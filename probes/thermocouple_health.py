@@ -105,6 +105,9 @@ class HardwareFaultLatch:
         self._report = ThermocoupleHealthReport.unmonitored(0.0)
         self._clean_since: float | None = None
 
+    def cancel_clean_recovery(self) -> None:
+        self._clean_since = None
+
     def update(
         self,
         faults: tuple[ThermocoupleFault, ...],

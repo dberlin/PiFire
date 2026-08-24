@@ -1,5 +1,6 @@
 import importlib
 import json
+import logging
 import sys
 import types
 from pathlib import Path
@@ -375,3 +376,71 @@ def test_status_exception_propagates_without_becoming_a_hardware_fault(probe):
     assert obj.device.sensor.accesses == ["status"]
     assert report.state is ThermocoupleHealthState.UNMONITORED
     assert report.faults == ()
+
+
+def test_status_exception_cancels_secondary_clean_recovery_window(
+    probe,
+    monkeypatch,
+):
+    obj = _configured_probe(
+        probe,
+        primary=False,
+        detection="True",
+        status=0x10,
+        temp_c=100.0,
+    )
+    shared = sys.modules["probes._mcp960x_adafruit"]
+    clock = {"now": 0.0}
+    monkeypatch.setattr(shared.time, "monotonic", lambda: clock["now"])
+    assert obj.read_all_ports({})["food"]["Grill"] is None
+
+    obj.device.sensor.status_value = 0x00
+    clock["now"] = 10.0
+    assert obj.read_all_ports({})["food"]["Grill"] is None
+
+    status_error = OSError("status read failed")
+    obj.device.sensor.status_value = status_error
+    clock["now"] = 20.0
+    with pytest.raises(OSError) as caught:
+        obj.read_all_ports({})
+    assert caught.value is status_error
+
+    obj.device.sensor.status_value = 0x00
+    for now in (70.0, 129.9):
+        clock["now"] = now
+        obj.device.sensor.accesses.clear()
+        assert obj.read_all_ports({})["food"]["Grill"] is None
+        assert obj.device.sensor.accesses == ["status"]
+
+    clock["now"] = 130.0
+    obj.device.sensor.accesses.clear()
+    output = obj.read_all_ports({})
+    report = obj.get_thermocouple_health()["Grill"]
+
+    assert obj.device.sensor.accesses == ["status", "temperature"]
+    assert output["food"]["Grill"] == 212.0
+    assert report.state is ThermocoupleHealthState.HEALTHY
+
+
+def test_init_device_propagates_constructor_exception_unchanged(
+    probe,
+    monkeypatch,
+    caplog,
+):
+    module, _, _ = probe
+    init_error = OSError("device unavailable")
+
+    class FailingDevice:
+        def __init__(self, **_):
+            raise init_error
+
+    monkeypatch.setattr(module.ReadProbes, "device_class", FailingDevice)
+    obj = _new_read_probes(probe, config={})
+    obj.logger = logging.getLogger("test_mcp9601_init")
+
+    with caplog.at_level(logging.ERROR, logger="test_mcp9601_init"):
+        with pytest.raises(OSError) as caught:
+            obj._init_device()
+
+    assert caught.value is init_error
+    assert "address=0x61" in caplog.text

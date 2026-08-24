@@ -27,7 +27,11 @@ class ReadProbes(MCP960xProbe):
     def _read_hardware_faults(self):
         if not self.hardware_fault_detection:
             return None
-        status = self.device.fault_status
+        try:
+            status = self.device.fault_status
+        except Exception:
+            self._hardware_fault_latch.cancel_clean_recovery()
+            raise
         faults = []
         if status & 0x10:
             faults.append(ThermocoupleFault.OPEN)
