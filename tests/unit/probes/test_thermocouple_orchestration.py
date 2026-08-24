@@ -292,6 +292,39 @@ def test_policy_lifecycle_drops_only_when_off_and_invalid_change_is_atomic(recor
     assert main._thermocouple_inference_engines[("device", "port")] is not engine
 
 
+def test_off_policy_immediately_reprojects_cached_inference_without_followup_read(
+    recording_engines,
+):
+    inferred_probe = _probe("device", "p0", "Pit", "Primary")
+    hardware_probe = _probe("device", "p1", "Food", "Food")
+    hardware = ThermocoupleHealthReport.confirmed_hardware(
+        (ThermocoupleFault.OPEN,),
+        now=2.0,
+        status=0x10,
+    )
+    device = _Device(
+        "device",
+        [inferred_probe, hardware_probe],
+        {"p0": ThermocoupleJunctionSample(100.0, 20.0)},
+        health={"Food": hardware},
+    )
+    main = _main([inferred_probe, hardware_probe], [device])
+    main.read_probes(now=1.0)
+    engine = main._thermocouple_inference_engines[("device", "p0")]
+    engine.report = _raw_inferred(ThermocoupleHealthState.CONFIRMED, now=2.0)
+    main.read_probes(now=2.0)
+
+    main.set_thermocouple_inference_policy("off")
+
+    health = main.get_thermocouple_health()
+    assert health["Pit"] == ThermocoupleHealthReport.unmonitored(2.0)
+    assert health["Food"] == hardware
+    assert main.get_device_info()[0]["status"]["thermocouple_health"] == {
+        label: report.as_dict() for label, report in health.items()
+    }
+    assert main.consume_thermocouple_health_transitions() == ()
+
+
 def test_no_argument_read_uses_safe_inactive_excitation_and_monotonic_time(
     recording_engines, monkeypatch
 ):

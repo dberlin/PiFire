@@ -755,6 +755,10 @@ class ControlMode:
             excitation=excitation,
             now=now,
         )
+        self.ctx.store.write_generic_key(
+            "probe_device_info",
+            self.probe_complex.get_device_info(),
+        )
         return sensor_data, output_status
 
     def _process_thermocouple_health(self, sensor_data) -> bool:
@@ -828,7 +832,6 @@ class ControlMode:
         grill_platform.auger_off()
 
         preflight_data, _ = self._read_probes_with_excitation()
-        ctx.store.write_generic_key("probe_device_info", probe_complex.get_device_info())
         preflight_ptemp = next(iter(preflight_data["primary"].values()), None)
         last_valid_ptemp = preflight_ptemp if isinstance(preflight_ptemp, (int, float)) else None
         if self._process_thermocouple_health(preflight_data):
@@ -852,7 +855,6 @@ class ControlMode:
 
         # Get initial probe sensor data, temperatures
         sensor_data, _ = self._read_probes_with_excitation()
-        ctx.store.write_generic_key("probe_device_info", probe_complex.get_device_info())
         ptemp = list(sensor_data["primary"].values())[0]  # Primary Temperature or the Pit Temperature
 
         # ---- thermocouple health precedes mode-specific numeric safety ----

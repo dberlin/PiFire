@@ -142,10 +142,37 @@ class ProbesMain:
 
         return errors
 
+    def _reproject_cached_health_without_inference(self) -> None:
+        probe_is_primary = {
+            (str(probe["device"]), str(probe["label"])): probe["type"] == "Primary"
+            for probe in self.probe_info
+        }
+        health = {}
+        health_by_device = {}
+        for device in self.probe_device_list:
+            device_name = str(getattr(device, "device_info", {}).get("device", ""))
+            hardware = dict(device.get_thermocouple_health())
+            reports = dict(hardware)
+            for label, previous in self._thermocouple_health_by_device.get(
+                device_name, {}
+            ).items():
+                reports[label] = fuse_thermocouple_health(
+                    hardware.get(label),
+                    previous,
+                    ThermocoupleInferencePolicy.OFF,
+                    probe_is_primary.get((device_name, label), False),
+                )
+            health.update(reports)
+            health_by_device[device_name] = reports
+        self._thermocouple_health = health
+        self._thermocouple_health_by_device = health_by_device
+        self._thermocouple_health_transitions.clear()
+
     def set_thermocouple_inference_policy(self, policy) -> None:
         next_policy = ThermocoupleInferencePolicy(policy)
         if next_policy is ThermocoupleInferencePolicy.OFF:
             self._thermocouple_inference_engines.clear()
+            self._reproject_cached_health_without_inference()
         self.thermocouple_inference_policy = next_policy
 
     def read_probes(self, *, excitation=None, now=None):

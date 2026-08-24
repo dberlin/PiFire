@@ -306,6 +306,45 @@ def test_excitation_context_uses_active_mode_set_and_celsius_setpoint(mode_name,
     assert call["excitation"].primary_setpoint_c == pytest.approx(100.0)
 
 
+@pytest.mark.parametrize(
+    "report",
+    [
+        pytest.param(_suspected(), id="suspected"),
+        pytest.param(_inferred("observe"), id="confirmed"),
+    ],
+)
+def test_active_cook_read_publishes_current_fused_device_info_same_tick(report):
+    mode = _make_mode()
+    mode.name = "Hold"
+    probes = mode.probe_complex
+    probes.script_health([{"Grill": report}])
+    probes.get_device_info = lambda: [
+        {
+            "device": "test",
+            "status": {
+                "thermocouple_health": {
+                    label: current.as_dict()
+                    for label, current in probes.get_thermocouple_health().items()
+                }
+            },
+        }
+    ]
+    mode.ctx.store.write_generic_key("probe_device_info", [{"stale": True}])
+
+    mode._read_probes_with_excitation()
+
+    assert mode.ctx.store.read_generic_key("probe_device_info") == [
+        {
+            "device": "test",
+            "status": {
+                "thermocouple_health": {
+                    "Grill": report.as_dict(),
+                }
+            },
+        }
+    ]
+
+
 def test_run_passes_excitation_context_at_preflight_post_setup_and_tick():
     ctx = _make_ctx(temperatures=[225.0, 225.0, 225.0])
     mode = _RecordingMode(ctx, WorkCycleState())
