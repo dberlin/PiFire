@@ -87,9 +87,7 @@ def test_confirmed_inferred_secondary_is_invalid_and_notify_only(policy):
 
 
 def test_confirmed_hardware_wins_even_when_inference_is_off():
-    hardware = ThermocoupleHealthReport.confirmed_hardware(
-        (ThermocoupleFault.OPEN,), now=10.0, status=0x10
-    )
+    hardware = ThermocoupleHealthReport.confirmed_hardware((ThermocoupleFault.OPEN,), now=10.0, status=0x10)
 
     fused = fuse_thermocouple_health(
         hardware=hardware,
@@ -198,12 +196,8 @@ def test_one_second_admission_accumulates_heat_without_synthetic_samples():
     engine = ThermocoupleInferenceEngine()
 
     first = engine.observe(_sample(), _context(heat=0.25), is_primary=False, now=0.0)
-    rejected = engine.observe(
-        _sample(hot=31.0), _context(heat=0.5), is_primary=False, now=0.999
-    )
-    admitted = engine.observe(
-        _sample(hot=32.0), _context(heat=0.75), is_primary=False, now=1.0
-    )
+    rejected = engine.observe(_sample(hot=31.0), _context(heat=0.5), is_primary=False, now=0.999)
+    admitted = engine.observe(_sample(hot=32.0), _context(heat=0.75), is_primary=False, now=1.0)
 
     assert first.detail["sample_count"] == 1
     assert rejected is first
@@ -243,9 +237,7 @@ def test_slow_window_coverage_boundary_is_inclusive(coverage, eligible):
     while now + 1.0 < coverage:
         engine.observe(_sample(), _context(active=False), is_primary=False, now=now)
         now += 1.0
-    report = engine.observe(
-        _sample(), _context(active=False), is_primary=False, now=coverage
-    )
+    report = engine.observe(_sample(), _context(active=False), is_primary=False, now=coverage)
 
     assert report.detail["coverage_seconds"] == pytest.approx(coverage)
     assert report.detail["slow_window_eligible"] is eligible
@@ -266,9 +258,7 @@ def test_slow_window_maximum_gap_boundary_is_inclusive(gap, eligible):
 
     report = engine.current_report()
     for now in times:
-        report = engine.observe(
-            _sample(), _context(active=False), is_primary=False, now=now
-        )
+        report = engine.observe(_sample(), _context(active=False), is_primary=False, now=now)
 
     assert report.detail["max_gap_seconds"] == pytest.approx(gap)
     assert report.detail["slow_window_eligible"] is eligible
@@ -279,9 +269,7 @@ def test_clock_regression_resets_history_and_admits_new_sample():
     engine.observe(_sample(50.0, 20.0), _context(heat=1.0), is_primary=False, now=10.0)
     engine.observe(_sample(49.0, 20.0), _context(heat=1.0), is_primary=False, now=11.0)
 
-    report = engine.observe(
-        _sample(30.0, 20.0), _context(heat=0.25), is_primary=False, now=5.0
-    )
+    report = engine.observe(_sample(30.0, 20.0), _context(heat=0.25), is_primary=False, now=5.0)
 
     assert report.state is ThermocoupleHealthState.HEALTHY
     assert report.observed_at == 5.0
@@ -344,9 +332,7 @@ def test_diagnostics_are_complete_json_safe_and_use_immutable_witness_snapshot()
 @pytest.mark.parametrize("now", [float("nan"), float("inf"), float("-inf")])
 def test_observe_rejects_nonfinite_clock(now):
     with pytest.raises(ValueError):
-        ThermocoupleInferenceEngine().observe(
-            _sample(), _context(), is_primary=False, now=now
-        )
+        ThermocoupleInferenceEngine().observe(_sample(), _context(), is_primary=False, now=now)
 
 
 def _slow_report(
@@ -556,9 +542,7 @@ def test_slow_peer_candidate_response_is_strict(candidate_rise, expected_state):
 @pytest.mark.parametrize("delta_growth, asserted", [(1.999, True), (2.0, False)])
 def test_slow_cold_delta_growth_response_is_strict(delta_growth, asserted):
     cold_values = tuple(30.0 + 3.0 * index / 19 for index in range(20))
-    hot_values = tuple(
-        30.0 + (3.0 + delta_growth) * index / 19 for index in range(20)
-    )
+    hot_values = tuple(30.0 + (3.0 + delta_growth) * index / 19 for index in range(20))
 
     report = _slow_report(
         hot_values=hot_values,
@@ -568,9 +552,7 @@ def test_slow_cold_delta_growth_response_is_strict(delta_growth, asserted):
 
     asserted_channels = report.detail["asserted_channels"]
     assert isinstance(asserted_channels, tuple)
-    assert (
-        ThermocoupleEvidence.EXCITATION_RESPONSE.value in asserted_channels
-    ) is asserted
+    assert (ThermocoupleEvidence.EXCITATION_RESPONSE.value in asserted_channels) is asserted
 
 
 def test_valid_ramp_stays_healthy():
@@ -587,9 +569,7 @@ def test_valid_ramp_stays_healthy():
     "active, deficit",
     [(False, 15.0), (True, 14.999)],
 )
-def test_diagnostic_collapse_outside_identification_opportunity_stays_healthy(
-    active, deficit
-):
+def test_diagnostic_collapse_outside_identification_opportunity_stays_healthy(active, deficit):
     report = _slow_report(
         hot_values=(30.0,) * 20,
         cold_values=(30.0,) * 20,
@@ -744,9 +724,7 @@ def test_noncollapsed_followup_cancels_fast_path_arm():
     engine = ThermocoupleInferenceEngine()
     engine.observe(_sample(50.0, 30.0), _context(), is_primary=False, now=0.0)
     armed = engine.observe(_sample(30.0, 30.0), _context(), is_primary=False, now=1.0)
-    cancelled = engine.observe(
-        _sample(30.0, 25.0), _context(), is_primary=False, now=2.0
-    )
+    cancelled = engine.observe(_sample(30.0, 25.0), _context(), is_primary=False, now=2.0)
 
     assert armed.detail["fast_path_armed"] is True
     assert cancelled.detail["fast_path_armed"] is False
@@ -758,9 +736,7 @@ def test_clock_regression_clears_fast_path_arm():
     engine.observe(_sample(50.0, 30.0), _context(), is_primary=False, now=9.0)
     armed = engine.observe(_sample(30.0, 30.0), _context(), is_primary=False, now=10.0)
 
-    reset_report = engine.observe(
-        _sample(30.0, 30.0), _context(), is_primary=False, now=5.0
-    )
+    reset_report = engine.observe(_sample(30.0, 30.0), _context(), is_primary=False, now=5.0)
 
     assert armed.detail["fast_path_armed"] is True
     assert reset_report.detail["fast_path_armed"] is False
@@ -916,12 +892,8 @@ def test_slow_secondary_confirmation_recovers_at_exactly_sixty_clean_eligible_se
         cold_values=(30.0,) * 20,
         is_primary=False,
     )
-    first_clean = _feed_delayed_witness_recovery(
-        engine, first_now=241, last_now=541
-    )
-    before_boundary = _feed_delayed_witness_recovery(
-        engine, first_now=542, last_now=600
-    )
+    first_clean = _feed_delayed_witness_recovery(engine, first_now=241, last_now=541)
+    before_boundary = _feed_delayed_witness_recovery(engine, first_now=542, last_now=600)
     boundary = _feed_delayed_witness_recovery(engine, first_now=601, last_now=601)
 
     assert confirmed.confirmed

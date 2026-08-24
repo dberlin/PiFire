@@ -6,9 +6,7 @@ from typing import Mapping
 
 def _freeze_detail(value: object) -> object:
     if isinstance(value, Mapping):
-        return MappingProxyType(
-            {key: _freeze_detail(item) for key, item in value.items()}
-        )
+        return MappingProxyType({key: _freeze_detail(item) for key, item in value.items()})
     if isinstance(value, (list, tuple)):
         return tuple(_freeze_detail(item) for item in value)
     return value
@@ -53,9 +51,7 @@ class ThermocoupleHealthReport:
     detail: Mapping[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        owned_detail = MappingProxyType(
-            {key: _freeze_detail(value) for key, value in self.detail.items()}
-        )
+        owned_detail = MappingProxyType({key: _freeze_detail(value) for key, value in self.detail.items()})
         object.__setattr__(self, "detail", owned_detail)
         confirmed_valid_inferred_primary_observe = (
             self.state is ThermocoupleHealthState.CONFIRMED
@@ -120,11 +116,8 @@ class ThermocoupleHealthReport:
             "evidence": [item.value for item in self.evidence],
             "temperature_valid": self.temperature_valid,
             "observed_at": self.observed_at,
-            "detail": {
-                key: _thaw_detail(value) for key, value in self.detail.items()
-            },
+            "detail": {key: _thaw_detail(value) for key, value in self.detail.items()},
         }
-
 
 
 @dataclass(frozen=True, slots=True)

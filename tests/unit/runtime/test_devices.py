@@ -132,6 +132,7 @@ def test_build_devices_prototype_success_random_hopper_and_probe_info_written(ds
     assert json.loads(datastore.get_blob("probe_device_info")) == []
     assert not read_control().get("critical_error")
 
+
 def test_build_devices_uses_the_normalized_initial_inference_policy(ds):
     from controller.runtime.devices import build_devices
     from probes.thermocouple_inference import ThermocoupleInferencePolicy

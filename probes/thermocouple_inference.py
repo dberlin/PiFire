@@ -191,9 +191,7 @@ class ThermocoupleInferenceEngine:
                 self._report = ThermocoupleHealthReport(
                     state=slow.state,
                     faults=(
-                        (ThermocoupleFault.MALFUNCTION,)
-                        if slow.state is ThermocoupleHealthState.SUSPECTED
-                        else ()
+                        (ThermocoupleFault.MALFUNCTION,) if slow.state is ThermocoupleHealthState.SUSPECTED else ()
                     ),
                     evidence=slow.evidence,
                     observed_at=now,
@@ -257,20 +255,13 @@ class ThermocoupleInferenceEngine:
                 not fast_evidence
                 and self._fast_arm is None
                 and abs(current.delta_c) > 1.0
-                and (
-                    not slow.identification_eligible
-                    or slow.state is ThermocoupleHealthState.HEALTHY
-                )
+                and (not slow.identification_eligible or slow.state is ThermocoupleHealthState.HEALTHY)
             )
         if not clean:
             self._reset_recovery()
             return replace(self._report, observed_at=now, detail=detail)
 
-        if (
-            self._recovery_since is None
-            or self._recovery_last_at is None
-            or now - self._recovery_last_at > 30.0
-        ):
+        if self._recovery_since is None or self._recovery_last_at is None or now - self._recovery_last_at > 30.0:
             self._recovery_since = now
         self._recovery_last_at = now
         if now - self._recovery_since < 60.0:
@@ -297,10 +288,7 @@ class ThermocoupleInferenceEngine:
     ) -> dict[str, object]:
         first = history[0]
         last = history[-1]
-        gaps = tuple(
-            current.now - previous.now
-            for previous, current in zip(history, history[1:], strict=False)
-        )
+        gaps = tuple(current.now - previous.now for previous, current in zip(history, history[1:], strict=False))
         hot_values = tuple(entry.hot_c for entry in history)
         cold_values = tuple(entry.cold_c for entry in history)
         delta_values = tuple(entry.delta_c for entry in history)
@@ -318,8 +306,7 @@ class ThermocoupleInferenceEngine:
             "hot_span_c": max(hot_values) - min(hot_values),
             "cold_span_c": max(cold_values) - min(cold_values),
             "delta_span_c": max(delta_values) - min(delta_values),
-            "collapse_fraction": sum(abs(value) <= 1.0 for value in delta_values)
-            / len(delta_values),
+            "collapse_fraction": sum(abs(value) <= 1.0 for value in delta_values) / len(delta_values),
             "heat_on_seconds": sum(entry.delivered_heat_on_s for entry in history),
             "witness_source": list(witness_source) if witness_source is not None else None,
             "witness_rise_c": witness_rise_c,
@@ -335,11 +322,7 @@ def _advance_fast_path(
 ) -> tuple[_FastArm | None, tuple[ThermocoupleEvidence, ...]]:
     current = history[-1]
     if arm is not None:
-        if (
-            not current.active_cook
-            or abs(current.delta_c) > 1.0
-            or current.now - arm.event_at > 5.0
-        ):
+        if not current.active_cook or abs(current.delta_c) > 1.0 or current.now - arm.event_at > 5.0:
             arm = None
         else:
             collapsed_samples = arm.collapsed_samples + 1
@@ -385,10 +368,7 @@ def _evaluate_slow_channels(
 ) -> _SlowEvaluation:
     first = history[0]
     last = history[-1]
-    gaps = (
-        current.now - previous.now
-        for previous, current in zip(history, history[1:], strict=False)
-    )
+    gaps = (current.now - previous.now for previous, current in zip(history, history[1:], strict=False))
     temporal_eligible = last.now - first.now >= 240.0 and max(gaps, default=0.0) <= 30.0
     if not temporal_eligible:
         return _SlowEvaluation(
@@ -432,29 +412,16 @@ def _evaluate_slow_channels(
 
     hot_values = tuple(entry.hot_c for entry in history)
     delta_values = tuple(entry.delta_c for entry in history)
-    collapse_fraction = sum(abs(value) <= 1.0 for value in delta_values) / len(
-        delta_values
-    )
-    junction_collapse = (
-        collapse_fraction >= 0.95
-        and max(delta_values) - min(delta_values) <= 1.0
-    )
+    collapse_fraction = sum(abs(value) <= 1.0 for value in delta_values) / len(delta_values)
+    junction_collapse = collapse_fraction >= 0.95 and max(delta_values) - min(delta_values) <= 1.0
     stuck_response = max(hot_values) - min(hot_values) <= 1.0
     candidate_hot_rise_c = last.hot_c - first.hot_c
-    excitation_response = (
-        candidate_hot_rise_c < 3.0
-        if peer_witness
-        else last.delta_c - first.delta_c < 2.0
-    )
+    excitation_response = candidate_hot_rise_c < 3.0 if peer_witness else last.delta_c - first.delta_c < 2.0
 
     evidence = (
         *((ThermocoupleEvidence.JUNCTION_COLLAPSE,) if junction_collapse else ()),
         *((ThermocoupleEvidence.STUCK_RESPONSE,) if stuck_response else ()),
-        *(
-            (ThermocoupleEvidence.EXCITATION_RESPONSE,)
-            if excitation_response
-            else ()
-        ),
+        *((ThermocoupleEvidence.EXCITATION_RESPONSE,) if excitation_response else ()),
     )
     internal_anomaly = junction_collapse or stuck_response
     if internal_anomaly and excitation_response:
@@ -507,11 +474,7 @@ def fuse_thermocouple_health(
     detail.update(
         {
             "policy": policy.value,
-            "authority": (
-                "stop"
-                if policy is ThermocoupleInferencePolicy.ENFORCE and is_primary
-                else "notify_only"
-            ),
+            "authority": ("stop" if policy is ThermocoupleInferencePolicy.ENFORCE and is_primary else "notify_only"),
             "is_primary": is_primary,
         }
     )

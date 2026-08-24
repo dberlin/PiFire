@@ -48,6 +48,7 @@ def assert_parity(settings: dict) -> None:
 def test_default_settings_round_trips():
     assert_parity(default_settings())
 
+
 def test_thermocouple_health_defaults_match_schema_and_round_trip():
     settings = default_settings()
 
@@ -66,6 +67,7 @@ def test_thermocouple_inference_policy_accepts_every_supported_value(policy):
     model = SettingsSchema.model_validate(settings, strict=True)
 
     assert model.thermocouple_health.inference_policy == policy
+
 
 def test_thermocouple_inference_policy_rejects_arbitrary_strings():
     settings = default_settings()

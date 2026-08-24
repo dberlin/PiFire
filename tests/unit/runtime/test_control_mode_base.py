@@ -8,6 +8,7 @@ should_exit] -> teardown.
 This complements (does not replace) the characterization oracle in
 tests/characterization/, which is the real behavior-preservation gate.
 """
+
 import json
 
 import pytest
@@ -196,11 +197,7 @@ def _transition_message(report, *, label, role, authority=None):
 
 
 def _transition_messages(ctx):
-    return [
-        message
-        for message in ctx.event_log.messages
-        if message.startswith("Thermocouple health transition ")
-    ]
+    return [message for message in ctx.event_log.messages if message.startswith("Thermocouple health transition ")]
 
 
 def _suspected():
@@ -323,8 +320,7 @@ def test_active_cook_read_publishes_current_fused_device_info_same_tick(report):
             "device": "test",
             "status": {
                 "thermocouple_health": {
-                    label: current.as_dict()
-                    for label, current in probes.get_thermocouple_health().items()
+                    label: current.as_dict() for label, current in probes.get_thermocouple_health().items()
                 }
             },
         }
@@ -743,8 +739,7 @@ def test_secondary_recovery_clears_current_report_without_notification_or_log():
             "device": "test",
             "status": {
                 "thermocouple_health": {
-                    label: report.as_dict()
-                    for label, report in probe_complex.get_thermocouple_health().items()
+                    label: report.as_dict() for label, report in probe_complex.get_thermocouple_health().items()
                 }
             },
         }

@@ -731,16 +731,9 @@ class ControlMode:
         if now is None:
             now = self.ctx.clock.now()
         output_status = self.grill.get_output_status()
-        elapsed = (
-            0.0
-            if self._excitation_last_read_at is None
-            else max(0.0, now - self._excitation_last_read_at)
-        )
+        elapsed = 0.0 if self._excitation_last_read_at is None else max(0.0, now - self._excitation_last_read_at)
         delivered_heat_on_s = (
-            elapsed
-            if output_status.get("auger", False)
-            or output_status.get("igniter", False)
-            else 0.0
+            elapsed if output_status.get("auger", False) or output_status.get("igniter", False) else 0.0
         )
         self._excitation_last_read_at = now
         primary_setpoint_c = float(control["primary_setpoint"])
@@ -770,9 +763,7 @@ class ControlMode:
             event = _thermocouple_transition_event(transition, primary_label)
             if event is None:
                 continue
-            self.ctx.event_log.info(
-                _thermocouple_transition_log(transition, primary_label)
-            )
+            self.ctx.event_log.info(_thermocouple_transition_log(transition, primary_label))
             self.ctx.notifications.send(event)
 
         primary = reports.get(primary_label)

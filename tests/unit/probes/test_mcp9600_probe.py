@@ -145,9 +145,7 @@ def test_mcp9600_read_captures_one_raw_celsius_junction_pair(
 
     assert obj.device.sensor.accesses == ["temperature", "ambient_temperature"]
     assert output["primary"]["Grill"] == expected_output
-    assert obj.get_thermocouple_samples() == {
-        "KTT0": ThermocoupleJunctionSample(hot_c=100.04, cold_c=24.96)
-    }
+    assert obj.get_thermocouple_samples() == {"KTT0": ThermocoupleJunctionSample(hot_c=100.04, cold_c=24.96)}
 
 
 @pytest.mark.parametrize(

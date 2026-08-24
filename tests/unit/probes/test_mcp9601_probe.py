@@ -243,9 +243,7 @@ def test_detection_off_never_reads_status(probe):
 
     assert obj.device.sensor.accesses == ["temperature", "ambient_temperature"]
     assert output["primary"]["Grill"] == 212.0
-    assert obj.get_thermocouple_samples() == {
-        "KTT0": ThermocoupleJunctionSample(hot_c=100.04, cold_c=24.96)
-    }
+    assert obj.get_thermocouple_samples() == {"KTT0": ThermocoupleJunctionSample(hot_c=100.04, cold_c=24.96)}
     assert report.state is ThermocoupleHealthState.UNMONITORED
 
 
@@ -268,9 +266,7 @@ def test_enabled_clean_status_is_read_once_before_temperature(probe):
         "ambient_temperature",
     ]
     assert output["primary"]["Grill"] == 212.0
-    assert obj.get_thermocouple_samples() == {
-        "KTT0": ThermocoupleJunctionSample(hot_c=100.04, cold_c=24.96)
-    }
+    assert obj.get_thermocouple_samples() == {"KTT0": ThermocoupleJunctionSample(hot_c=100.04, cold_c=24.96)}
     assert report.state is ThermocoupleHealthState.HEALTHY
     assert report.faults == ()
 
@@ -449,9 +445,7 @@ def test_secondary_junction_read_exception_restarts_full_clean_recovery_window(
     obj.device.sensor.status_value = 0x00
     clock["now"] = 10.0
     assert obj.read_all_ports({})["food"]["Grill"] is None
-    assert obj.get_thermocouple_samples() == {
-        "KTT0": ThermocoupleJunctionSample(hot_c=100.0, cold_c=25.0)
-    }
+    assert obj.get_thermocouple_samples() == {"KTT0": ThermocoupleJunctionSample(hot_c=100.0, cold_c=25.0)}
 
     read_error = OSError(f"{failed_attribute} read failed")
     setattr(obj.device.sensor, failed_attribute, read_error)

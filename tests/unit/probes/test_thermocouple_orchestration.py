@@ -38,9 +38,7 @@ class _Device:
     def __init__(self, name, probes, samples, health=None, values=None):
         self.device_info = {"device": name, "ports": [probe["port"] for probe in probes]}
         self.port_map = {probe["port"]: probe["label"] for probe in probes}
-        self.primary_port = next(
-            (probe["port"] for probe in probes if probe["type"] == "Primary"), None
-        )
+        self.primary_port = next((probe["port"] for probe in probes if probe["type"] == "Primary"), None)
         self.food_ports = [probe["port"] for probe in probes if probe["type"] == "Food"]
         self.aux_ports = [probe["port"] for probe in probes if probe["type"] == "Aux"]
         self.samples = dict(samples)
@@ -75,9 +73,7 @@ class _Device:
     def get_device_info(self):
         status = {"driver": "ready"}
         if self.health:
-            status["thermocouple_health"] = {
-                label: report.as_dict() for label, report in self.health.items()
-            }
+            status["thermocouple_health"] = {label: report.as_dict() for label, report in self.health.items()}
         return {**self.device_info, "status": status}
 
     def close(self):
@@ -325,9 +321,7 @@ def test_off_policy_immediately_reprojects_cached_inference_without_followup_rea
     assert main.consume_thermocouple_health_transitions() == ()
 
 
-def test_no_argument_read_uses_safe_inactive_excitation_and_monotonic_time(
-    recording_engines, monkeypatch
-):
+def test_no_argument_read_uses_safe_inactive_excitation_and_monotonic_time(recording_engines, monkeypatch):
     probe = _probe("device", "port", "Pit", "Primary")
     device = _Device("device", [probe], {"port": ThermocoupleJunctionSample(100.0, 20.0)})
     main = _main([probe], [device])
@@ -461,9 +455,7 @@ def test_confirmed_inference_invalidation_depends_on_policy_and_primary(
     device = _Device("device", [probe], {"port": ThermocoupleJunctionSample(100.0, 20.0)})
     main = _main([probe], [device], policy)
     main.read_probes(now=1.0)
-    main._thermocouple_inference_engines[("device", "port")].report = _raw_inferred(
-        ThermocoupleHealthState.CONFIRMED
-    )
+    main._thermocouple_inference_engines[("device", "port")].report = _raw_inferred(ThermocoupleHealthState.CONFIRMED)
 
     output = main.read_probes(now=2.0)
 
@@ -472,9 +464,7 @@ def test_confirmed_inference_invalidation_depends_on_policy_and_primary(
         assert output[group]["Probe"] is None
     else:
         assert output[group]["Probe"] == expected
-    assert main.get_thermocouple_health()["Probe"].temperature_valid is (
-        expected is not None
-    )
+    assert main.get_thermocouple_health()["Probe"].temperature_valid is (expected is not None)
 
 
 def test_suspected_inference_keeps_numeric_output(recording_engines):
@@ -482,9 +472,7 @@ def test_suspected_inference_keeps_numeric_output(recording_engines):
     device = _Device("device", [probe], {"port": ThermocoupleJunctionSample(100.0, 20.0)})
     main = _main([probe], [device], ThermocoupleInferencePolicy.ENFORCE)
     main.read_probes(now=1.0)
-    main._thermocouple_inference_engines[("device", "port")].report = _raw_inferred(
-        ThermocoupleHealthState.SUSPECTED
-    )
+    main._thermocouple_inference_engines[("device", "port")].report = _raw_inferred(ThermocoupleHealthState.SUSPECTED)
 
     output = main.read_probes(now=2.0)
 
@@ -493,13 +481,9 @@ def test_suspected_inference_keeps_numeric_output(recording_engines):
 
 
 @pytest.mark.parametrize("policy", list(ThermocoupleInferencePolicy))
-def test_hardware_confirmation_is_authoritative_and_invalid_in_every_policy(
-    recording_engines, policy
-):
+def test_hardware_confirmation_is_authoritative_and_invalid_in_every_policy(recording_engines, policy):
     probe = _probe("device", "port", "Probe", "Primary")
-    hardware = ThermocoupleHealthReport.confirmed_hardware(
-        (ThermocoupleFault.OPEN,), now=2.0, status=0x10
-    )
+    hardware = ThermocoupleHealthReport.confirmed_hardware((ThermocoupleFault.OPEN,), now=2.0, status=0x10)
     device = _Device(
         "device",
         [probe],

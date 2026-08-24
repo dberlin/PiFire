@@ -313,6 +313,7 @@ class ProbeSettings(_Section):
     probe_profiles: dict[str, dict] = {}
     probe_map: ProbeMap = ProbeMap()
 
+
 class ThermocoupleHealthSettings(_Section):
     # Mirrors defaults.py settings["thermocouple_health"].
     inference_policy: Literal["off", "observe", "enforce"] = "observe"

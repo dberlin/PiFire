@@ -56,6 +56,7 @@ def test_a_current_tree_runs_no_step(ds, monkeypatch):
 
     assert ran == []
 
+
 def test_a_sparse_pre_setting_tree_backfills_observe_without_a_schema_bump(ds, tmp_path):
     settings = copy.deepcopy(default_settings())
     settings.pop("thermocouple_health", None)
