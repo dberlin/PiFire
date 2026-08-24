@@ -112,9 +112,12 @@ fake temperature group.
 not need parallel implementations. `ProbesMain` collects each driver's latest
 report and exposes it after a fresh read.
 
-A confirmed report always has `temperature_valid = false`. The corresponding
-output value is `None`; no last-known-good or cold-junction substitute is
-presented as current sensor data.
+A confirmed hardware report is always invalid. A confirmed inferred report is
+invalid for every secondary probe and for a primary under `enforce`. The one
+intentional exception is a confirmed inferred primary under `observe`: it keeps
+`temperature_valid = true`, continues supplying the measured temperature, and
+notifies without changing controller mode. No path substitutes cold-junction or
+last-known-good temperature for the current measurement.
 
 ## MCP9601 driver design
 
@@ -250,6 +253,38 @@ This policy does not apply to thermistors through ADS1015/ADS1115, MAX31865
 RTDs, DS18B20, Bluetooth probes, or cloud probes. Those sensor families do not
 expose the hot/cold-junction relationship and require separate fault models.
 
+### Implementation rulings
+
+- `temperature_valid` describes whether the current numeric reading remains
+  usable, not detector confidence. Therefore `confirmed + valid` is permitted
+  only for inferred primary health under `observe`; hardware confirmation is
+  authoritative under every inference policy.
+- A slow window is eligible at `>=240` seconds first-to-last coverage with no
+  adjacent gap over `30` seconds. Exact `30` seconds is allowed. Samples are
+  admitted at most once per second; missing seconds are never synthesized.
+- Peer witnesses are other logical Primary/Aux thermocouples whose pre-pass
+  fused health is healthy and valid. Food, self, suspected, confirmed, and
+  invalid probes are excluded. Choose the greatest rise with stable
+  device/port tie-breaking; prefer a qualifying peer over cold-junction
+  fallback.
+- Active-cook inference applies to Startup, Reignite, Smoke, Hold, Manual, and
+  active recipe submodes. Prime, Monitor, Shutdown, Stop, and Error are
+  ineligible.
+- Suspected slow-path health clears only on a later eligible clean slow window.
+  Slow-path secondary recovery counts only eligible non-anomalous observations;
+  fast-path secondary recovery may count ordinary contiguous clean samples.
+  Primary inferred confirmation remains latched until engine reset.
+- The fast path requires five samples strictly after the inclusive `>=20°C`
+  fall event. Its prior sample must be within `<=10` seconds and have
+  hot-minus-cold separation `>=15°C`.
+- Current structured health remains in `probe_device_info`; one deduplicated
+  structured event-log record is written per semantic transition. Rings and
+  per-second samples are not persisted.
+- Policy changes `observe↔enforce` preserve engine history and confidence.
+  Entering `off` drops inferred histories/reports but does not affect hardware
+  latches; leaving `off` starts empty inference histories. Probe-map rebuild,
+  process restart, or monotonic clock regression resets inference.
+
 ### Channel 1: sensor-internal anomaly
 
 The engine computes these candidates after a complete five-minute window:
@@ -317,20 +352,24 @@ thermocouple failure.
 - Both fast-path signatures: `confirmed` live junction collapse.
 - Enabled hardware OC/SC: `confirmed` without inference.
 - `observe`: default. Compute states and metrics; notify once on transition to
-  confirmed, but never change controller mode.
-- `enforce`: confirmed primary transitions to Error before actuation; confirmed
-  food/aux remains notify-and-unavailable.
-- `off`: no inference allocation or evaluation.
+  confirmed, but never change controller mode. A confirmed inferred primary
+  remains valid and numeric; confirmed secondary probes remain unavailable.
+- `enforce`: confirmed inferred primary transitions to Error before actuation;
+  confirmed secondary probes remain notify-and-unavailable.
+- `off`: allocate no inference engine and publish no inferred report. Enabled
+  hardware OC/SC remains authoritative.
 
-Suspected does not notify. Confirmed does. Observe mode therefore surfaces
-high-confidence faults without introducing a default automatic stop. Users who
-select enforce explicitly authorize the two-channel primary safety action.
+Suspected does not notify. Confirmed transitions notify once. Observe mode
+therefore surfaces high-confidence primary faults without introducing a default
+automatic stop; the notification explicitly says heating was not stopped.
+Users who select enforce authorize the two-channel primary safety action.
 
-A primary confirmation is latched through Error. Food/aux inferred confirmation
-requires 60 consecutive seconds of non-anomalous samples to clear. With no new
-identification opportunity, elapsed time alone cannot increase or clear
-slow-path confidence. The explicitly defined live-collapse fast path is the
-only inference path outside a verified ramp.
+An inferred primary confirmation remains latched until engine reset; Error is
+never automatically resumed. Food/aux inferred confirmation requires 60
+seconds of policy-appropriate non-anomalous observations to clear. With no new
+eligible opportunity, elapsed time alone cannot increase or clear slow-path
+confidence. The explicitly defined live-collapse fast path is the only
+inference path outside a verified ramp.
 
 ### Wizard warning
 
@@ -377,10 +416,10 @@ asserted evidence channels
 hardware status byte when read
 ```
 
-Observe mode records a confirmed transition and sends its notification. It does
-not persist every one-second sample. Repeated identical states are deduplicated.
-The current report is projected through probe device status for operator
-inspection.
+Observe mode records and notifies only on the transition to confirmed. Repeated
+identical state/fault reports, mode re-entry, and metadata-only metric changes
+do not re-notify. It does not persist every one-second sample. The current
+report is projected through probe device status for operator inspection.
 
 ## Thermocouple failure signatures and coverage
 
