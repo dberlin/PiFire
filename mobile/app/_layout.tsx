@@ -112,8 +112,8 @@ function StatusStrip({ live }: { live: LiveResult }) {
 
 // The decision logic -- which alerts a transition warrants -- lives entirely
 // in alertsFor (src/alerts.ts), which is pure and unit-tested. This effect
-// contains none of it: it only tracks the previous payload across renders and
-// hands whatever alertsFor returns to expo-notifications.
+// only tracks the previous payload across renders and delivers its results
+// when the loaded preference enables local alerts.
 //
 // `previousRef` starts at null and is compared against with alertsFor's own
 // null-previous rule (see that file's doc comment) -- that is what keeps the
@@ -127,36 +127,52 @@ function StatusStrip({ live }: { live: LiveResult }) {
 // away from FIXTURE_DASH's all-zero state instead of the true first payload,
 // which is exactly the false-alert-on-launch failure mode this whole function
 // exists to avoid.
-function useAlertNotifications(dash: DashSocketPayload, lastPayloadAt: number | null) {
+function useAlertNotifications(
+  dash: DashSocketPayload,
+  lastPayloadAt: number | null,
+  alertsEnabled: boolean,
+) {
   const previousRef = useRef<DashSocketPayload | null>(null);
 
   useEffect(() => {
     if (lastPayloadAt === null) {
       return;
     }
-    for (const alert of alertsFor(previousRef.current, dash)) {
+    const alerts = alertsFor(previousRef.current, dash);
+    previousRef.current = dash;
+    if (!alertsEnabled) {
+      return;
+    }
+    for (const alert of alerts) {
       Notifications.scheduleNotificationAsync({
         identifier: alert.id,
         content: { title: alert.title, body: alert.body },
         trigger: null,
       });
     }
-    previousRef.current = dash;
-  }, [dash, lastPayloadAt]);
+  }, [alertsEnabled, dash, lastPayloadAt]);
 }
 
-function LiveShell({ host, children }: { host: string; children: React.ReactNode }) {
+function LiveShell({
+  host,
+  alertsEnabled,
+  children,
+}: {
+  host: string;
+  alertsEnabled: boolean;
+  children: React.ReactNode;
+}) {
   const live = useLive(host);
   const primaryWire = live.live.thermocoupleHealth?.find(
     (health) => health.role === "Primary" && health.label === live.live.primaryProbe.label,
   );
   const primaryHealth = primaryWire ? projectProbeHealth(primaryWire) : null;
-  useAlertNotifications(live.live, live.lastPayloadAt);
+  useAlertNotifications(live.live, live.lastPayloadAt, alertsEnabled);
 
-  // Fire-and-forget: this is what actually raises the OS permission prompt
-  // on iOS. A denial just means scheduleNotificationAsync's notifications
-  // never surface -- nothing here depends on the result.
   useEffect(() => {
+    if (!alertsEnabled) {
+      return;
+    }
     Notifications.requestPermissionsAsync();
     if (Platform.OS === "android") {
       Notifications.setNotificationChannelAsync("default", {
@@ -164,7 +180,7 @@ function LiveShell({ host, children }: { host: string; children: React.ReactNode
         importance: Notifications.AndroidImportance.HIGH,
       });
     }
-  }, []);
+  }, [alertsEnabled]);
 
   return (
     <LiveContext.Provider value={live}>
@@ -181,6 +197,7 @@ export default function RootLayout() {
   // undefined: storage not read yet. null: read, and empty.
   const [host, setHost] = useState<string | null | undefined>(undefined);
   const [prefs, setPrefs] = useState<Prefs>(defaultPrefs);
+  const [prefsLoaded, setPrefsLoaded] = useState(false);
 
   // Re-read on every navigation, not just on mount: this layout stays
   // mounted for the app's whole lifetime, and connect.tsx saves a new host
@@ -205,6 +222,7 @@ export default function RootLayout() {
     loadPrefs().then((p) => {
       if (!cancelled) {
         setPrefs(p);
+        setPrefsLoaded(true);
       }
     });
     return () => {
@@ -270,7 +288,11 @@ export default function RootLayout() {
   return (
     <PrefsContext.Provider value={prefsValue}>
       {connected ? (
-        <LiveShell host={host as string} key={host as string}>
+        <LiveShell
+          host={host as string}
+          key={host as string}
+          alertsEnabled={prefsLoaded && prefs.alerts}
+        >
           {routes}
         </LiveShell>
       ) : (

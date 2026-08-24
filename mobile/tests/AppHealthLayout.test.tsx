@@ -4,7 +4,11 @@ import type { LiveResult } from "../src/useLive";
 import { FIXTURE_DASH } from "@pifire/core/fixture";
 import { wireHealth } from "./healthFixture";
 
+const mockRequestPermissionsAsync = jest.fn();
 const mockScheduleNotificationAsync = jest.fn();
+const mockPrefsState = {
+  current: { host: null, accent: "ember", alerts: true },
+};
 const mockLiveState = { current: {} as LiveResult };
 
 jest.mock("expo-router", () => {
@@ -20,7 +24,7 @@ jest.mock("expo-router", () => {
 
 jest.mock("expo-notifications", () => ({
   AndroidImportance: { HIGH: 4 },
-  requestPermissionsAsync: jest.fn(),
+  requestPermissionsAsync: (...args: unknown[]) => mockRequestPermissionsAsync(...args),
   scheduleNotificationAsync: (...args: unknown[]) => mockScheduleNotificationAsync(...args),
   setNotificationChannelAsync: jest.fn(),
   setNotificationHandler: jest.fn(),
@@ -29,7 +33,7 @@ jest.mock("expo-notifications", () => ({
 jest.mock("../src/host", () => ({ loadHosts: async () => ["http://pifire.local:5000"] }));
 jest.mock("../src/prefs", () => ({
   defaultPrefs: { host: null, accent: "ember", alerts: true },
-  loadPrefs: async () => ({ host: null, accent: "ember", alerts: true }),
+  loadPrefs: async () => mockPrefsState.current,
   savePrefs: jest.fn(),
 }));
 jest.mock("../src/useLive", () => ({ useLive: () => mockLiveState.current }));
@@ -63,7 +67,9 @@ const CONFIRMED_PRIMARY_LAST_REPORTED = wireHealth({
 });
 
 beforeEach(() => {
+  mockRequestPermissionsAsync.mockClear();
   mockScheduleNotificationAsync.mockClear();
+  mockPrefsState.current = { host: null, accent: "ember", alerts: true };
   mockLiveState.current = liveResult([CONFIRMED_PRIMARY_CURRENT]);
 });
 
@@ -96,5 +102,19 @@ it("removes the primary banner on a recovered payload without changing transport
 
   await waitFor(() => expect(screen.queryByText("FAULT")).toBeNull());
   expect(screen.getByText("Live")).toBeTruthy();
+  expect(mockScheduleNotificationAsync).not.toHaveBeenCalled();
+});
+
+it("requests no permission and schedules no confirmed alert when local alerts are disabled", async () => {
+  mockPrefsState.current = { host: null, accent: "ember", alerts: false };
+  mockLiveState.current = liveResult([wireHealth()]);
+  const screen = await render(<RootLayout />);
+  await waitFor(() => expect(screen.getByText("Live")).toBeTruthy());
+
+  mockLiveState.current = liveResult([CONFIRMED_PRIMARY_CURRENT]);
+  await screen.rerender(<RootLayout />);
+  await waitFor(() => expect(screen.getByText("FAULT")).toBeTruthy());
+
+  expect(mockRequestPermissionsAsync).not.toHaveBeenCalled();
   expect(mockScheduleNotificationAsync).not.toHaveBeenCalled();
 });

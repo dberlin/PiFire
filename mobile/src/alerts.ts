@@ -1,4 +1,5 @@
-import type { DashSocketPayload } from "@pifire/core/contracts/core";
+import type { DashSocketPayload, ThermocoupleHealthView } from "@pifire/core/contracts/core";
+import { projectProbeHealth } from "@pifire/core/dashboard/probeHealth";
 
 export interface Alert {
   /** Stable across repeated payloads describing the same underlying event, so
@@ -8,6 +9,47 @@ export interface Alert {
   id: string;
   title: string;
   body: string;
+}
+
+function thermocoupleKey(health: ThermocoupleHealthView): string {
+  return `${health.device}\u0000${health.port}\u0000${health.label}`;
+}
+
+function confirmedThermocoupleAlert(health: ThermocoupleHealthView): Alert {
+  const projected = projectProbeHealth(health);
+  const id = `thermocouple:${health.device}:${health.port}:${health.label}`;
+
+  if (health.role === "Primary" && health.outcome === "notify_only") {
+    return {
+      id,
+      title: "Control-probe fault detected",
+      body: "Observe mode did not stop heating. Stop and inspect the pit probe now.",
+    };
+  }
+  if (health.role === "Primary" && health.outcome === "stopped") {
+    return {
+      id,
+      title: "Control probe unavailable",
+      body: "PiFire stopped heating because the control temperature is unavailable.",
+    };
+  }
+  if (health.role !== "Primary") {
+    return {
+      id,
+      title: `${health.displayName} probe unavailable`,
+      body: [projected.causeCopy, projected.impactCopy]
+        .filter((part): part is string => part !== null)
+        .join(" "),
+    };
+  }
+
+  return {
+    id,
+    title: projected.headline ?? "Control-probe fault detected",
+    body: [projected.impactCopy, projected.causeCopy]
+      .filter((part): part is string => part !== null)
+      .join(" "),
+  };
 }
 
 /**
@@ -31,6 +73,23 @@ export function alertsFor(previous: DashSocketPayload | null, next: DashSocketPa
   }
 
   const alerts: Alert[] = [];
+
+  // Health notification delivery stays edge-triggered here with every other
+  // local alert: only entry into the authoritative confirmed state qualifies.
+  // Healthy/suspected recovery therefore rearms the next genuine confirmation,
+  // while identical and reconnect-replayed confirmed frames remain quiet.
+  const previousHealthByProbe = new Map(
+    (previous.thermocoupleHealth ?? []).map((health) => [thermocoupleKey(health), health]),
+  );
+  for (const health of next.thermocoupleHealth ?? []) {
+    if (health.report.state !== "confirmed") {
+      continue;
+    }
+    if (previousHealthByProbe.get(thermocoupleKey(health))?.report.state === "confirmed") {
+      continue;
+    }
+    alerts.push(confirmedThermocoupleAlert(health));
+  }
 
   // Grill errors: dash.errors is free text, not a fixed set of codes (see
   // web-react/src/components/shell/Banners.tsx, which renders each entry
