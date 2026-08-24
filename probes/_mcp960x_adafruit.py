@@ -77,11 +77,7 @@ class MCP960xProbe(ProbeInterface):
         faults = self._read_hardware_faults()
         now = time.monotonic()
         temperature = None
-        if faults or (
-            faults is not None
-            and port == self.primary_port
-            and self._thermocouple_health_report.confirmed
-        ):
+        if faults or (faults is not None and port == self.primary_port and self._thermocouple_health_report.confirmed):
             report = self._hardware_fault_latch.update(
                 faults,
                 now=now,

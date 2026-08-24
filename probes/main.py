@@ -134,13 +134,9 @@ class ProbesMain:
         for device in self.probe_device_list:
             health.update(device.get_thermocouple_health())
         for label, current in health.items():
-            previous = self._thermocouple_health.get(
-                label, ThermocoupleHealthReport.unmonitored(current.observed_at)
-            )
+            previous = self._thermocouple_health.get(label, ThermocoupleHealthReport.unmonitored(current.observed_at))
             if (previous.state, previous.faults) != (current.state, current.faults):
-                self._thermocouple_health_transitions.append(
-                    ThermocoupleHealthTransition(label, previous, current)
-                )
+                self._thermocouple_health_transitions.append(ThermocoupleHealthTransition(label, previous, current))
         self._thermocouple_health = health
 
         return output_data

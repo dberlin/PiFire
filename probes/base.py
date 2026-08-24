@@ -443,9 +443,7 @@ class ProbeInterface:
         health = self.get_thermocouple_health()
         if health:
             status = dict(status)
-            status["thermocouple_health"] = {
-                label: report.as_dict() for label, report in health.items()
-            }
+            status["thermocouple_health"] = {label: report.as_dict() for label, report in health.items()}
         self.device_info["status"] = status
         return self.device_info
 

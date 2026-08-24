@@ -144,11 +144,7 @@ class ControlMode:
             cook_id = self.ctx.store.ensure_cook_id(preferred=preferred)
             control["cook_id"] = cook_id
         self.control = control
-        if (
-            now is not None
-            and self._valid_cook_id(previous_cook_id)
-            and previous_cook_id != cook_id
-        ):
+        if now is not None and self._valid_cook_id(previous_cook_id) and previous_cook_id != cook_id:
             self.on_cook_identity_rotated(previous_cook_id, cook_id, now)
         return control
 
@@ -717,9 +713,7 @@ class ControlMode:
         preflight_data = probe_complex.read_probes()
         ctx.store.write_generic_key("probe_device_info", probe_complex.get_device_info())
         preflight_ptemp = next(iter(preflight_data["primary"].values()), None)
-        last_valid_ptemp = (
-            preflight_ptemp if isinstance(preflight_ptemp, (int, float)) else None
-        )
+        last_valid_ptemp = preflight_ptemp if isinstance(preflight_ptemp, (int, float)) else None
         if self._process_thermocouple_health(preflight_data):
             grill_platform.fan_off()
             grill_platform.power_off()

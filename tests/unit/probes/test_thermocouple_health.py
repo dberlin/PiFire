@@ -52,12 +52,8 @@ def test_report_owns_detail_and_returns_a_fresh_mutable_copy():
 
 def test_report_constructors_set_expected_states_and_evidence():
     unmonitored = ThermocoupleHealthReport.unmonitored(1.0)
-    healthy = ThermocoupleHealthReport.healthy(
-        2.0, evidence=(ThermocoupleEvidence.STUCK_RESPONSE,)
-    )
-    confirmed = ThermocoupleHealthReport.confirmed_hardware(
-        (ThermocoupleFault.MALFUNCTION,), now=3.0, status=None
-    )
+    healthy = ThermocoupleHealthReport.healthy(2.0, evidence=(ThermocoupleEvidence.STUCK_RESPONSE,))
+    confirmed = ThermocoupleHealthReport.confirmed_hardware((ThermocoupleFault.MALFUNCTION,), now=3.0, status=None)
 
     assert unmonitored == ThermocoupleHealthReport(
         state=ThermocoupleHealthState.UNMONITORED,
@@ -147,9 +143,7 @@ def test_hardware_fault_preserves_all_fault_bits_and_status():
 
 
 def test_first_clean_update_is_healthy():
-    report = HardwareFaultLatch(recovery_seconds=60.0).update(
-        (), now=1.0, primary=False
-    )
+    report = HardwareFaultLatch(recovery_seconds=60.0).update((), now=1.0, primary=False)
 
     assert report.state is ThermocoupleHealthState.HEALTHY
     assert report.temperature_valid is True

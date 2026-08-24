@@ -287,8 +287,7 @@ def _evt_control_stopped(ctx):
 def _evt_thermocouple_fault_primary(ctx):
     return (
         "Primary Thermocouple Fault!",
-        "Primary thermocouple fault detected. PiFire is shutting down because "
-        "the control temperature is unavailable.",
+        "Primary thermocouple fault detected. PiFire is shutting down because the control temperature is unavailable.",
         "pifire_error_alerts",
         {"value1": "Primary thermocouple fault"},
     )

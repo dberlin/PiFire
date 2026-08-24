@@ -39,11 +39,7 @@ class _StatusDevice:
 
 class _ProbeWithHealth(ProbeInterface):
     def get_thermocouple_health(self):
-        return {
-            "Grill": ThermocoupleHealthReport.confirmed_hardware(
-                (ThermocoupleFault.OPEN,), now=5.0, status=0x10
-            )
-        }
+        return {"Grill": ThermocoupleHealthReport.confirmed_hardware((ThermocoupleFault.OPEN,), now=5.0, status=0x10)}
 
 
 def _empty_probe_map():
@@ -65,11 +61,7 @@ def _bare_probe(interface=ProbeInterface):
 
 def test_read_collects_health_by_logical_label_and_emits_state_transition():
     probes = _main_with_device_health(
-        {
-            "Grill": ThermocoupleHealthReport.confirmed_hardware(
-                (ThermocoupleFault.OPEN,), now=5.0, status=0x10
-            )
-        }
+        {"Grill": ThermocoupleHealthReport.confirmed_hardware((ThermocoupleFault.OPEN,), now=5.0, status=0x10)}
     )
 
     probes.read_probes()
@@ -91,18 +83,12 @@ def test_read_collects_health_by_logical_label_and_emits_state_transition():
 
 def test_observation_metadata_change_does_not_emit_transition():
     probes = _main_with_device_health(
-        {
-            "Grill": ThermocoupleHealthReport.confirmed_hardware(
-                (ThermocoupleFault.OPEN,), now=5.0, status=0x10
-            )
-        }
+        {"Grill": ThermocoupleHealthReport.confirmed_hardware((ThermocoupleFault.OPEN,), now=5.0, status=0x10)}
     )
     probes.read_probes()
     probes.consume_thermocouple_health_transitions()
     probes.probe_device_list[0].health = {
-        "Grill": ThermocoupleHealthReport.confirmed_hardware(
-            (ThermocoupleFault.OPEN,), now=6.0, status=0x11
-        )
+        "Grill": ThermocoupleHealthReport.confirmed_hardware((ThermocoupleFault.OPEN,), now=6.0, status=0x11)
     }
 
     probes.read_probes()
@@ -113,18 +99,12 @@ def test_observation_metadata_change_does_not_emit_transition():
 
 def test_fault_kind_change_emits_transition():
     probes = _main_with_device_health(
-        {
-            "Grill": ThermocoupleHealthReport.confirmed_hardware(
-                (ThermocoupleFault.OPEN,), now=5.0, status=0x10
-            )
-        }
+        {"Grill": ThermocoupleHealthReport.confirmed_hardware((ThermocoupleFault.OPEN,), now=5.0, status=0x10)}
     )
     probes.read_probes()
     probes.consume_thermocouple_health_transitions()
     probes.probe_device_list[0].health = {
-        "Grill": ThermocoupleHealthReport.confirmed_hardware(
-            (ThermocoupleFault.SHORT,), now=6.0, status=0x20
-        )
+        "Grill": ThermocoupleHealthReport.confirmed_hardware((ThermocoupleFault.SHORT,), now=6.0, status=0x20)
     }
 
     probes.read_probes()
@@ -137,11 +117,7 @@ def test_fault_kind_change_emits_transition():
 
 def test_device_map_rebuild_clears_stale_health_and_events():
     probes = _main_with_device_health(
-        {
-            "Grill": ThermocoupleHealthReport.confirmed_hardware(
-                (ThermocoupleFault.OPEN,), now=5.0, status=0x10
-            )
-        }
+        {"Grill": ThermocoupleHealthReport.confirmed_hardware((ThermocoupleFault.OPEN,), now=5.0, status=0x10)}
     )
     probes.read_probes()
 

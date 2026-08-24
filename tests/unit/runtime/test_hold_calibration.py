@@ -713,16 +713,10 @@ def test_thermocouple_fault_cancels_calibration_inhibits_pulse_and_records_error
 
     hold._on_safety_event("thermocouple_fault", 3.0)
 
-    safety = [
-        record.payload
-        for record in recorder.records
-        if isinstance(record.payload, SafetyEventPayload)
-    ]
+    safety = [record.payload for record in recorder.records if isinstance(record.payload, SafetyEventPayload)]
     assert runner.calibration_cancellations == ["safety"]
     assert hold.grill.get_output_status()["auger"] is False
-    assert [
-        (payload.event, payload.inhibit_reason, payload.detail) for payload in safety
-    ] == [
+    assert [(payload.event, payload.inhibit_reason, payload.detail) for payload in safety] == [
         (SafetyEventType.ERROR, InhibitReason.SAFETY, "thermocouple fault"),
         (
             SafetyEventType.SCHEDULER_RESET,

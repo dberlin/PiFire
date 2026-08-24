@@ -350,14 +350,10 @@ def test_loop_identity_refresh_rotates_with_supplied_loop_time():
     refreshed = mode.control.copy()
     refreshed["cook_id"] = "new-session"
     rotations = []
-    mode.on_cook_identity_rotated = lambda previous, current, now: rotations.append(
-        (previous, current, now)
-    )
+    mode.on_cook_identity_rotated = lambda previous, current, now: rotations.append((previous, current, now))
 
     assert mode._refresh_cook_identity(refreshed, now=12.5) is refreshed
     assert rotations == [("old-session", "new-session", 12.5)]
-
-
 
 
 def test_status_publishes_duty_fields():
