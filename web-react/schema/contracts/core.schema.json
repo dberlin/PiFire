@@ -354,6 +354,13 @@
           "title": "Tempunits",
           "type": "string"
         },
+        "thermocoupleHealth": {
+          "items": {
+            "$ref": "#/$defs/ThermocoupleHealthView"
+          },
+          "title": "Thermocouplehealth",
+          "type": "array"
+        },
         "timer": {
           "$ref": "#/$defs/TimerPayload"
         },
@@ -828,6 +835,182 @@
       "title": "RecipeStatusPayload",
       "type": "object"
     },
+    "ThermocoupleHealthDetectorView": {
+      "additionalProperties": false,
+      "properties": {
+        "policy": {
+          "enum": [
+            "off",
+            "observe",
+            "enforce"
+          ],
+          "title": "Policy",
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "hardware",
+            "software",
+            "mixed"
+          ],
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "policy"
+      ],
+      "title": "ThermocoupleHealthDetectorView",
+      "type": "object"
+    },
+    "ThermocoupleHealthFreshnessView": {
+      "additionalProperties": false,
+      "properties": {
+        "current": {
+          "title": "Current",
+          "type": "boolean"
+        },
+        "lastReportedAgeS": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Lastreportedages"
+        }
+      },
+      "required": [
+        "current",
+        "lastReportedAgeS"
+      ],
+      "title": "ThermocoupleHealthFreshnessView",
+      "type": "object"
+    },
+    "ThermocoupleHealthReportView": {
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "additionalProperties": true,
+          "title": "Detail",
+          "type": "object"
+        },
+        "evidence": {
+          "items": {
+            "enum": [
+              "hardware",
+              "junction-collapse",
+              "stuck-response",
+              "excitation-response",
+              "implausible-step"
+            ],
+            "type": "string"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "faults": {
+          "items": {
+            "enum": [
+              "open",
+              "short",
+              "malfunction"
+            ],
+            "type": "string"
+          },
+          "title": "Faults",
+          "type": "array"
+        },
+        "state": {
+          "enum": [
+            "unmonitored",
+            "healthy",
+            "suspected",
+            "confirmed"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "temperatureValid": {
+          "title": "Temperaturevalid",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "state",
+        "faults",
+        "evidence",
+        "temperatureValid",
+        "detail"
+      ],
+      "title": "ThermocoupleHealthReportView",
+      "type": "object"
+    },
+    "ThermocoupleHealthView": {
+      "additionalProperties": false,
+      "properties": {
+        "detector": {
+          "$ref": "#/$defs/ThermocoupleHealthDetectorView"
+        },
+        "device": {
+          "title": "Device",
+          "type": "string"
+        },
+        "displayName": {
+          "title": "Displayname",
+          "type": "string"
+        },
+        "freshness": {
+          "$ref": "#/$defs/ThermocoupleHealthFreshnessView"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "none",
+            "notify_only",
+            "unavailable",
+            "stopped"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "port": {
+          "title": "Port",
+          "type": "string"
+        },
+        "report": {
+          "$ref": "#/$defs/ThermocoupleHealthReportView"
+        },
+        "role": {
+          "enum": [
+            "Primary",
+            "Food",
+            "Aux"
+          ],
+          "title": "Role",
+          "type": "string"
+        }
+      },
+      "required": [
+        "device",
+        "port",
+        "label",
+        "displayName",
+        "role",
+        "report",
+        "detector",
+        "outcome",
+        "freshness"
+      ],
+      "title": "ThermocoupleHealthView",
+      "type": "object"
+    },
     "TimerPayload": {
       "additionalProperties": false,
       "properties": {
@@ -899,6 +1082,10 @@
     "ProbeDataPayload",
     "ProbeStatusPayload",
     "RecipeStatusPayload",
+    "ThermocoupleHealthDetectorView",
+    "ThermocoupleHealthFreshnessView",
+    "ThermocoupleHealthReportView",
+    "ThermocoupleHealthView",
     "TimerPayload",
     "WebUiBuildResponse"
   ]

@@ -15,6 +15,7 @@ Description: This library provides socketio functions for app.py
  Imported Modules
 ==============================================================================
 """
+from collections.abc import Mapping
 import threading
 import json
 import math
@@ -78,7 +79,11 @@ from pydantic import ValidationError
 
 from common.settings_schema import SettingsValidationError, apply_settings_delta
 from common.web_contracts.control import ControlPatchRequest
-from common.web_contracts.core import DashSocketPayload, PelletSocketPayload
+from common.web_contracts.core import (
+    DashSocketPayload,
+    PelletSocketPayload,
+    ThermocoupleHealthView,
+)
 from flask import request
 from werkzeug.utils import secure_filename
 from app import socketio
@@ -295,6 +300,145 @@ def _get_pellet_socket_data(settings, pelletdb):
     ).model_dump(mode="json", by_alias=True, exclude_none=False)
 
 
+def _project_thermocouple_health(
+    settings,
+    probe_device_info,
+    controller_mode,
+    *,
+    now=None,
+):
+    """Build the client health view without mutating persisted producer data."""
+    if not isinstance(probe_device_info, list):
+        return []
+
+    health_settings = settings.get("thermocouple_health")
+    probe_settings = settings.get("probe_settings")
+    if not isinstance(health_settings, Mapping) or not isinstance(
+        probe_settings, Mapping
+    ):
+        return []
+    policy = health_settings.get("inference_policy")
+    if policy not in {"off", "observe", "enforce"}:
+        return []
+
+    probe_map = probe_settings.get("probe_map")
+    if not isinstance(probe_map, Mapping):
+        return []
+    configured_probes = probe_map.get("probe_info")
+    if not isinstance(configured_probes, list):
+        return []
+
+    reports_by_probe = {}
+    for device_info in probe_device_info:
+        if not isinstance(device_info, Mapping):
+            continue
+        device = device_info.get("device")
+        status = device_info.get("status")
+        if not isinstance(device, str) or not isinstance(status, Mapping):
+            continue
+        reports = status.get("thermocouple_health")
+        if not isinstance(reports, Mapping):
+            continue
+        for label, report in reports.items():
+            if isinstance(label, str) and isinstance(report, Mapping):
+                reports_by_probe[(device, label)] = report
+
+    if now is None:
+        now = time.monotonic()
+    if isinstance(now, bool) or not isinstance(now, (int, float)) or not math.isfinite(now):
+        return []
+    now = float(now)
+
+    projected = []
+    for probe in configured_probes:
+        if not isinstance(probe, Mapping):
+            continue
+        device = probe.get("device")
+        port = probe.get("port")
+        label = probe.get("label")
+        display_name = probe.get("name")
+        role = probe.get("type")
+        if (
+            not isinstance(device, str)
+            or not isinstance(port, str)
+            or not isinstance(label, str)
+            or not isinstance(display_name, str)
+            or role not in {"Primary", "Food", "Aux"}
+        ):
+            continue
+
+        report = reports_by_probe.get((device, label))
+        if report is None:
+            continue
+        observed_at = report.get("observed_at")
+        detail = report.get("detail")
+        evidence = report.get("evidence")
+        if (
+            isinstance(observed_at, bool)
+            or not isinstance(observed_at, (int, float))
+            or not math.isfinite(observed_at)
+            or not isinstance(detail, Mapping)
+            or not isinstance(evidence, list)
+        ):
+            continue
+
+        age_s = max(0.0, now - float(observed_at))
+        has_hardware = "hardware" in evidence
+        has_software = any(item != "hardware" for item in evidence)
+        source = (
+            "mixed"
+            if has_hardware and has_software
+            else "hardware"
+            if has_hardware
+            else "software"
+        )
+
+        state = report.get("state")
+        temperature_valid = report.get("temperature_valid")
+        outcome = "none"
+        if state == "confirmed":
+            if role == "Primary" and temperature_valid is True:
+                outcome = "notify_only"
+            elif role == "Primary" and controller_mode == Mode.ERROR:
+                outcome = "stopped"
+            else:
+                outcome = "unavailable"
+
+        try:
+            view = ThermocoupleHealthView.model_validate(
+                {
+                    "device": device,
+                    "port": port,
+                    "label": label,
+                    "displayName": display_name,
+                    "role": role,
+                    "report": {
+                        "state": state,
+                        "faults": report.get("faults"),
+                        "evidence": evidence,
+                        "temperatureValid": temperature_valid,
+                        "detail": dict(detail),
+                    },
+                    "detector": {
+                        "source": source,
+                        "policy": policy,
+                    },
+                    "outcome": outcome,
+                    "freshness": {
+                        "current": age_s <= CONTROL_HEARTBEAT_STALE_AFTER,
+                        "lastReportedAgeS": age_s,
+                    },
+                },
+                strict=True,
+            )
+        except ValidationError:
+            continue
+        projected.append(
+            view.model_dump(mode="json", by_alias=True, exclude_none=False)
+        )
+    return projected
+
+
 def _get_dash_data(settings, pelletdb):
     control = read_control()
     status = read_status()
@@ -395,6 +539,11 @@ def _get_dash_data(settings, pelletdb):
         "foodProbes": food_probes,
         "primaryProbe": primary_probe,
         "modelLearningRevision": controller_learning_report_revision(settings["controller"]["selected"]),
+        "thermocoupleHealth": _project_thermocouple_health(
+            settings,
+            probe_device_info,
+            control["mode"],
+        ),
     }
     return DashSocketPayload.model_validate(dash_data, strict=True).model_dump(
         mode="json",

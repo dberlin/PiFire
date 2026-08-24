@@ -2,13 +2,21 @@ from __future__ import annotations
 
 from typing import Generic, Literal, TypeVar
 
-from pydantic import Field, SerializationInfo, SerializerFunctionWrapHandler, model_serializer
+from pydantic import (
+    Field,
+    SerializationInfo,
+    SerializerFunctionWrapHandler,
+    TypeAdapter,
+    field_validator,
+    model_serializer,
+)
 
 from .base import ExtensibleWireModel, FiniteFloat, WireModel
-from .control import PelletDbSchema
+from .control import JsonValue, PelletDbSchema
 
 T = TypeVar("T")
 FiniteNumber = int | FiniteFloat
+_JSON_VALUE_ADAPTER = TypeAdapter(JsonValue)
 
 
 class ApiEnvelope(WireModel, Generic[T]):
@@ -92,6 +100,53 @@ class RecipeStatusPayload(WireModel):
     step: int
 
 
+
+class ThermocoupleHealthReportView(WireModel):
+    state: Literal["unmonitored", "healthy", "suspected", "confirmed"]
+    faults: list[Literal["open", "short", "malfunction"]]
+    evidence: list[
+        Literal[
+            "hardware",
+            "junction-collapse",
+            "stuck-response",
+            "excitation-response",
+            "implausible-step",
+        ]
+    ]
+    temperature_valid: bool = Field(alias="temperatureValid")
+    detail: dict[str, object]
+
+    @field_validator("detail")
+    @classmethod
+    def _detail_is_json(cls, detail: dict[str, object]) -> dict[str, object]:
+        for value in detail.values():
+            _JSON_VALUE_ADAPTER.validate_python(value, strict=True)
+        return detail
+
+
+class ThermocoupleHealthDetectorView(WireModel):
+    source: Literal["hardware", "software", "mixed"]
+    policy: Literal["off", "observe", "enforce"]
+
+
+class ThermocoupleHealthFreshnessView(WireModel):
+    current: bool
+    last_reported_age_s: FiniteNumber = Field(alias="lastReportedAgeS")
+
+
+class ThermocoupleHealthView(WireModel):
+    device: str
+    port: str
+    label: str
+    display_name: str = Field(alias="displayName")
+    role: Literal["Primary", "Food", "Aux"]
+    report: ThermocoupleHealthReportView
+    detector: ThermocoupleHealthDetectorView
+    outcome: Literal["none", "notify_only", "unavailable", "stopped"]
+    freshness: ThermocoupleHealthFreshnessView
+
+
+
 class DashSocketPayload(WireModel):
     uuid: str
     errors: list[str]
@@ -135,6 +190,10 @@ class DashSocketPayload(WireModel):
     food_probes: list[ProbeDataPayload] = Field(alias="foodProbes")
     primary_probe: ProbeDataPayload = Field(alias="primaryProbe")
     model_learning_revision: str | None = Field(alias="modelLearningRevision")
+    thermocouple_health: list[ThermocoupleHealthView] = Field(
+        default_factory=list,
+        alias="thermocoupleHealth",
+    )
 
 
 

@@ -135,6 +135,10 @@ from .core import (
     ProbeStatusPayload,
     RecipeStatusPayload,
     TimerPayload,
+    ThermocoupleHealthDetectorView,
+    ThermocoupleHealthFreshnessView,
+    ThermocoupleHealthReportView,
+    ThermocoupleHealthView,
     WebUiBuildResponse,
 )
 from .learning import (
@@ -456,6 +460,10 @@ WEB_CONTRACT_BUNDLES: tuple[ContractBundle, ...] = (
             ProbeStatusPayload,
             RecipeStatusPayload,
             TimerPayload,
+            ThermocoupleHealthDetectorView,
+            ThermocoupleHealthFreshnessView,
+            ThermocoupleHealthReportView,
+            ThermocoupleHealthView,
             WebUiBuildResponse,
         ),
         typescript_output="core.gen.ts",

@@ -174,6 +174,7 @@ export const FIXTURE_DASH = {
     device: "proto_adc",
   },
   modelLearningRevision: null,
+  thermocoupleHealth: [],
 } satisfies DashSocketPayload;
 
 // The same payload shape in a RUNNING state, for the cases FIXTURE_DASH

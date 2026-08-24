@@ -85,6 +85,27 @@ type Startupgototemp = number;
 type Startuptimestamp = number;
 type Status = string;
 type Tempunits = "F" | "C";
+type Policy = "off" | "observe" | "enforce";
+type Source = "hardware" | "software" | "mixed";
+type Device1 = string;
+type Displayname = string;
+type Current = boolean;
+type Lastreportedages = number;
+type Label1 = string;
+type Outcome = "none" | "notify_only" | "unavailable" | "stopped";
+type Port = string;
+type Evidence = (
+  | "hardware"
+  | "junction-collapse"
+  | "stuck-response"
+  | "excitation-response"
+  | "implausible-step"
+)[];
+type Faults = ("open" | "short" | "malfunction")[];
+type State = "unmonitored" | "healthy" | "suspected" | "confirmed";
+type Temperaturevalid = boolean;
+type Role = "Primary" | "Food" | "Aux";
+type Thermocouplehealth = ThermocoupleHealthView[];
 type End = number;
 type Keepwarm = boolean;
 type Paused1 = number;
@@ -190,6 +211,7 @@ export interface DashSocketPayload {
   startupTimestamp: Startuptimestamp;
   status: Status;
   tempUnits: Tempunits;
+  thermocoupleHealth?: Thermocouplehealth;
   timer: TimerPayload;
   uiHash: Uihash;
   uuid: Uuid;
@@ -259,6 +281,51 @@ export interface RecipeStatusPayload {
   paused: Paused;
   recipeMode: Recipemode;
   step: Step;
+}
+/**
+ * This interface was referenced by `PiFireCoreWebContracts`'s JSON-Schema
+ * via the `definition` "ThermocoupleHealthView".
+ */
+export interface ThermocoupleHealthView {
+  detector: ThermocoupleHealthDetectorView;
+  device: Device1;
+  displayName: Displayname;
+  freshness: ThermocoupleHealthFreshnessView;
+  label: Label1;
+  outcome: Outcome;
+  port: Port;
+  report: ThermocoupleHealthReportView;
+  role: Role;
+}
+/**
+ * This interface was referenced by `PiFireCoreWebContracts`'s JSON-Schema
+ * via the `definition` "ThermocoupleHealthDetectorView".
+ */
+export interface ThermocoupleHealthDetectorView {
+  policy: Policy;
+  source: Source;
+}
+/**
+ * This interface was referenced by `PiFireCoreWebContracts`'s JSON-Schema
+ * via the `definition` "ThermocoupleHealthFreshnessView".
+ */
+export interface ThermocoupleHealthFreshnessView {
+  current: Current;
+  lastReportedAgeS: Lastreportedages;
+}
+/**
+ * This interface was referenced by `PiFireCoreWebContracts`'s JSON-Schema
+ * via the `definition` "ThermocoupleHealthReportView".
+ */
+export interface ThermocoupleHealthReportView {
+  detail: Detail;
+  evidence: Evidence;
+  faults: Faults;
+  state: State;
+  temperatureValid: Temperaturevalid;
+}
+interface Detail {
+  [k: string]: unknown | undefined;
 }
 /**
  * This interface was referenced by `PiFireCoreWebContracts`'s JSON-Schema
