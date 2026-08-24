@@ -96,11 +96,11 @@ def test_confirmed_hardware_wins_even_when_inference_is_off():
         is_primary=True,
     )
 
-    assert fused is hardware
-    assert fused.as_dict()["detail"] == {"status": 0x10}
+    assert fused is not hardware
+    assert fused.as_dict()["detail"] == {"status": 0x10, "policy": "off"}
 
 
-def test_nonconfirmed_inference_remains_valid_and_unmodified():
+def test_nonconfirmed_inference_remains_valid_and_gains_effective_policy():
     inferred = ThermocoupleHealthReport(
         state=ThermocoupleHealthState.SUSPECTED,
         faults=(ThermocoupleFault.MALFUNCTION,),
@@ -116,9 +116,9 @@ def test_nonconfirmed_inference_remains_valid_and_unmodified():
         is_primary=True,
     )
 
-    assert fused is inferred
+    assert fused is not inferred
     assert fused.temperature_valid is True
-    assert fused.detail == {"metric": 1.0}
+    assert fused.detail == {"metric": 1.0, "policy": "enforce"}
 
 
 def test_clean_hardware_does_not_override_confirmed_inference_or_evidence_order():
@@ -146,7 +146,9 @@ def test_off_without_hardware_returns_unmonitored_at_inferred_timestamp():
         is_primary=True,
     )
 
-    assert fused == ThermocoupleHealthReport.unmonitored(12.0)
+    assert fused.state is ThermocoupleHealthState.UNMONITORED
+    assert fused.observed_at == 12.0
+    assert fused.detail == {"policy": "off"}
 
 
 def test_immutable_inputs_own_witnesses_and_validate_finite_numbers():

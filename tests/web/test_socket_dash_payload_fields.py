@@ -157,13 +157,19 @@ def _report(
     observed_at=92.5,
     detail=None,
 ):
+    if detail is None:
+        report_detail = {"policy": "observe"}
+    elif isinstance(detail, dict):
+        report_detail = {"policy": "observe", **detail}
+    else:
+        report_detail = detail
     return {
         "state": state,
         "faults": list(faults),
         "evidence": list(evidence),
         "temperature_valid": temperature_valid,
         "observed_at": observed_at,
-        "detail": {} if detail is None else detail,
+        "detail": report_detail,
     }
 
 
@@ -277,7 +283,7 @@ def test_health_projection_uses_policy_and_actual_controller_outcome(
                 port="A2" if role == "Aux" else "CH1",
                 name="Ambient" if role == "Aux" else "Control",
             ),
-            policy=policy,
+            policy="enforce" if policy != "enforce" else "observe",
         ),
         _device_info(
             "aux0" if role == "Aux" else "tc0",
@@ -325,7 +331,8 @@ def test_health_projection_preserves_open_and_short_without_error_strings(ds):
 
     assert result[0]["report"]["faults"] == ["open", "short"]
     assert result[0]["report"]["detail"] == {
-        "status": {"open": True, "short": True}
+        "policy": "observe",
+        "status": {"open": True, "short": True},
     }
     assert result[0]["detector"]["source"] == "hardware"
     assert result[0]["outcome"] == "stopped"
@@ -339,12 +346,14 @@ def test_health_projection_rejects_malformed_detail_and_computes_finite_age(ds):
         _probe("Fresh", port="CH1"),
         _probe("Old", port="CH2"),
         _probe("Future", port="CH3"),
+        _probe("Huge", port="CH4"),
     )
     reports = {
         "Bad": _report("healthy", detail=["not", "an", "object"]),
         "Fresh": _report("healthy", observed_at=98.75),
         "Old": _report("suspected", evidence=["implausible-step"], observed_at=50.0),
         "Future": _report("healthy", observed_at=101.0),
+        "Huge": _report("healthy", observed_at=10**10_000),
     }
 
     result = _project_thermocouple_health(
@@ -364,6 +373,41 @@ def test_health_projection_rejects_malformed_detail_and_computes_finite_age(ds):
         item["freshness"]["lastReportedAgeS"] >= 0.0
         for item in result
     )
+
+
+def test_health_projection_uses_epoch_time_and_age_crosses_current_threshold(
+    ds, monkeypatch
+):
+    from blueprints.mobile import socket_io
+
+    settings = _health_settings(_probe("Grill", role="Primary"))
+    reports = _device_info(
+        "tc0",
+        {"Grill": _report("healthy", observed_at=1_800_000_000.0)},
+    )
+    now = 1_800_000_001.0
+    monkeypatch.setattr(socket_io.time, "time", lambda: now)
+
+    fresh = socket_io._project_thermocouple_health(
+        settings,
+        reports,
+        "Hold",
+    )
+    now += socket_io.CONTROL_HEARTBEAT_STALE_AFTER + 1.0
+    stale = socket_io._project_thermocouple_health(
+        settings,
+        reports,
+        "Hold",
+    )
+
+    assert fresh[0]["freshness"] == {
+        "current": True,
+        "lastReportedAgeS": 1.0,
+    }
+    assert stale[0]["freshness"] == {
+        "current": False,
+        "lastReportedAgeS": socket_io.CONTROL_HEARTBEAT_STALE_AFTER + 2.0,
+    }
 
 
 def test_dash_payload_projects_persisted_health_and_accepts_old_omission(ds):

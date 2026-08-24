@@ -300,6 +300,16 @@ def _get_pellet_socket_data(settings, pelletdb):
     ).model_dump(mode="json", by_alias=True, exclude_none=False)
 
 
+def _finite_float(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        number = float(value)
+    except (OverflowError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
 def _project_thermocouple_health(
     settings,
     probe_device_info,
@@ -310,16 +320,10 @@ def _project_thermocouple_health(
     """Build the client health view without mutating persisted producer data."""
     if not isinstance(probe_device_info, list):
         return []
-
-    health_settings = settings.get("thermocouple_health")
     probe_settings = settings.get("probe_settings")
-    if not isinstance(health_settings, Mapping) or not isinstance(
-        probe_settings, Mapping
-    ):
+    if not isinstance(probe_settings, Mapping):
         return []
-    policy = health_settings.get("inference_policy")
-    if policy not in {"off", "observe", "enforce"}:
-        return []
+
 
     probe_map = probe_settings.get("probe_map")
     if not isinstance(probe_map, Mapping):
@@ -344,10 +348,10 @@ def _project_thermocouple_health(
                 reports_by_probe[(device, label)] = report
 
     if now is None:
-        now = time.monotonic()
-    if isinstance(now, bool) or not isinstance(now, (int, float)) or not math.isfinite(now):
+        now = time.time()
+    now = _finite_float(now)
+    if now is None:
         return []
-    now = float(now)
 
     projected = []
     for probe in configured_probes:
@@ -370,19 +374,20 @@ def _project_thermocouple_health(
         report = reports_by_probe.get((device, label))
         if report is None:
             continue
-        observed_at = report.get("observed_at")
+        observed_at = _finite_float(report.get("observed_at"))
         detail = report.get("detail")
         evidence = report.get("evidence")
         if (
-            isinstance(observed_at, bool)
-            or not isinstance(observed_at, (int, float))
-            or not math.isfinite(observed_at)
+            observed_at is None
             or not isinstance(detail, Mapping)
             or not isinstance(evidence, list)
         ):
             continue
+        policy = detail.get("policy")
+        if policy not in {"off", "observe", "enforce"}:
+            continue
 
-        age_s = max(0.0, now - float(observed_at))
+        age_s = max(0.0, now - observed_at)
         has_hardware = "hardware" in evidence
         has_software = any(item != "hardware" for item in evidence)
         source = (

@@ -313,8 +313,13 @@ def test_off_policy_immediately_reprojects_cached_inference_without_followup_rea
     main.set_thermocouple_inference_policy("off")
 
     health = main.get_thermocouple_health()
-    assert health["Pit"] == ThermocoupleHealthReport.unmonitored(2.0)
-    assert health["Food"] == hardware
+    assert health["Pit"].state is ThermocoupleHealthState.UNMONITORED
+    assert health["Pit"].observed_at == 2.0
+    assert health["Pit"].detail == {"policy": "off"}
+    assert health["Food"] == replace(
+        hardware,
+        detail={"status": 0x10, "policy": "off"},
+    )
     assert main.get_device_info()[0]["status"]["thermocouple_health"] == {
         label: report.as_dict() for label, report in health.items()
     }
@@ -481,9 +486,15 @@ def test_suspected_inference_keeps_numeric_output(recording_engines):
 
 
 @pytest.mark.parametrize("policy", list(ThermocoupleInferencePolicy))
-def test_hardware_confirmation_is_authoritative_and_invalid_in_every_policy(recording_engines, policy):
+def test_hardware_confirmation_is_controller_clocked_and_policy_owned(
+    recording_engines, policy
+):
     probe = _probe("device", "port", "Probe", "Primary")
-    hardware = ThermocoupleHealthReport.confirmed_hardware((ThermocoupleFault.OPEN,), now=2.0, status=0x10)
+    hardware = ThermocoupleHealthReport.confirmed_hardware(
+        (ThermocoupleFault.OPEN,),
+        now=2.0,
+        status=0x10,
+    )
     device = _Device(
         "device",
         [probe],
@@ -492,10 +503,15 @@ def test_hardware_confirmation_is_authoritative_and_invalid_in_every_policy(reco
     )
     main = _main([probe], [device], policy)
 
-    output = main.read_probes(now=2.0)
+    output = main.read_probes(now=1_800_000_000.0)
+    fused = main.get_thermocouple_health()["Probe"]
 
     assert output["primary"]["Probe"] is None
-    assert main.get_thermocouple_health()["Probe"] == hardware
+    assert fused.observed_at == 1_800_000_000.0
+    assert fused.detail == {"status": 0x10, "policy": policy.value}
+    assert main.get_device_info()[0]["status"]["thermocouple_health"]["Probe"] == fused.as_dict()
+    assert hardware.observed_at == 2.0
+    assert hardware.detail == {"status": 0x10}
     if policy is ThermocoupleInferencePolicy.OFF:
         assert main._thermocouple_inference_engines == {}
 

@@ -462,24 +462,36 @@ def fuse_thermocouple_health(
     is_primary: bool,
 ) -> ThermocoupleHealthReport:
     if hardware is not None and hardware.confirmed:
-        return hardware
-    if policy is ThermocoupleInferencePolicy.OFF or inferred is None:
+        fused = hardware
+    elif policy is ThermocoupleInferencePolicy.OFF or inferred is None:
         if hardware is not None:
-            return hardware
-        observed_at = inferred.observed_at if inferred is not None else 0.0
-        return ThermocoupleHealthReport.unmonitored(observed_at)
-    if not inferred.confirmed:
-        return inferred
-    detail = dict(inferred.detail)
-    detail.update(
-        {
-            "policy": policy.value,
-            "authority": ("stop" if policy is ThermocoupleInferencePolicy.ENFORCE and is_primary else "notify_only"),
-            "is_primary": is_primary,
-        }
-    )
-    return replace(
-        inferred,
-        temperature_valid=policy is ThermocoupleInferencePolicy.OBSERVE and is_primary,
-        detail=detail,
-    )
+            fused = hardware
+        else:
+            observed_at = inferred.observed_at if inferred is not None else 0.0
+            fused = ThermocoupleHealthReport.unmonitored(observed_at)
+    elif not inferred.confirmed:
+        fused = inferred
+    else:
+        detail = dict(inferred.detail)
+        detail.update(
+            {
+                "policy": policy.value,
+                "authority": (
+                    "stop"
+                    if policy is ThermocoupleInferencePolicy.ENFORCE and is_primary
+                    else "notify_only"
+                ),
+                "is_primary": is_primary,
+            }
+        )
+        fused = replace(
+            inferred,
+            temperature_valid=(
+                policy is ThermocoupleInferencePolicy.OBSERVE and is_primary
+            ),
+            detail=detail,
+        )
+
+    detail = dict(fused.detail)
+    detail["policy"] = policy.value
+    return replace(fused, detail=detail)

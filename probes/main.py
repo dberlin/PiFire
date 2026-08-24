@@ -266,6 +266,24 @@ class ProbesMain:
                 health[label] = fused
                 fused_by_device.setdefault(identity[0], {})[label] = fused
 
+        normalized_health = {}
+        normalized_by_device = {}
+        for device_name, reports in fused_by_device.items():
+            normalized_reports = {}
+            for label, report in reports.items():
+                detail = dict(report.detail)
+                detail["policy"] = policy.value
+                normalized = replace(
+                    report,
+                    observed_at=observed_at,
+                    detail=detail,
+                )
+                normalized_reports[label] = normalized
+                normalized_health[label] = normalized
+            normalized_by_device[device_name] = normalized_reports
+        health = normalized_health
+        fused_by_device = normalized_by_device
+
         for probe in self.probe_info:
             report = health.get(probe["label"])
             if report is None or report.temperature_valid:
