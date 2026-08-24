@@ -1,4 +1,8 @@
-import type { DashSocketPayload, ProbeDataPayload } from "../src/contracts/core.gen";
+import type {
+  DashSocketPayload,
+  ProbeDataPayload,
+  ThermocoupleHealthView,
+} from "../src/contracts/core.gen";
 import { describe, expect, it } from "@rstest/core";
 import { deriveView, staleLabel } from "../src/dashboard/deriveView";
 import { FIXTURE_DASH } from "../src/fixture";
@@ -235,5 +239,189 @@ describe("duty pills", () => {
     const view = deriveView(older as DashSocketPayload);
     expect(view.pillL.value).toBe("0%");
     expect(view.pillR.value).toBe("0%");
+  });
+});
+
+const wireHealth = (
+  over: Omit<Partial<ThermocoupleHealthView>, "report" | "freshness"> & {
+    report?: Partial<ThermocoupleHealthView["report"]>;
+    freshness?: Partial<ThermocoupleHealthView["freshness"]>;
+  } = {},
+): ThermocoupleHealthView => ({
+  device: "mcp9601",
+  port: "TC0",
+  label: "Grill",
+  displayName: "Grill",
+  role: "Primary",
+  detector: { source: "software", policy: "observe" },
+  outcome: "none",
+  ...over,
+  report: {
+    state: "healthy",
+    faults: [],
+    evidence: [],
+    temperatureValid: true,
+    detail: {},
+    ...over.report,
+  },
+  freshness: { current: true, lastReportedAgeS: 0, ...over.freshness },
+});
+
+describe("deriveView thermocouple health integration", () => {
+  it("keeps old payloads compatible when the optional projection is absent", () => {
+    const { thermocoupleHealth, ...older } = FIXTURE_DASH;
+    void thermocoupleHealth;
+
+    const view = deriveView(older as DashSocketPayload);
+
+    expect(view.probeHealth).toEqual([]);
+    expect(view.probeHealthSummary).toBeNull();
+    expect(view.primaryHealth).toBeNull();
+  });
+
+  it("projects all roles and keeps Aux available to summary/details without making a card", () => {
+    const food = wireHealth({
+      port: "TC1",
+      label: FIXTURE_DASH.foodProbes[0].label,
+      displayName: FIXTURE_DASH.foodProbes[0].title,
+      role: "Food",
+      report: { state: "suspected" },
+    });
+    const aux = wireHealth({
+      port: "TC2",
+      label: "Stack",
+      displayName: "Stack",
+      role: "Aux",
+      report: { state: "confirmed", temperatureValid: false },
+      outcome: "unavailable",
+    });
+    const view = deriveView({ ...FIXTURE_DASH, thermocoupleHealth: [food, aux] });
+
+    expect(view.probeHealth.map(({ role }) => role)).toEqual(["Food", "Aux"]);
+    expect(view.probes).toHaveLength(FIXTURE_DASH.foodProbes.length);
+    expect(view.probes[0].health?.headline).toBe("CHECK PROBE");
+    expect(view.probeHealthSummary?.highest.label).toBe("Stack");
+  });
+
+  it("never falls back to last-good for a confirmed-invalid primary", () => {
+    const view = deriveView({
+      ...FIXTURE_DASH,
+      primaryProbe: {
+        ...FIXTURE_DASH.primaryProbe,
+        temp: null,
+        status: { lastTemp: 225, lastReadingAge: 12 },
+      },
+      thermocoupleHealth: [
+        wireHealth({
+          report: { state: "confirmed", faults: ["open"], temperatureValid: false },
+          outcome: "stopped",
+        }),
+      ],
+    });
+
+    expect(view.primaryHealth?.availability).toBe("unavailable");
+    expect(view.tempInt).toBeNull();
+    expect(view.stale).toBeNull();
+    expect(view.gaugeFrac).toBe(0);
+  });
+
+  it("never falls back to last-good for a confirmed-invalid Food probe", () => {
+    const label = FIXTURE_DASH.foodProbes[0].label;
+    const view = deriveView({
+      ...FIXTURE_DASH,
+      foodProbes: [
+        {
+          ...FIXTURE_DASH.foodProbes[0],
+          temp: null,
+          status: { lastTemp: 155, lastReadingAge: 18 },
+        },
+      ],
+      thermocoupleHealth: [
+        wireHealth({
+          port: "TC1",
+          label,
+          displayName: "Brisket",
+          role: "Food",
+          report: { state: "confirmed", faults: ["short"], temperatureValid: false },
+          outcome: "unavailable",
+        }),
+      ],
+    });
+
+    expect(view.probes[0].health?.availability).toBe("unavailable");
+    expect(view.probes[0].tempInt).toBeNull();
+    expect(view.probes[0].stale).toBeNull();
+    expect(view.probes[0].barPct).toBe(0);
+  });
+
+  it.each([
+    ["suspected", "none"],
+    ["confirmed", "notify_only"],
+  ] as const)("retains the current primary number for %s/%s", (state, outcome) => {
+    const view = deriveView({
+      ...FIXTURE_DASH,
+      primaryProbe: { ...FIXTURE_DASH.primaryProbe, temp: 227.4 },
+      thermocoupleHealth: [
+        wireHealth({
+          report: {
+            state,
+            faults: state === "confirmed" ? ["malfunction"] : [],
+            temperatureValid: true,
+          },
+          outcome,
+        }),
+      ],
+    });
+
+    expect(view.primaryHealth?.availability).toBe("current");
+    expect(view.tempInt).toBe(227);
+    expect(view.stale).toBeNull();
+  });
+
+  it("keeps health freshness orthogonal to numeric availability", () => {
+    const view = deriveView({
+      ...FIXTURE_DASH,
+      primaryProbe: { ...FIXTURE_DASH.primaryProbe, temp: 226 },
+      thermocoupleHealth: [
+        wireHealth({
+          report: { state: "suspected", temperatureValid: true },
+          freshness: { current: false, lastReportedAgeS: 70 },
+        }),
+      ],
+    });
+
+    expect(view.primaryHealth).toMatchObject({
+      availability: "current",
+      freshnessQualifier: "Last reported",
+    });
+    expect(view.tempInt).toBe(226);
+    expect(view.stale).toBeNull();
+  });
+
+  it("matches validity by role and label instead of applying an Aux fault to a Food card", () => {
+    const label = FIXTURE_DASH.foodProbes[0].label;
+    const view = deriveView({
+      ...FIXTURE_DASH,
+      foodProbes: [
+        {
+          ...FIXTURE_DASH.foodProbes[0],
+          temp: null,
+          status: { lastTemp: 160, lastReadingAge: 9 },
+        },
+      ],
+      thermocoupleHealth: [
+        wireHealth({
+          label,
+          displayName: "Stack",
+          role: "Aux",
+          report: { state: "confirmed", temperatureValid: false },
+          outcome: "unavailable",
+        }),
+      ],
+    });
+
+    expect(view.probes[0].health).toBeNull();
+    expect(view.probes[0].tempInt).toBe(160);
+    expect(view.probes[0].stale).toBe("last data 9s ago");
   });
 });

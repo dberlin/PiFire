@@ -1,5 +1,11 @@
 import type { DashSocketPayload, ProbeStatusPayload } from "../contracts/core.gen";
 import {
+  type ProbeHealthSummary,
+  type ProbeHealthView,
+  projectProbeHealthList,
+  summarizeProbeHealth,
+} from "./probeHealth";
+import {
   type BatteryBadge,
   batteryBadge,
   type ConnectionBadge,
@@ -66,8 +72,8 @@ export interface ProbeCardView {
    *  addressed by label (common/api_commands.py:550-551), and the title is a
    *  free-text name the user can change. */
   label: string;
-  /** The temperature to display, which is the last real reading when the probe
-   *  has no current one. Null only when it has produced nothing at all. */
+  /** The temperature to display. Confirmed-invalid health overrides both a
+   *  current value and the generic last-real-reading fallback. */
   tempInt: number | null;
   /** Set when `tempInt` is a carried-over reading rather than a live one, e.g.
    *  "last data 47s ago". Null while the probe is reporting. */
@@ -86,6 +92,8 @@ export interface ProbeCardView {
   conn: ConnectionBadge | null;
   /** Battery level, or null for a probe that has no battery. */
   battery: BatteryBadge | null;
+  /** Authoritative health semantics for this configured Food probe. */
+  health: ProbeHealthView | null;
 }
 
 export interface OutputView {
@@ -119,11 +127,18 @@ export interface DashView {
   modeLabel: string;
   liveColor: string;
   units: "F" | "C";
-  /** The pit temperature to display -- the last real reading when there is no
-   *  current one, null when the probe has produced nothing at all. */
+  /** The pit temperature to display. Confirmed-invalid health overrides both
+   *  a current value and the generic last-real-reading fallback. */
   tempInt: number | null;
   /** Set when `tempInt` is a carried-over reading rather than a live one. */
   stale: string | null;
+
+  /** Authoritative health semantics for the configured Primary probe. */
+  primaryHealth: ProbeHealthView | null;
+  /** Every projected Primary/Food/Aux item, including detail-only Aux probes. */
+  probeHealth: readonly ProbeHealthView[];
+  /** Highest active issue plus the number of remaining active issues. */
+  probeHealthSummary: ProbeHealthSummary | null;
   maxTemp: number;
   gaugeFrac: number;
   hasSetpoint: boolean;
@@ -154,9 +169,16 @@ function outputView(on: boolean, onColor: string, onStatus: string): OutputView 
   };
 }
 
-function probeCard(fp: DashSocketPayload["foodProbes"][number], units: "F" | "C"): ProbeCardView {
+function probeCard(
+  fp: DashSocketPayload["foodProbes"][number],
+  units: "F" | "C",
+  health: ProbeHealthView | null,
+): ProbeCardView {
   const hasTarget = fp.target > 0 && fp.targetReq;
-  const { shown, stale } = reading(fp.temp, fp.status);
+  const { shown, stale } =
+    health?.availability === "unavailable"
+      ? { shown: null, stale: null }
+      : reading(fp.temp, fp.status);
   // Progress is measured against whatever the card is showing: a stale reading
   // still places the probe on its way to target, and a probe with no reading
   // at all has no progress to draw.
@@ -184,6 +206,7 @@ function probeCard(fp: DashSocketPayload["foodProbes"][number], units: "F" | "C"
     etaStr: fp.targetReq && typeof fp.eta === "number" ? fmtDuration(fp.eta) : null,
     conn: connectionBadge(fp.status),
     battery: batteryBadge(fp.status),
+    health,
   };
 }
 
@@ -205,8 +228,15 @@ export function deriveView(dash: DashSocketPayload): DashView {
   const units = dash.tempUnits;
   const p = dash.primaryProbe;
   const maxTemp = p.maxTemp > 0 ? p.maxTemp : 600;
+  const probeHealth = projectProbeHealthList(dash.thermocoupleHealth);
+  const healthByProbe = new Map(
+    probeHealth.map((health) => [`${health.role}\u0000${health.label}`, health] as const),
+  );
+  const primaryHealth = healthByProbe.get(`Primary\u0000${p.label}`) ?? null;
 
-  const probes = (dash.foodProbes ?? []).map((fp) => probeCard(fp, units));
+  const probes = (dash.foodProbes ?? []).map((fp) =>
+    probeCard(fp, units, healthByProbe.get(`Food\u0000${fp.label}`) ?? null),
+  );
 
   const smokeOn = dash.smokePlus;
   // P-mode and Smoke+ describe the smoke cycle, so they are shown only where
@@ -242,10 +272,13 @@ export function deriveView(dash: DashSocketPayload): DashView {
 
   const igniter = outputView(dash.outputs.igniter, "var(--igniter)", "HOT");
 
-  // The pit probe is usually a wired thermocouple that always has a number,
-  // but nothing guarantees it: the same carry-over applies here so a gauge
-  // never reads 0° for a probe that simply did not report.
-  const primary = reading(p.temp, p.status);
+  // The generic carry-over remains useful when a reporting gap has no
+  // authoritative health invalidation. Confirmed-invalid health wins over both
+  // a current wire number and that last-real fallback.
+  const primary =
+    primaryHealth?.availability === "unavailable"
+      ? { shown: null, stale: null }
+      : reading(p.temp, p.status);
 
   return {
     cooking,
@@ -254,6 +287,9 @@ export function deriveView(dash: DashSocketPayload): DashView {
     units,
     tempInt: primary.shown === null ? null : Math.round(primary.shown),
     stale: primary.stale,
+    primaryHealth,
+    probeHealth,
+    probeHealthSummary: summarizeProbeHealth(probeHealth),
     maxTemp,
     gaugeFrac: primary.shown === null ? 0 : Math.max(0, Math.min(1, primary.shown / maxTemp)),
     hasSetpoint: p.setTemp > 0,
