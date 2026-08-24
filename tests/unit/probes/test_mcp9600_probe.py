@@ -4,6 +4,10 @@ import sys
 import types
 import importlib
 
+import pytest
+
+from probes.thermocouple_health import ThermocoupleHealthState
+
 
 def _install_fakes(monkeypatch):
     """Install fake hardware modules so the probe imports without hardware."""
@@ -15,7 +19,12 @@ def _install_fakes(monkeypatch):
             self.i2c = i2c
             self.address = address
             self.tctype = tctype
-            self.temperature = 0.0
+            self.temperature = 100.0
+            self.ambient_temperature = 25.0
+
+        @property
+        def status(self):
+            raise AssertionError("MCP9600 status register must not be read")
 
     mcp_mod.MCP9600 = FakeMCP9600
     monkeypatch.setitem(sys.modules, "adafruit_mcp9600", mcp_mod)
@@ -48,10 +57,59 @@ def _install_fakes(monkeypatch):
 
 def _load_probe(monkeypatch):
     _install_fakes(monkeypatch)
+    import probes._mcp960x_adafruit as shared
     import probes.mcp9600_adafruit as probe
 
-    importlib.reload(probe)  # bind the fake adafruit_mcp9600
+    importlib.reload(shared)
+    importlib.reload(probe)
     return probe
+
+
+def _make_mcp_probe(monkeypatch, units):
+    probe = _load_probe(monkeypatch)
+    probe_info = [
+        {
+            "device": "mcp9600",
+            "port": "KTT0",
+            "label": "Grill",
+            "type": "Primary",
+            "profile": {"A": 0.00073431401, "B": 0.0002157437, "C": 9.515686e-8},
+        }
+    ]
+    device_info = {
+        "device": "mcp9600",
+        "module": "mcp9600_adafruit",
+        "ports": ["KTT0"],
+        "config": {},
+    }
+    return probe.ReadProbes(probe_info, device_info, units)
+
+
+@pytest.fixture
+def mcp_probe(monkeypatch):
+    return _make_mcp_probe(monkeypatch, "F")
+
+
+@pytest.fixture
+def mcp_probe_celsius(monkeypatch):
+    return _make_mcp_probe(monkeypatch, "C")
+
+
+def test_mcp9600_remains_unmonitored_and_does_not_read_status(mcp_probe):
+    output = mcp_probe.read_all_ports({})
+    report = mcp_probe.get_thermocouple_health()["Grill"]
+
+    assert output["primary"]["Grill"] == 212.0
+    assert report.state is ThermocoupleHealthState.UNMONITORED
+    assert report.temperature_valid is True
+
+
+def test_mcp9600_read_keeps_existing_units_and_port_contract(mcp_probe_celsius):
+    output = mcp_probe_celsius.read_all_ports({})
+
+    assert mcp_probe_celsius.device_info["ports"] == ["KTT0"]
+    assert output["primary"]["Grill"] == 100.0
+    assert output["tr"]["Grill"] == 0
 
 
 def test_init_device_wires_tc_type(monkeypatch):
@@ -79,6 +137,14 @@ def test_init_device_defaults(monkeypatch):
     assert sensor.address == 0x67  # default address
 
 
+def test_kttdevice_exposes_ambient_temperature(monkeypatch):
+    probe = _load_probe(monkeypatch)
+
+    dev = probe.KTTDevice()
+
+    assert dev.ambient_temperature == 25.0
+
+
 def test_manifest_mcp9600_entry():
     repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
     manifest = json.load(open(os.path.join(repo_root, "wizard", "wizard_manifest.json")))
@@ -103,6 +169,7 @@ def test_kttdevice_opens_bus_via_factory(monkeypatch):
     from common.i2c_bus_config import FT232HBus
 
     probe = _load_probe(monkeypatch)
+    shared = sys.modules["probes._mcp960x_adafruit"]
 
     fake_bus = object()
     opened = {}
@@ -111,10 +178,11 @@ def test_kttdevice_opens_bus_via_factory(monkeypatch):
         opened["bus"] = bus
         return fake_bus
 
-    monkeypatch.setattr(probe, "open_i2c_bus", fake_open)
-    monkeypatch.setattr(probe, "MCP9600", mock.Mock())
+    monkeypatch.setattr(shared, "open_i2c_bus", fake_open)
+    sensor_factory = mock.Mock()
+    monkeypatch.setattr(shared.MCP960xDevice, "sensor_class", sensor_factory)
 
     dev = probe.KTTDevice(i2c_bus_addr=0x67, bus=FT232HBus(url="1"), tc_type="K")
     assert dev.i2c is fake_bus
     assert opened["bus"] == FT232HBus(url="1")
-    probe.MCP9600.assert_called_once()
+    sensor_factory.assert_called_once()
