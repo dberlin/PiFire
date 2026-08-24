@@ -1,3 +1,5 @@
+from collections.abc import Mapping
+
 import time
 
 from adafruit_mcp9600 import MCP9600
@@ -10,6 +12,7 @@ from probes.thermocouple_health import (
     ThermocoupleFault,
     ThermocoupleHealthReport,
 )
+from probes.thermocouple_inference import ThermocoupleJunctionSample
 
 
 class MCP960xDevice:
@@ -66,6 +69,7 @@ class MCP960xProbe(ProbeInterface):
         self._hardware_fault_latch = HardwareFaultLatch(recovery_seconds=60.0)
         self._thermocouple_health_report = ThermocoupleHealthReport.unmonitored(0.0)
         self._last_hardware_status = None
+        self._thermocouple_samples: dict[str, ThermocoupleJunctionSample] = {}
 
     def _read_hardware_faults(self) -> tuple[ThermocoupleFault, ...] | None:
         return None
@@ -74,9 +78,11 @@ class MCP960xProbe(ProbeInterface):
         """Read the thermocouple health and temperature from the device."""
         port = self.device_info["ports"][0]
         label = self.port_map[port]
+        self._thermocouple_samples = {}
         faults = self._read_hardware_faults()
         now = time.monotonic()
         temperature = None
+        junction_sample = None
         if faults or (faults is not None and port == self.primary_port and self._thermocouple_health_report.confirmed):
             report = self._hardware_fault_latch.update(
                 faults,
@@ -86,7 +92,13 @@ class MCP960xProbe(ProbeInterface):
             )
         else:
             try:
-                temp_c = round(self.device.temperature, 1)
+                hot_c = self.device.temperature
+                cold_c = self.device.ambient_temperature
+                junction_sample = ThermocoupleJunctionSample(
+                    hot_c=hot_c,
+                    cold_c=cold_c,
+                )
+                temp_c = round(hot_c, 1)
             except Exception:
                 self._hardware_fault_latch.cancel_clean_recovery()
                 raise
@@ -111,6 +123,8 @@ class MCP960xProbe(ProbeInterface):
             self.output_data["food"][label] = temperature
         elif port in self.aux_ports:
             self.output_data["aux"][label] = temperature
+        if junction_sample is not None:
+            self._thermocouple_samples = {port: junction_sample}
 
         return self.output_data
 
@@ -120,3 +134,6 @@ class MCP960xProbe(ProbeInterface):
         if label is None:
             return {}
         return {label: self._thermocouple_health_report}
+
+    def get_thermocouple_samples(self) -> Mapping[str, ThermocoupleJunctionSample]:
+        return self._thermocouple_samples

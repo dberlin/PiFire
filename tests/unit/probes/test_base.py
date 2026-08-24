@@ -115,6 +115,15 @@ def test_init_transient_explicit_false_string():
     assert obj.transient is False
 
 
+def test_non_thermocouple_probe_has_no_junction_samples():
+    obj = _make_probe(
+        [_probe("P1", "Primary1", "Primary")],
+        _device_info(["P1"]),
+    )
+
+    assert obj.get_thermocouple_samples() == {}
+
+
 # ---------------------------------------------------------------------------
 # _init_device_with_retries: retry-then-succeed, and exhaustion
 # ---------------------------------------------------------------------------

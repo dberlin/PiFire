@@ -16,12 +16,15 @@ Description:
 *****************************************
 """
 
+from collections.abc import Mapping
+
 import math
 import os
 import time
 import logging
 from probes.kalman import TempKalman
 from probes.thermocouple_health import ThermocoupleHealthReport
+from probes.thermocouple_inference import ThermocoupleJunctionSample
 
 # find_i2c_bus lives in the shared factory; re-export so existing
 # `from probes.base import find_i2c_bus` imports keep working.
@@ -436,6 +439,9 @@ class ProbeInterface:
         return self.port_map
 
     def get_thermocouple_health(self) -> dict[str, ThermocoupleHealthReport]:
+        return {}
+
+    def get_thermocouple_samples(self) -> Mapping[str, ThermocoupleJunctionSample]:
         return {}
 
     def get_device_info(self):

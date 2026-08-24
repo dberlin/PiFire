@@ -32,8 +32,11 @@ Description:
  Imported Libraries
 *****************************************
 """
+from collections.abc import Mapping
+
 import adafruit_max31856
 from probes.base import ProbeInterface, resolve_spi_bus
+from probes.thermocouple_inference import ThermocoupleJunctionSample
 
 # Config string -> adafruit_max31856.ThermocoupleType.* enum value
 _TC_TYPES = {
@@ -67,6 +70,10 @@ class TCDevice:
     def temperature(self):
         return self.sensor.temperature
 
+    @property
+    def reference_temperature(self):
+        return self.sensor.reference_temperature
+
     def get_status(self):
         return self.status
 
@@ -84,12 +91,20 @@ class ReadProbes(ProbeInterface):
         averaging = int(config.get("averaging", 1))
         noise_rejection = int(config.get("noise_rejection", 60))
         self.device = TCDevice(spi, cs, tc_type, averaging, noise_rejection)
+        self._thermocouple_samples: dict[str, ThermocoupleJunctionSample] = {}
 
     def read_all_ports(self, output_data):
         """Read temperature from device"""
-        tempC = round(self.device.temperature, 1)
-        tempF = round(tempC * (9 / 5) + 32, 1)  # Celsius to Fahrenheit
         port = self.device_info["ports"][0]
+        self._thermocouple_samples = {}
+        hot_c = self.device.temperature
+        cold_c = self.device.reference_temperature
+        junction_sample = ThermocoupleJunctionSample(
+            hot_c=hot_c,
+            cold_c=cold_c,
+        )
+        tempC = round(hot_c, 1)
+        tempF = round(tempC * (9 / 5) + 32, 1)  # Celsius to Fahrenheit
 
         """ Thermocouples have no resistance reading """
         self.output_data["tr"][self.port_map[port]] = 0
@@ -101,5 +116,9 @@ class ReadProbes(ProbeInterface):
             self.output_data["food"][self.port_map[port]] = tempF if self.units == "F" else tempC
         elif port in self.aux_ports:
             self.output_data["aux"][self.port_map[port]] = tempF if self.units == "F" else tempC
+        self._thermocouple_samples = {port: junction_sample}
 
         return self.output_data
+
+    def get_thermocouple_samples(self) -> Mapping[str, ThermocoupleJunctionSample]:
+        return self._thermocouple_samples

@@ -10,6 +10,7 @@ from probes.thermocouple_health import (
     ThermocoupleFault,
     ThermocoupleHealthState,
 )
+from probes.thermocouple_inference import ThermocoupleJunctionSample
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -32,6 +33,7 @@ def _install_fakes(monkeypatch):
             self.tctype = tctype
             self.status_value = 0
             self.temp_c = 100.0
+            self.ambient_c = 25.0
             self.accesses = []
 
         @property
@@ -43,7 +45,10 @@ def _install_fakes(monkeypatch):
 
         @property
         def ambient_temperature(self):
-            return 25.0
+            self.accesses.append("ambient_temperature")
+            if isinstance(self.ambient_c, BaseException):
+                raise self.ambient_c
+            return self.ambient_c
 
     setattr(mcp_mod, "MCP9600", FakeMCP9600)
     monkeypatch.setitem(sys.modules, "adafruit_mcp9600", mcp_mod)
@@ -110,7 +115,15 @@ def _new_read_probes(probe, config):
     return obj
 
 
-def _configured_probe(probe, *, primary, detection, status, temp_c):
+def _configured_probe(
+    probe,
+    *,
+    primary,
+    detection,
+    status,
+    temp_c,
+    ambient_c=25.0,
+):
     module, _, _ = probe
     probe_info = [
         {
@@ -130,6 +143,7 @@ def _configured_probe(probe, *, primary, detection, status, temp_c):
     obj = module.ReadProbes(probe_info, device_info, "F")
     obj.device.sensor.status_value = status
     obj.device.sensor.temp_c = temp_c
+    obj.device.sensor.ambient_c = ambient_c
     return obj
 
 
@@ -220,14 +234,18 @@ def test_detection_off_never_reads_status(probe):
         primary=True,
         detection="False",
         status=0x30,
-        temp_c=100.0,
+        temp_c=100.04,
+        ambient_c=24.96,
     )
 
     output = obj.read_all_ports({})
     report = obj.get_thermocouple_health()["Grill"]
 
-    assert obj.device.sensor.accesses == ["temperature"]
+    assert obj.device.sensor.accesses == ["temperature", "ambient_temperature"]
     assert output["primary"]["Grill"] == 212.0
+    assert obj.get_thermocouple_samples() == {
+        "KTT0": ThermocoupleJunctionSample(hot_c=100.04, cold_c=24.96)
+    }
     assert report.state is ThermocoupleHealthState.UNMONITORED
 
 
@@ -237,14 +255,22 @@ def test_enabled_clean_status_is_read_once_before_temperature(probe):
         primary=True,
         detection="True",
         status=0x00,
-        temp_c=100.0,
+        temp_c=100.04,
+        ambient_c=24.96,
     )
 
     output = obj.read_all_ports({})
     report = obj.get_thermocouple_health()["Grill"]
 
-    assert obj.device.sensor.accesses == ["status", "temperature"]
+    assert obj.device.sensor.accesses == [
+        "status",
+        "temperature",
+        "ambient_temperature",
+    ]
     assert output["primary"]["Grill"] == 212.0
+    assert obj.get_thermocouple_samples() == {
+        "KTT0": ThermocoupleJunctionSample(hot_c=100.04, cold_c=24.96)
+    }
     assert report.state is ThermocoupleHealthState.HEALTHY
     assert report.faults == ()
 
@@ -262,10 +288,30 @@ def test_enabled_open_fault_is_read_before_temperature_and_invalidates_output(pr
     report = obj.get_thermocouple_health()["Grill"]
 
     assert obj.device.sensor.accesses == ["status"]
+    assert obj.get_thermocouple_samples() == {}
     assert output["primary"]["Grill"] is None
     assert report.faults == (ThermocoupleFault.OPEN,)
     assert report.confirmed
     assert report.detail["status"] == 0x10
+
+
+def test_direct_hardware_fault_clears_previous_sample_without_junction_reads(probe):
+    obj = _configured_probe(
+        probe,
+        primary=True,
+        detection="True",
+        status=0x00,
+        temp_c=100.0,
+    )
+    obj.read_all_ports({})
+    obj.device.sensor.status_value = 0x10
+    obj.device.sensor.accesses.clear()
+
+    output = obj.read_all_ports({})
+
+    assert obj.device.sensor.accesses == ["status"]
+    assert obj.get_thermocouple_samples() == {}
+    assert output["primary"]["Grill"] is None
 
 
 @pytest.mark.parametrize(
@@ -347,21 +393,46 @@ def test_secondary_fault_recovers_after_sixty_consecutive_clean_seconds(
         clock["now"] = now
         obj.device.sensor.accesses.clear()
         assert obj.read_all_ports({})["food"]["Grill"] is None
-        assert obj.device.sensor.accesses == ["status", "temperature"]
+        assert obj.device.sensor.accesses == [
+            "status",
+            "temperature",
+            "ambient_temperature",
+        ]
     clock["now"] = 70.0
     obj.device.sensor.accesses.clear()
     output = obj.read_all_ports({})
     report = obj.get_thermocouple_health()["Grill"]
 
-    assert obj.device.sensor.accesses == ["status", "temperature"]
+    assert obj.device.sensor.accesses == [
+        "status",
+        "temperature",
+        "ambient_temperature",
+    ]
     assert output["food"]["Grill"] == 212.0
     assert report.state is ThermocoupleHealthState.HEALTHY
     assert report.faults == ()
 
 
-def test_secondary_hot_read_exception_restarts_full_clean_recovery_window(
+@pytest.mark.parametrize(
+    ("failed_attribute", "expected_accesses"),
+    [
+        pytest.param(
+            "temp_c",
+            ["status", "temperature"],
+            id="hot",
+        ),
+        pytest.param(
+            "ambient_c",
+            ["status", "temperature", "ambient_temperature"],
+            id="cold",
+        ),
+    ],
+)
+def test_secondary_junction_read_exception_restarts_full_clean_recovery_window(
     probe,
     monkeypatch,
+    failed_attribute,
+    expected_accesses,
 ):
     obj = _configured_probe(
         probe,
@@ -378,34 +449,47 @@ def test_secondary_hot_read_exception_restarts_full_clean_recovery_window(
     obj.device.sensor.status_value = 0x00
     clock["now"] = 10.0
     assert obj.read_all_ports({})["food"]["Grill"] is None
+    assert obj.get_thermocouple_samples() == {
+        "KTT0": ThermocoupleJunctionSample(hot_c=100.0, cold_c=25.0)
+    }
 
-    hot_error = OSError("hot read failed")
-    obj.device.sensor.temp_c = hot_error
+    read_error = OSError(f"{failed_attribute} read failed")
+    setattr(obj.device.sensor, failed_attribute, read_error)
     obj.device.sensor.accesses.clear()
     clock["now"] = 70.0
     with pytest.raises(OSError) as caught:
         obj.read_all_ports({})
 
     report = obj.get_thermocouple_health()["Grill"]
-    assert caught.value is hot_error
-    assert obj.device.sensor.accesses == ["status", "temperature"]
+    assert caught.value is read_error
+    assert obj.device.sensor.accesses == expected_accesses
+    assert obj.get_thermocouple_samples() == {}
     assert obj.output_data["food"]["Grill"] is None
     assert report.state is ThermocoupleHealthState.CONFIRMED
     assert report.faults == (ThermocoupleFault.OPEN,)
 
-    obj.device.sensor.temp_c = 100.0
+    recovered_value = 100.0 if failed_attribute == "temp_c" else 25.0
+    setattr(obj.device.sensor, failed_attribute, recovered_value)
     for now in (71.0, 130.9):
         clock["now"] = now
         obj.device.sensor.accesses.clear()
         assert obj.read_all_ports({})["food"]["Grill"] is None
-        assert obj.device.sensor.accesses == ["status", "temperature"]
+        assert obj.device.sensor.accesses == [
+            "status",
+            "temperature",
+            "ambient_temperature",
+        ]
 
     clock["now"] = 131.0
     obj.device.sensor.accesses.clear()
     output = obj.read_all_ports({})
     report = obj.get_thermocouple_health()["Grill"]
 
-    assert obj.device.sensor.accesses == ["status", "temperature"]
+    assert obj.device.sensor.accesses == [
+        "status",
+        "temperature",
+        "ambient_temperature",
+    ]
     assert output["food"]["Grill"] == 212.0
     assert report.state is ThermocoupleHealthState.HEALTHY
     assert report.faults == ()
@@ -463,13 +547,21 @@ def test_status_exception_cancels_secondary_clean_recovery_window(
         clock["now"] = now
         obj.device.sensor.accesses.clear()
         assert obj.read_all_ports({})["food"]["Grill"] is None
-        assert obj.device.sensor.accesses == ["status", "temperature"]
+        assert obj.device.sensor.accesses == [
+            "status",
+            "temperature",
+            "ambient_temperature",
+        ]
     clock["now"] = 130.0
     obj.device.sensor.accesses.clear()
     output = obj.read_all_ports({})
     report = obj.get_thermocouple_health()["Grill"]
 
-    assert obj.device.sensor.accesses == ["status", "temperature"]
+    assert obj.device.sensor.accesses == [
+        "status",
+        "temperature",
+        "ambient_temperature",
+    ]
     assert output["food"]["Grill"] == 212.0
     assert report.state is ThermocoupleHealthState.HEALTHY
 

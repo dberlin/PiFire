@@ -7,6 +7,7 @@ import importlib
 import pytest
 
 from probes.thermocouple_health import ThermocoupleHealthState
+from probes.thermocouple_inference import ThermocoupleJunctionSample
 
 
 def _install_fakes(monkeypatch):
@@ -19,8 +20,23 @@ def _install_fakes(monkeypatch):
             self.i2c = i2c
             self.address = address
             self.tctype = tctype
-            self.temperature = 100.0
-            self.ambient_temperature = 25.0
+            self.temp_c = 100.0
+            self.ambient_c = 25.0
+            self.accesses = []
+
+        @property
+        def temperature(self):
+            self.accesses.append("temperature")
+            if isinstance(self.temp_c, BaseException):
+                raise self.temp_c
+            return self.temp_c
+
+        @property
+        def ambient_temperature(self):
+            self.accesses.append("ambient_temperature")
+            if isinstance(self.ambient_c, BaseException):
+                raise self.ambient_c
+            return self.ambient_c
 
         @property
         def status(self):
@@ -110,6 +126,59 @@ def test_mcp9600_read_keeps_existing_units_and_port_contract(mcp_probe_celsius):
     assert mcp_probe_celsius.device_info["ports"] == ["KTT0"]
     assert output["primary"]["Grill"] == 100.0
     assert output["tr"]["Grill"] == 0
+
+
+@pytest.mark.parametrize(
+    ("units", "expected_output"),
+    [pytest.param("F", 212.0, id="fahrenheit"), pytest.param("C", 100.0, id="celsius")],
+)
+def test_mcp9600_read_captures_one_raw_celsius_junction_pair(
+    monkeypatch,
+    units,
+    expected_output,
+):
+    obj = _make_mcp_probe(monkeypatch, units)
+    obj.device.sensor.temp_c = 100.04
+    obj.device.sensor.ambient_c = 24.96
+
+    output = obj.read_all_ports({})
+
+    assert obj.device.sensor.accesses == ["temperature", "ambient_temperature"]
+    assert output["primary"]["Grill"] == expected_output
+    assert obj.get_thermocouple_samples() == {
+        "KTT0": ThermocoupleJunctionSample(hot_c=100.04, cold_c=24.96)
+    }
+
+
+@pytest.mark.parametrize(
+    ("failed_attribute", "expected_accesses"),
+    [
+        pytest.param("temp_c", ["temperature"], id="hot"),
+        pytest.param(
+            "ambient_c",
+            ["temperature", "ambient_temperature"],
+            id="cold",
+        ),
+    ],
+)
+def test_mcp9600_junction_exception_clears_previous_sample_and_reraises(
+    monkeypatch,
+    failed_attribute,
+    expected_accesses,
+):
+    obj = _make_mcp_probe(monkeypatch, "F")
+    obj.read_all_ports({})
+    error = OSError(f"{failed_attribute} read failed")
+    setattr(obj.device.sensor, failed_attribute, error)
+    obj.device.sensor.accesses.clear()
+
+    with pytest.raises(OSError) as caught:
+        obj.read_all_ports({})
+
+    assert caught.value is error
+    assert obj.device.sensor.accesses == expected_accesses
+    assert obj.get_thermocouple_samples() == {}
+    assert obj.get_thermocouple_health()["Grill"].state is ThermocoupleHealthState.UNMONITORED
 
 
 def test_init_device_wires_tc_type(monkeypatch):
