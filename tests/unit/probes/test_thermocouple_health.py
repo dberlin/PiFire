@@ -106,25 +106,30 @@ def test_primary_hardware_fault_latches_across_clean_samples():
     assert clean.faults == (ThermocoupleFault.OPEN,)
 
 
-def test_secondary_hardware_fault_requires_sixty_clean_seconds():
+def test_secondary_hardware_fault_requires_sixty_consecutive_clean_seconds():
     latch = HardwareFaultLatch(recovery_seconds=60.0)
     latch.update((ThermocoupleFault.SHORT,), now=10.0, primary=False)
 
-    assert latch.update((), now=69.9, primary=False).confirmed
-    recovered = latch.update((), now=70.0, primary=False)
+    first_clean = latch.update((), now=70.0, primary=False)
+    assert first_clean.confirmed
+    assert latch.update((), now=129.9, primary=False).confirmed
+    recovered = latch.update((), now=130.0, primary=False)
     assert recovered.state is ThermocoupleHealthState.HEALTHY
     assert recovered.temperature_valid is True
 
 
-def test_reasserted_secondary_fault_resets_clean_timer():
+def test_reasserted_secondary_fault_restarts_clean_window_on_next_clean_sample():
     latch = HardwareFaultLatch(recovery_seconds=60.0)
     latch.update((ThermocoupleFault.OPEN,), now=10.0, primary=False)
     latch.update((), now=20.0, primary=False)
-    latch.update((ThermocoupleFault.OPEN,), now=50.0, primary=False)
-    latch.update((), now=60.0, primary=False)
+    assert latch.update((), now=79.9, primary=False).confirmed
 
-    assert latch.update((), now=109.9, primary=False).confirmed
-    assert latch.update((), now=110.0, primary=False).state is ThermocoupleHealthState.HEALTHY
+    latch.update((ThermocoupleFault.OPEN,), now=80.0, primary=False)
+    first_clean_after_reassertion = latch.update((), now=140.0, primary=False)
+
+    assert first_clean_after_reassertion.confirmed
+    assert latch.update((), now=199.9, primary=False).confirmed
+    assert latch.update((), now=200.0, primary=False).state is ThermocoupleHealthState.HEALTHY
 
 
 def test_hardware_fault_preserves_all_fault_bits_and_status():

@@ -114,7 +114,7 @@ class HardwareFaultLatch:
     ) -> ThermocoupleHealthReport:
         if faults:
             self._report = ThermocoupleHealthReport.confirmed_hardware(faults, now, status)
-            self._clean_since = now
+            self._clean_since = None
             return self._report
 
         if not self._report.confirmed:
@@ -127,7 +127,7 @@ class HardwareFaultLatch:
             return self._report
 
         if self._clean_since is None:
-            self._clean_since = self._report.observed_at
+            self._clean_since = now
         if now - self._clean_since >= self._recovery_seconds:
             self._report = ThermocoupleHealthReport.healthy(now)
             self._clean_since = None
