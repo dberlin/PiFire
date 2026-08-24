@@ -332,9 +332,9 @@ def test_diagnostics_are_complete_json_safe_and_use_immutable_witness_snapshot()
         "delta_span_c": 0.0,
         "collapse_fraction": 0.0,
         "heat_on_seconds": 3.0,
-        "witness_source": ["peer", "P0"],
+        "witness_source": ("peer", "P0"),
         "witness_rise_c": 10.0,
-        "asserted_channels": [],
+        "asserted_channels": (),
         "slow_window_eligible": False,
         "fast_path_armed": False,
     }
@@ -534,7 +534,7 @@ def test_slow_cold_witness_rise_boundary(cold_rise, expected_state):
 
     assert report.state is expected_state
     if cold_rise >= 3.0:
-        assert report.detail["witness_source"] == ["cold_junction", "internal"]
+        assert report.detail["witness_source"] == ("cold_junction", "internal")
 
 
 @pytest.mark.parametrize(
@@ -567,7 +567,7 @@ def test_slow_cold_delta_growth_response_is_strict(delta_growth, asserted):
     )
 
     asserted_channels = report.detail["asserted_channels"]
-    assert isinstance(asserted_channels, list)
+    assert isinstance(asserted_channels, tuple)
     assert (
         ThermocoupleEvidence.EXCITATION_RESPONSE.value in asserted_channels
     ) is asserted
@@ -580,7 +580,7 @@ def test_valid_ramp_stays_healthy():
     report = _slow_report(hot_values=hot_values, cold_values=cold_values)
 
     assert report.state is ThermocoupleHealthState.HEALTHY
-    assert report.detail["asserted_channels"] == []
+    assert report.detail["asserted_channels"] == ()
 
 
 @pytest.mark.parametrize(
@@ -599,7 +599,7 @@ def test_diagnostic_collapse_outside_identification_opportunity_stays_healthy(
 
     assert report.detail["collapse_fraction"] == 1.0
     assert report.state is ThermocoupleHealthState.HEALTHY
-    assert report.detail["asserted_channels"] == []
+    assert report.detail["asserted_channels"] == ()
 
 
 def test_commanded_heat_without_warming_witness_is_insufficient_evidence():
@@ -610,7 +610,7 @@ def test_commanded_heat_without_warming_witness_is_insufficient_evidence():
     )
 
     assert report.state is ThermocoupleHealthState.HEALTHY
-    assert report.detail["asserted_channels"] == []
+    assert report.detail["asserted_channels"] == ()
 
 
 def test_peer_witness_wins_over_qualifying_cold_fallback():
@@ -623,7 +623,7 @@ def test_peer_witness_wins_over_qualifying_cold_fallback():
     )
 
     assert report.state is ThermocoupleHealthState.SUSPECTED
-    assert report.detail["witness_source"] == ["peer-device", "P0"]
+    assert report.detail["witness_source"] == ("peer-device", "P0")
     assert report.detail["witness_rise_c"] == 10.0
 
 
@@ -713,10 +713,10 @@ def test_fast_path_requires_exactly_five_strictly_subsequent_collapsed_samples()
         ThermocoupleEvidence.IMPLAUSIBLE_STEP,
         ThermocoupleEvidence.JUNCTION_COLLAPSE,
     )
-    assert reports[6].detail["asserted_channels"] == [
+    assert reports[6].detail["asserted_channels"] == (
         "implausible-step",
         "junction-collapse",
-    ]
+    )
 
 
 def test_fast_path_does_not_arm_during_inactive_cook():
@@ -982,6 +982,95 @@ def test_fast_secondary_confirmation_recovers_at_exactly_sixty_clean_seconds():
     assert first_clean.confirmed
     assert before_boundary.confirmed
     assert boundary.state is ThermocoupleHealthState.HEALTHY
+
+
+def _feed_slow_anomaly_during_fast_confirmation(
+    engine: ThermocoupleInferenceEngine,
+    *,
+    last_now: int,
+    suspected: bool,
+) -> ThermocoupleHealthReport:
+    report = engine.current_report()
+    for now in range(7, last_now + 1):
+        hot_c = 30.0 if not suspected or now % 40 < 20 else 32.0
+        cold_c = hot_c if now in (60, 120, 180, 240, 300) else 20.0
+        report = engine.observe(
+            _sample(hot_c, cold_c),
+            _context(
+                heat=0.1,
+                witnesses=(
+                    ThermocoupleWitnessSample(
+                        ("peer-device", "P0"),
+                        20.0 + (now - 7) / 30.0,
+                    ),
+                ),
+            ),
+            is_primary=False,
+            now=float(now),
+        )
+    return report
+
+
+@pytest.mark.parametrize(
+    ("suspected", "expected_channels"),
+    [
+        (
+            False,
+            (
+                ThermocoupleEvidence.STUCK_RESPONSE.value,
+                ThermocoupleEvidence.EXCITATION_RESPONSE.value,
+            ),
+        ),
+        (True, (ThermocoupleEvidence.EXCITATION_RESPONSE.value,)),
+    ],
+)
+def test_fast_secondary_recovery_is_blocked_by_active_slow_anomaly(
+    suspected,
+    expected_channels,
+):
+    engine, _ = _confirmed_fast_engine(is_primary=False)
+
+    report = _feed_slow_anomaly_during_fast_confirmation(
+        engine,
+        last_now=361,
+        suspected=suspected,
+    )
+
+    assert report.confirmed
+    assert report.detail["asserted_channels"] == expected_channels
+
+
+def test_fast_secondary_requires_fresh_full_recovery_after_slow_anomaly_clears():
+    engine, _ = _confirmed_fast_engine(is_primary=False)
+    anomalous = _feed_slow_anomaly_during_fast_confirmation(
+        engine,
+        last_now=361,
+        suspected=False,
+    )
+
+    recovery_reports = []
+    for now in range(362, 423):
+        recovery_reports.append(
+            engine.observe(
+                _sample(35.0 + 0.1 * (now - 362), 20.0),
+                _context(
+                    heat=0.1,
+                    witnesses=(
+                        ThermocoupleWitnessSample(
+                            ("peer-device", "P0"),
+                            20.0 + (now - 7) / 30.0,
+                        ),
+                    ),
+                ),
+                is_primary=False,
+                now=float(now),
+            )
+        )
+
+    assert anomalous.confirmed
+    assert recovery_reports[0].confirmed
+    assert recovery_reports[-2].confirmed
+    assert recovery_reports[-1].state is ThermocoupleHealthState.HEALTHY
 
 
 def test_fast_secondary_recovery_restarts_after_collapsed_observation():

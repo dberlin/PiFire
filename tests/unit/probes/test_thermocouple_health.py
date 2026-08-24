@@ -1,4 +1,7 @@
+import json
+
 from dataclasses import FrozenInstanceError
+from typing import Any
 
 import pytest
 
@@ -39,15 +42,77 @@ def test_report_owns_detail_and_returns_a_fresh_mutable_copy():
     )
 
     source_detail["status"] = 0
-    serialized = report.as_dict()
+    serialized: Any = report.as_dict()
     serialized["detail"]["status"] = 0
 
     assert report.detail == {"status": 0x10}
     assert report.as_dict()["detail"] == {"status": 0x10}
+    frozen_detail: Any = report.detail
     with pytest.raises(TypeError):
-        report.detail["status"] = 0
+        frozen_detail["status"] = 0
     with pytest.raises(FrozenInstanceError):
-        report.observed_at = 9.0
+        setattr(report, "observed_at", 9.0)
+
+
+def test_report_recursively_owns_and_freezes_nested_detail():
+    source_detail: Any = {
+        "witness_source": ["peer", "P0"],
+        "diagnostics": {
+            "asserted_channels": ["stuck-response"],
+            "windows": [{"seconds": 60.0}],
+        },
+    }
+    report = ThermocoupleHealthReport(
+        state=ThermocoupleHealthState.SUSPECTED,
+        evidence=(ThermocoupleEvidence.STUCK_RESPONSE,),
+        detail=source_detail,
+    )
+
+    source_detail["witness_source"][0] = "mutated"
+    source_detail["diagnostics"]["asserted_channels"].append("excitation-response")
+    source_detail["diagnostics"]["windows"][0]["seconds"] = 0.0
+
+    frozen_detail: Any = report.detail
+    assert frozen_detail["witness_source"] == ("peer", "P0")
+    assert frozen_detail["diagnostics"]["asserted_channels"] == ("stuck-response",)
+    assert frozen_detail["diagnostics"]["windows"][0]["seconds"] == 60.0
+    with pytest.raises(TypeError):
+        frozen_detail["witness_source"][0] = "mutated"
+    with pytest.raises(TypeError):
+        frozen_detail["diagnostics"]["asserted_channels"] += ("mutated",)
+    with pytest.raises(TypeError):
+        frozen_detail["diagnostics"]["windows"][0]["seconds"] = 0.0
+
+
+def test_as_dict_recursively_returns_fresh_json_safe_detail():
+    report = ThermocoupleHealthReport(
+        state=ThermocoupleHealthState.SUSPECTED,
+        evidence=(ThermocoupleEvidence.STUCK_RESPONSE,),
+        detail={
+            "witness_source": ("peer", "P0"),
+            "diagnostics": {
+                "asserted_channels": ("stuck-response",),
+                "windows": ({"seconds": 60.0},),
+            },
+        },
+    )
+
+    serialized: Any = report.as_dict()
+    json.dumps(serialized)
+    serialized["detail"]["witness_source"][0] = "mutated"
+    serialized["detail"]["diagnostics"]["asserted_channels"].append("mutated")
+    serialized["detail"]["diagnostics"]["windows"][0]["seconds"] = 0.0
+
+    fresh: Any = report.as_dict()
+    assert fresh["detail"] == {
+        "witness_source": ["peer", "P0"],
+        "diagnostics": {
+            "asserted_channels": ["stuck-response"],
+            "windows": [{"seconds": 60.0}],
+        },
+    }
+    assert fresh is not serialized
+    assert fresh["detail"] is not serialized["detail"]
 
 
 def test_report_constructors_set_expected_states_and_evidence():

@@ -257,6 +257,10 @@ class ThermocoupleInferenceEngine:
                 not fast_evidence
                 and self._fast_arm is None
                 and abs(current.delta_c) > 1.0
+                and (
+                    not slow.identification_eligible
+                    or slow.state is ThermocoupleHealthState.HEALTHY
+                )
             )
         if not clean:
             self._reset_recovery()
