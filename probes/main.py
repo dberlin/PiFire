@@ -19,6 +19,11 @@ Description:
 import importlib
 import logging
 
+from probes.thermocouple_health import (
+    ThermocoupleHealthReport,
+    ThermocoupleHealthTransition,
+)
+
 
 class ProbesMain:
     def __init__(self, probe_map, units, disable=False):
@@ -29,6 +34,8 @@ class ProbesMain:
         self.probe_devices = probe_map["probe_devices"]
         self.probe_info = probe_map["probe_info"]
         self.device_info_list = []
+        self._thermocouple_health: dict[str, ThermocoupleHealthReport] = {}
+        self._thermocouple_health_transitions: list[ThermocoupleHealthTransition] = []
         self._setup_probe_devices(self.probe_devices)
 
     def _close_probe_devices(self):
@@ -72,6 +79,8 @@ class ProbesMain:
         error_event = None
         errors = []
         self._close_probe_devices()
+        self._thermocouple_health.clear()
+        self._thermocouple_health_transitions.clear()
         self.probe_device_list = []
         for device in probe_devices:
             try:
@@ -121,6 +130,19 @@ class ProbesMain:
                 for probe in device_data[group]:
                     output_data[group][probe] = device_data[group][probe]
 
+        health = {}
+        for device in self.probe_device_list:
+            health.update(device.get_thermocouple_health())
+        for label, current in health.items():
+            previous = self._thermocouple_health.get(
+                label, ThermocoupleHealthReport.unmonitored(current.observed_at)
+            )
+            if (previous.state, previous.faults) != (current.state, current.faults):
+                self._thermocouple_health_transitions.append(
+                    ThermocoupleHealthTransition(label, previous, current)
+                )
+        self._thermocouple_health = health
+
         return output_data
 
     def update_probe_map(self, probe_map):
@@ -159,6 +181,16 @@ class ProbesMain:
         """
         for device in self.probe_device_list:
             device.update_units(units)
+
+    def get_thermocouple_health(self) -> dict[str, ThermocoupleHealthReport]:
+        return dict(self._thermocouple_health)
+
+    def consume_thermocouple_health_transitions(
+        self,
+    ) -> tuple[ThermocoupleHealthTransition, ...]:
+        transitions = tuple(self._thermocouple_health_transitions)
+        self._thermocouple_health_transitions.clear()
+        return transitions
 
     def get_errors(self):
         return self.errors

@@ -21,6 +21,7 @@ import os
 import time
 import logging
 from probes.kalman import TempKalman
+from probes.thermocouple_health import ThermocoupleHealthReport
 
 # find_i2c_bus lives in the shared factory; re-export so existing
 # `from probes.base import find_i2c_bus` imports keep working.
@@ -434,8 +435,18 @@ class ProbeInterface:
     def get_port_map(self):
         return self.port_map
 
+    def get_thermocouple_health(self) -> dict[str, ThermocoupleHealthReport]:
+        return {}
+
     def get_device_info(self):
-        self.device_info["status"] = self.device.get_status()
+        status = self.device.get_status()
+        health = self.get_thermocouple_health()
+        if health:
+            status = dict(status)
+            status["thermocouple_health"] = {
+                label: report.as_dict() for label, report in health.items()
+            }
+        self.device_info["status"] = status
         return self.device_info
 
     def _to_celsius(self, fahrenheit):
