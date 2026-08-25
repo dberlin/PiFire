@@ -12,7 +12,6 @@
   @apply relative w-full;
 }
 
-
 .pf-history-tip {
   @apply pointer-events-none absolute z-10 rounded-[10px] bg-card px-[10px] py-[8px] text-text;
   border: 1px solid rgba(255, 255, 255, 0.14);
