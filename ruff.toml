@@ -1,5 +1,10 @@
 # Line length is relaxed: ~99% of existing lines fit within 120 columns.
 line-length = 120
+# Stated rather than inferred. Ruff derives this from requires-python when it
+# is absent, so this changes nothing today -- but it pins the syntax level the
+# formatter may emit (PEP 758 bare `except A, B` among it) to the version the
+# project actually requires, instead of to whatever a future ruff infers.
+target-version = "py314"
 
 [lint]
 # Initial Ruff adoption baseline, captured during P0 gates.
