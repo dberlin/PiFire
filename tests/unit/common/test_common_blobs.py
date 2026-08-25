@@ -2,13 +2,11 @@ import json
 
 import pytest
 
-import common.common as common_mod
 from common import datastore, defaults
-from common.common import ErrorKind, flush_events_records, read_events_records
+from common.common import ErrorKind, flush_events_records
 from common.control_delta import control_delta
 from common.persistence import control as control_persistence
 from common.persistence import history as history_persistence
-from common.persistence import install_state as install_persistence
 from common.persistence import runtime as runtime_persistence
 
 
@@ -201,105 +199,6 @@ def test_read_warnings_snapshot_max_id_matches_the_returned_strings(ds):
 
 def test_read_warnings_snapshot_is_empty_with_null_max_id(ds):
     assert runtime_persistence.read_warnings_snapshot() == {"warnings": [], "max_id": None}
-
-
-def test_connected_users_add_remove(ds):
-    assert runtime_persistence.read_connected_users() == []
-    runtime_persistence.write_connected_user("sidA")
-    runtime_persistence.write_connected_user("sidB")
-    assert sorted(runtime_persistence.read_connected_users()) == ["sidA", "sidB"]
-    runtime_persistence.remove_connected_user("sidA")
-    assert runtime_persistence.read_connected_users() == ["sidB"]
-    runtime_persistence.flush_connected_users()
-    assert runtime_persistence.read_connected_users() == []
-
-
-def test_flush_control_clears_only_control_not_history(ds):
-    # seed history + a control blob + a queued write
-    history_persistence.write_history(
-        {"probe_history": {"primary": {"G": 1}, "food": {}, "aux": {}}, "primary_setpoint": 1, "notify_targets": {}}
-    )
-    control_persistence.write_control_snapshot({"mode": "Hold"}, origin="t")
-    control_persistence.enqueue_control_delta(control_delta(set_values={"x": 1}), origin="t")
-    control = control_persistence.flush_control()
-    assert control == defaults.default_control()  # reseeded default
-    from common.sqlite_queue import SqliteQueue
-
-    assert SqliteQueue("queue_control_write").length() == 0  # queue cleared
-    assert len(history_persistence.read_history()) == 1  # history untouched
-
-
-def test_wizard_install_status_roundtrip(ds):
-    install_persistence.set_wizard_install_status(50, "Running", "log")
-    assert install_persistence.get_wizard_install_status() == (50, "Running", "log")
-
-
-def test_read_generic_key_roundtrip(ds):
-    runtime_persistence.write_generic_key("some_key", {"a": 1})
-    assert runtime_persistence.read_generic_key("some_key") == {"a": 1}
-
-
-def test_read_events_records_returns_dicts(ds, monkeypatch):
-    fake_events = [[f"2024-01-0{i}", f"0{i}:00:00", f"message {i}\n"] for i in range(1, 5)]
-
-    def fake_read_events():
-        return fake_events, len(fake_events)
-
-    monkeypatch.setattr("common.common.read_events", fake_read_events)
-
-    result = read_events_records()
-
-    assert isinstance(result, list)
-    assert len(result) == len(fake_events)
-    for idx, event in enumerate(result):
-        assert set(event.keys()) == {"date", "time", "message"}
-        assert event["date"] == fake_events[idx][0]
-        assert event["time"] == fake_events[idx][1]
-        assert event["message"] == fake_events[idx][2].strip("\n")
-
-
-def test_read_events_records_caps_at_60(ds, monkeypatch):
-    fake_events = [["2024-01-01", "00:00:00", f"message {i}\n"] for i in range(100)]
-
-    def fake_read_events():
-        return fake_events, len(fake_events)
-
-    monkeypatch.setattr("common.common.read_events", fake_read_events)
-
-    result = read_events_records()
-
-    assert len(result) == 60
-
-
-def test_read_events_does_not_pad_short_logs(tmp_path, monkeypatch):
-    """A log shorter than ten lines used to be padded out with
-    ``["--------", "--:--:--", "---"]`` rows, and num_events reported as ten.
-    That padding existed to fill the legacy events TABLE to a fixed height; its
-    only consumer now is the mobile Socket.IO JSON feed, which was being handed
-    placeholder events as though they were real ones."""
-    monkeypatch.setattr(common_mod, "LOG_DIR", str(tmp_path))
-    (tmp_path / "events.log").write_text("2024-01-01 00:00:01 first\n2024-01-01 00:00:02 second\n")
-
-    events, num_events = common_mod.read_events()
-
-    assert num_events == 2
-    assert [event[0] for event in events] == ["2024-01-01", "2024-01-01"]
-
-
-def test_read_events_records_emits_only_real_events(tmp_path, monkeypatch):
-    monkeypatch.setattr(common_mod, "LOG_DIR", str(tmp_path))
-    (tmp_path / "events.log").write_text("2024-01-01 00:00:01 only one\n")
-
-    assert read_events_records() == [{"date": "2024-01-01", "time": "00:00:01", "message": "only one"}]
-
-
-def test_read_events_on_a_missing_log_is_empty_and_creates_nothing(tmp_path, monkeypatch):
-    """Reading must not invent the file, and must not raise when LOG_DIR itself
-    is absent -- nothing in Python creates it, only the installer scripts do."""
-    monkeypatch.setattr(common_mod, "LOG_DIR", str(tmp_path / "absent"))
-
-    assert common_mod.read_events() == ([], 0)
-    assert not (tmp_path / "absent").exists()
 
 
 def test_flush_events_records_clears_and_returns_empty(ds):

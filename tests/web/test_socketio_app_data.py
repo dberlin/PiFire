@@ -62,7 +62,6 @@ from common.persistence.runtime import (
     flush_current,
     init_status,
     read_connected_users,
-    read_current,
     read_errors,
     read_pellets_store,
     read_settings,
@@ -133,7 +132,6 @@ def sio(ds):
         mock.patch.object(socket_io, "restart_control", side_effect=_rec("restart_control")),
         mock.patch.object(socket_io, "restart_webapp", side_effect=_rec("restart_webapp")),
         mock.patch.object(socket_io, "restart_scripts", side_effect=_rec("restart_scripts")),
-        mock.patch.object(socket_io, "read_events_records", return_value=[]),
     ):
         yield types.SimpleNamespace(mod=socket_io, calls=calls)
 
@@ -171,13 +169,6 @@ def test_get_pellets_data(sio):
     assert resp["result"] == "OK"
     assert resp["data"]["uuid"] == read_settings()["server_info"]["uuid"]
     assert resp["data"]["pellets"] == read_pellets_store()
-
-
-def test_get_events_data(sio):
-    resp = sio.mod._get_app_data("events_data")
-    assert resp["result"] == "OK"
-    assert resp["data"]["uuid"] == read_settings()["server_info"]["uuid"]
-    assert isinstance(resp["data"]["events"], list)
 
 
 def test_get_hopper_level(sio):
@@ -1616,13 +1607,12 @@ def test_handle_connect_sends_current_data_to_that_client_alone(sio):
         sio.mod.handle_connect()
 
     assert [(name, to) for name, to, _ in emitted] == [
-        ("socket_event_data", "sid-late-join"),
         ("socket_pellet_data", "sid-late-join"),
         ("socket_dash_data", "sid-late-join"),
     ]
     # The dash payload is the current one, not a placeholder: it is whatever
     # _get_dash_data produced at connect time.
-    assert emitted[2][2] == {"sentinel": "dash"}
+    assert emitted[1][2] == {"sentinel": "dash"}
 
 
 def test_handle_disconnect_other_users_remain_no_join(sio):
@@ -1703,7 +1693,7 @@ def test_emit_app_data_force_refresh_emits_all_three_once(sio):
     ):
         sio.mod._emit_app_data(event, True)
 
-    assert emitted == ["socket_event_data", "socket_pellet_data", "socket_dash_data"]
+    assert emitted == ["socket_pellet_data", "socket_dash_data"]
     assert not event.is_set()
     assert sio.mod.thread is None
 
@@ -1777,5 +1767,5 @@ def test_emit_app_data_skips_emit_when_data_unchanged(sio):
     ):
         sio.mod._emit_app_data(event, False)
 
-    assert emitted == ["socket_event_data", "socket_pellet_data", "socket_dash_data"]
+    assert emitted == ["socket_pellet_data", "socket_dash_data"]
     assert sio.mod.thread is None

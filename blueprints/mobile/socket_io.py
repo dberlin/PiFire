@@ -39,7 +39,6 @@ from common.common import (
     convert_settings_units,
     epoch_to_time,
     flush_events_records,
-    read_events_records,
     read_generic_json,
     write_log,
 )
@@ -222,7 +221,6 @@ def _emit_app_data(event, force_refresh):
     global thread
 
     previous_dash = ""
-    previous_event = ""
     previous_pellet = ""
 
     try:
@@ -237,24 +235,16 @@ def _emit_app_data(event, force_refresh):
 
             settings = read_settings_store()
             pelletdb = read_pellets_store()
-            uuid = settings["server_info"]["uuid"]
 
             pellet_data = _get_pellet_socket_data(settings, pelletdb)
-
-            event_data = {"uuid": uuid, "events": read_events_records()}
 
             dash_data = _get_dash_data(settings, pelletdb)
 
             if force_refresh:
-                socketio.emit("socket_event_data", event_data)
                 socketio.emit("socket_pellet_data", pellet_data)
                 socketio.emit("socket_dash_data", dash_data)
                 force_refresh = False
             else:
-                if previous_event != event_data:
-                    socketio.emit("socket_event_data", event_data)
-                    previous_event = event_data
-
                 if previous_pellet != pellet_data:
                     socketio.emit("socket_pellet_data", pellet_data)
                     previous_pellet = pellet_data
@@ -286,9 +276,7 @@ def _emit_app_data_to(client_id):
     """
     settings = read_settings_store()
     pelletdb = read_pellets_store()
-    uuid = settings["server_info"]["uuid"]
 
-    socketio.emit("socket_event_data", {"uuid": uuid, "events": read_events_records()}, to=client_id)
     socketio.emit("socket_pellet_data", _get_pellet_socket_data(settings, pelletdb), to=client_id)
     socketio.emit("socket_dash_data", _get_dash_data(settings, pelletdb), to=client_id)
 
@@ -548,10 +536,6 @@ def _get_app_data_pellets_data(settings, arg01, arg02):
     return _response(result="OK", data=_get_pellet_socket_data(settings, read_pellets_store()))
 
 
-def _get_app_data_events_data(settings, arg01, arg02):
-    return _response(result="OK", data={"uuid": settings["server_info"]["uuid"], "events": read_events_records()})
-
-
 def _get_app_data_hopper_level(settings, arg01, arg02):
     return _response(result="OK", data=read_pellets_store()["current"]["hopper_level"])
 
@@ -634,7 +618,6 @@ _GET_APP_DATA_DISPATCH = {
     "settings_data": _get_app_data_settings_data,
     "dash_data": _get_app_data_dash_data,
     "pellets_data": _get_app_data_pellets_data,
-    "events_data": _get_app_data_events_data,
     "hopper_level": _get_app_data_hopper_level,
     "info_data": _get_app_data_info_data,
     "manual_data": _get_app_data_manual_data,

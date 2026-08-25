@@ -14,7 +14,6 @@ Description: This library provides functions that are common to
  Imported Modules
 ==============================================================================
 """
-import copy
 import datetime
 import json
 import logging
@@ -238,35 +237,6 @@ def _load_json_file(filename, default, retry_count=0, max_retries=None):
         return default
 
 
-def read_events():
-    """
-    Read events.log and populate an array of events, newest first.
-
-    :return: (event_list, num_events)
-    """
-    # Read all lines of events.log into a list(array)
-    try:
-        with open(log_path("events.log")) as event_file:
-            event_lines = event_file.readlines()
-    # No log yet (or it is unreadable) means no events. Creating the file here
-    # would be pointless -- create_logger's RotatingFileHandler makes it on the
-    # first write -- and the create itself fails when LOG_DIR is absent, which
-    # raised out of this handler instead of returning an empty list.
-    except OSError:
-        event_lines = []
-
-    # Initialize event_list list
-    event_list = []
-
-    # Get number of events
-    num_events = len(event_lines)
-
-    for x in range(num_events):
-        event_list.insert(0, event_lines[x].split(" ", 2))
-
-    return (event_list, num_events)
-
-
 def read_log_file(filepath):
     # Read all lines of log file into a list(array)
     try:
@@ -317,27 +287,14 @@ def flush_events_records():
     """
     Erase the events log.
 
-    Previously reachable only as ``read_events_records(flush=True)`` -- the same
-    delete-behind-a-read_-name defect as the old ``read_history(flushhistory=True)``
-    (see common.persistence.history.flush_history).
+    Clears the `events` rows in the datastore. The log FILE is cleared
+    separately by common.log_actions.clear_events_log, which is what the admin
+    surface calls -- see tests/web/test_api_admin_clear_events.py.
 
     :return: An empty events list (the post-flush state).
     """
     datastore.clear_log("events")
     return []
-
-
-def read_events_records():
-    """
-    Read Events from events.log and return a list of event dictionaries.
-
-    :return: events_list - list of {'date':, 'time':, 'message':} dicts
-    """
-    events, num_events = read_events()
-    events_list = []
-    for item in range(min(num_events, 60)):
-        events_list.append({"date": events[item][0], "time": events[item][1], "message": events[item][2].strip("\n")})
-    return events_list
 
 
 def unpack_history(datalist):

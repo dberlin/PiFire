@@ -4,12 +4,10 @@ Every logger create_logger builds writes to two sinks: a RotatingFileHandler and
 a SqliteLogHandler. Clearing only one leaves the other holding what the user
 asked to be rid of.
 
-The pre-existing split was the wrong way round in a way nobody could see:
-common.common.read_events_records() reads the FILE, while
-common.common.flush_events_records() calls datastore.clear_log("events") and so
-clears the DATABASE. Clearing events therefore deleted rows nothing reads and
-left the file everything reads -- observable on the development machine as one
-`events` row against 1,062 lines in logs/events.log.
+The two sinks are cleared by different functions, so a clear that calls only
+one is silently partial: common.common.flush_events_records() clears the
+DATABASE rows, and common.log_actions.clear_events_log() truncates the FILE
+family. The admin surface has to reach both.
 """
 
 import os
