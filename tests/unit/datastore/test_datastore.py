@@ -208,7 +208,7 @@ def test_metrics_v1_blob_db_migrates_to_columnar(tmp_path):
     datastore._reset_for_tests(db_path)
     try:
         conn = datastore.connection()
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 8
         cols = {r[1] for r in conn.execute("PRAGMA table_info(metrics)")}
         assert "seq" in cols
         assert "mode" in cols
@@ -255,7 +255,7 @@ CREATE TABLE metrics (
     datastore._reset_for_tests(db_path)
     try:
         conn = datastore.connection()
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 8
         cols = {r[1]: r[2] for r in conn.execute("PRAGMA table_info(metrics)")}
         assert cols["pellet_level_start"] == "NUMERIC"
         assert cols["starttime"] == "NUMERIC"
@@ -272,11 +272,11 @@ def test_metrics_v7_migration_idempotent(tmp_path):
     datastore._reset_for_tests(db_path)
     try:
         conn = datastore.connection()
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 8
         datastore.execute_write("INSERT INTO metrics(id, mode) VALUES ('abc', 'Hold')")
         datastore._reset_for_tests(db_path)  # drop cached connection, keep file
         conn = datastore.connection()  # reconnect -> _ensure_schema runs again
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 8
         # Row must survive: idempotent migration must not re-drop the table.
         assert conn.execute("SELECT mode FROM metrics WHERE id=?", ("abc",)).fetchone()[0] == "Hold"
     finally:
@@ -319,7 +319,7 @@ CREATE TABLE history (
     datastore._reset_for_tests(db_path)
     try:
         conn = datastore.connection()
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 8
         cols = {r[1]: r[2] for r in conn.execute("PRAGMA table_info(history)")}
         assert cols["psp"] == "NUMERIC"
 
@@ -421,7 +421,7 @@ CREATE TABLE history (
         # A clean reconnect (no injected failure) must complete the migration.
         datastore._reset_for_tests(db_path)  # drop any cached connection, keep the file
         conn2 = datastore.connection()
-        assert conn2.execute("PRAGMA user_version").fetchone()[0] == 7
+        assert conn2.execute("PRAGMA user_version").fetchone()[0] == 8
         row2 = conn2.execute("SELECT ts, psp, primary_temps FROM history").fetchone()
         assert row2 == (1000, 225, '{"Grill": 225}')
         assert isinstance(row2[1], int)
@@ -436,14 +436,14 @@ def test_history_v7_migration_idempotent(tmp_path):
     datastore._reset_for_tests(db_path)
     try:
         conn = datastore.connection()
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 8
         conn.execute(
             "INSERT INTO history(ts, psp, primary_temps, food_temps, aux_temps, notify_targets) "
             "VALUES (2000, 165, '{}', '{}', '{}', '{}')"
         )
         datastore._reset_for_tests(db_path)  # drop cached connection, keep file
         conn = datastore.connection()  # reconnect -> _ensure_schema runs again
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 8
         # Row must survive: idempotent migration must not re-drop the table.
         row = conn.execute("SELECT ts, psp FROM history").fetchone()
         assert row == (2000, 165)
@@ -479,3 +479,85 @@ def test_no_valkey_references_in_source():
             hits.append(os.path.relpath(path, repo_root))
 
     assert hits == [], f"stale Valkey references in: {', '.join(hits)}"
+
+
+def test_v7_history_gains_duty_columns_without_losing_rows(tmp_path):
+    """A pre-v8 DB gains the three duty columns in place, keeping every row.
+
+    history is durable -- unlike metrics, it is not safe to drop and recreate --
+    so this asserts the existing sample survives with its temperatures intact
+    AND reads back with NULL duty rather than a fabricated zero. 0% duty is a
+    real reading, so "unrecorded" has to stay distinguishable from it.
+    """
+    db_path = str(tmp_path / "v7.db")
+    datastore._reset_for_tests(db_path)
+    try:
+        conn = datastore.connection()
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 8
+        # Drop back to a v7-shaped history: no duty columns, one durable row.
+        conn.execute("DROP TABLE history")
+        conn.execute("""
+            CREATE TABLE history (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts             INTEGER NOT NULL,
+                psp            NUMERIC,
+                primary_temps  TEXT NOT NULL CHECK(json_valid(primary_temps)),
+                food_temps     TEXT NOT NULL CHECK(json_valid(food_temps)),
+                aux_temps      TEXT NOT NULL CHECK(json_valid(aux_temps)),
+                notify_targets TEXT NOT NULL CHECK(json_valid(notify_targets)),
+                ext_data       TEXT CHECK(ext_data IS NULL OR json_valid(ext_data))
+            )
+        """)
+        conn.execute(
+            "INSERT INTO history(ts,psp,primary_temps,food_temps,aux_temps,notify_targets,ext_data) "
+            "VALUES(?,?,?,?,?,?,NULL)",
+            (1700000000000, 225, json.dumps({"Grill": 224}), json.dumps({"P1": 145}), "{}", "{}"),
+        )
+        conn.execute("PRAGMA user_version=7")
+        conn.commit()
+    finally:
+        datastore._reset_for_tests(db_path)
+
+    try:
+        conn = datastore.connection()
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 8
+
+        affinities = {r[1]: r[2] for r in conn.execute("PRAGMA table_info(history)")}
+        assert affinities["cycle_ratio"] == "REAL"
+        assert affinities["realized_cycle_ratio"] == "REAL"
+        # NUMERIC, not REAL: fan_duty is a whole percent and must not round-trip
+        # 65 as 65.0, for the same reason psp uses NUMERIC.
+        assert affinities["fan_duty"] == "NUMERIC"
+
+        from common.persistence.history import read_history
+
+        rows = read_history()
+        assert len(rows) == 1, "the pre-v8 history row did not survive the migration"
+        assert rows[0]["P"] == {"Grill": 224}
+        assert rows[0]["PSP"] == 225
+        assert rows[0]["CR"] is None
+        assert rows[0]["RCR"] is None
+        assert rows[0]["FD"] is None
+    finally:
+        datastore._reset_for_tests(str(tmp_path / "unused.db"))
+
+
+def test_v8_migration_is_idempotent_on_an_already_migrated_db(tmp_path):
+    """Reconnecting must not try to re-add a column that is already there.
+
+    A fresh database is created by SCHEMA with all three duty columns and
+    user_version 0, so it walks the v8 branch with the columns already present
+    -- the table_info guard is what keeps that from raising "duplicate column".
+    """
+    db_path = str(tmp_path / "fresh.db")
+    datastore._reset_for_tests(db_path)
+    try:
+        assert datastore.connection().execute("PRAGMA user_version").fetchone()[0] == 8
+    finally:
+        datastore._reset_for_tests(db_path)
+
+    conn = datastore.connection()  # second connect over the same file
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 8
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(history)")}
+    assert {"cycle_ratio", "realized_cycle_ratio", "fan_duty"} <= cols
+    datastore._reset_for_tests(str(tmp_path / "unused.db"))

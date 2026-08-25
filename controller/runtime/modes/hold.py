@@ -670,9 +670,19 @@ class HoldMode(ControlMode):
                 measured_combustion_load=measured_combustion_load,
             ),
         )
+        # Every applied output in Hold funnels through here, so this is the one
+        # place the measured duty has to be captured. `prepared.ratio` is by
+        # definition the duty that reached the auger -- whatever caused it, a
+        # controller frame, a lid-open pause or a manual override -- which is
+        # exactly what the history chart plots against the commanded ratio.
+        self.state.cycle.realized_ratio = prepared.ratio
         if dispatch:
             self._runner.set_output(prepared)
         return prepared
+
+    def realized_cycle_ratio(self):
+        """Hold measures delivered on-time, so it has a real answer here."""
+        return self.state.cycle.realized_ratio
 
     name = Mode.HOLD
     _model_store = None

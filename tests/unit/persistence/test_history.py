@@ -72,6 +72,9 @@ def test_history_timestamp_columns_and_limit_boundaries(monkeypatch, ds):
             "PSP": 100,
             "NT": {"Grill": 0, "Food1": 165},
             "AUX": {"Aux1": 80},
+            "CR": None,
+            "RCR": None,
+            "FD": None,
         },
         {
             "T": 2001,
@@ -80,6 +83,9 @@ def test_history_timestamp_columns_and_limit_boundaries(monkeypatch, ds):
             "PSP": 200,
             "NT": {"Grill": 0, "Food1": 165},
             "AUX": {"Aux1": 80},
+            "CR": None,
+            "RCR": None,
+            "FD": None,
         },
         {
             "T": 3003,
@@ -88,6 +94,9 @@ def test_history_timestamp_columns_and_limit_boundaries(monkeypatch, ds):
             "PSP": 300,
             "NT": {"Grill": 0, "Food1": 165},
             "AUX": {"Aux1": 80},
+            "CR": None,
+            "RCR": None,
+            "FD": None,
         },
     ]
     assert history.read_history() == expected
@@ -107,7 +116,7 @@ def test_history_optional_extended_data_and_copy_ownership(monkeypatch, ds):
     with_extended["ext_data"]["fan"].append(5)
 
     first, second = history.read_history()
-    assert set(first) == {"T", "P", "F", "PSP", "NT", "AUX"}
+    assert set(first) == {"T", "P", "F", "PSP", "NT", "AUX", "CR", "RCR", "FD"}
     assert second["EXD"] == {"fan": [3, 4]}
 
     second["P"]["Grill"] = 999

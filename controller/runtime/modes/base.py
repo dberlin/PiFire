@@ -174,6 +174,17 @@ class ControlMode:
     def on_tick(self, now, ptemp, current_output_status):
         pass
 
+    def realized_cycle_ratio(self):
+        """The duty measured to have reached the auger, or None if unmeasured.
+
+        Default None: most modes drive the auger open-loop from a configured
+        cycle, so the commanded ratio IS the whole story and reporting it again
+        under a second name would draw two identical lines and imply a clamp
+        was measured when none was. Hold overrides this -- its framed-pulse
+        machinery measures delivered on-time.
+        """
+        return
+
     def on_metrics_stamped(self):
         pass
 
@@ -650,6 +661,46 @@ class ControlMode:
             control["manual"]["output"] = False
             ctx.store.write_control_snapshot(control, origin="control")
 
+    def _duty_snapshot(self, control, mode, outputs):
+        """The duty driving this tick: what the auger is commanded to, and what the fan got.
+
+        One implementation, two consumers -- the status blob the dashboard
+        renders and the history row the chart plots. Both are written from this
+        loop but at different cadences (0.5s and 3s), and a second copy of this
+        logic would drift on exactly the branches nobody checks: Manual mode's
+        auger-bool coercion and the dc_fan PWM split. A dashboard reading 0%
+        beside a history row plotting 100% for the same instant is a
+        disagreement no one would think to look for.
+
+        `outputs` is a fresh grill_platform.get_output_status(). Fan duty gates
+        on the output in every branch rather than on the request:
+        control['duty_cycle'] is the duty the fan WOULD be given, and reporting
+        it for a fan that is off puts "FAN DUTY 100%" beside "FAN IDLE".
+
+        `cycle_ratio` is what the controller COMMANDED -- the same quantity
+        the dashboard's duty tile has always shown. `realized_cycle_ratio` is
+        what the framed-pulse machinery measured actually reaching the auger,
+        and is None in modes that do not measure it. The gap between the two is
+        where a clamp acted.
+        """
+        if mode == Mode.MANUAL:
+            # Manual has no controller and no cycle: the auger is simply on or
+            # off, and the fan's duty is whatever the operator's PWM is set to.
+            ratio = 1.0 if outputs.get("auger") else 0.0
+            pwm = int(outputs.get("pwm", 0) or 0)
+        else:
+            ratio = round(self.state.cycle.ratio, 2)
+            pwm = int(control.get("duty_cycle", 0) or 0)
+
+        if not outputs.get("fan"):
+            fan_duty = 0
+        elif self.settings["platform"].get("dc_fan"):
+            fan_duty = pwm
+        else:
+            fan_duty = 100
+
+        return {"cycle_ratio": ratio, "realized_cycle_ratio": self.realized_cycle_ratio(), "fan_duty": fan_duty}
+
     def _build_status_data(self, control, pelletdb, start_time):
         """Build the per-0.5s display status dict (extracted from run()). Returns a
         fresh, fully-populated dict; the caller writes it to the store."""
@@ -686,26 +737,12 @@ class ControlMode:
                 status_data["outpins"][item] = current[item]
             except KeyError:
                 continue
-        if mode == Mode.MANUAL:
-            status_data["cycle_ratio"] = 1.0 if current.get("auger") else 0.0
-            if not current.get("fan"):
-                status_data["fan_duty"] = 0
-            elif self.settings["platform"].get("dc_fan"):
-                status_data["fan_duty"] = int(current.get("pwm", 0) or 0)
-            else:
-                status_data["fan_duty"] = 100
-        else:
-            status_data["cycle_ratio"] = round(self.state.cycle.ratio, 2)
-            # Both branches gate on the output, as the Manual branch above does:
-            # control['duty_cycle'] is the duty the fan WOULD be given, and
-            # reporting it for a fan that is off puts "FAN DUTY 100%" beside
-            # "FAN IDLE" on the dashboard.
-            if not current.get("fan"):
-                status_data["fan_duty"] = 0
-            elif self.settings["platform"].get("dc_fan"):
-                status_data["fan_duty"] = int(control.get("duty_cycle", 0) or 0)
-            else:
-                status_data["fan_duty"] = 100
+        duty = self._duty_snapshot(control, mode, current)
+        status_data["cycle_ratio"] = duty["cycle_ratio"]
+        status_data["fan_duty"] = duty["fan_duty"]
+        # requested_cycle_ratio is deliberately NOT published to status: the
+        # dashboard's duty tiles report what the grill is doing, and the
+        # requested-vs-applied gap is a history-chart reading, not a live one.
         # ---- mode-specific status fields ----
         status_data.update(self.status_fragment())
         return status_data
@@ -942,12 +979,6 @@ class ControlMode:
             in_data["primary_setpoint"] = control["primary_setpoint"] if mode == Mode.HOLD else 0
             in_data["notify_targets"] = ctx.notifications.get_targets(control["notify_data"])
 
-            # If Extended Data Mode is Enabled, Populate Extra Data Here
-            if self.settings["globals"]["ext_data"]:
-                in_data["ext_data"] = {}
-                in_data["ext_data"]["CR"] = 0
-                in_data["ext_data"]["RCR"] = 0
-
             # Save current data to the database
             ctx.store.write_current(in_data)
 
@@ -982,6 +1013,13 @@ class ControlMode:
 
             # ---- ACT: merged mode-specific per-tick control/auger/fan logic ----
             self.on_tick(now, ptemp, current_output_status)
+
+            # The duty that drove this tick, captured AFTER on_tick: on_tick is
+            # what sets the cycle ratio and moves the outputs, so reading it any
+            # earlier records the previous tick's duty against this tick's
+            # temperatures. The history write below fires every 3s and takes
+            # whatever the most recent tick left here.
+            in_data["duty"] = self._duty_snapshot(control, mode, grill_platform.get_output_status())
 
             # ---- PUBLISH ----
             # Every 20 seconds, update ETA for any pending notifications

@@ -13,7 +13,7 @@ _ORIGINAL_DB_PATH = DB_PATH
 
 _local = threading.local()
 
-# history table DDL (schema v4). `{name}` is templated so the pre-v4
+# history table DDL (schema v8). `{name}` is templated so the pre-v4
 # migration below can rebuild it under a temporary name (history_new) with an
 # identical schema before swapping it in, preserving existing rows.
 #
@@ -22,16 +22,35 @@ _local = threading.local()
 # REAL, so ints round-trip as ints instead of being coerced to floats.
 # primary_setpoint is always written as an int (e.g. 225); REAL affinity
 # would silently coerce it to a float (225.0) on round-trip.
+#
+# The three duty columns are nullable with no default: a row written before
+# schema v8, or by a control loop that reported no duty, reads back as None
+# and renders as a gap in the chart rather than as a fabricated zero. Zero is
+# a meaningful duty, so it cannot double as "unknown".
+#
+# cycle_ratio is what the controller COMMANDED; realized_cycle_ratio is what
+# actually reached the auger, measured from delivered on-time by the framed
+# pulse machinery. They separate exactly where a clamp acts -- the duty floor
+# lifting a request too small to pulse, u_max capping one too large, a lid-open
+# pause pinning the auger off -- which is the whole reason to record both.
+# Only the framed-pulse Hold path measures the second, so it is NULL elsewhere.
+#
+# Both are REAL (a 0.0-1.0 fraction, genuinely fractional). fan_duty takes
+# NUMERIC for the same reason psp does: it is a whole percent, and REAL
+# affinity would round-trip 65 as 65.0.
 _HISTORY_TABLE_DDL = """
 CREATE TABLE IF NOT EXISTS {name} (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    ts             INTEGER NOT NULL,
-    psp            NUMERIC,
-    primary_temps  TEXT NOT NULL CHECK(json_valid(primary_temps)),
-    food_temps     TEXT NOT NULL CHECK(json_valid(food_temps)),
-    aux_temps      TEXT NOT NULL CHECK(json_valid(aux_temps)),
-    notify_targets TEXT NOT NULL CHECK(json_valid(notify_targets)),
-    ext_data       TEXT CHECK(ext_data IS NULL OR json_valid(ext_data))
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts                    INTEGER NOT NULL,
+    psp                   NUMERIC,
+    primary_temps         TEXT NOT NULL CHECK(json_valid(primary_temps)),
+    food_temps            TEXT NOT NULL CHECK(json_valid(food_temps)),
+    aux_temps             TEXT NOT NULL CHECK(json_valid(aux_temps)),
+    notify_targets        TEXT NOT NULL CHECK(json_valid(notify_targets)),
+    ext_data              TEXT CHECK(ext_data IS NULL OR json_valid(ext_data)),
+    cycle_ratio           REAL,
+    realized_cycle_ratio  REAL,
+    fan_duty              NUMERIC
 );
 """
 
@@ -340,6 +359,29 @@ def _ensure_schema(conn):
                 if name not in columns:
                     conn.execute(f"ALTER TABLE model_activation_state ADD COLUMN {name} {declaration}")
             conn.execute("PRAGMA user_version=7")
+    if version < 8:
+        # Schema v8 records the duty that drove each history sample: the auger
+        # cycle ratio the controller commanded, the ratio actually delivered to
+        # the auger, and fan duty.
+        #
+        # Added in place rather than by the rebuild-and-swap `history` uses
+        # above: these are nullable additive columns, so ALTER TABLE ADD COLUMN
+        # is a metadata-only change that leaves durable rows untouched, and
+        # every pre-v8 row keeps NULL duty (a gap in the chart, not a zero).
+        # Guarded by table_info so a fresh database -- where SCHEMA already
+        # created the table with all three -- walks this branch to reach the
+        # version bump without trying to add a column twice.
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(history)").fetchall()}
+        additions = (
+            ("cycle_ratio", "REAL"),
+            ("realized_cycle_ratio", "REAL"),
+            ("fan_duty", "NUMERIC"),
+        )
+        with transaction(conn):
+            for name, declaration in additions:
+                if name not in columns:
+                    conn.execute(f"ALTER TABLE history ADD COLUMN {name} {declaration}")
+            conn.execute("PRAGMA user_version=8")
 
 
 def connection():

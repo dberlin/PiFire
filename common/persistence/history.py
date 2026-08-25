@@ -9,7 +9,10 @@ from common.defaults import METRIC_COLUMNS, default_metrics
 from common.persistence.transforms import history_row_to_dict
 from common.sqlite_queue import SqliteQueue
 
-_HISTORY_SELECT = "SELECT ts,psp,primary_temps,food_temps,aux_temps,notify_targets,ext_data FROM history ORDER BY id"
+_HISTORY_SELECT = (
+    "SELECT ts,psp,primary_temps,food_temps,aux_temps,notify_targets,ext_data,"
+    "cycle_ratio,realized_cycle_ratio,fan_duty FROM history ORDER BY id"
+)
 _AUTOTUNE_QUEUE = "queue_autotune"
 
 CLEAR_HISTORY_COMMAND = "clear_history"
@@ -111,12 +114,25 @@ def read_history(num_items=0):
 def write_history(in_data, maxsizelines=28800, ext_data=False):
     """Append one history sample and trim the oldest rows past retention."""
     timestamp = int(time.time() * 1000)
-    extended_data = json.dumps(in_data["ext_data"]) if ext_data else None
+    # `ext_data` the flag says the caller MAY supply extended data; the key
+    # says it actually did. Both are required, because the control loop no
+    # longer populates it -- the CR/RCR pair it used to write there is now
+    # first-class columns below -- so the flag alone would KeyError, and a
+    # tolerated-but-missing key would store the JSON literal `null` and make
+    # every row grow an EXD entry holding nothing.
+    payload = in_data.get("ext_data")
+    extended_data = json.dumps(payload) if ext_data and payload is not None else None
+    # Absent rather than zeroed when the caller reported no duty: the control
+    # loop fills this every tick, but nothing else that writes history does,
+    # and 0% duty is a real reading that must not be indistinguishable from
+    # "this sample predates duty recording".
+    duty = in_data.get("duty") or {}
 
     with datastore.transaction() as connection:
         connection.execute(
             "INSERT INTO history(ts,psp,primary_temps,food_temps,aux_temps,"
-            "notify_targets,ext_data) VALUES(?,?,?,?,?,?,?)",
+            "notify_targets,ext_data,cycle_ratio,realized_cycle_ratio,fan_duty) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?)",
             (
                 timestamp,
                 in_data["primary_setpoint"],
@@ -125,6 +141,9 @@ def write_history(in_data, maxsizelines=28800, ext_data=False):
                 json.dumps(in_data["probe_history"]["aux"]),
                 json.dumps(in_data["notify_targets"]),
                 extended_data,
+                duty.get("cycle_ratio"),
+                duty.get("realized_cycle_ratio"),
+                duty.get("fan_duty"),
             ),
         )
         count = connection.execute("SELECT COUNT(*) FROM history").fetchone()[0]

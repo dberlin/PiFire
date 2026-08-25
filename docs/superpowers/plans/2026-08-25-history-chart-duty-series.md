@@ -1,7 +1,12 @@
 # Auger + fan duty on the history chart
 
-**Status:** design, awaiting decisions
+**Status:** implemented (phases 1-5), uncommitted
 **Date:** 2026-08-25
+
+Two sections below carry **Correction** notes where implementing the design proved part of
+it wrong -- the vestigial `raw_ratio` under Decision 5, and the downsampling prescription
+under Decision 3. Both are kept rather than rewritten, because the reasoning that led to
+the wrong answer is worth as much as the right one.
 **Visual companion:** <https://claude.ai/code/artifact/497ccd9d-457a-4f6d-8c08-c9715fe94b15>
 — live, interactive mockups of every option below. Source: `assets/duty-chart-mockups.html`.
 
@@ -71,8 +76,8 @@ The only extension point is `ext_data` — a nullable JSON `TEXT` column gated o
 # controller/runtime/modes/base.py:944-948
 if self.settings["globals"]["ext_data"]:
     in_data["ext_data"] = {}
-    in_data["ext_data"]["CR"] = 0     # cycle ratio
-    in_data["ext_data"]["RCR"] = 0    # raw cycle ratio
+    in_data["ext_data"]["CR"] = 0  # cycle ratio
+    in_data["ext_data"]["RCR"] = 0  # raw cycle ratio
 ```
 
 Hardcoded zeros. And the block runs at line ~944, **before** `self.on_tick(...)` at line 985 —
@@ -160,14 +165,41 @@ for `NT` and `PSP`:
 > same `window`, so they must share the same fidelity check or a step edge can be smoothed
 > into a ramp that never happened.
 
-Duty is the same class of series and needs the same treatment, with a unit correction: feed
-`cycle_ratio * 100` into the fidelity check so a 2% duty change carries the same weight as
-2 °F, and feed `fan_duty` as-is (already 0–100).
+The diagnosis above is right; the prescription this section originally carried was not.
 
-**Negative control for this:** with duty joining the check, a synthetic history containing a
-single one-sample auger pulse on an otherwise flat temperature trace must retain that pulse
-after reduction. Without the unit correction, it must not. Assert both directions — otherwise
-the test proves nothing.
+**Correction (measured during Phase 2).** The original plan was to feed `cycle_ratio * 100`
+into the fidelity check so a 2% duty change carries the same weight as 2 °F. Measured over a
+30,000-sample window against a 55%→12% duty step on a thermally flat hold — the duty-floor
+case the series exists to show:
+
+| approach | points kept | duty error |
+| --- | --- | --- |
+| duty omitted (today) | 1,000 | 27.2 pp |
+| duty in the fidelity check, percent-scaled | **30,000** | 0.0 |
+| duty transitions retained | **1,002** | 0.0 |
+
+Feeding duty to the tolerance check reproduces it perfectly and **defeats downsampling
+entirely**, returning the full window on every history request — for a series that is off by
+default.
+
+The reason is the error model. `select_indices` measures how far the drawn line strays from
+the samples **under linear interpolation**. Duty is a step function that the chart draws as
+steps, so between two kept samples the drawn value is the earlier one held flat — which means
+keeping every index where duty *changes* reproduces it exactly, and keeping anything else adds
+nothing. The tolerance check was chasing an error that only exists under an interpolation the
+chart never performs.
+
+So duty is retained by its transitions (`_duty_change_indices`), unioned with the temperature
+reduction, and left out of `select_indices` altogether. Two consequences worth keeping in
+view: this makes stepped rendering **load-bearing** rather than cosmetic — a future switch to
+linear interpolation would silently start drawing ramps between transitions — and the cost
+scales with how often duty changes, so a controller re-solving every sample would approach
+full fidelity. Measured at 5% of samples for a wandering hold.
+
+**Negative control:** the retention test's counterpart asserts that the temperature shape
+*alone* would misdraw the same step by more than 20 percentage points. Without it, the
+retention assertion would pass just as well against a reducer that happened to keep enough
+points anyway.
 
 ---
 
@@ -196,11 +228,42 @@ Plot requested-vs-applied duty and it becomes obvious — the controller asks fo
 clamps to 12%, and the two lines visibly separate and stay separated. That single view turns a
 subtle tuning failure into something a user can see and report.
 
-The data exists: `controller/applied_output.py` is literally "the duty that actually reached
-the auger, and why", carrying an `OutputSource` for the reason. `self.state.cycle.raw_ratio`
-is already tracked alongside `.ratio` (`controller/runtime/modes/base.py:449-462`).
-
 This is what `RCR` in the dead stub was *supposed* to be.
+
+**Correction (found during Phase 1).** An earlier draft of this section said
+`self.state.cycle.raw_ratio` was already tracking the pre-clamp request. It is not:
+*every* assignment site sets it equal to `.ratio` (`modes/base.py:449-462`,
+`smoke.py:50,81`, `startup.py:49,88`, `prime.py:36`, `hold.py:704,755,868,1604`). It is a
+vestigial field that never diverges, so plotting it would draw a line lying exactly on top
+of the applied one — and read as "the floor never clamps", which is worse than not shipping
+the series at all.
+
+The real pair lives in `controller/runtime/framed_pulse.py:426,585`, which builds
+`AppliedOutput(ratio=<realized duty, measured from delivered on-time>,
+requested=frame.requested_auger_duty)`. Two consequences:
+
+- It exists only on the framed-pulse Hold path. Smoke, Startup, Prime and Manual have no
+  requested/applied distinction to record, so those samples are honestly NULL.
+- It is pushed *into* the controller core via `set_output` and into the model-learning
+  trace. Nothing stashes it where the run loop's history write can reach it, so recording
+  it needs new plumbing through the Hold path.
+
+That plumbing is deferred to its own change rather than bundled into the schema migration —
+it touches the framed-pulse/safety path, which wants reviewing on its own terms. The column
+ships with the migration (written once, per the plan) and stays NULL until then.
+
+There are in fact **three** distinct quantities here, and it is worth being explicit about
+which one this records:
+
+| Quantity | Where it lives | Recorded |
+| --- | --- | --- |
+| Controller request, pre-clamp | `frame.requested_auger_duty` | not yet — needs the plumbing above |
+| **Commanded cycle ratio** | `state.cycle.ratio` | **yes — this is `cycle_ratio`** |
+| Realized duty, measured | `AppliedOutput.ratio` | no |
+
+Recording the commanded ratio is the right first choice regardless: it is exactly what the
+dashboard's duty tile has always shown, so the chart and the tile agree by construction —
+which is what the shared-helper decision above was for.
 
 ---
 

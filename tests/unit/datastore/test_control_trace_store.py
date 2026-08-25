@@ -154,7 +154,7 @@ def test_v4_database_upgrades_to_v7_without_altering_existing_rows(tmp_path):
     datastore._reset_for_tests(db_path)
     try:
         upgraded = datastore.connection()
-        assert upgraded.execute("PRAGMA user_version").fetchone()[0] == 7
+        assert upgraded.execute("PRAGMA user_version").fetchone()[0] == 8
         assert upgraded.execute("SELECT value FROM kv WHERE key='preserved'").fetchone()[0] == '{"value": 1}'
         assert upgraded.execute("SELECT COUNT(*) FROM control_trace").fetchone()[0] == 0
     finally:

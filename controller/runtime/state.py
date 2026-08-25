@@ -7,6 +7,16 @@ class CycleState:
 
     ratio: float = 0.0
     raw_ratio: float = 0.0
+    #: The duty that actually reached the auger, as measured from delivered
+    #: on-time by the framed-pulse machinery -- the counterpart to `ratio`,
+    #: which is what the controller COMMANDED. They separate exactly where a
+    #: clamp acts: the duty floor lifting a request too small to pulse, u_max
+    #: capping one too large, a lid-open pause pinning the auger off.
+    #:
+    #: None until something reports one. Only the framed-pulse Hold path
+    #: measures it, so a mode that does not stays honestly unmeasured rather
+    #: than reporting its commanded ratio twice.
+    realized_ratio: float | None = None
     on_time: float = 0.0
     off_time: float = 0.0
     cycle_time: float = 0.0

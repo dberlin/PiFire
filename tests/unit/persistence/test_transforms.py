@@ -194,6 +194,9 @@ def test_history_row_to_dict_preserves_timestamp_values_and_omits_absent_extende
         '{"Ambient": 72}',
         '{"PitProbe": 0, "PinkProbe": 165}',
         None,
+        None,
+        None,
+        None,
     )
 
     assert history_row_to_dict(row) == {
@@ -203,6 +206,11 @@ def test_history_row_to_dict_preserves_timestamp_values_and_omits_absent_extende
         "PSP": 225,
         "NT": {"PitProbe": 0, "PinkProbe": 165},
         "AUX": {"Ambient": 72},
+        # Emitted even when NULL -- see history_row_to_dict for why these
+        # cannot be conditional the way EXD is.
+        "CR": None,
+        "RCR": None,
+        "FD": None,
     }
 
 
@@ -215,6 +223,9 @@ def test_history_row_to_dict_decodes_extended_data_into_a_detached_result():
         "{}",
         '{"PitProbe": 0}',
         '{"auger": {"on": true}}',
+        0.25,
+        None,
+        65,
     )
 
     first = history_row_to_dict(row)
@@ -229,6 +240,9 @@ def test_history_row_to_dict_decodes_extended_data_into_a_detached_result():
         "PSP": 225,
         "NT": {"PitProbe": 0},
         "AUX": {},
+        "CR": 0.25,
+        "RCR": None,
+        "FD": 65,
         "EXD": {"auger": {"on": True}},
     }
 

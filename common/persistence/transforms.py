@@ -8,7 +8,9 @@ from common.control_delta import apply_control_delta as _apply_control_delta
 from common.current_schema import CurrentSchema, build_current
 from common.persistence.protocols import JsonValue
 
-type HistorySqlRow = tuple[int, int | float, str, str, str, str, str | None]
+type HistorySqlRow = tuple[
+    int, int | float, str, str, str, str, str | None, float | None, float | None, int | float | None
+]
 
 
 def _child(source: Mapping[str, JsonValue], key: str) -> Mapping[str, JsonValue]:
@@ -57,7 +59,7 @@ def history_row_to_dict(row: HistorySqlRow) -> dict[str, JsonValue]:
     """Decode one SQLite history row into the established wire shape."""
     import json
 
-    ts, psp, primary, food, aux, notify_targets, extended_data = row
+    ts, psp, primary, food, aux, notify_targets, extended_data, cr, rcr, fan_duty = row
     result: dict[str, JsonValue] = {
         "T": ts,
         "P": json.loads(primary),
@@ -65,6 +67,16 @@ def history_row_to_dict(row: HistorySqlRow) -> dict[str, JsonValue]:
         "PSP": psp,
         "NT": json.loads(notify_targets),
         "AUX": json.loads(aux),
+        # Duty is emitted UNCONDITIONALLY, None included -- unlike EXD below.
+        # `unpack_history` builds its whole key set from row 0 of the window,
+        # so a key that only appears on some rows is silently dropped for the
+        # entire read whenever the first row happens to lack it. EXD lives with
+        # that (it is gated on a setting that can be flipped mid-cook); duty
+        # must not, because every window that begins before the v8 migration
+        # would lose the series for its newer rows too.
+        "CR": cr,
+        "RCR": rcr,
+        "FD": fan_duty,
     }
     if extended_data is not None:
         result["EXD"] = json.loads(extended_data)
