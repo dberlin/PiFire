@@ -356,7 +356,7 @@ function ActivePidSpLearningView({
                 </div>
                 <div>
                   <dt className="text-probe-label">Distrust ratio</dt>
-                  <dd>Distrust ratio: {report.identifier.distrust_ratio}</dd>
+                  <dd>Distrust ratio: {report.identifier.distrust_ratio ?? "not available"}</dd>
                 </div>
               </dl>
               <p className="mt-3 text-sm text-probe-label">

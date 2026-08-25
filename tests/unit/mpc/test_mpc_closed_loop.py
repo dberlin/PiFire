@@ -41,6 +41,57 @@ def _run(seed=0, minutes=90, setpoint=SETPOINT):
     return np.array(ts), np.array(temps)
 
 
+def _run_transition(*, restore: bool) -> tuple[np.ndarray, np.ndarray]:
+    controller = Controller(
+        {**DEFAULT_MPC_CONFIG, "control_period": TS},
+        "C",
+        dict(CYCLE),
+    )
+    controller.set_target(SETPOINT)
+    plant = GrillSim(seed=3)
+    temperatures: list[float] = []
+    commands: list[float] = []
+    try:
+        for step in range(32):
+            if restore and step == 24:
+                assert controller.restore_model(controller.get_model_snapshot())
+            output = controller.update(plant.measured())
+            ratio = float(np.clip(output["cycle_ratio"], 0.0, CYCLE["u_max"]))
+            fan = output["fan"]["duty"] if output["fan"]["duty"] is not None else 100.0
+            on_seconds = int(round(ratio * TS))
+            for second in range(int(TS)):
+                plant.step(
+                    auger_on=second < on_seconds,
+                    fan_frac=fan / 100.0,
+                )
+            controller.set_output(
+                AppliedOutput(
+                    ratio=on_seconds / TS,
+                    source=OutputSource.CONTROLLER,
+                    timestamp=(step + 1) * TS,
+                    requested=ratio,
+                )
+            )
+            state = controller.active_control_pair.core.estimate
+            assert state is not None
+            assert np.all(state[:8] >= 0.0)
+            assert np.all(state[:8] <= 1.0)
+            temperatures.append(plant.true_Tc)
+            commands.append(ratio)
+    finally:
+        controller.close()
+    return np.array(temperatures), np.array(commands)
+
+
+def test_mid_cook_snapshot_restore_preserves_immediate_control_continuity():
+    baseline_temperatures, baseline_commands = _run_transition(restore=False)
+    restored_temperatures, restored_commands = _run_transition(restore=True)
+    comparison = slice(24, 29)
+
+    assert abs(restored_commands[24] - baseline_commands[24]) <= 0.02
+    assert np.max(np.abs(restored_temperatures[comparison] - baseline_temperatures[comparison])) <= 0.1
+
+
 @pytest.fixture(scope="module")
 def steady_run():
     """One cook, shared by every test below that asks it a different question.

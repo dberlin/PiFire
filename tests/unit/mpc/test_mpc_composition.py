@@ -193,6 +193,7 @@ def _activation_composition() -> _ActivationComposition:
     grey.sync_activation_generation(exact=True)
     controller = object.__new__(mpc_module.Controller)
     controller.cfg = incumbent.core.config
+    controller.set_point = 0.0
     controller._activation_runtime = runtime
     controller._grey_learning_runtime = grey
     return _ActivationComposition(
@@ -575,8 +576,14 @@ def test_successful_authorization_synchronizes_generation_and_public_configurati
     controller = object.__new__(mpc_module.Controller)
     active_config = {"control_period": 3.0}
     controller.cfg = {"control_period": 2.0}
+    controller.set_point = 0.0
     controller._activation_runtime = SimpleNamespace(
-        active_pair=SimpleNamespace(core=SimpleNamespace(config=active_config)),
+        active_pair=SimpleNamespace(
+            core=SimpleNamespace(
+                config=active_config,
+                set_target=lambda _target: None,
+            )
+        ),
         role_generation=5,
         authorize_candidate_pair=lambda _record: True,
     )

@@ -337,6 +337,15 @@ def test_pid_sp_report_contract_preserves_each_real_live_and_checkpoint_projecti
     assert validated.model_dump(mode="json", exclude_unset=True) == payload
 
 
+def test_untrusted_identifier_report_preserves_unavailable_distrust_ratio():
+    live = _marked_live(distrust_ratio=None)
+
+    payload = _report(status={"learning": live}).as_dict()
+
+    assert payload["failure"] is None
+    assert payload["identifier"]["distrust_ratio"] is None
+
+
 def test_pid_sp_report_contract_preserves_idle_and_structured_failure_projections():
     idle = _report().as_dict()
     malformed_live = _marked_live()

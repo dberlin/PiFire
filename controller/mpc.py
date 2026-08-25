@@ -82,6 +82,7 @@ class Controller(ControllerBase):
             return grey_runtime.model_authority()
 
         def handle_policy_failure(_error):
+            self._calibration.cancel_immediately("policy-failure")
             if self._activation_runtime.active_record is not None and not self.activation_runtime_failure(
                 "native-solve-failure"
             ):
@@ -139,7 +140,7 @@ class Controller(ControllerBase):
                 configuration=self._learning_configuration,
                 snapshot_parameters=self._snapshot_parameters_for_learning,
                 cook_history=self._history_for_learning,
-                sync_configuration=self._sync_learning_configuration,
+                sync_configuration=self._synchronize_active_core,
                 append_trace=append_control_trace,
                 logger=self._logger,
             )
@@ -193,8 +194,12 @@ class Controller(ControllerBase):
     def _sync_learning_configuration(self) -> None:
         self.cfg = self.active_control_pair.core.config
 
-    def _synchronize_activation_transition(self, *, exact: bool = False) -> None:
+    def _synchronize_active_core(self) -> None:
         self._sync_learning_configuration()
+        self.active_control_pair.core.set_target(self.set_point)
+
+    def _synchronize_activation_transition(self, *, exact: bool = False) -> None:
+        self._synchronize_active_core()
         if exact:
             self._grey_learning_runtime.sync_activation_generation(exact=True)
         else:

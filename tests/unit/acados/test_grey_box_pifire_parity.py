@@ -21,14 +21,27 @@ def test_frozen_do_mpc_corpus_has_auditable_base_capture_provenance():
     assert provenance["review"] == "recaptured-from-immutable-base-and-reviewed-for-task-8"
 
 
-def test_acados_first_decision_matches_the_frozen_reviewed_do_mpc_corpus():
+def test_acados_matches_physical_corpus_cases_and_rejects_unphysical_estimator_states():
     corpus = json.loads(_FIXTURE.read_text(encoding="utf-8"))
     assert corpus["schema"] == 1
     assert "do-mpc/IPOPT" in corpus["source"]
 
+    physical = 0
+    rejected = 0
     solver = AcadosGreyBoxMPC(GreyBoxMPCConfig(**corpus["config"]))
     try:
         for case in corpus["cases"]:
+            delay_states = case["state"][:8]
+            if not all(0.0 <= value <= 1.0 for value in delay_states):
+                with pytest.raises(ValueError, match="delay states"):
+                    solver.solve(
+                        case["state"],
+                        setpoint_c=case["setpoint_c"],
+                        q_previous=case["q_previous"],
+                        equilibrium_q=case["equilibrium_q"],
+                    )
+                rejected += 1
+                continue
             result = solver.solve(
                 case["state"],
                 setpoint_c=case["setpoint_c"],
@@ -36,5 +49,9 @@ def test_acados_first_decision_matches_the_frozen_reviewed_do_mpc_corpus():
                 equilibrium_q=case["equilibrium_q"],
             )
             assert result.sequence_q[0] == pytest.approx(case["do_mpc_first_q"], abs=2e-4), case["name"]
+            physical += 1
     finally:
         solver.close()
+
+    assert physical == 1
+    assert rejected == 4

@@ -591,6 +591,7 @@ def test_retarget_moves_a_restored_model_to_the_new_operating_point():
     identifier = FOPDTIdentifier()
     identifier.restore(_ipdt())
     before = identifier.trusted_model()["c0"]
+    before_revision = identifier.trusted_model()["revision"]
 
     assert identifier.retarget(225.0) is True
 
@@ -598,9 +599,11 @@ def test_retarget_moves_a_restored_model_to_the_new_operating_point():
     assert after == pytest.approx(before * (225.0 - AMBIENT_F) / (450.0 - AMBIENT_F))
     # Losses at a cooler chamber are smaller, and c0 is negative.
     assert after > before
+    assert identifier.trusted_model()["revision"] == before_revision + 1
     # Moved once, it now describes 225 and must not be moved again for it.
-    assert identifier.retarget(225.0) is True
+    assert identifier.retarget(225.0) is False
     assert identifier.trusted_model()["c0"] == pytest.approx(after)
+    assert identifier.trusted_model()["revision"] == before_revision + 1
 
 
 def test_retarget_leaves_a_model_this_cook_earned_alone():

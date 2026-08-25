@@ -373,7 +373,7 @@ class PidSpIdentifierReport(WireModel):
     confirming: NonNegativeInt | None
     trusted: PidSpCheckpointModel | None
     distrust_count: NonNegativeInt
-    distrust_ratio: FiniteNumber
+    distrust_ratio: FiniteNumber | None
 
 
 class PidSpPredictorReport(WireModel):

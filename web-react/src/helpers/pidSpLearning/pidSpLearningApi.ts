@@ -215,7 +215,9 @@ function parseIdentifier(value: unknown): PidSpIdentifierReport {
         : nonNegativeInteger(source.confirming, `${path}.confirming`),
     trusted: nullable(source.trusted, (item) => parseModel(item, `${path}.trusted`)),
     distrust_count: nonNegativeInteger(source.distrust_count, `${path}.distrust_count`),
-    distrust_ratio: finiteNumber(source.distrust_ratio, `${path}.distrust_ratio`),
+    distrust_ratio: nullable(source.distrust_ratio, (item) =>
+      finiteNumber(item, `${path}.distrust_ratio`),
+    ),
   };
 }
 

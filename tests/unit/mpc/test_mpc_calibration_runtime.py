@@ -104,6 +104,24 @@ def test_calibration_overlay_returns_baseline_and_combined_allocations(monkeypat
     )
 
 
+def test_invalid_estimator_state_cancels_active_probe_before_failed_result_is_published(
+    monkeypatch,
+):
+    controller = _controller(monkeypatch)
+    runner = SyncControllerRunner(controller)
+    runner.request_calibration(_start())
+    active = runner.latest_from(100.0)
+    assert active.calibration.active
+
+    controller.estimator.update = lambda _load, temperature: np.array([0.0] * 7 + [7.81, float(temperature), 0.0])
+    failed = runner.latest_from(100.0)
+
+    assert failed.diagnostics.failure_state.value == "policy_exception"
+    assert failed.calibration.active is False
+    assert failed.calibration.command_action == "safety-cancel"
+    assert failed.allocation == failed.baseline_allocation
+
+
 def test_duplicate_calibration_revision_is_idempotent_and_stop_returns_baseline(monkeypatch):
     controller = _controller(monkeypatch)
     runner = SyncControllerRunner(controller)

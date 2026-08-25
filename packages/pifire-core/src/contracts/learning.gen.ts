@@ -609,7 +609,7 @@ export interface PidSpIdentifierReport {
   candidates_passing: CandidatesPassing;
   confirming: Confirming;
   distrust_count: DistrustCount;
-  distrust_ratio: FiniteNumber;
+  distrust_ratio: FiniteNumber | null;
   duty_segments: DutySegments;
   duty_std: FiniteNumber;
   runner_up_residual: FiniteNumber;

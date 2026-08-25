@@ -16,6 +16,7 @@ import numpy.typing as npt
 
 from . import _ffi
 from .contracts import (
+    GREY_DELAY_STATES,
     GREY_STATE_SIZE,
     GreyBoxMPCConfig,
     GreyBoxSolve,
@@ -57,6 +58,11 @@ def _state_array(state: npt.ArrayLike) -> npt.NDArray[np.float64]:
         raise ValueError(f"state must have shape ({GREY_STATE_SIZE},)")
     if not np.isfinite(normalized).all():
         raise ValueError("state must contain only finite values")
+    delay_states = normalized[:GREY_DELAY_STATES]
+    if np.any(delay_states < 0.0) or np.any(delay_states > 1.0):
+        raise ValueError("state delay states must remain between 0 and 1")
+    if normalized[GREY_DELAY_STATES] <= -273.15:
+        raise ValueError("state temperature must remain above absolute zero")
     return np.ascontiguousarray(normalized)
 
 
@@ -196,11 +202,36 @@ class AcadosGreyBoxMPC:
 
         sequence_q = np.ctypeslib.as_array(native_output.sequence_q)[:sequence_length]
         sequence_residual = np.ctypeslib.as_array(native_output.sequence_residual)[:sequence_length]
+        objective = float(native_output.objective)
+        if (
+            not np.isfinite(sequence_q).all()
+            or not np.isfinite(sequence_residual).all()
+            or not math.isfinite(objective)
+        ):
+            raise SolverError(
+                "Native grey-box result must be finite",
+                diagnostics,
+            )
+        if not np.allclose(
+            sequence_q,
+            equilibrium + sequence_residual,
+            rtol=1e-9,
+            atol=1e-9,
+        ):
+            raise SolverError(
+                "Native grey-box total and residual load sequences are inconsistent",
+                diagnostics,
+            )
+        if not math.isclose(objective, diagnostics.objective, rel_tol=1e-12, abs_tol=1e-12):
+            raise SolverError(
+                "Native grey-box objective and structured diagnostics are inconsistent",
+                diagnostics,
+            )
         try:
             return GreyBoxSolve(
                 sequence_q=sequence_q,
                 sequence_residual=sequence_residual,
-                objective=float(native_output.objective),
+                objective=objective,
                 diagnostics=diagnostics,
             )
         except ValueError as error:

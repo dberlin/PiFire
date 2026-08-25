@@ -165,6 +165,7 @@ class Controller(PIDControllerBase):
     def restore_model(self, snapshot):
         if not self.identifier.restore(snapshot):
             return False
+        self.identifier.retarget(_to_f(self.set_point, self.units))
         self.predictor.trust(self.identifier.trusted_model())
         return True
 
@@ -383,6 +384,7 @@ class Controller(PIDControllerBase):
         self.set_point = set_point
         self.error = 0.0
         self.inter = 0.0
+        self._integral_seeded = False
         self.derv = 0.0
         self.last_update = time.time()
         self.last_set_time = self.last_update

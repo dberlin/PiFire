@@ -30,6 +30,7 @@ import numpy as np
 from scipy.optimize import least_squares
 
 from common.persistence.control_trace import read_control_trace_cook, read_control_trace_session
+from controller.acados.contracts import GREY_MIN_DELAY_S
 from controller.model_learning.trace import TraceSelectionError, calibration_samples
 from controller.model_promotion import T_FLOOR_C, T_HAZARD_C, effective_tau, steady_state_at_full_fire
 from controller.mpc_model import simulate_grey_box
@@ -209,7 +210,10 @@ def fit_params(t, temp, Q, *, T_amb, init, sigma=0.0, n_delay=0, log_bounds=None
     held = {k: float(init[k]) for k in _FIT_KEYS if k not in _FREE}
     lo = math.log(_LOWER_BOUND)
     if log_bounds is None:
-        lower = np.full(len(_FREE), lo, dtype=float)
+        lower = np.array(
+            [math.log(GREY_MIN_DELAY_S) if key == "theta" else lo for key in _FREE],
+            dtype=float,
+        )
         upper = np.full(len(_FREE), np.inf, dtype=float)
     else:
         if set(log_bounds) != set(_FREE):

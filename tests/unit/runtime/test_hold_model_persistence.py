@@ -757,6 +757,19 @@ class _CrashRecoveryEstimator:
     def update(self, _load, temperature):
         return [0.0] * 8 + [float(temperature), 0.0]
 
+    def reset(
+        self,
+        normalized_combustion_load,
+        measured_temperature,
+        *,
+        delay_states=None,
+        disturbance=0.0,
+    ):
+        if measured_temperature is None:
+            return None
+        delays = [float(normalized_combustion_load)] * 8 if delay_states is None else list(delay_states)
+        return [*delays, float(measured_temperature), float(disturbance)]
+
     def close(self):
         self.closed += 1
 
@@ -789,6 +802,9 @@ class _CrashRecoverySolver:
                 warm_started=False,
             ),
         )
+
+    def reset(self):
+        return None
 
     def close(self):
         self.closed += 1

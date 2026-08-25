@@ -21,6 +21,19 @@ class _Estimator:
         self.calls.append((applied_load, temperature_c))
         return np.array([0.0] * 8 + [temperature_c, 0.0], dtype=float)
 
+    def reset(
+        self,
+        applied_load,
+        measured_temperature,
+        *,
+        delay_states=None,
+        disturbance=0.0,
+    ):
+        if measured_temperature is None:
+            return None
+        delays = [applied_load] * 8 if delay_states is None else list(delay_states)
+        return np.array([*delays, measured_temperature, disturbance], dtype=float)
+
     def close(self):
         self.closed += 1
 
@@ -49,6 +62,9 @@ class _Solver:
                 warm_started=False,
             ),
         )
+
+    def reset(self):
+        return None
 
     def close(self):
         self.closed += 1

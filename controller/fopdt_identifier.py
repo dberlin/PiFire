@@ -788,8 +788,13 @@ class FOPDTIdentifier:
         target_rise = float(target_f) - AMBIENT_F
         if rise < MIN_RISE_F or target_rise < MIN_RISE_F:
             return False
-        trusted["c0"] = trusted["c0"] * target_rise / rise
-        self._identified_at_f = float(target_f)
+        retargeted_c0 = trusted["c0"] * target_rise / rise
+        retargeted_at = float(target_f)
+        if retargeted_c0 == trusted["c0"] and retargeted_at == self._identified_at_f:
+            return False
+        trusted["c0"] = retargeted_c0
+        self._identified_at_f = retargeted_at
+        self._revision += 1
         return True
 
     @staticmethod

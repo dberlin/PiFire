@@ -15,6 +15,7 @@ import math
 from dataclasses import dataclass
 from enum import StrEnum
 
+from controller.acados.contracts import GREY_MIN_DELAY_S
 from controller.mpc_model import steady_combustion_load, steady_temperature
 
 #: Ranges a fitted parameter must fall inside to be considered at all. Wide on
@@ -45,7 +46,7 @@ PROMOTION_BOUNDS = {
     "C_c": (1.0, 1e6),
     "h_amb": (1e-4, 1e3),
     "T_amb": (-40.0, 60.0),
-    "theta": (0.0, 1200.0),
+    "theta": (GREY_MIN_DELAY_S, 1200.0),
     "n_delay": (0.0, 50.0),
     "K_Q": (1e-3, 1e4),
     "sigma": (0.0, 1e-8),

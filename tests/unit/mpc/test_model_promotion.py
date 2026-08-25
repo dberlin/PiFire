@@ -183,17 +183,10 @@ def test_theta_zero_with_an_active_delay_chain_is_refused():
 
 
 def test_the_theta_bound_is_enforced():
-    """Exactly 1200 is in, and the next representable step out of it is out.
-
-    The at-bound case is asked at a horizon wide enough to hold its own coast.
-    theta that long implies a 5280 s brake, which the horizon cap refuses on
-    its own -- PROMOTION_BOUNDS is a box on one parameter at a time and the cap
-    is a joint statement about the model, so the two disagree here. Asking at
-    the narrower horizon would let that refusal stand in for this bound and the
-    test would pass with the bound deleted.
-    """
-    assert _ev(dict(GOOD, theta=-1e-9)).accepted is False
-    assert _ev(dict(GOOD, theta=0.0, n_delay=0)).accepted is True
+    """The fixed 25-second generated map accepts only delay values whose
+    eight-stage RK4 propagation preserves normalized delay-state bounds."""
+    assert _ev(dict(GOOD, theta=25.0 - 1e-3)).accepted is False
+    assert _ev(dict(GOOD, theta=25.0)).accepted is True
     assert _ev(dict(GOOD, theta=1200.0)).accepted is True
     assert _ev(dict(GOOD, theta=1200.0 + 1e-3)).accepted is False
 
@@ -802,7 +795,7 @@ _EXPECTED_BOUNDS = {
     "C_c": (1.0, 1e6),
     "h_amb": (1e-4, 1e3),
     "T_amb": (-40.0, 60.0),
-    "theta": (0.0, 1200.0),
+    "theta": (25.0, 1200.0),
     "n_delay": (0.0, 50.0),
     "K_Q": (1e-3, 1e4),
     "sigma": (0.0, 1e-8),
@@ -813,11 +806,9 @@ def test_every_bound_is_pinned_by_a_literal():
     assert _EXPECTED_BOUNDS == PROMOTION_BOUNDS
 
 
-#: n_delay and theta are covered by their own dedicated tests instead: n_delay's
-#: lower edge (0) interacts with theta through the effective-dead-time rule, and
-#: theta's lower edge (0) is only valid when n_delay is also 0 (otherwise the
-#: transport-delay chain divides by n_delay into a zero theta) -- both depend on
-#: the OTHER parameter's value, not just on whether the bare value is in range.
+#: n_delay and theta are covered by dedicated tests: n_delay must remain a
+#: whole state count, while theta must keep the fixed generated propagation
+#: inside its physical normalized state domain.
 @pytest.mark.parametrize(
     "key,lo,hi", [(k, *bounds) for k, bounds in _EXPECTED_BOUNDS.items() if k not in ("n_delay", "theta")]
 )

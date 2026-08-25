@@ -106,24 +106,29 @@ _EQUILIBRIUM_S = 100_000
 MIN_PEAK_DROP_F = 10.0
 
 
-def _cook(config, *, refit):
-    """One cook, scored, with the end-of-cook refit run afterwards if asked.
+def _cook(snapshot, *, refit):
+    """One production-ordered cook and optional end-of-cook refit.
 
-    `config` is the model the previous cook got promoted, merged over the
-    shipped defaults when the core is built.
-
-    That is NOT the path production takes. Production persists the promoted
-    model to the store and the next Hold builds its core from settings alone,
-    then hands the snapshot to `Controller.restore_model`, which rebuilds the
-    estimator, the horizon and the policy against it. Both routes end with the
-    learned model built into the objects that solve, which is what this test
-    measures; the agreement between the two routes is pinned by
-    tests/unit/mpc/test_mpc_model_snapshot.py's
-    test_a_restored_model_reaches_the_estimator_the_horizon_and_the_solve, and
-    a cook here would not notice if the restore stopped carrying it.
+    A new controller is built from shipped settings, receives the live target,
+    and only then restores the prior cook's complete checkpoint—the same order
+    Hold uses. Accepted learning therefore reaches the next cook through the
+    persistence/restore boundary rather than being pasted into constructor
+    configuration.
     """
+
+    def restore_after_target(core):
+        if snapshot is not None:
+            assert core.restore_model(snapshot)
+
     row = controller_matrix.run_scenario(
-        "mpc", SCENARIO, SEED, plant=PLANT, config=dict(config), cycle_config=_shipped_cycle_data(), refit=refit
+        "mpc",
+        SCENARIO,
+        SEED,
+        plant=PLANT,
+        config={},
+        cycle_config=_shipped_cycle_data(),
+        refit=refit,
+        post_target_setup=restore_after_target,
     )
     row["peak_temp_f"] = SETPOINT_F + row["overshoot_f"]
     return row
@@ -162,21 +167,20 @@ def test_overshoot_falls_across_successive_cooks():
         "here reads the actuator floor rather than the controller"
     )
 
-    config, rows, verdicts = {}, [], []
+    snapshot, rows, verdicts = None, [], []
     for _ in range(COOKS):
-        row = _cook(config, refit=True)
+        row = _cook(snapshot, refit=True)
         verdict = row["refit"]
         rows.append(row)
         verdicts.append(verdict)
 
-        # A14 keeps the horizon derived at build time and deliberately does not
-        # store it, because a stored horizon is a ratchet: it can only grow, and
-        # a later, faster model could never bring it down. Promotion carrying an
-        # `n_horizon` across is exactly how that ratchet would reappear.
-        assert "n_horizon" not in config, "an adopted model stored a horizon; that is the ratchet A14 removed"
+        if snapshot is not None:
+            assert "n_horizon" not in snapshot["active"]["parameters"], (
+                "an adopted model stored a horizon; that is the ratchet A14 removed"
+            )
 
         if verdict["accepted"]:
-            config = dict(verdict["params"])
+            snapshot = verdict["snapshot"]
 
     peaks = [row["peak_temp_f"] for row in rows]
     fall_f = peaks[0] - peaks[-1]
@@ -244,14 +248,14 @@ def test_identification_off_is_invisible():
     # old `mpc.settings.n_horizon` belonged to the previous MPC object.
     assert flagged.mpc.config.horizon_steps == plain.mpc.config.horizon_steps == flagged.cfg["n_horizon"]
 
-    learned = _cook({}, refit=True)
+    learned = _cook(None, refit=True)
     verdict = learned["refit"]
     assert verdict["accepted"], f"nothing was learned, so there is nothing to be invisible: {verdict['reason']}"
     assert {k: verdict["params"][k] for k in ("C_c", "theta", "K_Q")} != {
         k: DEFAULT_MPC_CONFIG[k] for k in ("C_c", "theta", "K_Q")
     }, "the promoted model is the shipped one; the control below would be vacuous"
 
-    forgetful = _cook({}, refit=False)
+    forgetful = _cook(None, refit=False)
     assert "built_n_horizon" not in forgetful
     assert "built_n_horizon" not in learned
     for key in ("overshoot_f", "undershoot_f", "iae", "pct_within_5f", "settle_s", "configured_n_horizon"):

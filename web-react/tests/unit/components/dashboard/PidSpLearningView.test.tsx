@@ -342,6 +342,20 @@ describe("PidSpLearningView", () => {
     expect(predictor!).not.toHaveTextContent("revision");
   });
 
+  it("labels an unavailable distrust ratio instead of rendering a blank value", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        ...REPORT,
+        identifier: { ...REPORT.identifier!, distrust_ratio: null },
+      }),
+    );
+    renderPanel();
+
+    const dialog = await openPanel();
+
+    expect(dialog).toHaveTextContent("Distrust ratio: not available");
+  });
+
   it("keeps a durable checkpoint visible beside a structured live failure", async () => {
     fetchMock.mockResolvedValue(jsonResponse(reportForStatus("error")));
     renderPanel();

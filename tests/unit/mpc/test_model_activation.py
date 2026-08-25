@@ -23,6 +23,7 @@ from common.model_evidence import (
 from common.persistence.model_evidence import ModelActivationState
 from common.web_contracts.learning import ModelActivationRequest
 from controller.acados import GreyBoxMPCConfig
+from controller.applied_output import AppliedOutput, OutputSource
 from controller.model_learning.activation import (
     ActivationDecision,
     ActivationManager,
@@ -65,6 +66,11 @@ class _Handle:
     def __init__(self, name: str) -> None:
         self.name = name
         self.closed = 0
+        self.resets: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def reset(self, *args: object, **kwargs: object):
+        self.resets.append((args, kwargs))
+        return None
 
     def close(self) -> None:
         self.closed += 1
@@ -531,6 +537,7 @@ def _bare_mpc_pair_owner(
     core = MpcController.__new__(MpcController)
     incumbent.core._last_combustion_load = 0.35
     core._closed = False
+    core.set_point = 0.0
     core._pair_factory = MpcPairFactory(
         DEFAULT_MPC_CONFIG,
         "C",
@@ -750,6 +757,25 @@ def test_mpc_installs_complete_pair_inertly_then_authorizes_only_the_active_rece
     core.close()
 
 
+def test_inert_candidate_receives_live_target_before_output_authorization() -> None:
+    core, incumbent, candidate, prepared = _bare_mpc_pair_owner()
+    core.set_point = 107.2
+    incumbent.core.set_target(core.set_point)
+    incumbent.core.set_output(AppliedOutput(0.45, OutputSource.CONTROLLER, 1.0))
+    incumbent.core.history.append((1.0, 100.0, 0.5))
+
+    assert core.install_candidate_pair_inert(candidate, prepared)
+
+    assert not core.activation_output_authorized
+    assert candidate.core.set_point_c == pytest.approx(107.2)
+    assert candidate.core.applied_combustion_load == pytest.approx(0.5)
+    assert candidate.core.last_combustion_load == pytest.approx(0.35)
+    assert tuple(candidate.core.history) == ((1.0, 100.0, 0.5),)
+    assert candidate.estimator.resets
+    assert candidate.solver.resets
+    core.close()
+
+
 def test_successive_activation_closes_displaced_rollback_before_retaining_current_owner() -> None:
     core, original, first, first_prepared = _bare_mpc_pair_owner()
     assert core.install_candidate_pair_inert(first, first_prepared)
@@ -837,6 +863,9 @@ def test_first_native_solve_failure_after_activation_restores_exact_pair_and_rec
 
         def solve(self, *_args, **_kwargs):
             raise RuntimeError("native exploded")
+
+        def reset(self):
+            pass
 
         def close(self):
             pass

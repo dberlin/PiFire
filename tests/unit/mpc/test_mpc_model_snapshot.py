@@ -13,6 +13,7 @@ import pytest
 import controller.mpc as mpc_module
 import controller.mpc_core as mpc_core_module
 from common.controller_model_state import ControllerModelStore
+from controller.applied_output import AppliedOutput, OutputSource
 from controller.model_learning.activation import ActivationPhase, GreyControlPairDescriptor
 from controller.mpc import Controller
 from controller.mpc_config import DEFAULT_MPC_CONFIG
@@ -165,6 +166,28 @@ def test_restore_rebinds_owned_active_pair_to_rebuilt_handles():
     assert active is not previous
     assert active.estimator is restored.estimator
     assert active.solver is restored.mpc
+
+
+def test_restore_preserves_the_live_target_on_the_replacement_pair():
+    snapshot = _identified().get_model_snapshot()
+    restored = _controller()
+    restored.set_target(107.2)
+    restored.set_output(AppliedOutput(0.18, OutputSource.CONTROLLER, 1.0))
+
+    assert restored.restore_model(snapshot) is True
+
+    assert restored.active_control_pair.core.set_point_c == pytest.approx(107.2)
+    assert restored.active_control_pair.core.applied_combustion_load == pytest.approx(0.2)
+    result = restored.update((175.4 - 32.0) * 5.0 / 9.0)
+    state = restored.active_control_pair.core.estimate
+    allocation = restored.trace_allocation()
+
+    assert state is not None
+    assert all(0.0 <= value <= 1.0 for value in state[:8])
+    assert state[:8] == pytest.approx([0.2] * 8)
+    assert allocation is not None
+    assert allocation.normalized_combustion_load == pytest.approx(1.0)
+    assert result["cycle_ratio"] == pytest.approx(CYCLE["u_max"])
 
 
 def test_restore_round_trips_complete_validated_v4_checkpoint_state() -> None:

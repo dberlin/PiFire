@@ -520,6 +520,10 @@ class ActivationRuntime:
                 except Exception:
                     return False
             incumbent = self._active_pair
+            try:
+                pair.core.adopt_operating_state(incumbent.core.capture_operating_state())
+            except Exception:
+                return False
             pair.revoke_output()
             incumbent.revoke_output()
             self._rollback_pair = incumbent
@@ -569,6 +573,10 @@ class ActivationRuntime:
                 or pair.descriptor != record.candidate
                 or rollback.descriptor != record.incumbent
             ):
+                return False
+            try:
+                rollback.core.adopt_operating_state(pair.core.capture_operating_state())
+            except Exception:
                 return False
             pair.revoke_output()
             try:
@@ -651,6 +659,10 @@ class ActivationRuntime:
                 return False
             failed = self._active_pair
             active_record = self._active_record
+            try:
+                rollback.core.adopt_operating_state(failed.core.capture_operating_state())
+            except Exception:
+                return False
             failed.revoke_output()
             try:
                 rollback.authorize_output()
@@ -798,6 +810,13 @@ class ActivationRuntime:
                     if pair is not None:
                         pair.close()
                 return False
+            try:
+                restored.core.adopt_operating_state(self._active_pair.core.capture_operating_state())
+            except Exception:
+                restored.close()
+                if rollback is not None:
+                    rollback.close()
+                return False
             restored.authorize_output()
             retired_active = self._active_pair
             retired_rollback = self._rollback_pair
@@ -837,6 +856,7 @@ class ActivationRuntime:
             current = self._active_pair
             if pair is current:
                 raise ValueError("replacement pair must be a distinct owner")
+            pair.core.adopt_operating_state(current.core.capture_operating_state())
             pair.revoke_output()
             displaced_rollback = self._rollback_pair
             pending = self._pending

@@ -115,7 +115,7 @@ def test_fit_contract_is_bounded_log_space_for_only_the_three_identifiable_param
     assert FIT_LOG_BOUNDS == {
         "C_c": (math.log(1.0), math.log(1e6)),
         "K_Q": (math.log(1e-3), math.log(1e4)),
-        "theta": (math.log(1e-9), math.log(1200.0)),
+        "theta": (math.log(25.0), math.log(1200.0)),
     }
 
 

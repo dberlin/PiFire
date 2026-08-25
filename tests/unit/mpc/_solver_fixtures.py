@@ -91,6 +91,19 @@ class _Estimator:
     def update(self, _load, temperature):
         return [0.0] * 8 + [float(temperature), 0.0]
 
+    def reset(
+        self,
+        normalized_combustion_load,
+        measured_temperature,
+        *,
+        delay_states=None,
+        disturbance=0.0,
+    ):
+        if measured_temperature is None:
+            return None
+        delays = [float(normalized_combustion_load)] * 8 if delay_states is None else list(delay_states)
+        return [*delays, float(measured_temperature), float(disturbance)]
+
 
 class _Solver:
     created = []
@@ -99,6 +112,9 @@ class _Solver:
         self.config = config
         self.closed = False
         self.created.append(self)
+
+    def reset(self):
+        return None
 
     def close(self):
         self.closed = True

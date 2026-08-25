@@ -15,6 +15,7 @@ GREY_HORIZON_CAPACITY = 24
 GREY_DELAY_STATES = 8
 GREY_STATE_SIZE = 10
 GREY_TIMESTEP_S = 25.0
+GREY_MIN_DELAY_S = GREY_TIMESTEP_S
 GREY_MAX_ITERATIONS = 10
 
 
@@ -98,7 +99,10 @@ class GreyBoxMPCConfig:
         object.__setattr__(self, "C_c", _positive(self.C_c, "C_c"))
         object.__setattr__(self, "h_amb", _nonnegative(self.h_amb, "h_amb"))
         object.__setattr__(self, "T_amb", _finite_float(self.T_amb, "T_amb"))
-        object.__setattr__(self, "theta", _positive(self.theta, "theta"))
+        theta = _finite_float(self.theta, "theta")
+        if theta < GREY_MIN_DELAY_S:
+            raise ValueError(f"theta must be at least {GREY_MIN_DELAY_S}")
+        object.__setattr__(self, "theta", theta)
         object.__setattr__(self, "K_Q", _positive(self.K_Q, "K_Q"))
         object.__setattr__(self, "sigma", _nonnegative(self.sigma, "sigma"))
 

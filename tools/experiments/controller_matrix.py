@@ -182,7 +182,8 @@ def _observe_frame(core, frame, *, sequence, temp_c, setpoint_c, fan_frac, lid_o
     start does not abut its predecessor's end.
     """
     observe = getattr(core, "observe_frame", None)
-    history = getattr(core, "_teardown_history", None)
+    learning_runtime = getattr(core, "_grey_learning_runtime", None)
+    history = getattr(learning_runtime, "_teardown_history", None)
     if observe is None or history is None:
         return
     from controller.model_learning.contracts import FrameObservation
@@ -302,6 +303,7 @@ def run_scenario(
     cycle_config=None,
     refit=False,
     core_setup=None,
+    post_target_setup=None,
     output_transform=None,
     trace_sink=None,
 ):
@@ -309,7 +311,9 @@ def run_scenario(
 
     The only overrides are ``config`` (controller options) and
     ``cycle_config`` (Hold cycle settings); both override fresh
-    ``default_settings()`` values for this call only. Rows retain independent
+    ``default_settings()`` values for this call only. ``post_target_setup``
+    runs after the production target has been installed, matching Hold's model
+    restore order. Rows retain independent
     JSON-safe snapshots so subsequent settings/manifest changes cannot alter
     recorded evidence.
     """
@@ -361,6 +365,8 @@ def run_scenario(
             core.set_target(setpoint)
         else:
             runner.set_target(setpoint)
+        if post_target_setup is not None:
+            post_target_setup(core)
         period = float(
             (core.get_control_period() if runner is None else runner.control_period()) or scheduler.timing.frame_s
         )
@@ -637,6 +643,7 @@ def _refit_after_cook(core):
         # reported None for every run rather than failing.
         "params": None if snapshot is None else dict(snapshot["active"]["parameters"]),
         "rmse": None if snapshot is None else snapshot["active"]["metadata"].get("rmse"),
+        "snapshot": snapshot,
         "log": buf.getvalue().strip().splitlines(),
     }
 

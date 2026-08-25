@@ -15,6 +15,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+import controller.acados.grey_box as grey_box_module
 import controller.acados._library as library_module
 from controller.acados import (
     AcadosGreyBoxMPC,
@@ -489,6 +490,22 @@ def test_invalid_horizons_are_rejected_before_native_create(
     assert native_create_called is False
 
 
+@pytest.mark.parametrize(
+    ("state", "message"),
+    [
+        (np.array([1.01] + [0.2] * 7 + [100.0, 0.0]), "delay state"),
+        (np.array([-0.01] + [0.2] * 7 + [100.0, 0.0]), "delay state"),
+        (np.array([0.2] * 8 + [-273.16, 0.0]), "temperature"),
+    ],
+)
+def test_state_contract_rejects_nonphysical_estimates_before_native_call(
+    state: np.ndarray,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        grey_box_module._state_array(state)
+
+
 def test_invalid_solve_inputs_are_rejected_before_ffi(
     monkeypatch: pytest.MonkeyPatch,
     built_native_release: Path,
@@ -502,6 +519,9 @@ def test_invalid_solve_inputs_are_rejected_before_ffi(
     invalid_cases = [
         (np.zeros(9), 120.0, 0.2, 0.25, "shape"),
         (np.r_[_state()[:-1], np.nan], 120.0, 0.2, 0.25, "finite"),
+        (np.array([1.01] + [0.2] * 7 + [100.0, 0.0]), 120.0, 0.2, 0.25, "delay state"),
+        (np.array([-0.01] + [0.2] * 7 + [100.0, 0.0]), 120.0, 0.2, 0.25, "delay state"),
+        (np.array([0.2] * 8 + [-273.16, 0.0]), 120.0, 0.2, 0.25, "temperature"),
         (_state(), np.nan, 0.2, 0.25, "setpoint_c"),
         (_state(), 120.0, -0.01, 0.25, "q_previous"),
         (_state(), 120.0, 0.2, 1.01, "equilibrium_q"),
@@ -614,6 +634,40 @@ def test_wrapper_rejects_non_finite_success_output(
         solver.close()
 
     assert isinstance(raised.value.diagnostics, SolverDiagnostics)
+
+
+@pytest.mark.parametrize("corruption", ["sequence", "objective"])
+def test_wrapper_rejects_internally_inconsistent_success_output(
+    monkeypatch: pytest.MonkeyPatch,
+    corruption: str,
+) -> None:
+    fake_handle = ctypes.pointer(_ffi.GreyHandle())
+    monkeypatch.setattr(
+        _ffi,
+        "create",
+        lambda config: (_ffi.STATUS_SUCCESS, fake_handle),
+    )
+    monkeypatch.setattr(_ffi, "destroy", lambda handle: None)
+
+    def solve_with_inconsistency(
+        handle: object,
+        solve_input: _ffi.GreySolveInput,
+        output: _ffi.GreySolveOutput,
+    ) -> int:
+        _populate_successful_output(output, horizon_steps=5)
+        if corruption == "sequence":
+            output.sequence_q[0] = 0.4
+        else:
+            output.diagnostics.objective = 2.0
+        return _ffi.STATUS_SUCCESS
+
+    monkeypatch.setattr(_ffi, "solve", solve_with_inconsistency)
+    solver = AcadosGreyBoxMPC(GreyBoxMPCConfig(horizon_steps=5))
+    try:
+        with pytest.raises(SolverError, match="inconsistent"):
+            _solve(solver)
+    finally:
+        solver.close()
 
 
 def test_failed_solve_restores_exact_successful_primal_and_dual_warm_iterate(

@@ -141,6 +141,40 @@ def _normalized_load(value):
     return load
 
 
+def _validated_delay_states(
+    delay_states,
+    n_delay,
+    fallback,
+):
+    if delay_states is None:
+        return np.full(n_delay, fallback, dtype=float)
+    values = np.asarray(delay_states, dtype=float)
+    if values.shape != (n_delay,) or not np.isfinite(values).all():
+        raise ValueError("delay states must match the configured finite delay chain")
+    if np.any(values < 0.0) or np.any(values > 1.0):
+        raise ValueError("delay states must remain within [0, 1]")
+    return values
+
+
+def _joseph_covariance(P, K, H, R):
+    innovation = np.eye(P.shape[0]) - K @ H
+    covariance = innovation @ P @ innovation.T + K @ R @ K.T
+    return (covariance + covariance.T) * 0.5
+
+
+def _project_delay_covariance(x, P, Q, n_delay):
+    original = x[:n_delay].copy()
+    np.clip(original, 0.0, 1.0, out=x[:n_delay])
+    active = np.flatnonzero(original != x[:n_delay])
+    if active.size:
+        P[active, :] = 0.0
+        P[:, active] = 0.0
+        P[active, active] = np.diag(Q)[active]
+        P[:n_delay, n_delay:] = 0.0
+        P[n_delay:, :n_delay] = 0.0
+    P[:] = (P + P.T) * 0.5
+
+
 def _thermal_parameters(params):
     """Return the finite physical coefficients shared by steady-state helpers."""
     if not isinstance(params, dict):
@@ -353,18 +387,51 @@ class GreyBoxKF:
         self.Ad = Md[:n, :n]
         self.Bd = Md[:n, n : n + 1]  # for Q
         self.bd = Md[:n, n + 1 : n + 2]  # affine (constant input = 1)
+        self.T_amb = T_amb
         self.H = np.zeros((1, n))
         self.H[0, iTc] = 1.0
         self.Qkf = np.diag([q_temp] * (n_delay + 1) + [q_dist])
         self.Rkf = np.array([[r_meas]])
+        initialized = x0 is not None
         if x0 is None:
             x0 = [0.0] * n_delay + [T_amb, 0.0]
         self.x = np.array(x0, dtype=float)
         self.P = np.eye(n) * 5.0
+        self.n_delay = n_delay
+        self.iTc = iTc
+        self._initialized = initialized
         self.n = n
+
+    def reset(
+        self,
+        normalized_combustion_load,
+        measured_temperature,
+        *,
+        delay_states=None,
+        disturbance=0.0,
+    ):
+        load = _normalized_load(normalized_combustion_load)
+        disturbance = float(disturbance)
+        if not np.isfinite(disturbance):
+            raise ValueError("disturbance must be finite")
+        self.x[: self.n_delay] = _validated_delay_states(delay_states, self.n_delay, load)
+        self.x[self.iTc + 1] = disturbance
+        if measured_temperature is None:
+            self.x[self.iTc] = self.T_amb
+            self._initialized = False
+        else:
+            measured = float(measured_temperature)
+            if not np.isfinite(measured):
+                raise ValueError("measured temperature must be finite")
+            self.x[self.iTc] = measured
+            self._initialized = True
+        self.P = np.eye(self.n) * 5.0
+        return self.x.copy() if self._initialized else None
 
     def update(self, normalized_combustion_load, y_measured):
         load = _normalized_load(normalized_combustion_load)
+        if not self._initialized:
+            return self.reset(load, y_measured)
         # predict
         self.x = self.Ad @ self.x + self.Bd.flatten() * load + self.bd.flatten()
         self.P = self.Ad @ self.P @ self.Ad.T + self.Qkf
@@ -372,7 +439,8 @@ class GreyBoxKF:
         S = self.H @ self.P @ self.H.T + self.Rkf
         K = (self.P @ self.H.T) / S
         self.x = self.x + K.flatten() * (y_measured - (self.H @ self.x)[0])
-        self.P = (np.eye(self.n) - K @ self.H) @ self.P
+        self.P = _joseph_covariance(self.P, K, self.H, self.Rkf)
+        _project_delay_covariance(self.x, self.P, self.Qkf, self.n_delay)
         return self.x
 
 
@@ -438,10 +506,13 @@ class GreyBoxEKF:
         self.H[0, iTc] = 1.0
         self.Qkf = np.diag([q_temp] * (n_delay + 1) + [q_dist])
         self.Rkf = np.array([[r_meas]])
+        initialized = x0 is not None
         if x0 is None:
             x0 = [0.0] * n_delay + [T_amb, 0.0]
         self.x = np.array(x0, dtype=float)
         self.P = np.eye(n) * 5.0
+        self.n_delay = n_delay
+        self._initialized = initialized
 
     def _discretize(self):
         # linearize the radiative term about the current chamber estimate
@@ -459,8 +530,36 @@ class GreyBoxEKF:
         Md = expm(Mblk * self.t_step)
         return Md[:n, :n], Md[:n, n : n + 1], Md[:n, n + 1 : n + 2]
 
+    def reset(
+        self,
+        normalized_combustion_load,
+        measured_temperature,
+        *,
+        delay_states=None,
+        disturbance=0.0,
+    ):
+        load = _normalized_load(normalized_combustion_load)
+        disturbance = float(disturbance)
+        if not np.isfinite(disturbance):
+            raise ValueError("disturbance must be finite")
+        self.x[: self.n_delay] = _validated_delay_states(delay_states, self.n_delay, load)
+        self.x[self.iTc + 1] = disturbance
+        if measured_temperature is None:
+            self.x[self.iTc] = self.T_amb
+            self._initialized = False
+        else:
+            measured = float(measured_temperature)
+            if not np.isfinite(measured):
+                raise ValueError("measured temperature must be finite")
+            self.x[self.iTc] = measured
+            self._initialized = True
+        self.P = np.eye(self.n) * 5.0
+        return self.x.copy() if self._initialized else None
+
     def update(self, normalized_combustion_load, y_measured):
         load = _normalized_load(normalized_combustion_load)
+        if not self._initialized:
+            return self.reset(load, y_measured)
         Ad, Bd, bd = self._discretize()
         # predict
         self.x = Ad @ self.x + Bd.flatten() * load + bd.flatten()
@@ -469,5 +568,6 @@ class GreyBoxEKF:
         S = self.H @ self.P @ self.H.T + self.Rkf
         K = (self.P @ self.H.T) / S
         self.x = self.x + K.flatten() * (y_measured - (self.H @ self.x)[0])
-        self.P = (np.eye(self.n) - K @ self.H) @ self.P
+        self.P = _joseph_covariance(self.P, K, self.H, self.Rkf)
+        _project_delay_covariance(self.x, self.P, self.Qkf, self.n_delay)
         return self.x

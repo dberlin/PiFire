@@ -45,6 +45,7 @@ CONFIG = dict(
 class FakeEstimator:
     def __init__(self) -> None:
         self.calls: list[tuple[float, float]] = []
+        self.reset_calls: list[tuple[float, float | None, tuple[float, ...] | None, float]] = []
         self.closed = 0
         self.state = np.array([0.1] * 8 + [72.0, 0.03], dtype=float)
 
@@ -54,6 +55,31 @@ class FakeEstimator:
         y_measured: float,
     ) -> npt.NDArray[np.float64]:
         self.calls.append((normalized_combustion_load, y_measured))
+        return self.state.copy()
+
+    def reset(
+        self,
+        normalized_combustion_load: float,
+        measured_temperature: float | None,
+        *,
+        delay_states: tuple[float, ...] | None = None,
+        disturbance: float = 0.0,
+    ) -> npt.NDArray[np.float64]:
+        self.reset_calls.append(
+            (
+                normalized_combustion_load,
+                measured_temperature,
+                delay_states,
+                disturbance,
+            )
+        )
+        if delay_states is not None:
+            self.state[:8] = delay_states
+        else:
+            self.state[:8] = normalized_combustion_load
+        if measured_temperature is not None:
+            self.state[8] = measured_temperature
+        self.state[9] = disturbance
         return self.state.copy()
 
     def close(self) -> None:
@@ -160,6 +186,7 @@ class FakeSolver:
         self.results = list(results)
         self.calls: list[tuple[npt.NDArray[np.float64], float | int, float | int, float | int]] = []
         self.closed = 0
+        self.resets = 0
 
     def solve(
         self,
@@ -181,6 +208,9 @@ class FakeSolver:
         if isinstance(result, BaseException):
             raise result
         return result
+
+    def reset(self) -> None:
+        self.resets += 1
 
     def close(self) -> None:
         self.closed += 1
@@ -425,6 +455,64 @@ def test_success_uses_applied_feedback_first_native_command_and_allocates_fan():
     assert step.diagnostics.failure_state is MpcFailureState.SUCCESS
     assert step.diagnostics.applied_combustion_load == 0.5
     assert step.baseline_allocation is step.allocation
+
+
+def test_operating_state_handoff_preserves_live_control_and_cook_history():
+    source, source_estimator, _source_solver = make_core(results=(solve_result(5, 0.625),))
+    source.set_output(AppliedOutput(0.45, OutputSource.CONTROLLER, 1.0))
+    source.update(74.0)
+    target, target_estimator, target_solver = make_core()
+
+    target.adopt_operating_state(source.capture_operating_state())
+
+    assert target.set_point_c == 110.0
+    assert target.applied_combustion_load == 0.5
+    assert target.last_combustion_load == 0.625
+    assert tuple(target.history) == tuple(source.history)
+    assert target.estimate is not None
+    assert target.estimate[:8] == pytest.approx(source_estimator.state[:8])
+    assert target.estimate[8] == 74.0
+    assert target.estimate[9] == pytest.approx(source_estimator.state[9])
+    assert target_estimator.reset_calls == [
+        (
+            0.5,
+            74.0,
+            pytest.approx(tuple(source_estimator.state[:8])),
+            pytest.approx(0.03),
+        )
+    ]
+    assert target_solver.resets == 1
+
+
+def test_nonphysical_estimator_delay_state_holds_last_safe_command_without_native_solve():
+    failures: list[BaseException] = []
+
+    def active_probe(
+        _load: float,
+        _temperature: float,
+        _forecast,
+    ) -> CalibrationDecision:
+        return CalibrationDecision(True, 0.2, None, CalibrationProgress())
+
+    core, estimator, solver = make_core(
+        results=(solve_result(5, 0.625),),
+        on_failure=failures.append,
+        advance_calibration=active_probe,
+    )
+    core.update(74.0)
+    estimator.state[7] = 7.81
+
+    step = core.update(74.0)
+
+    assert len(solver.calls) == 1
+    assert step.diagnostics.failure_state is MpcFailureState.POLICY_EXCEPTION
+    assert step.diagnostics.raw_policy_firing_load is None
+    assert step.diagnostics.bounded_firing_load == pytest.approx(0.625)
+    assert step.cycle_ratio == pytest.approx(0.625 * U_MAX)
+    assert step.allocation is step.baseline_allocation
+    assert len(failures) == 1
+    assert isinstance(failures[0], ValueError)
+    assert "normalized delay state" in str(failures[0])
 
 
 def test_units_authority_equilibrium_adjustment_and_snapshot_are_explicit_inputs():
@@ -741,7 +829,7 @@ def test_default_callbacks_repeat_failure_without_repeat_log_and_expose_state(ca
 
     assert first.diagnostics.consecutive_policy_failures == 1
     assert second.diagnostics.consecutive_policy_failures == 2
-    assert caplog.text.count("native solver has failed") == 1
+    assert caplog.text.count("policy has failed") == 1
     assert core.estimator is estimator_factory.estimator
     assert core.solver is solver_factory.solver
     assert core.set_point_c == 100.0

@@ -197,12 +197,22 @@ MUTATIONS = [
         "M31 the Kalman default state seeds the wrong slot with ambient",
         MODEL,
         (
-            "            x0 = [0.0] * n_delay + [T_amb, 0.0]\n        self.x = np.array(x0, dtype=float)\n"
-            "        self.P = np.eye(n) * 5.0\n        self.n = n"
+            "            x0 = [0.0] * n_delay + [T_amb, 0.0]\n"
+            "        self.x = np.array(x0, dtype=float)\n"
+            "        self.P = np.eye(n) * 5.0\n"
+            "        self.n_delay = n_delay\n"
+            "        self.iTc = iTc\n"
+            "        self._initialized = initialized\n"
+            "        self.n = n"
         ),
         (
-            "            x0 = [0.0] * n_delay + [0.0, T_amb]\n        self.x = np.array(x0, dtype=float)\n"
-            "        self.P = np.eye(n) * 5.0\n        self.n = n"
+            "            x0 = [0.0] * n_delay + [0.0, T_amb]\n"
+            "        self.x = np.array(x0, dtype=float)\n"
+            "        self.P = np.eye(n) * 5.0\n"
+            "        self.n_delay = n_delay\n"
+            "        self.iTc = iTc\n"
+            "        self._initialized = initialized\n"
+            "        self.n = n"
         ),
     ),
     (
@@ -279,16 +289,12 @@ MUTATIONS = [
         MPC_CORE,
         (
             "            if self._consecutive_policy_failures:\n"
-            "                self._logger.info(\n"
-            '                    f"[mpc] native solver recovered after {self._consecutive_policy_failures} failed step(s)"\n'
-            "                )\n"
+            '                self._logger.info(f"[mpc] policy recovered after {self._consecutive_policy_failures} failed step(s)")\n'
             "            self._consecutive_policy_failures = 0"
         ),
         (
             "            if self._consecutive_policy_failures:\n"
-            "                self._logger.info(\n"
-            '                    f"[mpc] native solver recovered after {self._consecutive_policy_failures} failed step(s)"\n'
-            "                )"
+            '                self._logger.info(f"[mpc] policy recovered after {self._consecutive_policy_failures} failed step(s)")'
         ),
     ),
     # ---- the deadtime chain length ----------------------------------------

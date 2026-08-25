@@ -37,6 +37,12 @@ def main() -> int:
     )
 
     persisted: dict[str, object] = {}
+    source = Controller(mpc_config, "F", settings["cycle_data"])
+    source.set_target(control["primary_setpoint"])
+    source_snapshot = source.get_model_snapshot()
+    source.close()
+    if source_snapshot is None:
+        raise RuntimeError("source MPC owner did not produce a restorable checkpoint")
 
     def read_model(_key: str):
         if "state" not in persisted:
@@ -47,7 +53,10 @@ def main() -> int:
         persisted["state"] = value
 
     model_store = ControllerModelStore(reader=read_model, writer=write_model)
+    if not model_store.save("mpc", source_snapshot):
+        raise RuntimeError("source MPC checkpoint was not persisted")
     core = Controller(mpc_config, "F", settings["cycle_data"])
+    core.set_target(control["primary_setpoint"])
     completed_frames = 0
     observe_frame = core.observe_frame
 
@@ -76,6 +85,8 @@ def main() -> int:
             "pwm": 0,
         }
         mode.setup()
+        if core.active_control_pair.core.set_point_c != (control["primary_setpoint"] - 32.0) * 5.0 / 9.0:
+            raise RuntimeError("restored MPC owner lost the live Hold target")
         mode.state.metrics = {"id": "smoke-acados-hold"}
 
         clock_now = getattr(context.clock, "now", None)
@@ -89,8 +100,8 @@ def main() -> int:
 
         if completed_frames < 1:
             raise RuntimeError("Hold did not deliver a completed framed observation")
-        if not any(name in {"auger_on", "auger_off"} for name, _args in grill.calls):
-            raise RuntimeError("Hold did not actuate the auger")
+        if not any(name == "auger_on" for name, _args in grill.calls):
+            raise RuntimeError("Hold never commanded heat below setpoint")
         history = core.cook_history()
         if not history:
             raise RuntimeError("acados solve/applied-output feedback did not reach the controller")
@@ -105,6 +116,7 @@ def main() -> int:
         print(
             "acados Hold smoke passed: "
             f"frames={completed_frames} samples={len(history)} "
+            f"target_f={control['primary_setpoint']} "
             f"refit={checkpoint['cook_refit']['latest']} revision={checkpoint['revision']}"
         )
         return 0

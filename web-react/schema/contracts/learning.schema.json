@@ -1717,7 +1717,14 @@
           "type": "integer"
         },
         "distrust_ratio": {
-          "$ref": "#/$defs/FiniteNumber"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FiniteNumber"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "duty_segments": {
           "minimum": 0,

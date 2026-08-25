@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from controller.mpc_model import GreyBoxEKF, GreyBoxKF
 
@@ -15,6 +16,69 @@ P = {
     "n_delay": 4,
     "K_Q": 350.0,
 }
+
+HOT_START = {
+    "C_c": 320.0,
+    "h_amb": 0.5,
+    "T_amb": 20.0,
+    "t_step": 5.0,
+    "q_temp": 0.01,
+    "q_dist": 0.05,
+    "r_meas": 0.04,
+    "theta": 50.0,
+    "n_delay": 8,
+    "K_Q": 350.0,
+}
+
+
+def _hot_start_estimator(estimator_type, *, initialized: bool = False):
+    kwargs = dict(HOT_START)
+    if estimator_type is GreyBoxEKF:
+        kwargs["sigma"] = 1.4e-9
+    if initialized:
+        kwargs["x0"] = [0.0] * 8 + [20.0, 0.0]
+    return estimator_type(**kwargs)
+
+
+@pytest.mark.parametrize("estimator_type", [GreyBoxKF, GreyBoxEKF])
+def test_hot_takeover_seeds_physical_state_from_applied_load_and_measurement(estimator_type):
+    estimator = _hot_start_estimator(estimator_type)
+    measured_c = (175.4 - 32.0) * 5.0 / 9.0
+
+    state = estimator.update(0.189, measured_c)
+
+    assert state[:8] == pytest.approx([0.189] * 8)
+    assert state[8] == pytest.approx(measured_c)
+    assert state[9] == 0.0
+
+
+@pytest.mark.parametrize("estimator_type", [GreyBoxKF, GreyBoxEKF])
+def test_measurement_correction_cannot_create_nonphysical_delay_loads(estimator_type):
+    estimator = _hot_start_estimator(estimator_type, initialized=True)
+
+    state = estimator.update(0.0, (175.4 - 32.0) * 5.0 / 9.0)
+
+    assert np.all(state[:8] >= 0.0)
+    assert np.all(state[:8] <= 1.0)
+
+
+@pytest.mark.parametrize("estimator_type", [GreyBoxKF, GreyBoxEKF])
+def test_bound_projection_keeps_covariance_coherent_under_repeated_observation(estimator_type):
+    estimator = _hot_start_estimator(estimator_type, initialized=True)
+    measured_c = (175.4 - 32.0) * 5.0 / 9.0
+
+    first = estimator.update(0.0, measured_c).copy()
+    first_covariance = estimator.P.copy()
+    active = np.flatnonzero((first[:8] == 0.0) | (first[:8] == 1.0))
+    second = estimator.update(0.0, measured_c).copy()
+
+    assert active.size > 0
+    assert first_covariance[active, 8:] == pytest.approx(0.0)
+    assert first_covariance[8:, active] == pytest.approx(0.0)
+    assert np.all(second[:8] >= 0.0)
+    assert np.all(second[:8] <= 1.0)
+    assert estimator.P == pytest.approx(estimator.P.T)
+    assert np.linalg.eigvalsh(estimator.P).min() >= -1e-10
 
 
 def test_ekf_reduces_to_kf_when_sigma_zero():

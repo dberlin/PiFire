@@ -174,6 +174,16 @@ class MpcCalibrationRuntime:
             raise ValueError("calibration cancellation reason must be a non-empty string")
         self._operations.append(_Cancellation(reason))
 
+    def cancel_immediately(self, reason: str) -> CalibrationDecision:
+        """Abort an active probe before a failed controller result is published."""
+        if not isinstance(reason, str) or not reason:
+            raise ValueError("calibration cancellation reason must be a non-empty string")
+        self._operations.clear()
+        self._feedback.clear()
+        self._frame_results.clear()
+        self._decision = self._coordinator.cancel_probe(reason)
+        return self._decision
+
     def advance(
         self,
         baseline_q: float,

@@ -81,6 +81,7 @@ def test_grey_config_rejects_booleans_as_numbers(field: str) -> None:
         ("C_c", 0.0),
         ("h_amb", -0.01),
         ("theta", 0.0),
+        ("theta", 24.99),
         ("K_Q", 0.0),
         ("sigma", -0.01),
         ("temperature_weight", -0.01),

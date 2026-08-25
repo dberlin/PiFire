@@ -340,6 +340,26 @@ def test_the_integral_seed_is_a_seed_and_not_a_control_law(clock):
     assert sp.inter != pytest.approx((held - sp.center) / sp.ki)
 
 
+def test_new_target_reseeds_the_identified_hold_duty(clock):
+    import controller.pid_sp as mod
+
+    sp = mod.Controller({**CONFIG, "bias_from_model": False}, "F", dict(CYCLE_DATA))
+    sp.set_target(225.0)
+    sp.identifier.hold_duty = lambda u_max=1.0, target_f=None: 0.07
+    clock.t += 20.0
+    sp.update(220.0)
+    assert sp._integral_seeded
+
+    sp.set_target(300.0)
+    sp.identifier.hold_duty = lambda u_max=1.0, target_f=None: 0.1
+    for _ in range(2):
+        clock.t += 20.0
+        sp.update(300.0)
+
+    assert sp._bias() + sp.ki * sp.inter == pytest.approx(0.1)
+    assert sp._integral_seeded
+
+
 def test_no_identified_hold_duty_leaves_the_integral_alone(clock):
     sp = _controller("pid_sp", clock)
     sp.set_target(225.0)
@@ -470,6 +490,30 @@ def test_restore_does_not_refuse_on_a_setpoint_f_mismatch(clock):
     sp.set_target(600.0)  # wildly different from the snapshot's provenance
     assert sp.restore_model({"K": 800.0, "tau": 600.0, "theta": 40.0, "revision": 3, "setpoint_f": 225.0}) is True
     assert sp.get_model_snapshot()["K"] == 800.0
+
+
+def test_restore_retargets_ipdt_to_the_target_already_installed_by_runtime(clock):
+    sp = _controller("pid_sp", clock)
+    sp.set_target(225.0)
+
+    assert (
+        sp.restore_model(
+            {
+                "form": "ipdt",
+                "K_i": 0.46,
+                "c0": -0.033,
+                "theta": 90.0,
+                "revision": 7,
+                "identified_at_f": 450.0,
+            }
+        )
+        is True
+    )
+
+    model = sp.get_model_snapshot()
+    assert model["c0"] == pytest.approx(-0.033 * (225.0 - 70.0) / (450.0 - 70.0))
+    assert model["identified_at_f"] == 225.0
+    assert model["revision"] == 8
 
 
 def test_a_restored_model_is_active_on_the_first_tick(clock):

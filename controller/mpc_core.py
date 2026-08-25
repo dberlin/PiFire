@@ -89,6 +89,15 @@ class MpcEstimator(Protocol):
         y_measured: float,
     ) -> npt.NDArray[np.float64]: ...
 
+    def reset(
+        self,
+        normalized_combustion_load: float,
+        measured_temperature: float | None,
+        *,
+        delay_states: tuple[float, ...] | None = None,
+        disturbance: float = 0.0,
+    ) -> npt.NDArray[np.float64] | None: ...
+
 
 @runtime_checkable
 class MpcSolver(Protocol):
@@ -102,6 +111,8 @@ class MpcSolver(Protocol):
         q_previous: float,
         equilibrium_q: float,
     ) -> NativeSolve: ...
+
+    def reset(self) -> None: ...
 
 
 @runtime_checkable
@@ -164,6 +175,19 @@ class MpcStep:
     diagnostics: MpcTraceDiagnostics
     allocation: AllocationResult
     baseline_allocation: AllocationResult
+
+
+@dataclass(frozen=True, slots=True)
+class MpcOperatingState:
+    """Live physical/control state that survives numerical pair replacement."""
+
+    set_point_c: float
+    applied_combustion_load: float
+    last_safe_combustion_load: float
+    measured_temperature_c: float | None
+    delay_states: tuple[float, ...] | None
+    disturbance: float
+    history: tuple[tuple[float, float, float], ...]
 
 
 def _authorized() -> bool:
@@ -297,6 +321,7 @@ class MpcCore:
         self._consecutive_policy_failures = 0
         self._native_failure_diagnostics: SolverDiagnostics | None = None
         self._history: collections.deque[tuple[float, float, float]] = collections.deque(maxlen=_HISTORY_MAX)
+        self._last_measured_temperature_c: float | None = None
         self._model_revision = revision
 
     @classmethod
@@ -454,6 +479,19 @@ class MpcCore:
             )
         )
 
+    @staticmethod
+    def _validated_estimate(
+        estimate: npt.ArrayLike,
+        n_delay: int,
+    ) -> npt.NDArray[np.float64]:
+        state = np.asarray(estimate, dtype=float)
+        if state.shape != (n_delay + 2,) or not np.isfinite(state).all():
+            raise ValueError("MPC estimator state must have the configured shape and contain only finite values")
+        delay_states = state[:n_delay]
+        if np.any(delay_states < 0.0) or np.any(delay_states > 1.0):
+            raise ValueError("MPC estimator normalized delay state must be between 0 and 1")
+        return state
+
     def _validated_native_command(self, solve: NativeSolve) -> float:
         horizon = _int_setting(self.config, "n_horizon")
         sequence = np.asarray(solve.sequence_q, dtype=float)
@@ -490,29 +528,39 @@ class MpcCore:
             raise RuntimeError("MPC activation pair is not durably authorized")
         measured_c = to_celsius(current, self.units)
         applied_load = self._applied_combustion_load
-        x_hat = self._estimator.update(applied_load, measured_c)
-        self._x_hat = x_hat
-        state_values = tuple(float(value) for value in np.asarray(x_hat).reshape(-1))
-        state_names = tuple(f"q{index}" for index in range(_int_setting(self.config, "n_delay"))) + ("T_c", "d")
-        disturbance = state_values[-1]
+        n_delay = _int_setting(self.config, "n_delay")
+        state_names = tuple(f"q{index}" for index in range(n_delay)) + ("T_c", "d")
+        self._last_measured_temperature_c = measured_c
         self._history.append((time.time(), measured_c, applied_load))
         revision, metadata = self._model_authority()
         model_provenance = "adopted" if metadata is not None else "configured"
         identified = model_is_identified(self.config, metadata)
-        feasibility = feasibility_report(
-            self.config if identified else None,
-            self._set_point_c,
-            disturbance=disturbance,
-            model_revision=revision if identified else None,
-            model_provenance=model_provenance if identified else None,
-        )
-        self._last_feasibility = feasibility
-        equilibrium = self._equilibrium_load(self._set_point_c, disturbance, identified)
 
         solve_start = time.monotonic()
         failure_state = MpcFailureState.SUCCESS
         failure_error: BaseException | None = None
+        feasibility = self._last_feasibility
+        equilibrium: float | None = None
+        residual_move: float | None = None
+        raw_firing_load: float | None = None
+        estimate_valid = False
         try:
+            x_hat = self._validated_estimate(
+                self._estimator.update(applied_load, measured_c),
+                n_delay,
+            )
+            estimate_valid = True
+            self._x_hat = x_hat
+            disturbance = float(x_hat[-1])
+            feasibility = feasibility_report(
+                self.config if identified else None,
+                self._set_point_c,
+                disturbance=disturbance,
+                model_revision=revision if identified else None,
+                model_provenance=model_provenance if identified else None,
+            )
+            self._last_feasibility = feasibility
+            equilibrium = self._equilibrium_load(self._set_point_c, disturbance, identified)
             solve = self._solver.solve(
                 x_hat,
                 setpoint_c=self._set_point_c,
@@ -520,13 +568,20 @@ class MpcCore:
                 equilibrium_q=equilibrium,
             )
             combustion_load = self._validated_native_command(solve)
-            raw_firing_load: float | None = combustion_load
-            residual_move: float | None = combustion_load - equilibrium
+            raw_firing_load = combustion_load
+            residual_move = combustion_load - equilibrium
         except Exception as error:
             failure_state = MpcFailureState.POLICY_EXCEPTION
             failure_error = error
             if isinstance(error, SolverError):
                 self._native_failure_diagnostics = error.diagnostics
+            if not estimate_valid:
+                try:
+                    reset_estimate = self._estimator.reset(applied_load, measured_c)
+                    self._x_hat = None if reset_estimate is None else self._validated_estimate(reset_estimate, n_delay)
+                except Exception as reset_error:
+                    self._x_hat = None
+                    error.add_note(f"MPC estimator reset also failed: {reset_error!r}")
             combustion_load = self._last_combustion_load
             equilibrium = None
             residual_move = None
@@ -534,21 +589,25 @@ class MpcCore:
         finally:
             solve_end = time.monotonic()
 
+        trace_estimate = self._x_hat
+        if trace_estimate is None:
+            trace_estimate = np.array([applied_load] * n_delay + [measured_c, 0.0], dtype=float)
+        state_values = tuple(float(value) for value in trace_estimate)
+        disturbance = state_values[-1]
+
         if failure_state is MpcFailureState.SUCCESS:
             if self._consecutive_policy_failures:
-                self._logger.info(
-                    f"[mpc] native solver recovered after {self._consecutive_policy_failures} failed step(s)"
-                )
+                self._logger.info(f"[mpc] policy recovered after {self._consecutive_policy_failures} failed step(s)")
             self._consecutive_policy_failures = 0
         else:
             self._consecutive_policy_failures += 1
             failure_count = self._consecutive_policy_failures
             if failure_count == 1 or failure_count in (10, 60) or failure_count % 300 == 0:
                 self._logger.error(
-                    f"[mpc] native solver has failed {failure_count} consecutive step(s) "
+                    f"[mpc] policy has failed {failure_count} consecutive step(s) "
                     f"({type(failure_error).__name__}: {failure_error}); holding normalized "
                     f"combustion load {combustion_load:.3f}. The grill is not being controlled "
-                    "to setpoint -- check the published acados runtime and model configuration."
+                    "to setpoint -- check estimator state, the published acados runtime, and model configuration."
                 )
             if failure_error is None:
                 raise RuntimeError("policy failure did not retain its cause")
@@ -568,10 +627,14 @@ class MpcCore:
             fan_max_pct=fan_max,
             enable_fan=fan_enabled,
         )
-        calibration = self._advance_calibration(
-            combustion_load,
-            measured_c,
-            self._forecast_calibration,
+        calibration = (
+            self._advance_calibration(
+                combustion_load,
+                measured_c,
+                self._forecast_calibration,
+            )
+            if failure_state is MpcFailureState.SUCCESS
+            else _INACTIVE_CALIBRATION
         )
         requested_load = float(np.clip(combustion_load + calibration.probe_q, 0.0, 1.0))
         allocation = (
@@ -628,6 +691,47 @@ class MpcCore:
 
     def snapshot_parameters(self) -> Mapping[str, JsonValue]:
         return {key: self.config[key] for key in MODEL_PARAMETER_KEYS}
+
+    def capture_operating_state(self) -> MpcOperatingState:
+        estimate = self._x_hat
+        n_delay = _int_setting(self.config, "n_delay")
+        delay_states = None if estimate is None else tuple(float(value) for value in estimate[:n_delay])
+        disturbance = 0.0 if estimate is None else float(estimate[-1])
+        return MpcOperatingState(
+            set_point_c=self._set_point_c,
+            applied_combustion_load=self._applied_combustion_load,
+            last_safe_combustion_load=self._last_combustion_load,
+            measured_temperature_c=self._last_measured_temperature_c,
+            delay_states=delay_states,
+            disturbance=disturbance,
+            history=tuple(self._history),
+        )
+
+    def adopt_operating_state(self, state: MpcOperatingState) -> None:
+        if not isinstance(state, MpcOperatingState):
+            raise TypeError("state must be an MpcOperatingState")
+        n_delay = _int_setting(self.config, "n_delay")
+        if state.delay_states is not None and len(state.delay_states) != n_delay:
+            raise ValueError("operating state delay chain does not match configured MPC model")
+        self._set_point_c = state.set_point_c
+        self._applied_combustion_load = state.applied_combustion_load
+        self._last_combustion_load = state.last_safe_combustion_load
+        self._last_raw_combustion_load = state.last_safe_combustion_load
+        self._last_equilibrium_load = None
+        self._last_residual_load = None
+        self._last_feasibility = None
+        self._last_measured_temperature_c = state.measured_temperature_c
+        self._history.clear()
+        self._history.extend(state.history)
+        self._x_hat = self._estimator.reset(
+            state.applied_combustion_load,
+            state.measured_temperature_c,
+            delay_states=state.delay_states,
+            disturbance=state.disturbance,
+        )
+        self._solver.reset()
+        self._consecutive_policy_failures = 0
+        self._native_failure_diagnostics = None
 
     def clear_estimate(self) -> None:
         self._x_hat = None

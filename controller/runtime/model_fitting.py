@@ -31,7 +31,10 @@ FITTED_PARAMETERS = ("C_c", "K_Q", "theta")
 FIT_LOG_BOUNDS = {
     "C_c": (math.log(1.0), math.log(1e6)),
     "K_Q": (math.log(1e-3), math.log(1e4)),
-    "theta": (math.log(1e-9), math.log(1200.0)),
+    # The generated 25-second RK4 map is physical only at theta >= 25.
+    # Keep this literal standard-library-only; this module must remain safe to
+    # import before the spawned worker constrains native math libraries.
+    "theta": (math.log(25.0), math.log(1200.0)),
 }
 MAX_FIT_OBSERVATIONS = 8640
 _THREAD_VARIABLES = (

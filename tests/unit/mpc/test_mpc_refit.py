@@ -210,7 +210,7 @@ def test_an_uninformative_cook_is_refused_because_it_determines_nothing():
         identifiability=2.0,
     )
     assert permitted.accepted is True
-    assert fitted["theta"] < 0.2 * learned_theta
+    assert fitted["theta"] < 0.5 * learned_theta
 
 
 def _heatup_only(rows, seed=0, noise=0.5):
