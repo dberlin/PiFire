@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 """FT232H USB adapter backend, via pyftdi directly (not Adafruit Blinka).
 
 One pyftdi.i2c.I2cController per FT232H (cached by url) exposes the I2C bus

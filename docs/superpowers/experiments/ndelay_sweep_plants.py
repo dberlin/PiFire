@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 """
 *****************************************
  PiFire MPC Grey-box Sweep Support: plants, scenarios, jitted twin

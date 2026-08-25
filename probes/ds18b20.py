@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 """
 *****************************************
 PiFire Probes DS18B20 Module

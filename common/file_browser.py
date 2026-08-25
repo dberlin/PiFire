@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 PiFire - Managed File Folder Browsing
 =====================================

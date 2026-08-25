@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 # *****************************************
 # PiFire Generic x86 Platform Interface Library
 # *****************************************

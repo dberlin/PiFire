@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 """
 *****************************************
  PiFire MPC Fit-Simulator Sub-step Convergence

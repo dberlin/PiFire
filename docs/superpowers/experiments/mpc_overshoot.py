@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Setpoint-step overshoot vs rise-time on the brisket scenario (225F hold, step to
 275F). The current controller climbs fast but overshoots ~17F and sits hot for

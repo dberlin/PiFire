@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 """
 *****************************************
 PiFire Numato 4 Channel USB Solid State Relay Module Driver

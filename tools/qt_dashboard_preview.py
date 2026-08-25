@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Standalone FPS / fidelity preview for the redesigned PiFire dashboard.
 
 Loads tools/qt_dashboard_preview.qml with a built-in simulator (no Redis, no

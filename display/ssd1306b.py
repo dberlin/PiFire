@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 *****************************************
 PiFire Display Interface Library

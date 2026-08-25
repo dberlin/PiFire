@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 """FT232H's sibling: the MCP2221 USB-I2C adapter backend.
 
 Uses EasyMCP2221.Device rather than Blinka's MCP2221 backend, which is a

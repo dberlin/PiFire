@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 """
 *****************************************
  PiFire MPC Promotion Signal: what separates a fit worth promoting from one that is not

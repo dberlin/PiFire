@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 """
 *****************************************
 PiFire Probes MCP9600 Adafruit Module

@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 # *****************************************
 # PiFire Raspberry Pi Platform Interface Library
 # *****************************************

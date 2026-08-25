@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 # *****************************************
 # PiFire FT232H IO-Triggered Relay Platform Interface Library
 # *****************************************

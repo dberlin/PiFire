@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 """
 *****************************************
  PiFire Experiment Guard: pinned to the two-lump grey box

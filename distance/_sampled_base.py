@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 # *****************************************
 # PiFire Background-Sampled Hopper Level Base
 # *****************************************

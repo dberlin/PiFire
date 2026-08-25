@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Does dropping the temperature regressor rescue online identification?
 
 The shipped FOPDT identifier recovers a negative gain AND a negative time

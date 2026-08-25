@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Controller comparison on the NOW-REALISTIC plant (light wind), using the PRODUCTION
 controller for the MPC variants:

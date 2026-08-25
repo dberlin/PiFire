@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 """Pellet-database actions, shared by the Socket.IO app-data channel and the
 REST API.
 

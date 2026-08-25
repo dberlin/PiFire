@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 """What did reducing the grey box from five free parameters to three buy,
 closed-loop, on a three-hour 325 F hold?
 

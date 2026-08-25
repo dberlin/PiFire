@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 """
 *****************************************
 PiFire Probes MAX31856 Adafruit Module

@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 # *****************************************
 # PiFire ToF (Time-of-Flight) Hopper Level Base
 # *****************************************

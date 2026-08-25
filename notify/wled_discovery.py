@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 WLED Device Discovery Module
 Discovers WLED devices on the network using mDNS/Bonjour and HTTP queries

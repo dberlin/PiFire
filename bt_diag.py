@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Bluetooth BLE diagnostic script for PiFire.
 Run this on the Raspberry Pi to identify why BLE scanning may not be working.

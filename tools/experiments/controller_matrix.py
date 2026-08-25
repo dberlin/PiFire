@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Scenario matrix for a controller against GrillSim.
 
 Drives a controller core directly -- no Hold mode or datastore -- while

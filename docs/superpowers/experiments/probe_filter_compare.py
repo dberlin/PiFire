@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 """
 Compare probe smoothing filters on synthetic traces at the real loop rate.
 

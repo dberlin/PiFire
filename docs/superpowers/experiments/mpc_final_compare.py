@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Final apples-to-apples comparison on the realistic plant (H=420 ~ 600F max,
 deadtime=20, fan lever, wind, sensor lag 4.5; fixed fan 100%). Same seed.

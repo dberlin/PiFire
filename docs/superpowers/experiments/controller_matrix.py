@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Stable regeneration entry point for the controller matrix evidence."""
 
 import sys

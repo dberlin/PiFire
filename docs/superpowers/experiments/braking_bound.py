@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 """
 *****************************************
  PiFire MPC Braking Distance: the bound over the model's dead-time shortfall

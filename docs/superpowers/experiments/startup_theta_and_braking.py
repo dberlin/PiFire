@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Dead time from the startup ramp, and what it buys on the approach.
 
 `ipdt_vs_fopdt.py` shows dead time is not recoverable from passive closed-loop

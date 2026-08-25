@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 PINNED TO THE TWO-LUMP GREY BOX (model schema 1). controller/mpc_model.py
 now implements a single chamber lump, so the numbers below describe a model

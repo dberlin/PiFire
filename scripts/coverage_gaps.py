@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Turn a coverage.json baseline into a risk-ranked gap report.
 
 Usage:

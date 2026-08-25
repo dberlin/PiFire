@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 """Grey-box MPC control through the repository-published acados runtime.
 
 The active controller owns one EKF/KF estimator and one native solver.  The

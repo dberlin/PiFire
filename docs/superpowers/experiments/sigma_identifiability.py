@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Why `controller/update_mpc.py` does not fit the radiative coefficient.
 

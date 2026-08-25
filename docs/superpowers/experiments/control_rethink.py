@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 A fresh look at why 325 F is not held on the realistic grill plant.
 

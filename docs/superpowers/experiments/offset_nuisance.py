@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 """Is a per-cook nuisance parameter worth a free parameter?
 
 A parameter-parsimony exploration found that freeing a constant disturbance `d`,

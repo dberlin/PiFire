@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """PiFire Display Process -- renders from the datastore, independent of the controller.
 
 Note: this file cannot be named display.py -- a top-level display/ package

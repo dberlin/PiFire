@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """PiFire display launcher -- run the display process inside a Wayland kiosk.
 
 The QtQuick display backends (module names starting with ``qtquick_``) build a

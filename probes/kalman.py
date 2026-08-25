@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 """
 Constant-velocity Kalman filter for smoothing probe temperature readings.
 
