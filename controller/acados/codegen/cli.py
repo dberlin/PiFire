@@ -50,34 +50,22 @@ def _default_generators() -> dict[str, Generator]:
     from .grey_box_ocp import generate_grey_box_solver
 
     return {
-        "grey_box": lambda directory: generate_grey_box_solver(
-            export_directory=directory
-        ),
+        "grey_box": lambda directory: generate_grey_box_solver(export_directory=directory),
     }
 
 
 def _tree_bytes(root: Path) -> dict[str, bytes]:
     if not root.exists():
         return {}
-    return {
-        path.relative_to(root).as_posix(): path.read_bytes()
-        for path in root.rglob("*")
-        if path.is_file()
-    }
+    return {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()}
 
 
 def compare_trees(expected: Path, actual: Path) -> tuple[FileDifference, ...]:
     """Return deterministic relative byte differences from expected to actual."""
     expected_files = _tree_bytes(expected)
     actual_files = _tree_bytes(actual)
-    differences = [
-        FileDifference("added", path)
-        for path in sorted(actual_files.keys() - expected_files.keys())
-    ]
-    differences.extend(
-        FileDifference("removed", path)
-        for path in sorted(expected_files.keys() - actual_files.keys())
-    )
+    differences = [FileDifference("added", path) for path in sorted(actual_files.keys() - expected_files.keys())]
+    differences.extend(FileDifference("removed", path) for path in sorted(expected_files.keys() - actual_files.keys()))
     differences.extend(
         FileDifference("changed", path)
         for path in sorted(expected_files.keys() & actual_files.keys())
@@ -94,9 +82,7 @@ def _platform_directory_exchange(left: Path, right: Path) -> None:
     if sys.platform.startswith("linux"):
         renameat2 = getattr(library, "renameat2", None)
         if renameat2 is None:
-            raise RegenerationError(
-                "atomic directory exchange is unsupported: renameat2 unavailable"
-            )
+            raise RegenerationError("atomic directory exchange is unsupported: renameat2 unavailable")
         renameat2.argtypes = [
             ctypes.c_int,
             ctypes.c_char_p,
@@ -109,16 +95,12 @@ def _platform_directory_exchange(left: Path, right: Path) -> None:
     elif sys.platform == "darwin":
         renamex_np = getattr(library, "renamex_np", None)
         if renamex_np is None:
-            raise RegenerationError(
-                "atomic directory exchange is unsupported: renamex_np unavailable"
-            )
+            raise RegenerationError("atomic directory exchange is unsupported: renamex_np unavailable")
         renamex_np.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
         renamex_np.restype = ctypes.c_int
         result = renamex_np(left_bytes, right_bytes, 2)
     else:
-        raise RegenerationError(
-            f"atomic directory exchange is unsupported on {sys.platform}"
-        )
+        raise RegenerationError(f"atomic directory exchange is unsupported on {sys.platform}")
     if result != 0:
         error_number = ctypes.get_errno()
         raise OSError(
@@ -130,9 +112,7 @@ def _platform_directory_exchange(left: Path, right: Path) -> None:
 
 def _probe_directory_exchange(parent: Path) -> None:
     """Fail before target mutation if this filesystem cannot exchange directories."""
-    probe_root = Path(
-        tempfile.mkdtemp(prefix=".acados-exchange-probe-", dir=parent)
-    )
+    probe_root = Path(tempfile.mkdtemp(prefix=".acados-exchange-probe-", dir=parent))
     left = probe_root / "left"
     right = probe_root / "right"
     left.mkdir()
@@ -140,9 +120,7 @@ def _probe_directory_exchange(parent: Path) -> None:
     try:
         _platform_directory_exchange(left, right)
     except (OSError, RegenerationError) as error:
-        raise RegenerationError(
-            f"atomic directory exchange is unsupported for {parent}: {error}"
-        ) from error
+        raise RegenerationError(f"atomic directory exchange is unsupported for {parent}: {error}") from error
     finally:
         shutil.rmtree(probe_root)
 
@@ -176,9 +154,7 @@ def _atomic_replace_tree(staged: Path, target: Path) -> None:
     """Commit the complete generated tree with one atomic directory exchange."""
     target_parent = target.parent
     if not target.is_dir():
-        raise RegenerationError(
-            f"atomic directory exchange requires existing target tree: {target}"
-        )
+        raise RegenerationError(f"atomic directory exchange requires existing target tree: {target}")
     _probe_directory_exchange(target_parent)
     transaction = target_parent / f".{target.name}-stage-{uuid4().hex}"
     shutil.copytree(staged, transaction)
@@ -213,9 +189,7 @@ def _populate_staged_tree(
         destination = staged / solver
         result = Path(generators[solver](destination)).resolve()
         if result != destination.resolve():
-            raise RegenerationError(
-                f"{solver} generator returned {result}, expected {destination.resolve()}"
-            )
+            raise RegenerationError(f"{solver} generator returned {result}, expected {destination.resolve()}")
     manifest = create_manifest(
         repository,
         staged,
@@ -245,15 +219,11 @@ def regenerate(
         raise RegenerationError("a staging destination is valid only in stage mode")
     repository = Path(repository_root).resolve()
     target = repository / "native/generated"
-    resolved_environment = (
-        collect_environment(repository) if environment is None else dict(environment)
-    )
+    resolved_environment = collect_environment(repository) if environment is None else dict(environment)
     validate_environment(resolved_environment)
     resolved_generators = dict(generators or _default_generators())
     if set(resolved_generators) != set(_SOLVER_NAMES):
-        raise RegenerationError(
-            f"generators must define exactly {', '.join(_SOLVER_NAMES)}"
-        )
+        raise RegenerationError(f"generators must define exactly {', '.join(_SOLVER_NAMES)}")
 
     if mode == "stage":
         assert staging is not None
@@ -298,9 +268,7 @@ def regenerate(
         return 0
 
 
-EquationEvaluator = Callable[
-    [tuple[float, ...], float, tuple[float, ...]], tuple[float, ...]
-]
+EquationEvaluator = Callable[[tuple[float, ...], float, tuple[float, ...]], tuple[float, ...]]
 
 
 def _reference_discrete_map(
@@ -311,22 +279,13 @@ def _reference_discrete_map(
     def rhs(current: tuple[float, ...]) -> tuple[float, ...]:
         C_c, h_amb, T_amb, theta, K_Q, sigma = parameters[:6]
         equilibrium_q = parameters[7]
-        derivatives = [
-            (equilibrium_q + residual - current[0]) / (theta / 8.0)
-        ]
-        derivatives.extend(
-            (current[index - 1] - current[index]) / (theta / 8.0)
-            for index in range(1, 8)
-        )
+        derivatives = [(equilibrium_q + residual - current[0]) / (theta / 8.0)]
+        derivatives.extend((current[index - 1] - current[index]) / (theta / 8.0) for index in range(1, 8))
         derivatives.append(
             (
                 K_Q * current[7]
                 - h_amb * (current[8] - T_amb)
-                - sigma
-                * (
-                    (current[8] + 273.15) ** 4
-                    - (T_amb + 273.15) ** 4
-                )
+                - sigma * ((current[8] + 273.15) ** 4 - (T_amb + 273.15) ** 4)
                 + current[9]
             )
             / C_c
@@ -341,25 +300,15 @@ def _reference_discrete_map(
         k2 = rhs(tuple(x + 0.5 * step * k for x, k in zip(current, k1)))
         k3 = rhs(tuple(x + 0.5 * step * k for x, k in zip(current, k2)))
         k4 = rhs(tuple(x + step * k for x, k in zip(current, k3)))
-        current = tuple(
-            x + step * (a + 2.0 * b + 2.0 * c + d) / 6.0
-            for x, a, b, c, d in zip(current, k1, k2, k3, k4)
-        )
+        current = tuple(x + step * (a + 2.0 * b + 2.0 * c + d) / 6.0 for x, a, b, c, d in zip(current, k1, k2, k3, k4))
     return (*current, residual)
 
 
-def _compiled_equation_evaluator(
-    staged: Path, temporary: Path
-) -> EquationEvaluator:
-    source = (
-        staged
-        / "grey_box/pifire_grey_model/pifire_grey_dyn_disc_phi_fun.c"
-    )
+def _compiled_equation_evaluator(staged: Path, temporary: Path) -> EquationEvaluator:
+    source = staged / "grey_box/pifire_grey_model/pifire_grey_dyn_disc_phi_fun.c"
     if not source.is_file():
         raise RegenerationError(f"staged dynamics source is missing: {source}")
-    library_path = temporary / (
-        "equation.dylib" if sys.platform == "darwin" else "equation.so"
-    )
+    library_path = temporary / ("equation.dylib" if sys.platform == "darwin" else "equation.so")
     subprocess.run(
         (
             os.environ.get("CC", "cc"),
@@ -399,14 +348,10 @@ def _compiled_equation_evaluator(
             ctypes.cast(residual_array, double_pointer),
             ctypes.cast(parameter_array, double_pointer),
         )
-        results = (double_pointer * 1)(
-            ctypes.cast(output_array, double_pointer)
-        )
+        results = (double_pointer * 1)(ctypes.cast(output_array, double_pointer))
         status = function(arguments, results, None, None, 0)
         if status != 0:
-            raise RegenerationError(
-                f"staged dynamics evaluation failed with status {status}"
-            )
+            raise RegenerationError(f"staged dynamics evaluation failed with status {status}")
         return tuple(float(value) for value in output_array)
 
     return evaluate
@@ -436,8 +381,7 @@ def _run_equation_parity(evaluator: EquationEvaluator) -> None:
         expected = _reference_discrete_map(state, residual, parameters)
         actual = evaluator(state, residual, parameters)
         if len(actual) != len(expected) or any(
-            not math.isclose(left, right, rel_tol=1e-10, abs_tol=1e-10)
-            for left, right in zip(actual, expected)
+            not math.isclose(left, right, rel_tol=1e-10, abs_tol=1e-10) for left, right in zip(actual, expected)
         ):
             raise RegenerationError("staged generated equation parity mismatch")
 
@@ -450,12 +394,8 @@ def validate_staged_equation_parity(
     if evaluator is not None:
         _run_equation_parity(evaluator)
         return
-    with tempfile.TemporaryDirectory(
-        prefix="acados-equation-parity-"
-    ) as temporary:
-        resolved = _compiled_equation_evaluator(
-            Path(staged).resolve(), Path(temporary)
-        )
+    with tempfile.TemporaryDirectory(prefix="acados-equation-parity-") as temporary:
+        resolved = _compiled_equation_evaluator(Path(staged).resolve(), Path(temporary))
         _run_equation_parity(resolved)
 
 

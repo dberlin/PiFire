@@ -57,8 +57,7 @@ def _rhs_terms(state10: Any, residual: Any, parameters: Any) -> tuple[Any, ...]:
 
     delay_derivatives = [(q_total - state10[0]) / delay_time_constant]
     delay_derivatives.extend(
-        (state10[index - 1] - state10[index]) / delay_time_constant
-        for index in range(1, GREY_DELAY_STATES)
+        (state10[index - 1] - state10[index]) / delay_time_constant for index in range(1, GREY_DELAY_STATES)
     )
     chamber_derivative = (
         K_Q * state10[7]
@@ -94,22 +93,14 @@ def _numeric_inputs(
     if state.shape != (GREY_STATE_SIZE,):
         raise ValueError(f"state10 must have shape ({GREY_STATE_SIZE},)")
     if parameter_values.shape != (len(GREY_PARAMETER_NAMES),):
-        raise ValueError(
-            f"parameters must have shape ({len(GREY_PARAMETER_NAMES)},)"
-        )
+        raise ValueError(f"parameters must have shape ({len(GREY_PARAMETER_NAMES)},)")
     return state, float(residual), parameter_values
 
 
-def grey_box_rhs(
-    state10: npt.ArrayLike, residual: float, parameters: npt.ArrayLike
-) -> FloatArray:
+def grey_box_rhs(state10: npt.ArrayLike, residual: float, parameters: npt.ArrayLike) -> FloatArray:
     """Evaluate the ten-state continuous physical RHS numerically."""
-    state, residual_value, parameter_values = _numeric_inputs(
-        state10, residual, parameters
-    )
-    return np.asarray(
-        _rhs_terms(state, residual_value, parameter_values), dtype=np.float64
-    )
+    state, residual_value, parameter_values = _numeric_inputs(state10, residual, parameters)
+    return np.asarray(_rhs_terms(state, residual_value, parameter_values), dtype=np.float64)
 
 
 def grey_box_discrete_map(
@@ -119,9 +110,7 @@ def grey_box_discrete_map(
     parameters: npt.ArrayLike,
 ) -> FloatArray:
     """Advance eight fixed RK4 substeps and store the applied residual."""
-    state, residual_value, parameter_values = _numeric_inputs(
-        state10, residual, parameters
-    )
+    state, residual_value, parameter_values = _numeric_inputs(state10, residual, parameters)
     float(previous_residual)
     physical_next = _rk4_physical_map(
         state,
@@ -163,6 +152,8 @@ def _default_parameter_values(config: GreyBoxMPCConfig) -> FloatArray:
         ],
         dtype=np.float64,
     )
+
+
 def normalize_generated_tree(
     directory: str | Path,
     *,
@@ -191,11 +182,7 @@ def normalize_generated_tree(
         for variable, replacement in cmake_replacements.items():
             marker = f"set({variable} "
             if stripped.startswith(marker):
-                suffix = (
-                    stripped[len(marker) :].split(" CACHE ", 1)[1]
-                    if " CACHE " in stripped
-                    else None
-                )
+                suffix = stripped[len(marker) :].split(" CACHE ", 1)[1] if " CACHE " in stripped else None
                 line = f"{indent}{marker}{replacement}"
                 if suffix is not None:
                     line += f" CACHE {suffix}"
@@ -209,9 +196,7 @@ def normalize_generated_tree(
     if makefile_path.exists():
         makefile_lines = []
         source_makefile_lines = makefile_path.read_text().splitlines()
-        inserted_portable_paths = any(
-            line.startswith("GENERATED_DIR :=") for line in source_makefile_lines
-        )
+        inserted_portable_paths = any(line.startswith("GENERATED_DIR :=") for line in source_makefile_lines)
         for line in source_makefile_lines:
             if line.startswith("INCLUDE_PATH = "):
                 if not inserted_portable_paths:
@@ -221,10 +206,7 @@ def normalize_generated_tree(
                             "ACADOS_SOURCE_DIRECTORY ?= <ACADOS_SOURCE_DIRECTORY>",
                             "ACADOS_BUILD_DIRECTORY ?= <ACADOS_BUILD_DIRECTORY>",
                             "PYTHON ?= python3",
-                            (
-                                "NUMPY_INCLUDE ?= $(shell $(PYTHON) -c "
-                                "'import numpy; print(numpy.get_include())')"
-                            ),
+                            ("NUMPY_INCLUDE ?= $(shell $(PYTHON) -c 'import numpy; print(numpy.get_include())')"),
                             (
                                 "PYTHON_INCLUDE ?= $(shell $(PYTHON) -c "
                                 "'import sysconfig; print(sysconfig.get_paths()[\"include\"])')"
@@ -283,9 +265,7 @@ def normalize_generated_tree(
                 break
         if match is not None:
             relative_path = path.relative_to(generated_directory).as_posix()
-            raise ValueError(
-                f"unrecognized absolute path in {relative_path}: {match.group(0)}"
-            )
+            raise ValueError(f"unrecognized absolute path in {relative_path}: {match.group(0)}")
 
 
 def generate_grey_box_solver(
@@ -304,8 +284,6 @@ def generate_grey_box_solver(
     destination = Path(ocp.code_gen_options.code_export_directory)
     normalize_generated_tree(destination)
     return destination
-
-
 
 
 def build_grey_box_ocp(
@@ -373,11 +351,7 @@ def build_grey_box_ocp(
     ocp.solver_options.nlp_solver_warm_start_first_qp = True
     ocp.solver_options.print_level = 0
 
-    destination = (
-        Path(export_directory).resolve()
-        if export_directory is not None
-        else _DEFAULT_EXPORT_DIRECTORY
-    )
+    destination = Path(export_directory).resolve() if export_directory is not None else _DEFAULT_EXPORT_DIRECTORY
     ocp.code_gen_options.code_export_directory = str(destination)
     ocp.code_gen_options.json_file = "pifire_grey.json"
     return ocp

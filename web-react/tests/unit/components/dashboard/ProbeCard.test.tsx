@@ -165,7 +165,9 @@ describe("ProbeCard thermocouple health", () => {
 
     expect(screen.getByText("147")).toBeInTheDocument();
     expect(screen.getByText("CHECK PROBE")).toBeInTheDocument();
-    expect(screen.getByText("Possible thermocouple issue; reading still available.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Possible thermocouple issue; reading still available."),
+    ).toBeInTheDocument();
     expect(container.querySelector(".pf-dash-probehealth")).toHaveClass(
       "pf-dash-probehealth--warning",
     );

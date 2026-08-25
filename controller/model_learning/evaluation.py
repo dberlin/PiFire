@@ -333,7 +333,12 @@ def evaluate_forecasts(
         "candidate_generation": candidate,
         "incumbent_digest": incumbent_digest,
         "challenger_digest": challenger_digest,
-        "scores": [score.__dict__ if hasattr(score, "__dict__") else [score.horizon_steps, score.incumbent_rmse_c, score.challenger_rmse_c, score.sample_count] for score in scores],
+        "scores": [
+            score.__dict__
+            if hasattr(score, "__dict__")
+            else [score.horizon_steps, score.incumbent_rmse_c, score.challenger_rmse_c, score.sample_count]
+            for score in scores
+        ],
         "consecutive_wins": wins,
     }
     decision_id = hashlib.sha256(

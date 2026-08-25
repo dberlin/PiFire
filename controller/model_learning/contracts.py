@@ -390,5 +390,3 @@ class AffinePrediction:
             raise ValueError("input_response_c must have shape (N, N)")
         object.__setattr__(self, "free_output_c", free_output_c)
         object.__setattr__(self, "input_response_c", input_response_c)
-
-

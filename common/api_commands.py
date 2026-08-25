@@ -786,17 +786,20 @@ def _timer_start_with_options(data, control, arglist, index, now):
         return
 
     write_log("Timer started.  Ends at: " + epoch_to_time(now + seconds))
-    enqueue_control_delta(control_delta(
-        ops=[
-            {
-                "op": "timer.start_with_options",
-                "at": now,
-                "seconds": seconds,
-                "shutdown": options["shutdown"],
-                "keep_warm": options["keep_warm"],
-            }
-        ]
-    ), origin="app")
+    enqueue_control_delta(
+        control_delta(
+            ops=[
+                {
+                    "op": "timer.start_with_options",
+                    "at": now,
+                    "seconds": seconds,
+                    "shutdown": options["shutdown"],
+                    "keep_warm": options["keep_warm"],
+                }
+            ]
+        ),
+        origin="app",
+    )
 
 
 # NOTE: the log line is still computed HERE, from this request's (possibly
@@ -847,7 +850,9 @@ def _cmd_set_timer(data, control, settings, arglist, origin):
                 "Timer unpaused.  Ends at: "
                 + epoch_to_time((control["timer"]["end"] - control["timer"]["paused"]) + now)
             )
-        enqueue_control_delta(control_delta(ops=[{"op": "timer.start_or_resume", "at": now, "seconds": seconds}]), origin="app")
+        enqueue_control_delta(
+            control_delta(ops=[{"op": "timer.start_or_resume", "at": now, "seconds": seconds}]), origin="app"
+        )
     elif arglist[1] == "pause":
         if control["timer"]["start"] != 0:
             write_log("Timer paused.")
@@ -858,16 +863,19 @@ def _cmd_set_timer(data, control, settings, arglist, origin):
         write_log("Timer stopped.")
         enqueue_control_delta(control_delta(ops=[{"op": "timer.clear"}]), origin="app")
     elif arglist[1] in ("shutdown", "keep_warm"):
-        enqueue_control_delta(control_delta(
-            ops=[
-                {
-                    "op": "notify.set",
-                    "label": control["notify_data"][index]["label"],
-                    "type": "timer",
-                    "fields": {arglist[1]: arglist[2] == "true"},
-                }
-            ]
-        ), origin=origin)
+        enqueue_control_delta(
+            control_delta(
+                ops=[
+                    {
+                        "op": "notify.set",
+                        "label": control["notify_data"][index]["label"],
+                        "type": "timer",
+                        "fields": {arglist[1]: arglist[2] == "true"},
+                    }
+                ]
+            ),
+            origin=origin,
+        )
     else:
         data["result"] = "ERROR"
         data["message"] = f"Timer command not recognized."

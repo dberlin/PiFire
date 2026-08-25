@@ -14,6 +14,7 @@ from controller.mpc_factory import MpcPairConfiguration, MpcPairFactory, OwnedMp
 
 CYCLE = {"u_min": 0.1, "u_max": 0.9}
 
+
 def inactive_calibration(_load, _temperature, _forecast) -> CalibrationDecision:
     return CalibrationDecision(False, 0.0, None, CalibrationProgress())
 
@@ -56,7 +57,6 @@ def owned_pair(descriptor, estimator, solver) -> OwnedMpcPair:
         components=(estimator, solver),
     )
     return OwnedMpcPair(core, descriptor)
-
 
 
 def _config(**overrides):

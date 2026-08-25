@@ -225,7 +225,6 @@ def test_metric_flush_is_isolated_but_history_flush_couples_all_owned_state(monk
     assert json.loads(ds.get_blob("control:current")) != {"marker": "must be reset"}
 
 
-
 def test_history_flush_rolls_back_every_session_field_when_control_clear_fails(monkeypatch, ds):
     monkeypatch.setattr(history.time, "time", lambda: 1.0)
     history.write_history(SAMPLE_HISTORY)
@@ -253,6 +252,7 @@ def test_history_flush_rolls_back_every_session_field_when_control_clear_fails(m
     assert len(history.read_all_metrics()) == 1
     assert control.read_control()["cook_id"] == "cook-session-rollback"
     assert json.loads(ds.get_blob("control:current")) == {"marker": "retained"}
+
 
 def test_tuning_blob_round_trip_and_copy_ownership(ds):
     assert history.read_tr() == {}

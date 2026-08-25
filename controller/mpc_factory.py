@@ -33,9 +33,7 @@ from controller.mpc_core import (
 from controller.runtime.model_fitting import TargetTimingEvidence
 
 
-_ESTIMATOR_CONFIGURATION_FIELDS = frozenset(
-    {"control_period", "est_q_temp", "est_q_dist", "est_r_meas"}
-)
+_ESTIMATOR_CONFIGURATION_FIELDS = frozenset({"control_period", "est_q_temp", "est_q_dist", "est_r_meas"})
 _NATIVE_CONFIGURATION_FIELDS = frozenset(
     {
         "C_c",
@@ -55,9 +53,7 @@ _NATIVE_CONFIGURATION_FIELDS = frozenset(
         "max_iterations",
     }
 )
-_PAIR_CONFIGURATION_FIELDS = (
-    _NATIVE_CONFIGURATION_FIELDS | _ESTIMATOR_CONFIGURATION_FIELDS
-)
+_PAIR_CONFIGURATION_FIELDS = _NATIVE_CONFIGURATION_FIELDS | _ESTIMATOR_CONFIGURATION_FIELDS
 _LEGACY_ESTIMATOR_CONFIGURATION: dict[str, JsonValue] = {
     "control_period": 5.0,
     "est_q_temp": 1e-2,
@@ -65,9 +61,7 @@ _LEGACY_ESTIMATOR_CONFIGURATION: dict[str, JsonValue] = {
     "est_r_meas": 0.04,
 }
 _LEGACY_V4_CONFIGURATION_FIELDS = frozenset({"schema", "n_delay", "parameters"})
-_LEGACY_V4_PARAMETER_FIELDS = frozenset(
-    {"C_c", "K_Q", "theta", "h_amb", "T_amb", "sigma"}
-)
+_LEGACY_V4_PARAMETER_FIELDS = frozenset({"C_c", "K_Q", "theta", "h_amb", "T_amb", "sigma"})
 _LEGACY_V4_IDENTIFICATION_DEFAULTS = {
     "C_c": 320.0,
     "K_Q": 350.0,
@@ -236,11 +230,7 @@ class MpcPairFactory:
             estimator_kind=kind,
             candidate_generation=candidate_generation,
             role_generation=role_generation,
-            model_identified=(
-                model_is_identified(normalized)
-                if model_identified is None
-                else model_identified
-            ),
+            model_identified=(model_is_identified(normalized) if model_identified is None else model_identified),
         )
 
     def native(
@@ -387,8 +377,7 @@ class MpcPairFactory:
             isinstance(estimator_kind, str)
             and pair.descriptor.solver_kind == "acados-grey"
             and pair.descriptor.estimator_kind == estimator_kind.lower()
-            and pair.descriptor.model_digest
-            == canonical_snapshot_digest(self._native_mapping(pair.solver.config))
+            and pair.descriptor.model_digest == canonical_snapshot_digest(self._native_mapping(pair.solver.config))
             and pair.descriptor.configuration == construction
         )
 
@@ -416,11 +405,7 @@ class MpcPairFactory:
         )
 
     def build_solver(self, native: GreyBoxMPCConfig) -> MpcSolver:
-        return (
-            MpcCore.build_solver(native)
-            if self._solver_factory is None
-            else self._solver_factory(native)
-        )
+        return MpcCore.build_solver(native) if self._solver_factory is None else self._solver_factory(native)
 
     def probe_solver(self, solver: MpcSolver) -> NativeTiming:
         return self._probe(
@@ -521,6 +506,7 @@ class MpcPairFactory:
                 "est_r_meas": est_r_meas,
             }
         )
+
     def _probe(
         self,
         solver: MpcSolver,
@@ -628,10 +614,7 @@ class MpcPairFactory:
         if isinstance(n_delay, bool) or not isinstance(n_delay, Integral) or n_delay != 8:
             raise ValueError("legacy descriptor n_delay must be the integer 8")
         parameters = configuration.get("parameters")
-        if (
-            not isinstance(parameters, Mapping)
-            or frozenset(parameters) != _LEGACY_V4_PARAMETER_FIELDS
-        ):
+        if not isinstance(parameters, Mapping) or frozenset(parameters) != _LEGACY_V4_PARAMETER_FIELDS:
             raise ValueError("legacy descriptor parameters do not match the v4 schema")
         normalized_parameters: dict[str, float] = {}
         for name in _LEGACY_V4_PARAMETER_FIELDS:
@@ -643,8 +626,7 @@ class MpcPairFactory:
                 raise ValueError(f"legacy descriptor parameter {name} must be finite")
             normalized_parameters[name] = normalized
         model_identified = any(
-            normalized_parameters[name] != expected
-            for name, expected in _LEGACY_V4_IDENTIFICATION_DEFAULTS.items()
+            normalized_parameters[name] != expected for name, expected in _LEGACY_V4_IDENTIFICATION_DEFAULTS.items()
         )
         native = GreyBoxMPCConfig(
             C_c=normalized_parameters["C_c"],
@@ -673,9 +655,7 @@ class MpcPairFactory:
         )
         migrated_configuration = MpcPairFactory._descriptor_mapping(settings, native)
         return GreyControlPairDescriptor(
-            model_digest=canonical_snapshot_digest(
-                MpcPairFactory._native_mapping(native)
-            ),
+            model_digest=canonical_snapshot_digest(MpcPairFactory._native_mapping(native)),
             configuration=migrated_configuration,
             estimator_kind=descriptor.estimator_kind,
             solver_kind=descriptor.solver_kind,

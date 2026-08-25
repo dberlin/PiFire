@@ -195,9 +195,7 @@ describe("SettingsShell", () => {
       freshness: { current: true, lastReportedAgeS: 0 },
     };
     function LiveParent() {
-      return (
-        <Outlet context={{ live: { thermocoupleHealth: [health] }, phase: "unreachable" }} />
-      );
+      return <Outlet context={{ live: { thermocoupleHealth: [health] }, phase: "unreachable" }} />;
     }
     function HealthProbe() {
       const { thermocoupleHealth = [], phase } = useOutletContext<{

@@ -573,9 +573,8 @@ class TeardownGreyHistory:
             return HistoryDecision(False, (reason,))
         if self._observations:
             previous = self._observations[-1]
-            adjacent = (
-                frame.observation_sequence == previous.observation_sequence + 1
-                and math.isclose(frame.frame_start_s, previous.frame_end_s, rel_tol=0.0, abs_tol=1e-9)
+            adjacent = frame.observation_sequence == previous.observation_sequence + 1 and math.isclose(
+                frame.frame_start_s, previous.frame_end_s, rel_tol=0.0, abs_tol=1e-9
             )
             if not adjacent:
                 self._observations.clear()
@@ -628,9 +627,8 @@ class PassiveGreyHistory:
             return HistoryDecision(False, (reason,))
         if self._observations:
             previous = self._observations[-1]
-            adjacent = (
-                frame.observation_sequence == previous.observation_sequence + 1
-                and math.isclose(frame.frame_start_s, previous.frame_end_s, rel_tol=0.0, abs_tol=1e-9)
+            adjacent = frame.observation_sequence == previous.observation_sequence + 1 and math.isclose(
+                frame.frame_start_s, previous.frame_end_s, rel_tol=0.0, abs_tol=1e-9
             )
             if not adjacent:
                 self._observations.clear()
@@ -737,9 +735,15 @@ def stale_result_reasons(
         or current_window.configuration_digest != submitted.configuration_digest
     ):
         reasons.append("configuration-changed")
-    if returned.incumbent_digest != submitted.incumbent_digest or current_window.incumbent_digest != submitted.incumbent_digest:
+    if (
+        returned.incumbent_digest != submitted.incumbent_digest
+        or current_window.incumbent_digest != submitted.incumbent_digest
+    ):
         reasons.append("incumbent-changed")
-    if returned.role_generation != submitted.role_generation or current_window.role_generation != submitted.role_generation:
+    if (
+        returned.role_generation != submitted.role_generation
+        or current_window.role_generation != submitted.role_generation
+    ):
         reasons.append("role-generation-changed")
     if (
         result.candidate_generation != request.candidate_generation
@@ -862,10 +866,12 @@ def _finite_dry_solve(solve: Any, expected_horizon: int) -> bool:
     try:
         sequence = tuple(solve.sequence_q)
         objective = float(solve.objective)
-    except (AttributeError, TypeError, ValueError):
+    except AttributeError, TypeError, ValueError:
         return False
-    return len(sequence) == expected_horizon and math.isfinite(objective) and all(
-        math.isfinite(float(value)) for value in sequence
+    return (
+        len(sequence) == expected_horizon
+        and math.isfinite(objective)
+        and all(math.isfinite(float(value)) for value in sequence)
     )
 
 
@@ -940,7 +946,6 @@ class CausalForecastInput:
     challenger_digest: str
 
 
-
 def paired_forecast_origin(
     frame: Any,
     *,
@@ -993,9 +998,9 @@ class CandidateHandoff:
     active_pair: Any
     blockers: tuple[str, ...] = ()
 
+
 class CandidateOwnershipTransferredError(RuntimeError):
     """Preparation failed after the activation runtime accepted pair ownership."""
-
 
 
 def handoff_candidate(
@@ -1056,9 +1061,7 @@ def handoff_candidate(
         )
     prepared_id = prepare(prepared, policy)
     status = (
-        LearningStatus.READY_FOR_REVIEW
-        if policy is ActivationPolicy.OPERATOR_REVIEWED
-        else LearningStatus.ACTIVATING
+        LearningStatus.READY_FOR_REVIEW if policy is ActivationPolicy.OPERATOR_REVIEWED else LearningStatus.ACTIVATING
     )
     return CandidateHandoff(
         status=status,
@@ -1255,11 +1258,7 @@ class GreyLearningOrchestrator:
         replacement_config = self.config if config is None else config
         if not isinstance(replacement_config, GreyBoxMPCConfig):
             raise ValueError("config must be a GreyBoxMPCConfig")
-        if (
-            identity == self.identity
-            and config is None
-            and incumbent_pair is _UNSET
-        ):
+        if identity == self.identity and config is None and incumbent_pair is _UNSET:
             return
         replacement_pair = self.incumbent_pair if incumbent_pair is _UNSET else incumbent_pair
         self._release_prepared()
@@ -1305,9 +1304,8 @@ class GreyLearningOrchestrator:
     def _append_contiguous(history: deque[Any], frame: Any) -> None:
         if history:
             previous = history[-1]
-            if (
-                frame.observation_sequence != previous.observation_sequence + 1
-                or not math.isclose(frame.frame_start_s, previous.frame_end_s, rel_tol=0.0, abs_tol=1e-9)
+            if frame.observation_sequence != previous.observation_sequence + 1 or not math.isclose(
+                frame.frame_start_s, previous.frame_end_s, rel_tol=0.0, abs_tol=1e-9
             ):
                 history.clear()
         history.append(frame)

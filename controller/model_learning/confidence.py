@@ -26,8 +26,6 @@ _RMSE_LIMITS = {3: 2.8, 15: 2.8, 45: 2.8, 90: 5.0, 180: 5.0}
 _REQUIRED_STAGES = frozenset(("low", "middle", "high", "coast"))
 
 
-
-
 @dataclass(frozen=True, slots=True)
 class ConfidenceConfig:
     bootstrap_seed: int = 0
@@ -47,9 +45,7 @@ class ConfidenceConfig:
             self.maximum_band_bias_c,
             self.maximum_refresh_p99_ms,
         )
-        if self.required_sequential_wins < 1 or not all(
-            isfinite(value) and value >= 0.0 for value in values
-        ):
+        if self.required_sequential_wins < 1 or not all(isfinite(value) and value >= 0.0 for value in values):
             raise ValueError("confidence thresholds must be finite and non-negative")
 
 
@@ -86,8 +82,6 @@ class ConfidenceReport:
     blockers: tuple[str, ...]
     bootstrap_seed: int
     bootstrap_replicates: int
-
-
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,10 +138,7 @@ def evaluate_confidence(
     _gate(
         gates,
         "candidate-lineage",
-        digest is not None
-        and role_generation is not None
-        and candidate_generation is not None
-        and bool(selected),
+        digest is not None and role_generation is not None and candidate_generation is not None and bool(selected),
         "candidate-lineage",
     )
     _gate(gates, "candidate-origin", origin is not None, "candidate-origin")
@@ -486,8 +477,6 @@ def _relative_rmse_ok(interval: BootstrapInterval) -> bool:
     )
 
 
-
-
 def _one_provenance(records: Sequence[ModelEvidenceRecord]) -> bool:
     values = {record.provenance_digest for record in records}
     return len(values) == 1 and None not in values
@@ -533,7 +522,9 @@ def _authoritative_status(state: Mapping[object, object]) -> LearningStatus | No
 def _candidate_origin(value: object) -> CandidateOrigin | None:
     if isinstance(value, CandidateOrigin):
         return value
-    return CandidateOrigin(value) if isinstance(value, str) and value in {item.value for item in CandidateOrigin} else None
+    return (
+        CandidateOrigin(value) if isinstance(value, str) and value in {item.value for item in CandidateOrigin} else None
+    )
 
 
 def _text(value: object) -> str | None:

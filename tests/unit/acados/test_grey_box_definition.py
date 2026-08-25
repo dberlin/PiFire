@@ -34,9 +34,7 @@ DEFAULT_PARAMETERS = np.array(
 )
 
 
-def _independent_rhs(
-    state: np.ndarray, residual: float, parameters: np.ndarray
-) -> np.ndarray:
+def _independent_rhs(state: np.ndarray, residual: float, parameters: np.ndarray) -> np.ndarray:
     C_c, h_amb, T_amb, theta, K_Q, sigma = parameters[:6]
     equilibrium_q = parameters[7]
     q_total = equilibrium_q + residual
@@ -55,9 +53,7 @@ def _independent_rhs(
     return derivative
 
 
-def _independent_discrete_map(
-    state: np.ndarray, residual: float, parameters: np.ndarray
-) -> np.ndarray:
+def _independent_discrete_map(state: np.ndarray, residual: float, parameters: np.ndarray) -> np.ndarray:
     physical_state = state.copy()
     substep = 25.0 / 8.0
     for _ in range(8):
@@ -115,9 +111,7 @@ def test_discrete_map_matches_eight_explicit_rk4_substeps_over_25_seconds() -> N
         parameters=DEFAULT_PARAMETERS,
     )
 
-    expected = np.concatenate(
-        (_independent_discrete_map(state, 0.07, DEFAULT_PARAMETERS), [0.07])
-    )
+    expected = np.concatenate((_independent_discrete_map(state, 0.07, DEFAULT_PARAMETERS), [0.07]))
     np.testing.assert_allclose(actual, expected, rtol=1e-13, atol=1e-13)
 
 
@@ -189,15 +183,9 @@ def test_stage_and_terminal_residuals_and_load_constraint_match_contract(
     monkeypatch,
 ) -> None:
     ocp = _build_fake_ocp(monkeypatch)
-    stage = ca.Function(
-        "stage_contract", [ocp.model.x, ocp.model.u, ocp.model.p], [ocp.model.cost_y_expr]
-    )
-    terminal = ca.Function(
-        "terminal_contract", [ocp.model.x, ocp.model.p], [ocp.model.cost_y_expr_e]
-    )
-    load = ca.Function(
-        "load_contract", [ocp.model.u, ocp.model.p], [ocp.model.con_h_expr]
-    )
+    stage = ca.Function("stage_contract", [ocp.model.x, ocp.model.u, ocp.model.p], [ocp.model.cost_y_expr])
+    terminal = ca.Function("terminal_contract", [ocp.model.x, ocp.model.p], [ocp.model.cost_y_expr_e])
+    load = ca.Function("load_contract", [ocp.model.u, ocp.model.p], [ocp.model.con_h_expr])
     initial_load = ca.Function(
         "initial_load_contract",
         [ocp.model.u, ocp.model.p],
@@ -213,12 +201,8 @@ def test_stage_and_terminal_residuals_and_load_constraint_match_contract(
         np.asarray(terminal(state, DEFAULT_PARAMETERS)).reshape(-1),
         [np.sqrt(3.0) * -3.0],
     )
-    np.testing.assert_allclose(
-        np.asarray(load(0.1, DEFAULT_PARAMETERS)).reshape(-1), [0.5]
-    )
-    np.testing.assert_allclose(
-        np.asarray(initial_load(0.1, DEFAULT_PARAMETERS)).reshape(-1), [0.5]
-    )
+    np.testing.assert_allclose(np.asarray(load(0.1, DEFAULT_PARAMETERS)).reshape(-1), [0.5])
+    np.testing.assert_allclose(np.asarray(initial_load(0.1, DEFAULT_PARAMETERS)).reshape(-1), [0.5])
     np.testing.assert_array_equal(ocp.constraints.lh, [0.0])
     np.testing.assert_array_equal(ocp.constraints.uh, [1.0])
     np.testing.assert_array_equal(ocp.constraints.lh_0, [0.0])

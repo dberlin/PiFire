@@ -75,11 +75,7 @@ class ActivationRuntime:
             raise ValueError("receipt_timeout must be nonnegative")
         self._pair_factory = pair_factory
         self._persistence = persistence
-        self._clock_ms = (
-            (lambda: time.time_ns() // 1_000_000)
-            if clock_ms is None
-            else clock_ms
-        )
+        self._clock_ms = (lambda: time.time_ns() // 1_000_000) if clock_ms is None else clock_ms
         self._receipt_timeout = float(receipt_timeout)
         self._lock = threading.RLock()
         self._active_pair = active_pair
@@ -145,7 +141,6 @@ class ActivationRuntime:
         with self._lock:
             return len(self._pending_aborts)
 
-
     @property
     def activation_terminated(self) -> bool:
         with self._lock:
@@ -173,23 +168,16 @@ class ActivationRuntime:
         preceding_evidence: Sequence[ModelEvidenceRecord] = (),
     ) -> DurableActivationReceipt:
         owned = self._copy_record(record)
-        if (
-            owned.kind is not EvidenceKind.CONFIDENCE_DECISION
-            or not isinstance(owned.payload, ConfidenceDecisionEvidence)
+        if owned.kind is not EvidenceKind.CONFIDENCE_DECISION or not isinstance(
+            owned.payload, ConfidenceDecisionEvidence
         ):
-            raise TypeError(
-                "activation confidence must be confidence-decision evidence"
-            )
+            raise TypeError("activation confidence must be confidence-decision evidence")
         if not isinstance(preceding_evidence, Sequence) or isinstance(
             preceding_evidence,
             (str, bytes),
         ):
-            raise TypeError(
-                "preceding_evidence must be a sequence of ModelEvidenceRecord"
-            )
-        owned_preceding = tuple(
-            self._copy_record(preceding) for preceding in preceding_evidence
-        )
+            raise TypeError("preceding_evidence must be a sequence of ModelEvidenceRecord")
+        owned_preceding = tuple(self._copy_record(preceding) for preceding in preceding_evidence)
         if any(
             preceding.kind is not EvidenceKind.CANDIDATE_ASSESSMENT
             or not isinstance(
@@ -198,17 +186,13 @@ class ActivationRuntime:
             )
             for preceding in owned_preceding
         ):
-            raise ValueError(
-                "preceding_evidence requires candidate-assessment evidence"
-            )
+            raise ValueError("preceding_evidence requires candidate-assessment evidence")
         if any(
             preceding.payload.decision_id != owned.payload.decision_id
             for preceding in owned_preceding
             if isinstance(preceding.payload, CandidateAssessmentEvidence)
         ):
-            raise ValueError(
-                "preceding candidate-assessment decision_id must match confidence"
-            )
+            raise ValueError("preceding candidate-assessment decision_id must match confidence")
         with self._lock:
             if self._closed:
                 return DurableActivationReceipt(accepted=False)
@@ -226,13 +210,11 @@ class ActivationRuntime:
             if receipt.accepted:
                 self._confidence_receipts[owned.evidence_id] = receipt
             return receipt
+
     def submit_evidence(self, record: ModelEvidenceRecord) -> bool:
         owned = self._copy_record(record)
         with self._lock:
-            return (
-                not self._closed
-                and self._persistence.submit_evidence(owned).accepted
-            )
+            return not self._closed and self._persistence.submit_evidence(owned).accepted
 
     def submit_prepared_phase(
         self,
@@ -289,18 +271,16 @@ class ActivationRuntime:
                     candidate_pair.close()
                     return False
                 owned_pair = (
-                    self._pending is not None
-                    and self._pending.candidate_pair is candidate_pair
-                ) or (
-                    self._flight is not None
-                    and self._flight.pending.candidate_pair is candidate_pair
-                ) or (
-                    self._active_pair is candidate_pair
-                    and (
-                        self._inert_record is not None
-                        and self._inert_record.transaction_id == record.transaction_id
-                        or self._active_record is not None
-                        and self._active_record.transaction_id == record.transaction_id
+                    (self._pending is not None and self._pending.candidate_pair is candidate_pair)
+                    or (self._flight is not None and self._flight.pending.candidate_pair is candidate_pair)
+                    or (
+                        self._active_pair is candidate_pair
+                        and (
+                            self._inert_record is not None
+                            and self._inert_record.transaction_id == record.transaction_id
+                            or self._active_record is not None
+                            and self._active_record.transaction_id == record.transaction_id
+                        )
                     )
                 )
                 if not owned_pair:
@@ -350,9 +330,7 @@ class ActivationRuntime:
                 try:
                     pending.candidate_pair.close()
                 finally:
-                    self._failed_role_generations.add(
-                        record.candidate.role_generation
-                    )
+                    self._failed_role_generations.add(record.candidate.role_generation)
                     self._transaction_ids[record.transaction_id] = aborted
                     self._pending_aborts[record.transaction_id] = _PendingAbort(
                         aborted,
@@ -419,7 +397,6 @@ class ActivationRuntime:
             return not self._pending_aborts
         return transaction_id not in self._pending_aborts
 
-
     def _submit_aborted(
         self,
         pending: _PendingActivation,
@@ -467,9 +444,7 @@ class ActivationRuntime:
         with self._lock:
             if self._closed:
                 return False
-            if not self._retry_pending_aborts_locked(
-                wait_for_completion=False
-            ):
+            if not self._retry_pending_aborts_locked(wait_for_completion=False):
                 return False
             if self._terminated_reason is not None:
                 return False
@@ -482,8 +457,7 @@ class ActivationRuntime:
                         reason = (
                             "activation-confidence-changed"
                             if flight.receipt.error is not None
-                            and "activation-authority-changed"
-                            in str(flight.receipt.error)
+                            and "activation-authority-changed" in str(flight.receipt.error)
                             else "active-persistence-failed"
                         )
                         self._flight = None
@@ -628,8 +602,7 @@ class ActivationRuntime:
         timestamp_ms = self._clock_ms()
         lifecycle = ModelEvidenceRecord(
             evidence_id=(
-                f"mpc-runtime-activation:activation-lifecycle:{timestamp_ms}:"
-                f"{record.candidate.role_generation}:{phase}"
+                f"mpc-runtime-activation:activation-lifecycle:{timestamp_ms}:{record.candidate.role_generation}:{phase}"
             ),
             kind=EvidenceKind.ACTIVATION_LIFECYCLE,
             session_id="mpc-runtime-activation",
@@ -699,8 +672,7 @@ class ActivationRuntime:
                 timestamp_ms = self._clock_ms()
                 event = ModelEvidenceRecord(
                     evidence_id=(
-                        f"fallback:{failed.descriptor.role_generation}:"
-                        f"{timestamp_ms}:{failed.descriptor.model_digest}"
+                        f"fallback:{failed.descriptor.role_generation}:{timestamp_ms}:{failed.descriptor.model_digest}"
                     ),
                     kind=EvidenceKind.FALLBACK,
                     session_id="mpc-runtime-activation",
@@ -711,9 +683,7 @@ class ActivationRuntime:
                     provenance_digest=rollback.descriptor.model_digest,
                     payload=FallbackEvidence(
                         decision_id=(
-                            active_record.decision_id
-                            if active_record is not None
-                            else "runtime-confidence-window"
+                            active_record.decision_id if active_record is not None else "runtime-confidence-window"
                         ),
                         reason=reason,
                         failed_digest=failed.descriptor.model_digest,
@@ -725,8 +695,7 @@ class ActivationRuntime:
                 self._events.append(event)
                 failure = ModelEvidenceRecord(
                     evidence_id=(
-                        f"mpc-runtime-activation:learning-failure:{timestamp_ms}:"
-                        f"{failed.descriptor.role_generation}"
+                        f"mpc-runtime-activation:learning-failure:{timestamp_ms}:{failed.descriptor.role_generation}"
                     ),
                     kind=EvidenceKind.LEARNING_FAILURE,
                     session_id="mpc-runtime-activation",
@@ -811,21 +780,17 @@ class ActivationRuntime:
                         or (
                             isinstance(record.payload, FallbackEvidence)
                             and record.payload.failed_digest in candidate_digests
-                            and record.payload.failed_generation
-                            == recovery.record.candidate.role_generation
+                            and record.payload.failed_generation == recovery.record.candidate.role_generation
                         )
                     ),
                     key=lambda record: (record.timestamp_ms, record.evidence_id),
                     default=None,
                 )
-                restore_descriptor = (
-                    recovery.rollback if lifecycle is not None else recovery.restore
-                )
+                restore_descriptor = recovery.rollback if lifecycle is not None else recovery.restore
                 restored = self._pair_factory.restore(restore_descriptor)
                 rollback = (
                     self._pair_factory.restore(recovery.rollback)
-                    if recovery.phase is ActivationPhase.ACTIVE
-                    and lifecycle is None
+                    if recovery.phase is ActivationPhase.ACTIVE and lifecycle is None
                     else None
                 )
             except Exception:
@@ -840,16 +805,12 @@ class ActivationRuntime:
             self._rollback_pair = rollback
             self._inert_record = None
             self._active_record = (
-                recovery.record
-                if recovery.phase is ActivationPhase.ACTIVE and lifecycle is None
-                else None
+                recovery.record if recovery.phase is ActivationPhase.ACTIVE and lifecycle is None else None
             )
             restored_generation = recovery.restore.role_generation
             if lifecycle is not None:
                 restored_generation = lifecycle.role_generation
-                self._failed_role_generations.add(
-                    recovery.record.candidate.role_generation
-                )
+                self._failed_role_generations.add(recovery.record.candidate.role_generation)
             self._role_generation = restored_generation
             self._transaction_ids[recovery.record.transaction_id] = recovery.record
             try:
@@ -887,30 +848,18 @@ class ActivationRuntime:
                 ("pending", None if pending is None else pending.candidate_pair),
                 ("flight", None if flight is None else flight.pending.candidate_pair),
             ):
-                if (
-                    retired is None
-                    or retired is current
-                    or retired is pair
-                    or id(retired) in retired_ids
-                ):
+                if retired is None or retired is current or retired is pair or id(retired) in retired_ids:
                     continue
                 retired_ids.add(id(retired))
                 retirees.append((slot, retired))
             for slot, retired in retirees:
+
                 def detach_retired() -> None:
                     if slot == "rollback" and self._rollback_pair is retired:
                         self._rollback_pair = None
-                    if (
-                        slot == "pending"
-                        and self._pending is not None
-                        and self._pending.candidate_pair is retired
-                    ):
+                    if slot == "pending" and self._pending is not None and self._pending.candidate_pair is retired:
                         self._pending = None
-                    if (
-                        slot == "flight"
-                        and self._flight is not None
-                        and self._flight.pending.candidate_pair is retired
-                    ):
+                    if slot == "flight" and self._flight is not None and self._flight.pending.candidate_pair is retired:
                         self._flight = None
 
                 try:
@@ -919,9 +868,7 @@ class ActivationRuntime:
                     if retired.closed:
                         detach_retired()
                         self._retired_pairs.append(retired)
-                    raise RuntimeError(
-                        "could not retire displaced activation ownership"
-                    ) from error
+                    raise RuntimeError("could not retire displaced activation ownership") from error
                 detach_retired()
 
             previous_rollback = self._rollback_pair
@@ -960,9 +907,7 @@ class ActivationRuntime:
         with self._lock:
             if self._closed:
                 return
-            aborts_durable = self._retry_pending_aborts_locked(
-                wait_for_completion=True
-            )
+            aborts_durable = self._retry_pending_aborts_locked(wait_for_completion=True)
             self._closed = True
             self._active_pair.revoke_output()
             pairs: list[OwnedMpcPair] = [self._active_pair]
@@ -978,11 +923,7 @@ class ActivationRuntime:
             self._flight = None
             errors: list[BaseException] = []
             if not aborts_durable:
-                errors.append(
-                    RuntimeError(
-                        "unresolved activation abort transactions remain"
-                    )
-                )
+                errors.append(RuntimeError("unresolved activation abort transactions remain"))
             try:
                 self._persistence.flush_and_stop(timeout=0.1)
             except BaseException as error:

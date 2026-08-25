@@ -265,9 +265,7 @@ def _validate_framed_timeline(frames: dict[int, list[tuple[int, FramedPulseFrame
 def _realized_combustion_load(output: AppliedOutputPayload) -> float:
     value = output.realized_combustion_load
     if value is None:
-        raise TraceSelectionError(
-            f"MPC revision {output.result_revision} has no realized combustion load"
-        )
+        raise TraceSelectionError(f"MPC revision {output.result_revision} has no realized combustion load")
     return float(value)
 
 
@@ -527,8 +525,6 @@ def calibration_samples(records: Iterable[ControlTraceRecord]) -> tuple[Calibrat
         raise TraceSelectionError(
             f"MPC revision {missing_actuated_revisions[0]} was actuated without a complete framed interval"
         )
-
-
 
     def realized_load(revision_outputs: list[tuple[int, AppliedOutputPayload]]) -> float:
         if len(revision_outputs) == 1:

@@ -679,7 +679,6 @@ _RETIRED_GOLDEN_CASES = frozenset(
 )
 
 
-
 def _deep_merge(base, patch):
     for k, v in patch.items():
         if isinstance(v, dict) and isinstance(base.get(k), dict):
@@ -1119,7 +1118,6 @@ def test_process_command_has_no_control_write_kind_escape_hatch(seeded):
     assert signature.parameters["action"].default is None
     assert signature.parameters["arglist"].default is None
     assert signature.parameters["origin"].default == "unknown"
-
 
 
 def test_timer_start_hardcodes_origin_app(seeded):

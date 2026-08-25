@@ -129,9 +129,7 @@ def test_standalone_rebuild_uses_the_conditional_shared_boundary(
     assert published[-1][0] == updater.FINISHED_PERCENT
 
 
-def test_standalone_rebuild_failure_is_terminal(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_standalone_rebuild_failure_is_terminal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import updater
 
     published: list[tuple[int, str, str]] = []
@@ -145,6 +143,7 @@ def test_standalone_rebuild_failure_is_terminal(
     assert published[-1][0] < 0
     assert published[-1][1] == "Acados rebuild failed"
     assert "17" in published[-1][2]
+
 
 def _staged_script(tmp_path: Path, *, with_venv: bool) -> tuple[Path, Path]:
     """Copy the real script into a throwaway tree whose interpreters are stubs.
@@ -357,7 +356,7 @@ def test_real_git_flow_restores_branch_revision_runtime_and_terminal_status(
     rebuild.write_text(
         "#!/bin/sh\n"
         "set -eu\n"
-        "cd \"$(dirname \"$0\")\"\n"
+        'cd "$(dirname "$0")"\n'
         "rm -f controller/_native/current\n"
         "ln -s releases/broken controller/_native/current\n"
         "exit 31\n"

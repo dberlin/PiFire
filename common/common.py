@@ -36,7 +36,6 @@ from common.sqlite_log_handler import SqliteLogHandler
 # *****************************************
 
 
-
 class ErrorKind(Enum):
     """Which process owns a dashboard error banner.
 
@@ -196,7 +195,6 @@ def generate_uuid():
     generated_uuid = uuid.uuid1(node + rand_int)
 
     return str(generated_uuid)
-
 
 
 def _load_json_file(filename, default, retry_count=0, max_retries=None):

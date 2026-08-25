@@ -1,10 +1,6 @@
 """Controller availability checks, including the acados native boundary."""
 
-
 from common import controller_deps as cd
-
-
-
 
 
 # --- detection -------------------------------------------------------------
@@ -29,10 +25,7 @@ def test_mpc_availability_calls_the_acados_native_loader(monkeypatch):
     assert calls == ["load"]
 
 
-
 # --- the message the user reads -------------------------------------------
-
-
 
 
 def test_message_when_there_is_no_extra_to_install():

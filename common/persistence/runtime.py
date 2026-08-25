@@ -145,8 +145,7 @@ def read_errors(kind):
         rows = (
             datastore.connection()
             .execute(
-                f"SELECT message FROM errors WHERE kind IN ({placeholders}) "
-                f"ORDER BY CASE kind {rank} END, id",
+                f"SELECT message FROM errors WHERE kind IN ({placeholders}) ORDER BY CASE kind {rank} END, id",
                 (*owners, *owners),
             )
             .fetchall()
@@ -361,24 +360,18 @@ def write_controller_model_checkpoint(name, snapshot):
         return False
     try:
         encoded_snapshot = json.dumps(snapshot, allow_nan=False)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return False
     with datastore.transaction() as connection:
-        row = connection.execute(
-            "SELECT value FROM kv WHERE key=?", ("controller_model_state",)
-        ).fetchone()
+        row = connection.execute("SELECT value FROM kv WHERE key=?", ("controller_model_state",)).fetchone()
         if row is None:
             models = {}
         else:
             try:
                 state = json.loads(row[0])
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 return False
-            if (
-                not isinstance(state, dict)
-                or state.get("version") != 1
-                or not isinstance(state.get("models"), dict)
-            ):
+            if not isinstance(state, dict) or state.get("version") != 1 or not isinstance(state.get("models"), dict):
                 return False
             models = state["models"]
         existing = models.get(name)
@@ -396,8 +389,7 @@ def write_controller_model_checkpoint(name, snapshot):
         updated_models[name] = json.loads(encoded_snapshot)
         encoded_state = json.dumps({"version": 1, "models": updated_models})
         connection.execute(
-            "INSERT INTO kv(key,value) VALUES(?,?) "
-            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            "INSERT INTO kv(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             ("controller_model_state", encoded_state),
         )
     return True

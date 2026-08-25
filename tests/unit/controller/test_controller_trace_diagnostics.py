@@ -71,8 +71,6 @@ def test_pid_sp_trace_diagnostics_reproduce_completed_update(monkeypatch):
     assert diagnostic.previous_update_time == pytest.approx(98.0)
 
 
-
-
 @pytest.mark.parametrize(
     ("current", "new_target", "last", "expected"),
     [

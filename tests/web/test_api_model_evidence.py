@@ -258,15 +258,10 @@ def test_calibration_route_uses_the_existing_error_envelope_for_pydantic_request
     assert response.get_json()["data"] == {}
 
 
-
-
-
 def _api_descriptor(theta, candidate_generation, role_generation, *, legacy=False):
     settings = dict(DEFAULT_MPC_CONFIG, theta=theta)
     native = MpcCore.native_configuration(settings)
-    native_configuration = {
-        name: getattr(native, name) for name in native.__dataclass_fields__
-    }
+    native_configuration = {name: getattr(native, name) for name in native.__dataclass_fields__}
     configuration = dict(native_configuration)
     if not legacy:
         configuration.update(
@@ -420,8 +415,6 @@ def test_manual_policy_is_rejected_from_real_backend_candidate_assessment(client
     assert response.get_json()["detail"] == "manual activation requires operator-reviewed policy"
 
 
-
-
 def test_operator_evaluation_persists_restart_checkpoint_consumed_by_unmocked_activation_route(
     client,
 ):
@@ -527,10 +520,7 @@ def test_operator_evaluation_persists_restart_checkpoint_consumed_by_unmocked_ac
         settings["globals"]["units"],
         settings["cycle_data"],
     )
-    assert (
-        rebuilt_controller.active_control_pair.descriptor.configuration
-        == candidate.configuration
-    )
+    assert rebuilt_controller.active_control_pair.descriptor.configuration == candidate.configuration
 
     response = client.post(
         "/api/model-evidence/activate",
@@ -546,8 +536,6 @@ def test_operator_evaluation_persists_restart_checkpoint_consumed_by_unmocked_ac
     controller.close()
     candidate_controller.close()
     rebuilt_controller.close()
-
-
 
 
 def test_activate_route_requires_exact_body_and_preserves_stale_rejection(
@@ -631,14 +619,18 @@ def test_rollback_is_atomic_idempotent_and_names_exact_recorded_owner(client):
     duplicate = client.post("/api/model-evidence/rollback", json={"reason": "different retry text"})
 
     assert first.status_code == duplicate.status_code == 200
-    assert first.get_json() == duplicate.get_json() == {
-        "accepted": True,
-        "active_kind": "grey-box",
-        "decision_id": prepared.decision_id,
-        "reason": "operator rollback grey",
-        "role_generation": candidate.role_generation + 1,
-        "rollback_digest": incumbent.model_digest,
-    }
+    assert (
+        first.get_json()
+        == duplicate.get_json()
+        == {
+            "accepted": True,
+            "active_kind": "grey-box",
+            "decision_id": prepared.decision_id,
+            "reason": "operator rollback grey",
+            "role_generation": candidate.role_generation + 1,
+            "rollback_digest": incumbent.model_digest,
+        }
+    )
     rollbacks = [record for record in read_model_evidence() if isinstance(record.payload, RollbackEvidence)]
     assert len(rollbacks) == 1
     assert rollbacks[0].model_digest == candidate.model_digest
@@ -731,9 +723,7 @@ def test_activate_route_exhaustively_maps_typed_service_outcomes(
 
     assert response.status_code == status
     assert response.content_type == "application/json"
-    assert response.data == (
-        json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n"
-    ).encode("utf-8")
+    assert response.data == (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
     assert response.get_json() == payload
     assert len(calls) == 1
     assert calls[0][0].candidate_digest == "2" * 64

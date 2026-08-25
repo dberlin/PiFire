@@ -353,9 +353,7 @@ def test_history_write_and_flush_coupling_parity(store):
                 }
             )
         else:
-            history_projections.append(
-                {key: row[key] for key in ("P", "F", "AUX", "PSP", "NT", "EXD")}
-            )
+            history_projections.append({key: row[key] for key in ("P", "F", "AUX", "PSP", "NT", "EXD")})
         history_input["probe_history"]["primary"]["PitProbe"] = 999
         history_input["ext_data"]["cycle"] = 99
         assert st.read_history() == persisted

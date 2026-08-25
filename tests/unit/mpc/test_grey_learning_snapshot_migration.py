@@ -379,9 +379,7 @@ def test_current_active_precedes_rollback_and_controller_authorities(ds):
     ],
     ids=["absent", "non-object", "legacy-snapshot", "legacy-envelope", "invalid-current"],
 )
-def test_only_valid_current_active_authority_can_outrank_rollback(
-    ds, malformed_active, reason
-):
+def test_only_valid_current_active_authority_can_outrank_rollback(ds, malformed_active, reason):
     _seed_controller(_v3(params={**PARAMS, "theta": 47.0}))
     datastore.set_blob(
         "mpc:model_activation_migration_input",

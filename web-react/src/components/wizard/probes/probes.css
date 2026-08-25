@@ -286,7 +286,7 @@
 .pf-probe-health-detail > p {
   @apply mb-0 mt-[5px];
   overflow-wrap: anywhere;
-  font: 500 13px/1.4 "Barlow";
+  font: 500 13px / 1.4 "Barlow";
 }
 .pf-probe-health-detail-status {
   @apply font-bold uppercase;

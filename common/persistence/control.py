@@ -32,9 +32,7 @@ def flush_control(*, cook_id: str | None = None):
     for table in ("queue_control_write", "queue_systemo"):
         datastore.execute_write(f"DELETE FROM {table}")
     datastore.execute_write(
-        "DELETE FROM queue_systemq "
-        "WHERE json_type(value) != 'array' "
-        "OR COALESCE(json_extract(value, '$[0]') != ?, 1)",
+        "DELETE FROM queue_systemq WHERE json_type(value) != 'array' OR COALESCE(json_extract(value, '$[0]') != ?, 1)",
         (CLEAR_HISTORY_COMMAND,),
     )
     for key in ("control:general", "control:command"):

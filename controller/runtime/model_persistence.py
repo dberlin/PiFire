@@ -90,14 +90,13 @@ class _ActivationPhaseWork:
     receipt: DurableActivationReceipt
 
 
-
 @dataclass(slots=True)
 class _ActivationConfidenceWork:
     records: tuple[ModelEvidenceRecord, ...]
     receipt: DurableActivationReceipt
-def _default_persist_activation_phase(
-    record: PreparedActivationRecord, expected_phase: ActivationPhase | None
-) -> None:
+
+
+def _default_persist_activation_phase(record: PreparedActivationRecord, expected_phase: ActivationPhase | None) -> None:
     commit_model_activation_phase(record, expected_phase=expected_phase)
 
 
@@ -145,9 +144,7 @@ class ModelPersistenceWorker:
         self._pending_evidence: deque[tuple[ModelEvidenceRecord, ...]] = deque()
         self._pending_recorder_gaps: deque[ModelEvidenceRecord] = deque()
         self._pending_activations: deque[_ActivationWork] = deque()
-        self._pending_activation_fifo: deque[
-            tuple[str, _ActivationConfidenceWork | _ActivationPhaseWork]
-        ] = deque()
+        self._pending_activation_fifo: deque[tuple[str, _ActivationConfidenceWork | _ActivationPhaseWork]] = deque()
         self._stopping = False
         self._thread: Thread | None = None
         self._evidence_blocked = False
@@ -158,11 +155,11 @@ class ModelPersistenceWorker:
         """Whether an evidence loss/failure has made confidence fail closed."""
         with self._condition:
             return self._evidence_blocked or self._failed
+
     @property
     def failed(self) -> bool:
         with self._condition:
             return self._failed
-
 
     def submit_checkpoint(self, name: str, snapshot: dict[str, object]) -> bool:
         """Copy a checkpoint and replace only its not-yet-written predecessor."""
@@ -282,45 +279,29 @@ class ModelPersistenceWorker:
             preceding_evidence,
             (str, bytes),
         ):
-            raise TypeError(
-                "preceding_evidence must be a sequence of ModelEvidenceRecord"
-            )
+            raise TypeError("preceding_evidence must be a sequence of ModelEvidenceRecord")
         owned_preceding: list[ModelEvidenceRecord] = []
         for record in preceding_evidence:
             if not isinstance(record, ModelEvidenceRecord):
-                raise TypeError(
-                    "preceding_evidence records must be ModelEvidenceRecord"
-                )
-            owned_record = ModelEvidenceRecord.model_validate_json(
-                record.model_dump_json()
-            )
-            if (
-                owned_record.kind is not EvidenceKind.CANDIDATE_ASSESSMENT
-                or not isinstance(
-                    owned_record.payload,
-                    CandidateAssessmentEvidence,
-                )
+                raise TypeError("preceding_evidence records must be ModelEvidenceRecord")
+            owned_record = ModelEvidenceRecord.model_validate_json(record.model_dump_json())
+            if owned_record.kind is not EvidenceKind.CANDIDATE_ASSESSMENT or not isinstance(
+                owned_record.payload,
+                CandidateAssessmentEvidence,
             ):
-                raise ValueError(
-                    "preceding_evidence requires candidate-assessment evidence"
-                )
+                raise ValueError("preceding_evidence requires candidate-assessment evidence")
             owned_preceding.append(owned_record)
         owned = ModelEvidenceRecord.model_validate_json(decision.model_dump_json())
-        if (
-            owned.kind is not EvidenceKind.CONFIDENCE_DECISION
-            or not isinstance(owned.payload, ConfidenceDecisionEvidence)
+        if owned.kind is not EvidenceKind.CONFIDENCE_DECISION or not isinstance(
+            owned.payload, ConfidenceDecisionEvidence
         ):
-            raise ValueError(
-                "activation confidence requires confidence-decision evidence"
-            )
+            raise ValueError("activation confidence requires confidence-decision evidence")
         if any(
             record.payload.decision_id != owned.payload.decision_id
             for record in owned_preceding
             if isinstance(record.payload, CandidateAssessmentEvidence)
         ):
-            raise ValueError(
-                "preceding candidate-assessment decision_id must match confidence"
-            )
+            raise ValueError("preceding candidate-assessment decision_id must match confidence")
         receipt = DurableActivationReceipt(accepted=True)
         with self._condition:
             if self._failed or self._stopping:
@@ -449,16 +430,9 @@ class ModelPersistenceWorker:
                 payload[0] if kind == "checkpoint" and isinstance(payload, tuple) and len(payload) == 2 else None
             )
             activation_work = payload if kind == "activation" and isinstance(payload, _ActivationWork) else None
-            phase_work = (
-                payload
-                if kind == "activation-phase" and isinstance(payload, _ActivationPhaseWork)
-                else None
-            )
+            phase_work = payload if kind == "activation-phase" and isinstance(payload, _ActivationPhaseWork) else None
             confidence_work = (
-                payload
-                if kind == "activation-confidence"
-                and isinstance(payload, _ActivationConfidenceWork)
-                else None
+                payload if kind == "activation-confidence" and isinstance(payload, _ActivationConfidenceWork) else None
             )
             succeeded = False
             checkpoint_revision = None

@@ -33,9 +33,7 @@ class ObservationOutcomeBuffer:
         if capacity <= 0:
             raise ValueError("capacity must be positive")
         self._capacity = capacity
-        self._outcomes: collections.deque[ObservationOutcomeEnvelope] = collections.deque(
-            maxlen=capacity
-        )
+        self._outcomes: collections.deque[ObservationOutcomeEnvelope] = collections.deque(maxlen=capacity)
         self._terminal_drops: collections.deque[_BufferedTerminalDrop] = collections.deque()
         self._contexts: dict[int, tuple[str, str | None]] = {}
 
@@ -68,15 +66,11 @@ class ObservationOutcomeBuffer:
         self._outcomes.append(owned)
 
     def append_terminal_drop(self, drop: ObservationTerminalDrop) -> None:
-        self._terminal_drops.append(
-            _BufferedTerminalDrop(drop, counted_eviction=False)
-        )
+        self._terminal_drops.append(_BufferedTerminalDrop(drop, counted_eviction=False))
 
     def drain(self) -> ObservationOutcomeDrain:
         envelopes: list[ObservationOutcomeEnvelope] = []
-        withheld_outcomes: collections.deque[ObservationOutcomeEnvelope] = collections.deque(
-            maxlen=self._capacity
-        )
+        withheld_outcomes: collections.deque[ObservationOutcomeEnvelope] = collections.deque(maxlen=self._capacity)
         for envelope in self._outcomes:
             context = self._contexts.get(envelope.configuration_generation)
             if context is None:

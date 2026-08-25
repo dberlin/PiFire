@@ -322,9 +322,7 @@ def _ensure_schema(conn):
     if version < 7:
         # Schema v7 turns activation authority into a crash-convergent pair
         # transaction. Existing active-only rows retain their old projection.
-        columns = {
-            row[1] for row in conn.execute("PRAGMA table_info(model_activation_state)").fetchall()
-        }
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(model_activation_state)").fetchall()}
         additions = (
             ("phase", "TEXT NOT NULL DEFAULT 'active'"),
             ("transaction_id", "TEXT"),
@@ -340,9 +338,7 @@ def _ensure_schema(conn):
         with transaction(conn):
             for name, declaration in additions:
                 if name not in columns:
-                    conn.execute(
-                        f"ALTER TABLE model_activation_state ADD COLUMN {name} {declaration}"
-                    )
+                    conn.execute(f"ALTER TABLE model_activation_state ADD COLUMN {name} {declaration}")
             conn.execute("PRAGMA user_version=7")
 
 

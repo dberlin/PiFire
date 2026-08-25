@@ -210,8 +210,6 @@ class ForecastOriginEvidence:
         return self
 
 
-
-
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
 class FitLifecycleEvidence:
     request_id: NonBlankString
@@ -280,6 +278,8 @@ class LearningFailureEvidence:
     detail: NonBlankString
     terminal: bool
     payload_type: Literal["learning_failure"] = "learning_failure"
+
+
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
 class RefreshDiagnosticsEvidence:
     accepted: bool

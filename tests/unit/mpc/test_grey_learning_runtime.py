@@ -79,6 +79,8 @@ class _Persistence(ModelPersistenceWorker):
 
         self.close_count += 1
         return True
+
+
 class _CheckpointStore:
     def __init__(
         self,
@@ -99,6 +101,7 @@ class _ProbeSolver(_Solver):
             objective=0.0,
         )
 
+
 class _CandidateEstimator(_Estimator):
     def __init__(self) -> None:
         super().__init__()
@@ -106,9 +109,6 @@ class _CandidateEstimator(_Estimator):
 
     def close(self) -> None:
         self.closed = True
-
-
-
 
 
 class _SuccessfulWorker:
@@ -161,6 +161,8 @@ class _BusyWorker(_SuccessfulWorker):
 class _CrashedWorker(_SuccessfulWorker):
     def receive(self, *, timeout_s: float):
         raise RuntimeError("worker crashed")
+
+
 class _FitErrorWorker(_SuccessfulWorker):
     def receive(self, *, timeout_s: float):
         assert self.job is not None
@@ -186,10 +188,6 @@ class _InvalidProbeSolver(_ProbeSolver):
             sequence_q=[float("nan")] * self.config.horizon_steps,
             objective=0.0,
         )
-
-
-
-
 
 
 @dataclass(slots=True)
@@ -223,6 +221,7 @@ def _descriptor() -> GreyControlPairDescriptor:
         candidate_generation=0,
         role_generation=0,
     )
+
 
 def _harness(
     *,
@@ -289,12 +288,12 @@ def _harness(
             else snapshot_parameters
         ),
         cook_history=lambda: history,
-        sync_configuration=lambda: published.append(
-            dict(activation.active_pair.core.config)
-        ),
+        sync_configuration=lambda: published.append(dict(activation.active_pair.core.config)),
         fit_worker_factory=fit_worker_factory,
     )
     return _Harness(runtime, activation, active, persistence, factory, published)
+
+
 def _automatic_candidate(harness: _Harness):
     native = GreyBoxMPCConfig(
         C_c=425.0,
@@ -340,6 +339,8 @@ def _automatic_candidate(harness: _Harness):
         completed_origins=(),
     )
     return preparation, evaluation, components
+
+
 def _reviewed_candidate(harness: _Harness):
     identity = harness.runtime.learning_identity()
     window = identity.window(0, 119)
@@ -409,10 +410,6 @@ def _reviewed_candidate(harness: _Harness):
     return preparation, evaluation, components
 
 
-
-
-
-
 def _frame(sequence: int = 0) -> FrameObservation:
     return FrameObservation(
         frame_start_s=sequence * 25.0,
@@ -438,6 +435,8 @@ def _frame(sequence: int = 0) -> FrameObservation:
         role_generation=0,
         observation_sequence=sequence,
     )
+
+
 def test_queued_fit_lifecycle_is_memory_only_until_off_path_poll(monkeypatch) -> None:
     instances = []
 
@@ -513,8 +512,6 @@ def test_queued_fit_lifecycle_is_memory_only_until_off_path_poll(monkeypatch) ->
     harness.activation.close()
 
 
-
-
 def test_disabled_runtime_records_teardown_history_without_starting_learning() -> None:
     harness = _harness()
     assert harness.runtime.observe_frame(_frame()) is None
@@ -522,6 +519,7 @@ def test_disabled_runtime_records_teardown_history_without_starting_learning() -
     assert harness.runtime.observation_failure(_frame(), RuntimeError("isolated")) is None
     assert harness.runtime.learning_status()["status"] == "collecting"
     harness.runtime.close()
+
 
 def test_identity_rebind_rotates_teardown_history_and_accepts_first_new_role_frame() -> None:
     harness = _harness()
@@ -601,6 +599,8 @@ def test_operator_probe_refit_persists_authority_without_installing_pair() -> No
     target.activation.close()
     harness.runtime.close()
     harness.activation.close()
+
+
 @pytest.mark.parametrize(
     ("worker_factory", "reason"),
     (
@@ -627,6 +627,8 @@ def test_completed_cook_refit_reports_worker_failures_and_closes_worker(
     assert worker_factory.instances[-1].closed
     harness.runtime.close()
     harness.activation.close()
+
+
 def test_completed_cook_refit_rejection_keeps_incumbent_and_closes_worker() -> None:
     harness = _harness(fit_worker_factory=_RejectedWorker)
     incumbent = harness.activation.active_pair
@@ -642,8 +644,6 @@ def test_completed_cook_refit_rejection_keeps_incumbent_and_closes_worker() -> N
     assert _RejectedWorker.instances[-1].closed
     harness.runtime.close()
     harness.activation.close()
-
-
 
 
 @pytest.mark.parametrize(
@@ -670,6 +670,8 @@ def test_automatic_activation_rejects_wrong_policy_or_incomplete_preparation(
     assert harness.activation.active_pair is harness.active
     harness.runtime.close()
     harness.activation.close()
+
+
 def test_completed_cook_refit_rejects_failed_native_preparation_without_owner_swap() -> None:
     harness = _harness(
         fit_worker_factory=_SuccessfulWorker,
@@ -711,7 +713,6 @@ def test_operator_refit_requires_durable_confidence_before_exposing_candidate() 
     assert not harness.active.closed
     harness.runtime.close()
     harness.activation.close()
-
 
 
 def test_orchestrator_start_failure_closes_partial_learning_owner(monkeypatch) -> None:
@@ -836,6 +837,8 @@ def test_rejected_evaluation_persists_failure_checks_and_projects_once(monkeypat
     harness.runtime.bind_learning_identity("next", "cook", 1)
     harness.runtime.close()
     harness.activation.close()
+
+
 def test_candidate_assessment_uses_activation_fifo_when_unrelated_evidence_is_rejected(
     monkeypatch,
 ) -> None:
@@ -854,9 +857,7 @@ def test_candidate_assessment_uses_activation_fifo_when_unrelated_evidence_is_re
         blockers=("stale-session",),
     )
     preparation = SimpleNamespace(
-        candidate=SimpleNamespace(
-            request=SimpleNamespace(origin=CandidateOrigin.PASSIVE_ONLINE)
-        ),
+        candidate=SimpleNamespace(request=SimpleNamespace(origin=CandidateOrigin.PASSIVE_ONLINE)),
         candidate_pair=None,
         timing=None,
         dry_solve_finite=False,
@@ -892,10 +893,7 @@ def test_candidate_assessment_uses_activation_fifo_when_unrelated_evidence_is_re
     assert harness.persistence.evidence == []
     assert len(harness.persistence.confidence) == 1
     assert len(harness.persistence.confidence_preceding) == 1
-    assert (
-        harness.persistence.confidence_preceding[0][0].payload.decision_id
-        == evaluation.decision_id
-    )
+    assert harness.persistence.confidence_preceding[0][0].payload.decision_id == evaluation.decision_id
     assert harness.activation.active_pair is harness.active
     harness.runtime.close()
     harness.activation.close()
@@ -993,13 +991,8 @@ def test_trace_projection_failure_terminates_activation_without_losing_evidence(
     assert harness.persistence.evidence == []
     assert len(harness.persistence.confidence_preceding) == 1
     assert len(harness.persistence.confidence_preceding[0]) == 1
-    assert (
-        harness.persistence.confidence_preceding[0][0].payload.decision_id
-        == evaluation.decision_id
-    )
-    assert harness.activation.terminated_reason == (
-        "learning lifecycle trace failed: trace unavailable"
-    )
+    assert harness.persistence.confidence_preceding[0][0].payload.decision_id == evaluation.decision_id
+    assert harness.activation.terminated_reason == ("learning lifecycle trace failed: trace unavailable")
     harness.runtime.close()
 
 
@@ -1053,12 +1046,8 @@ def test_reviewed_checkpoint_is_durable_idempotent_and_confidence_ordered(
     assert assessment.payload.decision_id == evaluation.decision_id
     assert confidence.payload.decision_id == evaluation.decision_id
     assert harness.runtime.model_authority()[0] == 1
-    assert store.snapshots[0][1]["evidence"]["confidence_decision_id"] == (
-        evaluation.decision_id
-    )
-    assert store.snapshots[0][1]["identities"]["candidate_digest"] == (
-        evaluation.challenger_digest
-    )
+    assert store.snapshots[0][1]["evidence"]["confidence_decision_id"] == (evaluation.decision_id)
+    assert store.snapshots[0][1]["identities"]["candidate_digest"] == (evaluation.challenger_digest)
     harness.runtime.close()
     assert components.estimator.closed
     assert components.controller.closed
@@ -1111,15 +1100,9 @@ def test_reviewed_checkpoint_failures_preserve_active_owner_and_close_candidate(
         "controller.model_learning.grey_runtime.GreyLearningOrchestrator",
         _Learning,
     )
-    store = _CheckpointStore(
-        CheckpointSaveOutcome.FAILED
-        if failure == "checkpoint"
-        else CheckpointSaveOutcome.SAVED
-    )
+    store = _CheckpointStore(CheckpointSaveOutcome.FAILED if failure == "checkpoint" else CheckpointSaveOutcome.SAVED)
     snapshot_parameters = (
-        (lambda: (_ for _ in ()).throw(ValueError("not serializable")))
-        if failure == "snapshot"
-        else None
+        (lambda: (_ for _ in ()).throw(ValueError("not serializable"))) if failure == "snapshot" else None
     )
     harness = _harness(
         learning_enabled=True,
@@ -1212,11 +1195,6 @@ def test_learning_status_projects_queued_running_preparing_and_handoff_states(
     assert harness.runtime.learning_status()["status"] == "active"
     harness.runtime.close()
     harness.activation.close()
-
-
-
-
-
 
 
 def test_observation_and_adoption_reject_invalid_public_inputs_without_owner_change() -> None:
@@ -1451,12 +1429,10 @@ def test_real_orchestrator_detaches_raw_owner_after_queued_lifecycle_abort() -> 
         orchestrator.handoff_if_ready(
             confidence_accepted=True,
             online_enabled=True,
-            prepare=lambda preparation, policy: (
-                harness.runtime.prepare_automatic_activation(
-                    preparation,
-                    policy,
-                    evaluation,
-                )
+            prepare=lambda preparation, policy: harness.runtime.prepare_automatic_activation(
+                preparation,
+                policy,
+                evaluation,
             ),
         )
 
@@ -1538,6 +1514,7 @@ def test_restore_preserves_each_supported_checkpoint_state(section, key, value) 
     source.runtime.close()
     source.activation.close()
 
+
 def test_restore_rejects_crossed_active_identity_without_replacing_owner() -> None:
     harness = _harness()
     snapshot = harness.runtime.get_model_snapshot()
@@ -1581,21 +1558,38 @@ def test_restore_replace_failure_closes_new_pair_and_keeps_incumbent(monkeypatch
     source.runtime.close()
     source.activation.close()
 
+
 def test_runtime_snapshot_is_exact_json_safe_v4_without_process_jobs() -> None:
     harness = _harness()
     snapshot = harness.runtime.get_model_snapshot()
     assert snapshot is not None
     assert snapshot["version"] == 4
     assert set(snapshot) == {
-        "version", "schema", "revision", "structure", "active", "challenger", "evidence", "origin",
-        "policy", "identification", "cook_refit", "window", "identities", "activation", "failure",
-        "active_pair", "candidate_pair",
+        "version",
+        "schema",
+        "revision",
+        "structure",
+        "active",
+        "challenger",
+        "evidence",
+        "origin",
+        "policy",
+        "identification",
+        "cook_refit",
+        "window",
+        "identities",
+        "activation",
+        "failure",
+        "active_pair",
+        "candidate_pair",
     }
     encoded = json.dumps(snapshot, sort_keys=True, allow_nan=False)
     assert "process" not in encoded
     assert "job" not in encoded
     harness.runtime.close()
     harness.activation.close()
+
+
 def test_restore_parameter_mismatch_closes_built_pair_and_keeps_incumbent(
     monkeypatch,
 ) -> None:
@@ -1630,14 +1624,9 @@ def test_finalize_checkpoint_failure_can_override_one_completed_outcome() -> Non
 
     assert harness.runtime.finalize_cook_refit(TeardownRefitOutcome.INSUFFICIENT)
     assert not harness.runtime.finalize_cook_refit(TeardownRefitOutcome.REJECTED)
-    assert harness.runtime.finalize_cook_refit(
-        TeardownRefitOutcome.CHECKPOINT_FAILURE
-    )
+    assert harness.runtime.finalize_cook_refit(TeardownRefitOutcome.CHECKPOINT_FAILURE)
     assert harness.runtime.model_authority()[0] == revision + 1
-    assert (
-        harness.runtime.get_model_snapshot()["cook_refit"]["latest"]
-        == TeardownRefitOutcome.CHECKPOINT_FAILURE.value
-    )
+    assert harness.runtime.get_model_snapshot()["cook_refit"]["latest"] == TeardownRefitOutcome.CHECKPOINT_FAILURE.value
     harness.runtime.close()
     harness.activation.close()
 
@@ -1683,9 +1672,7 @@ def test_restore_stages_learning_before_atomic_active_replacement(
         monkeypatch.setattr(
             target.activation,
             "replace_active_pair",
-            lambda *_args, **_kwargs: (_ for _ in ()).throw(
-                RuntimeError("replacement failed")
-            ),
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("replacement failed")),
         )
 
     assert target.runtime.restore_model(snapshot) is False
@@ -1761,8 +1748,6 @@ def test_restore_stages_identity_from_exact_restored_full_configuration(
     target.activation.close()
     source.runtime.close()
     source.activation.close()
-
-
 
 
 @pytest.mark.parametrize(

@@ -107,9 +107,7 @@ export function GrillGauge({
                     : "unknown"
               }`}
             >
-              {healthLastReported || health.freshnessQualifier !== null
-                ? "Last reported: "
-                : null}
+              {healthLastReported || health.freshnessQualifier !== null ? "Last reported: " : null}
               {health.headline}
             </strong>
             {health.impactCopy !== null ? <span>{health.impactCopy}</span> : null}

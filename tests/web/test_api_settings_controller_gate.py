@@ -23,9 +23,7 @@ def _select_mpc(client):
     return client.post("/api/settings_update", data=json.dumps(body), content_type="application/json")
 
 
-def test_selecting_mpc_without_a_native_publication_is_rejected_with_rebuild_guidance(
-    client, monkeypatch
-):
+def test_selecting_mpc_without_a_native_publication_is_rejected_with_rebuild_guidance(client, monkeypatch):
     _native_failure(monkeypatch)
 
     response = _select_mpc(client)

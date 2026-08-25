@@ -35,12 +35,14 @@ def _control():
     return {"primary_setpoint": 225}
 
 
-@pytest.fixture(params=[
-    "Native acados library is missing",
-    "Native acados build manifest is malformed",
-    "Native acados ABI mismatch: expected 2, found 1",
-    "Native acados library could not be loaded",
-])
+@pytest.fixture(
+    params=[
+        "Native acados library is missing",
+        "Native acados build manifest is malformed",
+        "Native acados ABI mismatch: expected 2, found 1",
+        "Native acados library could not be loaded",
+    ]
+)
 def native_failure(monkeypatch, request):
     detail = f"{request.param}. Run `{_REBUILD}`."
 

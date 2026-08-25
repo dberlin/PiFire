@@ -508,9 +508,7 @@ def test_the_cook_a_refit_can_be_handed_is_bounded_by_the_history():
     bounded deque, so the longest cook a teardown refit can ever see is the
     one that test measures."""
     c = _c()
-    c.active_control_pair.core.history.extend(
-        _synthetic_cook(rows=_HISTORY_MAX + 500)
-    )
+    c.active_control_pair.core.history.extend(_synthetic_cook(rows=_HISTORY_MAX + 500))
     assert len(c.cook_history()) == _HISTORY_MAX
 
 

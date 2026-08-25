@@ -26,11 +26,7 @@ BUNDLE = ContractBundle("test", (Parent, Child), "test.gen.ts")
 
 
 def _files(root: Path) -> dict[Path, bytes]:
-    return {
-        path.relative_to(root): path.read_bytes()
-        for path in sorted(root.rglob("*"))
-        if path.is_file()
-    }
+    return {path.relative_to(root): path.read_bytes() for path in sorted(root.rglob("*")) if path.is_file()}
 
 
 def test_bundle_schema_is_deterministic_strict_and_lf_terminated():

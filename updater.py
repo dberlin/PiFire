@@ -79,6 +79,7 @@ def update_startup_transaction(repo_root=None):
         finally:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
+
 """
 ==============================================================================
  Supporting Functions
@@ -761,8 +762,7 @@ def record_installed_version(manifest=None):
 
 def _migration_is_pending(current_version_string, current_build, version_info):
     return semantic_ver_is_lower(current_version_string, version_info["version"]) or (
-        current_version_string == version_info["version"]
-        and (current_build or 0) < version_info["build"]
+        current_version_string == version_info["version"] and (current_build or 0) < version_info["build"]
     )
 
 

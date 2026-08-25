@@ -307,7 +307,7 @@ def _finite_float(value):
         return None
     try:
         number = float(value)
-    except (OverflowError, ValueError):
+    except OverflowError, ValueError:
         return None
     return number if math.isfinite(number) else None
 
@@ -324,7 +324,6 @@ def _project_thermocouple_health(
     probe_settings = settings.get("probe_settings")
     if not isinstance(probe_settings, Mapping):
         return []
-
 
     probe_map = probe_settings.get("probe_map")
     if not isinstance(probe_map, Mapping):
@@ -378,11 +377,7 @@ def _project_thermocouple_health(
         observed_at = _finite_float(report.get("observed_at"))
         detail = report.get("detail")
         evidence = report.get("evidence")
-        if (
-            observed_at is None
-            or not isinstance(detail, Mapping)
-            or not isinstance(evidence, list)
-        ):
+        if observed_at is None or not isinstance(detail, Mapping) or not isinstance(evidence, list):
             continue
         policy = detail.get("policy")
         if policy not in {"off", "observe", "enforce"}:
@@ -391,13 +386,7 @@ def _project_thermocouple_health(
         age_s = max(0.0, now - observed_at)
         has_hardware = "hardware" in evidence
         has_software = any(item != "hardware" for item in evidence)
-        source = (
-            "mixed"
-            if has_hardware and has_software
-            else "hardware"
-            if has_hardware
-            else "software"
-        )
+        source = "mixed" if has_hardware and has_software else "hardware" if has_hardware else "software"
 
         state = report.get("state")
         temperature_valid = report.get("temperature_valid")
@@ -432,9 +421,7 @@ def _project_thermocouple_health(
             )
         except ValidationError:
             continue
-        projected.append(
-            view.model_dump(mode="json", by_alias=True, exclude_none=False)
-        )
+        projected.append(view.model_dump(mode="json", by_alias=True, exclude_none=False))
     return projected
 
 

@@ -56,6 +56,8 @@ def test_command_request_union_covers_command_client_path_grammar(payload):
 def test_command_request_union_is_discriminated_by_operation():
     with pytest.raises(ValidationError):
         TypeAdapter(CommandRequest).validate_python({"operation": "not_a_command"}, strict=True)
+
+
 @pytest.mark.parametrize("next_mode", ("startup", "monitor"))
 def test_prime_command_accepts_only_backend_recognized_next_modes(next_mode):
     parsed = PrimeCommandRequest.model_validate(
@@ -160,8 +162,6 @@ def test_notify_entry_rejects_explicit_null_shutdown():
             {"label": "Only", "type": "probe", "req": True, "shutdown": None},
             strict=True,
         )
-
-
 
 
 def test_control_patch_preserves_sparse_rfc7396_members_and_notify_updates():

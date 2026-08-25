@@ -1,4 +1,5 @@
 """Atomic grey estimator/native-pair activation contracts."""
+
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError, replace
@@ -266,9 +267,7 @@ def test_queue_acceptance_without_durable_receipt_never_prepares_or_transfers_ow
         ({"dry_solve": False}, "native-dry-solve-failed", ["build", "validate", "dry-solve"]),
     ],
 )
-def test_every_candidate_validation_failure_closes_the_complete_candidate_pair(
-    changes, reason, expected_calls
-) -> None:
+def test_every_candidate_validation_failure_closes_the_complete_candidate_pair(changes, reason, expected_calls) -> None:
     manager, descriptor, incumbent, candidate, calls, _records, _receipt = _manager(**changes)
 
     decision = manager.prepare(
@@ -327,7 +326,8 @@ def test_manual_request_requires_exact_digest_decision_and_operator_reviewed_pol
 def test_phase_transitions_preserve_exact_pair_owners_and_abort_reason() -> None:
     manager, descriptor, incumbent, candidate, *_ = _manager()
     prepared = manager.prepare(
-        _request(descriptor), descriptor,
+        _request(descriptor),
+        descriptor,
         origin=CandidateOrigin.PASSIVE_ONLINE,
         policy=ActivationPolicy.PASSIVE_AUTO,
     ).record
@@ -378,7 +378,8 @@ def _persisted_state(record: PreparedActivationRecord) -> ModelActivationState:
 def test_startup_aborts_prepared_before_restoring_only_the_incumbent() -> None:
     manager, descriptor, incumbent, _candidate, *_ = _manager()
     prepared = manager.prepare(
-        _request(descriptor), descriptor,
+        _request(descriptor),
+        descriptor,
         origin=CandidateOrigin.PASSIVE_ONLINE,
         policy=ActivationPolicy.PASSIVE_AUTO,
     ).record
@@ -407,7 +408,8 @@ def test_startup_aborts_prepared_before_restoring_only_the_incumbent() -> None:
 def test_startup_restores_candidate_only_from_active_and_never_replays_a_swap() -> None:
     manager, descriptor, incumbent, candidate, *_ = _manager()
     prepared = manager.prepare(
-        _request(descriptor), descriptor,
+        _request(descriptor),
+        descriptor,
         origin=CandidateOrigin.PASSIVE_ONLINE,
         policy=ActivationPolicy.PASSIVE_AUTO,
     ).record
@@ -441,7 +443,8 @@ def test_startup_restores_candidate_only_from_active_and_never_replays_a_swap() 
 def test_startup_refuses_ambiguous_prepared_compensation_without_a_durable_abort() -> None:
     manager, descriptor, *_ = _manager()
     prepared = manager.prepare(
-        _request(descriptor), descriptor,
+        _request(descriptor),
+        descriptor,
         origin=CandidateOrigin.PASSIVE_ONLINE,
         policy=ActivationPolicy.PASSIVE_AUTO,
     ).record
@@ -480,11 +483,7 @@ def test_startup_applies_persisted_fallback_before_candidate_output_is_authorize
     )
     lifecycle = ModelEvidenceRecord(
         evidence_id=f"{lifecycle_kind}-startup",
-        kind=(
-            EvidenceKind.FALLBACK
-            if lifecycle_kind == "fallback"
-            else EvidenceKind.ROLLBACK
-        ),
+        kind=(EvidenceKind.FALLBACK if lifecycle_kind == "fallback" else EvidenceKind.ROLLBACK),
         session_id="session-startup",
         cook_id=None,
         timestamp_ms=2_000,
@@ -576,7 +575,6 @@ def _bare_mpc_pair_owner(
 def test_automatic_preparation_drains_confidence_receipt_before_prepared_phase() -> None:
     calls = []
 
-
     class _Worker(model_persistence_module.ModelPersistenceWorker):
         def __init__(self):
             pass
@@ -587,17 +585,13 @@ def test_automatic_preparation_drains_confidence_receipt_before_prepared_phase()
 
         def submit_activation_confidence(self, record):
             calls.append(("confidence", record))
-            receipt = model_persistence_module.DurableActivationReceipt(
-                accepted=True
-            )
+            receipt = model_persistence_module.DurableActivationReceipt(accepted=True)
             receipt._complete(durable=True)
             return receipt
 
         def submit_activation_phase(self, record, *, expected_phase):
             calls.append(("phase", record, expected_phase))
-            receipt = model_persistence_module.DurableActivationReceipt(
-                accepted=True
-            )
+            receipt = model_persistence_module.DurableActivationReceipt(accepted=True)
             receipt._complete(durable=True)
             return receipt
 
@@ -607,10 +601,7 @@ def test_automatic_preparation_drains_confidence_receipt_before_prepared_phase()
     core, _incumbent, _candidate, _prepared = _bare_mpc_pair_owner(_Worker())
 
     native_config = GreyBoxMPCConfig(theta=39.0, horizon_steps=12)
-    configuration = {
-        name: getattr(native_config, name)
-        for name in native_config.__dataclass_fields__
-    }
+    configuration = {name: getattr(native_config, name) for name in native_config.__dataclass_fields__}
     evaluation = SimpleNamespace(
         decision_id="decision-confidence-fifo",
         accepted=True,
@@ -654,11 +645,8 @@ def test_automatic_preparation_drains_confidence_receipt_before_prepared_phase()
     core.close()
 
 
-
-
 def test_hold_and_learning_share_one_injected_activation_persistence_fifo() -> None:
     calls = []
-
 
     class _Worker(model_persistence_module.ModelPersistenceWorker):
         def __init__(self):
@@ -670,17 +658,13 @@ def test_hold_and_learning_share_one_injected_activation_persistence_fifo() -> N
 
         def submit_activation_confidence(self, record):
             calls.append(("confidence", record.evidence_id))
-            receipt = model_persistence_module.DurableActivationReceipt(
-                accepted=True
-            )
+            receipt = model_persistence_module.DurableActivationReceipt(accepted=True)
             receipt._complete(durable=True)
             return receipt
 
         def submit_activation_phase(self, record, *, expected_phase):
             calls.append(("phase", record.transaction_id, expected_phase))
-            receipt = model_persistence_module.DurableActivationReceipt(
-                accepted=True
-            )
+            receipt = model_persistence_module.DurableActivationReceipt(accepted=True)
             receipt._complete(durable=True)
             return receipt
 
@@ -691,10 +675,7 @@ def test_hold_and_learning_share_one_injected_activation_persistence_fifo() -> N
     core, _incumbent, _candidate, _prepared = _bare_mpc_pair_owner(worker)
     core.cfg = {"estimator": "ekf"}
     native_config = GreyBoxMPCConfig(theta=39.0, horizon_steps=12)
-    configuration = {
-        name: getattr(native_config, name)
-        for name in native_config.__dataclass_fields__
-    }
+    configuration = {name: getattr(native_config, name) for name in native_config.__dataclass_fields__}
     evaluation = SimpleNamespace(
         decision_id="decision-raced-first-use",
         accepted=True,
@@ -899,6 +880,7 @@ def test_first_native_solve_failure_after_activation_restores_exact_pair_and_rec
     finally:
         core.close()
 
+
 def test_operator_rollback_restores_only_the_recorded_in_memory_rollback_owner() -> None:
     core, incumbent, candidate, prepared = _bare_mpc_pair_owner()
     unrelated = _owned(
@@ -911,7 +893,6 @@ def test_operator_rollback_restores_only_the_recorded_in_memory_rollback_owner()
     )
     core.install_candidate_pair_inert(candidate, prepared)
     core.authorize_candidate_pair(prepared.transition(ActivationPhase.ACTIVE))
-
 
     assert core.rollback_activation("operator exact rollback")
 

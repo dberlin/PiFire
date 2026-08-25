@@ -17,6 +17,7 @@ class FakeGpio:
     def set(self, pin_name, high):
         self.values[pin_name] = high
 
+
 class FailingOffGpio(FakeGpio):
     def __init__(self, fail_pin):
         super().__init__()
@@ -44,8 +45,6 @@ class FailingFanController:
         if value == 0:
             raise OSError("fan controller unavailable")
         self._speed = value
-
-
 
 
 def _config(*, chip="none", triggerlevel="LOW", outputs=None, fan_bus=None):

@@ -30,9 +30,7 @@ def _frame(index: int) -> FrameObservation:
     )
 
 
-def _evidence_outcome(
-    *, eligible: bool = True, rejection_reasons: tuple[str, ...] = ()
-) -> dict[str, object]:
+def _evidence_outcome(*, eligible: bool = True, rejection_reasons: tuple[str, ...] = ()) -> dict[str, object]:
     return {
         "eligible": eligible,
         "rejection_reasons": rejection_reasons,
@@ -76,10 +74,10 @@ def test_buffer_preserves_runner_supplied_sequence_generation_and_order() -> Non
 
     drained = buffer.drain()
 
-    assert [
-        (envelope.submission_sequence, envelope.configuration_generation)
-        for envelope in drained.envelopes
-    ] == [(41, 7), (42, 8)]
+    assert [(envelope.submission_sequence, envelope.configuration_generation) for envelope in drained.envelopes] == [
+        (41, 7),
+        (42, 8),
+    ]
 
 
 def test_bounded_eviction_becomes_a_counted_terminal_drop() -> None:
@@ -174,9 +172,7 @@ def test_retired_context_fences_items_until_that_generation_is_rebound() -> None
     buffer.bind_context(9, "replacement-session", "replacement-cook")
     released = buffer.drain()
 
-    assert [
-        envelope.submission_sequence for envelope in released.envelopes
-    ] == [21]
+    assert [envelope.submission_sequence for envelope in released.envelopes] == [21]
     assert [drop.submission_sequence for drop in released.terminal_drops] == [22]
     assert released.envelopes[0].evidence[0].session_id == "replacement-session"
     assert released.envelopes[0].evidence[0].cook_id == "replacement-cook"
@@ -190,9 +186,7 @@ def test_drain_resets_only_eviction_counters_for_delivered_drops() -> None:
 
     bound_only = buffer.drain()
 
-    assert [
-        envelope.submission_sequence for envelope in bound_only.envelopes
-    ] == [31]
+    assert [envelope.submission_sequence for envelope in bound_only.envelopes] == [31]
     assert bound_only.terminal_drops == ()
     assert bound_only.dropped_count == 0
     assert bound_only.dropped_sequences == ()

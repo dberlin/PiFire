@@ -312,8 +312,6 @@ def simulate_grey_box(
     return out
 
 
-
-
 class GreyBoxKF:
     """
     Kalman filter over the augmented linear model
@@ -474,5 +472,3 @@ class GreyBoxEKF:
         self.x = self.x + K.flatten() * (y_measured - (self.H @ self.x)[0])
         self.P = (np.eye(self.n) - K @ self.H) @ self.P
         return self.x
-
-

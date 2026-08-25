@@ -104,10 +104,7 @@ class GreyBoxMPCConfig:
 
         horizon_steps = _integer(self.horizon_steps, "horizon_steps")
         if not GREY_HORIZON_MIN <= horizon_steps <= GREY_HORIZON_CAPACITY:
-            raise ValueError(
-                f"horizon_steps must be between {GREY_HORIZON_MIN} and "
-                f"{GREY_HORIZON_CAPACITY}"
-            )
+            raise ValueError(f"horizon_steps must be between {GREY_HORIZON_MIN} and {GREY_HORIZON_CAPACITY}")
         object.__setattr__(self, "horizon_steps", horizon_steps)
         object.__setattr__(
             self,
@@ -138,9 +135,7 @@ class GreyBoxMPCConfig:
 
         max_iterations = _integer(self.max_iterations, "max_iterations")
         if not 1 <= max_iterations <= GREY_MAX_ITERATIONS:
-            raise ValueError(
-                f"max_iterations must be between 1 and {GREY_MAX_ITERATIONS}"
-            )
+            raise ValueError(f"max_iterations must be between 1 and {GREY_MAX_ITERATIONS}")
         object.__setattr__(self, "max_iterations", max_iterations)
 
 
@@ -210,10 +205,7 @@ class GreyBoxSolve:
         if sequence_q.size != sequence_residual.size:
             raise ValueError("sequence arrays must have matching lengths")
         if not GREY_HORIZON_MIN <= sequence_q.size <= GREY_HORIZON_CAPACITY:
-            raise ValueError(
-                f"sequence length must be between {GREY_HORIZON_MIN} and "
-                f"{GREY_HORIZON_CAPACITY}"
-            )
+            raise ValueError(f"sequence length must be between {GREY_HORIZON_MIN} and {GREY_HORIZON_CAPACITY}")
         if not isinstance(self.diagnostics, SolverDiagnostics):
             raise ValueError("diagnostics must be SolverDiagnostics")
         object.__setattr__(self, "sequence_q", sequence_q)

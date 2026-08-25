@@ -67,11 +67,7 @@ def _sha256(path: Path) -> str:
 def _tree_bytes(root: Path) -> dict[str, bytes]:
     if not root.exists():
         return {}
-    return {
-        path.relative_to(root).as_posix(): path.read_bytes()
-        for path in root.rglob("*")
-        if path.is_file()
-    }
+    return {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()}
 
 
 def _write_solver(directory: Path, payload: bytes) -> Path:
@@ -129,9 +125,7 @@ def test_pinned_environment_uses_canonical_source_and_complete_exact_revisions()
         ("revision", "0" * 40, "acados revision"),
     ],
 )
-def test_manifest_rejects_wrong_acados_source_pin(
-    field: str, replacement: str, message: str
-) -> None:
+def test_manifest_rejects_wrong_acados_source_pin(field: str, replacement: str, message: str) -> None:
     actual = deepcopy(_EXPECTED_ENVIRONMENT)
     actual["acados"][field] = replacement
 
@@ -181,12 +175,8 @@ def test_manifest_is_exactly_grey_only_and_hashes_every_generated_file(
     }
     assert manifest["schema"] == 1
     assert manifest["acados"] == _EXPECTED_ENVIRONMENT["acados"]
-    assert manifest["python_generator_dependencies"] == (
-        _EXPECTED_ENVIRONMENT["python_generator_dependencies"]
-    )
-    assert manifest["model_definitions"] == {
-        "controller/acados/codegen/grey_box_ocp.py": _sha256(definition)
-    }
+    assert manifest["python_generator_dependencies"] == (_EXPECTED_ENVIRONMENT["python_generator_dependencies"])
+    assert manifest["model_definitions"] == {"controller/acados/codegen/grey_box_ocp.py": _sha256(definition)}
     assert manifest["solvers"] == {
         "grey_box": {
             "metadata": "grey_box/pifire_grey.json",
@@ -217,13 +207,9 @@ def test_checked_in_manifest_hashes_the_complete_grey_only_tree() -> None:
 
     assert actual_files
     assert manifest["acados"] == _EXPECTED_ENVIRONMENT["acados"]
-    assert manifest["python_generator_dependencies"] == (
-        _EXPECTED_ENVIRONMENT["python_generator_dependencies"]
-    )
+    assert manifest["python_generator_dependencies"] == (_EXPECTED_ENVIRONMENT["python_generator_dependencies"])
     assert set(manifest["solvers"]) == {"grey_box"}
-    assert manifest["solvers"]["grey_box"]["metadata"] == (
-        "grey_box/pifire_grey.json"
-    )
+    assert manifest["solvers"]["grey_box"]["metadata"] == ("grey_box/pifire_grey.json")
     assert manifest["model_definitions"] == {
         "controller/acados/codegen/grey_box_ocp.py": _sha256(
             _REPOSITORY_ROOT / "controller/acados/codegen/grey_box_ocp.py"
@@ -239,30 +225,39 @@ def test_regeneration_and_check_mode_are_deterministic_and_grey_only(
     repository = _repository(tmp_path)
     calls: list[str] = []
 
-    assert regenerate(
-        "write",
-        repository_root=repository,
-        generators=_generators(calls),
-        gate=lambda *_: None,
-        environment=deepcopy(_EXPECTED_ENVIRONMENT),
-    ) == 0
+    assert (
+        regenerate(
+            "write",
+            repository_root=repository,
+            generators=_generators(calls),
+            gate=lambda *_: None,
+            environment=deepcopy(_EXPECTED_ENVIRONMENT),
+        )
+        == 0
+    )
     generated = repository / "native/generated"
     first = _tree_bytes(generated)
 
-    assert regenerate(
-        "check",
-        repository_root=repository,
-        generators=_generators(calls),
-        gate=lambda *_: pytest.fail("check mode must not run write gates"),
-        environment=deepcopy(_EXPECTED_ENVIRONMENT),
-    ) == 0
-    assert regenerate(
-        "check",
-        repository_root=repository,
-        generators=_generators(calls),
-        gate=lambda *_: pytest.fail("check mode must not run write gates"),
-        environment=deepcopy(_EXPECTED_ENVIRONMENT),
-    ) == 0
+    assert (
+        regenerate(
+            "check",
+            repository_root=repository,
+            generators=_generators(calls),
+            gate=lambda *_: pytest.fail("check mode must not run write gates"),
+            environment=deepcopy(_EXPECTED_ENVIRONMENT),
+        )
+        == 0
+    )
+    assert (
+        regenerate(
+            "check",
+            repository_root=repository,
+            generators=_generators(calls),
+            gate=lambda *_: pytest.fail("check mode must not run write gates"),
+            environment=deepcopy(_EXPECTED_ENVIRONMENT),
+        )
+        == 0
+    )
 
     assert calls == ["grey_box", "grey_box", "grey_box"]
     assert _tree_bytes(generated) == first
@@ -273,26 +268,32 @@ def test_check_is_nonmutating_and_reports_added_removed_and_changed_paths(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     repository = _repository(tmp_path)
-    assert regenerate(
-        "write",
-        repository_root=repository,
-        generators=_generators(),
-        gate=lambda *_: None,
-        environment=deepcopy(_EXPECTED_ENVIRONMENT),
-    ) == 0
+    assert (
+        regenerate(
+            "write",
+            repository_root=repository,
+            generators=_generators(),
+            gate=lambda *_: None,
+            environment=deepcopy(_EXPECTED_ENVIRONMENT),
+        )
+        == 0
+    )
     generated = repository / "native/generated"
     (generated / "grey_box/solver.c").write_bytes(b"deliberately changed\n")
     (generated / "grey_box/pifire_grey.json").unlink()
     (generated / "unexpected.txt").write_text("unexpected\n")
     before = _tree_bytes(generated)
 
-    assert regenerate(
-        "check",
-        repository_root=repository,
-        generators=_generators(),
-        gate=lambda *_: pytest.fail("check mode must not run write gates"),
-        environment=deepcopy(_EXPECTED_ENVIRONMENT),
-    ) == 1
+    assert (
+        regenerate(
+            "check",
+            repository_root=repository,
+            generators=_generators(),
+            gate=lambda *_: pytest.fail("check mode must not run write gates"),
+            environment=deepcopy(_EXPECTED_ENVIRONMENT),
+        )
+        == 1
+    )
 
     assert _tree_bytes(generated) == before
     output = capsys.readouterr().out
@@ -314,13 +315,13 @@ def _write_generated_path_fixture(
     (directory / "CMakeLists.txt").write_text(
         "\n".join(
             (
-                "if(CMAKE_CXX_COMPILER_ID MATCHES \"MSVC\")",
+                'if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")',
                 f"    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE {export})",
                 f"    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_RELEASE {export})",
                 f"    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_RELEASE {export})",
                 "endif()",
-                f"set(ACADOS_INCLUDE_PATH {acados_source}/include CACHE PATH \"include\")",
-                f"set(ACADOS_LIB_PATH {acados_build}/lib CACHE PATH \"lib\")",
+                f'set(ACADOS_INCLUDE_PATH {acados_source}/include CACHE PATH "include")',
+                f'set(ACADOS_LIB_PATH {acados_build}/lib CACHE PATH "lib")',
                 "",
             )
         )
@@ -443,13 +444,16 @@ def test_internal_stage_mode_populates_only_caller_owned_destination(
     before = _tree_bytes(generated)
     staging = repository / "native/.generated-staging/candidate"
 
-    assert regenerate(
-        "stage",
-        repository_root=repository,
-        generators=_generators(),
-        environment=deepcopy(_EXPECTED_ENVIRONMENT),
-        staging=staging,
-    ) == 0
+    assert (
+        regenerate(
+            "stage",
+            repository_root=repository,
+            generators=_generators(),
+            environment=deepcopy(_EXPECTED_ENVIRONMENT),
+            staging=staging,
+        )
+        == 0
+    )
 
     assert (staging / "manifest.json").is_file()
     assert (staging / "grey_box/solver.c").is_file()
@@ -476,8 +480,6 @@ def test_write_does_not_mutate_generated_tree_when_a_gate_fails(tmp_path: Path) 
     assert _tree_bytes(generated) == before
 
 
-
-
 def test_staged_equation_parity_uses_compiled_equation_and_nonzero_sigma(
     tmp_path: Path,
 ) -> None:
@@ -489,13 +491,9 @@ def test_staged_equation_parity_uses_compiled_equation_and_nonzero_sigma(
         parameters: tuple[float, ...],
     ) -> tuple[float, ...]:
         seen_sigma.append(parameters[5])
-        return cli_module._reference_discrete_map(
-            state, residual, parameters
-        )
+        return cli_module._reference_discrete_map(state, residual, parameters)
 
-    cli_module.validate_staged_equation_parity(
-        tmp_path, evaluator=matching
-    )
+    cli_module.validate_staged_equation_parity(tmp_path, evaluator=matching)
     assert seen_sigma and all(value > 0.0 for value in seen_sigma)
 
     def wrong(
@@ -503,16 +501,14 @@ def test_staged_equation_parity_uses_compiled_equation_and_nonzero_sigma(
         residual: float,
         parameters: tuple[float, ...],
     ) -> tuple[float, ...]:
-        result = list(
-            cli_module._reference_discrete_map(state, residual, parameters)
-        )
+        result = list(cli_module._reference_discrete_map(state, residual, parameters))
         result[8] += parameters[5] * 1e12
         return tuple(result)
 
     with pytest.raises(RegenerationError, match="equation parity"):
-        cli_module.validate_staged_equation_parity(
-            tmp_path, evaluator=wrong
-        )
+        cli_module.validate_staged_equation_parity(tmp_path, evaluator=wrong)
+
+
 def test_atomic_replacement_uses_one_whole_tree_exchange(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

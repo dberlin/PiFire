@@ -192,8 +192,7 @@ def _run_scenario(ds, caplog, *, sample_at, duration, setpoint_f=425):
     transition_logs = [
         json.loads(record.message.removeprefix(_TRANSITION_LOG_PREFIX))
         for record in caplog.records
-        if record.name == logger.name
-        and record.message.startswith(_TRANSITION_LOG_PREFIX)
+        if record.name == logger.name and record.message.startswith(_TRANSITION_LOG_PREFIX)
     ]
     return _ScenarioResult(clock, device, grill, notifier, store, transition_logs)
 
@@ -207,9 +206,7 @@ def _assert_authoritative_stop(result, report):
     assert result.store.read_control()["mode"] == "Error"
     assert result.store.display_commands().list().count(["text", "ERROR"]) == 1
     assert result.notifier.sent == ["Thermocouple_Fault_Primary"]
-    assert result.notifier.timed_sent == [
-        (pytest.approx(report["observed_at"]), "Thermocouple_Fault_Primary")
-    ]
+    assert result.notifier.timed_sent == [(pytest.approx(report["observed_at"]), "Thermocouple_Fault_Primary")]
     assert result.transition_logs == [
         {
             "authority": "stop",
@@ -233,11 +230,7 @@ def _assert_authoritative_stop(result, report):
         }
     ]
     confirmed_at = report["observed_at"]
-    assert not [
-        call
-        for call in result.grill.timed_calls
-        if call[0] >= confirmed_at and call[1] in _POSITIVE_ACTUATION
-    ]
+    assert not [call for call in result.grill.timed_calls if call[0] >= confirmed_at and call[1] in _POSITIVE_ACTUATION]
     assert result.store.read_current()["P"][_LABEL] is None
 
 
@@ -252,9 +245,7 @@ def _dash_health(result, monkeypatch):
     return payload["thermocoupleHealth"]
 
 
-def test_live_pull_confirms_after_five_subsequent_collapsed_samples_and_stops(
-    ds, caplog, monkeypatch
-):
+def test_live_pull_confirms_after_five_subsequent_collapsed_samples_and_stops(ds, caplog, monkeypatch):
     def sample_at(now):
         if now < 1.0:
             return ThermocoupleJunctionSample(hot_c=100.0, cold_c=25.0)
@@ -287,9 +278,7 @@ def test_live_pull_confirms_after_five_subsequent_collapsed_samples_and_stops(
         cold_c=25.0,
     )
     event_at, event_sample = next(
-        (observed_at, sample)
-        for observed_at, sample in result.device.raw_reads
-        if observed_at >= 1.0
+        (observed_at, sample) for observed_at, sample in result.device.raw_reads if observed_at >= 1.0
     )
     prior_sample = result.device.raw_reads[0][1]
     assert event_at <= 1.05
@@ -321,9 +310,7 @@ def test_live_pull_confirms_after_five_subsequent_collapsed_samples_and_stops(
     assert device_info[0]["device"] == _DEVICE
 
 
-def test_startup_open_at_425f_confirms_on_first_complete_slow_window(
-    ds, caplog, monkeypatch
-):
+def test_startup_open_at_425f_confirms_on_first_complete_slow_window(ds, caplog, monkeypatch):
     def sample_at(now):
         ambient_c = 25.0 + 3.0 * min(now, 240.0) / 240.0
         return ThermocoupleJunctionSample(

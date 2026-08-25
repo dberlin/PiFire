@@ -18,7 +18,6 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONTROLLERS_JSON = os.path.join(PROJECT_ROOT, "controller", "controllers.json")
 
 
-
 class MissingDependency:
     """A selected controller needs `modules`, which are not importable.
 
@@ -113,7 +112,6 @@ def check_controller_dependencies(selected, config, metadata=None):
     return MissingDependency(selected, controller_dependencies(selected, metadata).get("extra"), missing)
 
 
-
 def dependency_message(missing):
     """Describe a missing base dependency without attempting installation."""
     names = ", ".join(missing.modules)
@@ -129,7 +127,7 @@ def guard_controller_selection(settings):
     try:
         selected = settings["controller"]["selected"]
         config = settings["controller"]["config"].get(selected, {})
-    except (KeyError, TypeError, AttributeError):
+    except KeyError, TypeError, AttributeError:
         return None
     try:
         missing = check_controller_dependencies(selected, config)

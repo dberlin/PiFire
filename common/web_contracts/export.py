@@ -119,14 +119,8 @@ def render_contract_artifacts(
         **{root.schema_output: root.typescript_output for root in ordered_roots},
     }
     rendered_schemas = {
-        **{
-            bundle.name: json.loads(render_bundle_schema(bundle))
-            for bundle in ordered
-        },
-        **{
-            root.name: json.loads(render_root_schema(root))
-            for root in ordered_roots
-        },
+        **{bundle.name: json.loads(render_bundle_schema(bundle)) for bundle in ordered},
+        **{root.name: json.loads(render_root_schema(root)) for root in ordered_roots},
     }
 
     definition_owners: dict[str, str] = {}
@@ -148,11 +142,7 @@ def render_contract_artifacts(
 
     for name, schema in rendered_schemas.items():
         exports = set(ADDITIONAL_TYPESCRIPT_EXPORTS.get(name, ()))
-        exports.update(
-            definition
-            for definition in schema.get("$defs", {})
-            if definition_owners[definition] == name
-        )
+        exports.update(definition for definition in schema.get("$defs", {}) if definition_owners[definition] == name)
         title = schema.get("title")
         if isinstance(title, str) and title.isidentifier():
             exports.add(title)

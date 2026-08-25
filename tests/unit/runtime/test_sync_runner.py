@@ -256,6 +256,7 @@ def test_sync_pid_sp_completed_update_captures_one_aligned_learning_status_snaps
     assert result.status is not None
     assert runner.controller_state()["learning"] == result.learning.as_json()
 
+
 def test_completed_result_rejects_an_invalid_learning_capability_value():
     class InvalidLearningCore(_Core):
         def get_learning_diagnostics(self):

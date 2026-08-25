@@ -371,12 +371,18 @@ def test_probe_map_response_contracts_cover_success_and_every_error_shape():
         "modules": ["ds18b20"],
     }
 
-    assert ProbeMapApplyResponse.model_validate(success, strict=True).model_dump(
-        mode="json", by_alias=True, exclude_unset=True
-    ) == success
-    assert ProbeMapErrorResponse.model_validate(error, strict=True).model_dump(
-        mode="json", by_alias=True, exclude_unset=True
-    ) == error
+    assert (
+        ProbeMapApplyResponse.model_validate(success, strict=True).model_dump(
+            mode="json", by_alias=True, exclude_unset=True
+        )
+        == success
+    )
+    assert (
+        ProbeMapErrorResponse.model_validate(error, strict=True).model_dump(
+            mode="json", by_alias=True, exclude_unset=True
+        )
+        == error
+    )
     assert ProbeMapResponse.model_validate(success, strict=True).root.result == "success"
     assert ProbeMapResponse.model_validate(error, strict=True).root.result == "error"
 

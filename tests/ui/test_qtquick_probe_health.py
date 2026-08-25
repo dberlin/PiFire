@@ -107,6 +107,7 @@ def _load_main(health, size=(1280, 720), rotation=0):
 def _find(root, name):
     obj = root.findChild(QObject, name)
     if obj is None and isinstance(root, QQuickWindow):
+
         def walk(item: QQuickItem):
             if item.objectName() == name:
                 return item
@@ -119,6 +120,7 @@ def _find(root, name):
         obj = walk(root.contentItem())
     assert obj is not None, f"missing QML object {name}"
     return obj
+
 
 def _text(root, name):
     return str(_find(root, name).property("text"))
@@ -156,6 +158,7 @@ def _open_details(root):
 def _item_rect_in(item, ancestor):
     origin = item.mapToItem(ancestor, QPointF(0, 0))
     return origin.x(), origin.y(), float(item.property("width")), float(item.property("height"))
+
 
 def _save(root, name, active_item=None):
     if active_item is not None:
@@ -364,7 +367,6 @@ def test_banner_and_details_fit_compact_and_rotated_viewports(size, rotation):
     _assert_no_qml_warnings(warnings)
 
 
-
 @pytest.mark.parametrize("rotation", [90, 270])
 def test_rotated_dashboard_reflows_to_vertical_scroll_without_horizontal_clipping(rotation):
     health = [_health(state="confirmed", outcome="stopped", temperature_valid=False, faults=["open"])]
@@ -380,6 +382,7 @@ def test_rotated_dashboard_reflows_to_vertical_scroll_without_horizontal_clippin
     assert gauge_card.property("x") + gauge_card.property("width") <= portrait.property("width")
     _save(root, f"dashboard-1024x600-r{rotation}")
     _assert_no_qml_warnings(warnings)
+
 
 def test_banner_accessible_press_action_opens_settled_details():
     health = [_health(state="confirmed", outcome="notify_only", faults=["malfunction"])]

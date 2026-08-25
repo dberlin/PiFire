@@ -16,9 +16,7 @@ def _child(source: Mapping[str, JsonValue], key: str) -> Mapping[str, JsonValue]
     return value if isinstance(value, Mapping) else {}
 
 
-def initial_status(
-    settings: Mapping[str, JsonValue], pellet_db: Mapping[str, JsonValue]
-) -> dict[str, JsonValue]:
+def initial_status(settings: Mapping[str, JsonValue], pellet_db: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
     """Build the controller's persisted initial status without mutating inputs."""
     modules = _child(settings, "modules")
     globals_ = _child(settings, "globals")

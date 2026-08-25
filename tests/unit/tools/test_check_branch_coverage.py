@@ -270,6 +270,4 @@ def test_failure_rows_and_final_listing_follow_requested_file_order(tmp_path: Pa
     assert "controller/missing.py" in lines[1]
     assert "./controller/missing.py" not in lines[1]
     assert "controller/invalid.py" in lines[2]
-    assert lines[-1] == (
-        "Failed files: controller/low.py, controller/missing.py, controller/invalid.py"
-    )
+    assert lines[-1] == ("Failed files: controller/low.py, controller/missing.py, controller/invalid.py")

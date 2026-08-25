@@ -1,6 +1,6 @@
 import type { ThermocoupleHealthView } from "@pifire/core/contracts/core";
-import { projectProbeHealth } from "@pifire/core/dashboard/probeHealth";
 import type { ProbeMap, ProbeModuleCatalog } from "@pifire/core/contracts/wizard";
+import { projectProbeHealth } from "@pifire/core/dashboard/probeHealth";
 import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -49,7 +49,6 @@ function readProbesDraft(settings: SettingsSchema): ProbesDraft {
   };
 }
 
-
 function displayDetailValue(value: unknown): string {
   if (value === null || value === undefined) return "—";
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
@@ -57,7 +56,6 @@ function displayDetailValue(value: unknown): string {
   }
   return JSON.stringify(value);
 }
-
 
 /** Modules being ADDED that the running system cannot install. Mirrors
  *  blueprints/api/probe_map_actions.py::unsupported_new_modules exactly -- the
@@ -81,7 +79,12 @@ function blockedModules(
 }
 
 export function ProbesTab() {
-  const { settings, mode, thermocoupleHealth = [], phase } = useOutletContext<{
+  const {
+    settings,
+    mode,
+    thermocoupleHealth = [],
+    phase,
+  } = useOutletContext<{
     settings: SettingsSchema;
     mode: string;
     thermocoupleHealth?: readonly ThermocoupleHealthView[];
@@ -124,10 +127,7 @@ export function ProbesTab() {
   const blocked = blockedModules(working.probeMap, live.probeMap, catalog.requires_install);
   const running = mode !== "Stop";
   const canSave =
-    dirty &&
-    (!probeMapDirty || (!running && blocked.length === 0)) &&
-    !saving &&
-    !savingSettings;
+    dirty && (!probeMapDirty || (!running && blocked.length === 0)) && !saving && !savingSettings;
 
   const onSave = async () => {
     setSaving(true);
@@ -136,10 +136,7 @@ export function ProbesTab() {
 
     if (
       policyDirty &&
-      !(await saveSettings(
-        { thermocouple_health: { inference_policy: working.policy } },
-        [],
-      ))
+      !(await saveSettings({ thermocouple_health: { inference_policy: working.policy } }, []))
     ) {
       setSaving(false);
       return;
@@ -246,8 +243,7 @@ export function ProbesTab() {
               .replaceAll("_", " ")
               .replace(/(^| )\S/g, (letter) => letter.toUpperCase());
             const status = health.headline ?? stateCopy;
-            const retainedHealth =
-              phase === "unreachable" || health.freshnessQualifier !== null;
+            const retainedHealth = phase === "unreachable" || health.freshnessQualifier !== null;
             return (
               <article
                 className={`pf-probe-health-detail pf-probe-health-detail--${health.severity}`}

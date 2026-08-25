@@ -662,6 +662,7 @@ def test_backend_failed_health_read_preserves_invalid_state_while_advancing_fres
     assert backend.primaryTemp == 0.0
     assert backend.primaryHasTemp is False
 
+
 @pytest.mark.parametrize("empty_health", [None, []])
 def test_backend_successful_empty_health_read_clears_confirmed_invalid_state(empty_health):
     clock = {"t": 1000.0}
@@ -833,11 +834,7 @@ def test_qt_health_transport_projects_report_authority_without_global_mode(
 def test_qt_health_transport_keeps_aux_identity_and_backend_relative_freshness():
     settings = {
         "probe_settings": {
-            "probe_map": {
-                "probe_info": [
-                    _configured_probe(role="Aux", label="Ambient", name="Ambient", port="TC1")
-                ]
-            }
+            "probe_map": {"probe_info": [_configured_probe(role="Aux", label="Ambient", name="Ambient", port="TC1")]}
         }
     }
 

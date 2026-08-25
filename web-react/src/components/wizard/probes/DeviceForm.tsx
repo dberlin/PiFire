@@ -24,8 +24,7 @@ export function DeviceForm(props: DeviceFormProps) {
   const thermocoupleModule = moduleData.device_specific.type === "thermocouple";
   const hardwareFaultDetectionEnabled =
     values.hardware_fault_detection === true || values.hardware_fault_detection === "True";
-  const showSoftwareDetectionWarning =
-    thermocoupleModule && !hardwareFaultDetectionEnabled;
+  const showSoftwareDetectionWarning = thermocoupleModule && !hardwareFaultDetectionEnabled;
   return (
     <div className="pf-device-form" role="dialog" aria-label={`${props.mode} device`}>
       {moduleImageUrl(baseUrl, moduleData.image) && (

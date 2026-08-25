@@ -82,9 +82,9 @@ def test_updater_and_startup_share_the_native_rebuild_lock_boundary(tmp_path: Pa
         tmp_path,
         'lock="$PWD/native-test.lock"\n'
         'while ! mkdir "$lock" 2>/dev/null; do sleep 0.02; done\n'
-        'trap \'rmdir "$lock"\' EXIT\n'
+        "trap 'rmdir \"$lock\"' EXIT\n"
         'printf "enter:%s\\n" "$PPID" >>"$TRACE"\n'
-        'sleep 0.15\n'
+        "sleep 0.15\n"
         'printf "exit:%s\\n" "$PPID" >>"$TRACE"\n',
     )
     trace = tmp_path / "trace.log"
@@ -102,7 +102,6 @@ def test_updater_and_startup_share_the_native_rebuild_lock_boundary(tmp_path: Pa
 
     phases = [line.split(":", 1)[0] for line in trace.read_text().splitlines()]
     assert phases == ["enter", "exit", "enter", "exit"]
-
 
 
 @pytest.mark.parametrize("flow_name", ["update", "branch"])

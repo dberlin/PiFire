@@ -44,9 +44,7 @@ class ModelActivationPair:
             raise ValueError("stored pair configuration must be an object")
         generation_fields = ("candidate_generation", "role_generation")
         if any(
-            isinstance(decoded.get(name), bool)
-            or not isinstance(decoded.get(name), int)
-            or decoded[name] < 0
+            isinstance(decoded.get(name), bool) or not isinstance(decoded.get(name), int) or decoded[name] < 0
             for name in generation_fields
         ):
             raise ValueError("stored pair generations must be non-negative integers")
@@ -56,10 +54,7 @@ class ModelActivationPair:
             "solver_kind",
             "ownership_digest",
         )
-        if any(
-            not isinstance(decoded.get(name), str) or not decoded[name].strip()
-            for name in string_fields
-        ):
+        if any(not isinstance(decoded.get(name), str) or not decoded[name].strip() for name in string_fields):
             raise ValueError("stored pair identity fields must be non-blank strings")
         configuration_json = json.dumps(
             dict(configuration),
@@ -360,11 +355,7 @@ def commit_model_activation_phase(
 ) -> None:
     """Durably prepare or CAS one exact grey estimator/native-pair transaction."""
     phase = getattr(record.phase, "value", record.phase)
-    expected_phase = (
-        None
-        if expected_phase is None
-        else getattr(expected_phase, "value", expected_phase)
-    )
+    expected_phase = None if expected_phase is None else getattr(expected_phase, "value", expected_phase)
     if phase not in {"prepared", "active", "aborted"}:
         raise ValueError(f"unknown activation phase: {phase!r}")
     if phase == "prepared" and expected_phase is not None:
@@ -372,15 +363,9 @@ def commit_model_activation_phase(
     if phase != "prepared" and expected_phase != "prepared":
         raise ValueError("active or aborted activation requires expected prepared phase")
 
-    incumbent_pair_json = json.dumps(
-        record.incumbent.to_dict(), sort_keys=True, separators=(",", ":"), allow_nan=False
-    )
-    candidate_pair_json = json.dumps(
-        record.candidate.to_dict(), sort_keys=True, separators=(",", ":"), allow_nan=False
-    )
-    rollback_pair_json = json.dumps(
-        record.rollback.to_dict(), sort_keys=True, separators=(",", ":"), allow_nan=False
-    )
+    incumbent_pair_json = json.dumps(record.incumbent.to_dict(), sort_keys=True, separators=(",", ":"), allow_nan=False)
+    candidate_pair_json = json.dumps(record.candidate.to_dict(), sort_keys=True, separators=(",", ":"), allow_nan=False)
+    rollback_pair_json = json.dumps(record.rollback.to_dict(), sort_keys=True, separators=(",", ":"), allow_nan=False)
     incumbent_snapshot_json = json.dumps(
         record.incumbent.to_dict()["configuration"],
         sort_keys=True,
@@ -446,10 +431,7 @@ def commit_model_activation_phase(
                         and current.candidate_pair_json == candidate_pair_json
                     ):
                         return
-                    if (
-                        current.phase not in ("active", "aborted")
-                        or current.active_pair != record.incumbent
-                    ):
+                    if current.phase not in ("active", "aborted") or current.active_pair != record.incumbent:
                         raise ValueError("activation-state-changed")
             else:
                 if (
@@ -478,9 +460,7 @@ def commit_model_activation_phase(
                     authority = (
                         None
                         if authority_row is None
-                        else ModelEvidenceRecord.from_db_row(
-                            ModelEvidenceDbRow(*authority_row)
-                        )
+                        else ModelEvidenceRecord.from_db_row(ModelEvidenceDbRow(*authority_row))
                     )
                     payload = None if authority is None else authority.payload
                     if (
@@ -495,9 +475,7 @@ def commit_model_activation_phase(
                         raise ValueError("activation-authority-changed")
 
             active_pair = record.candidate if phase == "active" else record.incumbent
-            active_snapshot_json = (
-                candidate_snapshot_json if phase == "active" else incumbent_snapshot_json
-            )
+            active_snapshot_json = candidate_snapshot_json if phase == "active" else incumbent_snapshot_json
             conn.execute("DELETE FROM model_activation_state WHERE singleton=1")
             conn.execute(
                 """

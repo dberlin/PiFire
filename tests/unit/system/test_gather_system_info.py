@@ -56,9 +56,7 @@ def test_gather_system_info_empty_supported_cmds_keeps_defaults_and_writes_contr
     # Nothing was probed, so the delta names nothing under "system". It is still
     # WRITTEN -- the call itself is the observable this pins -- but it imposes no
     # stale reading on a concurrent writer, which the old whole-dict write did.
-    enqueue_control_delta.assert_called_once_with(
-        {CONTROL_DELTA_KEY: 1, "set": {"system": {}}}, origin="unit-test"
-    )
+    enqueue_control_delta.assert_called_once_with({CONTROL_DELTA_KEY: 1, "set": {"system": {}}}, origin="unit-test")
 
 
 def test_gather_system_info_all_commands_ok_populates_control_and_system_info():

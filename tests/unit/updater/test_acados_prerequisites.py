@@ -64,7 +64,7 @@ def _migration_tree(tmp_path: Path, distro: str) -> tuple[Path, dict[str, str], 
         '  "rev-parse --verify old-revision^{commit}") echo old-revision ;;\n'
         '  "symbolic-ref --quiet --short HEAD") echo main ;;\n'
         '  "reflog -1 --format=%gs") echo "merge origin/main: Fast-forward" ;;\n'
-        'esac\n',
+        "esac\n",
     )
     _write_executable(repo / "rebuild-acados.sh", 'printf "rebuild %s\\n" "$*" >>"$COMMAND_LOG"\n')
 
@@ -131,14 +131,14 @@ def _run_failed_pre_migration_flow(
         '  "rev-parse --verify old-revision^{commit}") echo old-revision ;;\n'
         f'  "symbolic-ref --quiet --short HEAD") echo {"development" if branch_change else "main"} ;;\n'
         f'  "reflog -1 --format=%gs") echo "{reflog}" ;;\n'
-        'esac\n',
+        "esac\n",
     )
     _write_executable(
         repo / "rebuild-acados.sh",
-        'rm -f controller/_native/current\n'
-        'ln -s releases/broken controller/_native/current\n'
+        "rm -f controller/_native/current\n"
+        "ln -s releases/broken controller/_native/current\n"
         'printf "rebuild %s\\n" "$*" >>"$COMMAND_LOG"\n'
-        'exit 23\n',
+        "exit 23\n",
     )
     marker = tmp_path / "old-flow-continued"
     restart = tmp_path / "restart-called"
@@ -162,9 +162,7 @@ def _run_failed_pre_migration_flow(
 
 
 @pytest.mark.parametrize("branch_change", [False, True], ids=["ordinary-update", "branch-change"])
-def test_pre_migration_updater_rolls_back_and_terminates_on_native_failure(
-    tmp_path: Path, branch_change: bool
-) -> None:
+def test_pre_migration_updater_rolls_back_and_terminates_on_native_failure(tmp_path: Path, branch_change: bool) -> None:
     _, db, commands, completed = _run_failed_pre_migration_flow(tmp_path, branch_change=branch_change)
 
     assert completed.returncode != 0
@@ -237,8 +235,7 @@ def test_actual_fresh_installer_entry_orders_package_sync_native_and_service(
     _write_executable(fake_bin / "systemctl", 'printf "systemctl %s\\n" "$*" >>"$COMMAND_LOG"\n')
     _write_executable(
         repo / "rebuild-acados.sh",
-        'printf "rebuild %s\\n" "$*" >>"$COMMAND_LOG"\n'
-        + ("exit 29\n" if rebuild_fails else ""),
+        'printf "rebuild %s\\n" "$*" >>"$COMMAND_LOG"\n' + ("exit 29\n" if rebuild_fails else ""),
     )
     env = {
         **os.environ,
@@ -273,7 +270,6 @@ def test_actual_fresh_installer_entry_orders_package_sync_native_and_service(
             "rebuild --if-needed",
             service_event,
         ]
-
 
 
 class _BootstrapProcess:

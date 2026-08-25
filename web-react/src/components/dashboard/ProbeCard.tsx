@@ -77,9 +77,7 @@ export function ProbeCard({
                   : "unknown"
             }`}
           >
-            {healthLastReported || p.health.freshnessQualifier !== null
-              ? "Last reported: "
-              : null}
+            {healthLastReported || p.health.freshnessQualifier !== null ? "Last reported: " : null}
             {p.health.headline}
           </strong>
           {p.health.impactCopy !== null ? <span>{p.health.impactCopy}</span> : null}

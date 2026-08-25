@@ -22,11 +22,7 @@ class DuplicateGroup:
 
 
 def _is_docstring(node: ast.stmt) -> bool:
-    return (
-        isinstance(node, ast.Expr)
-        and isinstance(node.value, ast.Constant)
-        and isinstance(node.value.value, str)
-    )
+    return isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
 
 
 def _digest(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:

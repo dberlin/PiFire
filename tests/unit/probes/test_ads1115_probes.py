@@ -349,9 +349,7 @@ class TestAdafruitADS:
             monkeypatch.delitem(sys.modules, public_module, raising=False)
         return importlib.import_module(module_name)
 
-    def test_public_import_requires_only_selected_chip(
-        self, monkeypatch, module_name, chip_module, chip_class
-    ):
+    def test_public_import_requires_only_selected_chip(self, monkeypatch, module_name, chip_module, chip_class):
         probe = self._load(monkeypatch, module_name, chip_module, chip_class, {})
         other_chip = "ads1015" if chip_module == "ads1115" else "ads1115"
 
@@ -360,9 +358,7 @@ class TestAdafruitADS:
         assert f"adafruit_ads1x15.{other_chip}" not in sys.modules
         assert f"probes.{other_chip}_adafruit" not in sys.modules
 
-    def test_public_open_i2c_bus_seam_is_live_after_import(
-        self, monkeypatch, module_name, chip_module, chip_class
-    ):
+    def test_public_open_i2c_bus_seam_is_live_after_import(self, monkeypatch, module_name, chip_module, chip_class):
         probe = self._load(monkeypatch, module_name, chip_module, chip_class, {})
         configured_bus = FT232HBus(url="ftdi://ftdi:232h/1")
         shared_bus = object()
@@ -380,9 +376,7 @@ class TestAdafruitADS:
         assert dev.i2c is shared_bus
         assert dev.ads.address == 0x49
 
-    def test_public_analog_in_seam_is_live_after_import(
-        self, monkeypatch, module_name, chip_module, chip_class
-    ):
+    def test_public_analog_in_seam_is_live_after_import(self, monkeypatch, module_name, chip_module, chip_class):
         channels = tuple(f"{chip_module}.P{index}" for index in range(4))
         probe = self._load(
             monkeypatch,
@@ -435,9 +429,7 @@ class TestAdafruitADS:
         assert loaded.ReadProbes.__module__ == module_name
         assert type(obj) is loaded.ReadProbes
 
-    def test_public_adsdevice_selects_chip_through_shared_base(
-        self, monkeypatch, module_name, chip_module, chip_class
-    ):
+    def test_public_adsdevice_selects_chip_through_shared_base(self, monkeypatch, module_name, chip_module, chip_class):
         channels = tuple(f"{chip_module}.P{index}" for index in range(4))
         probe = self._load(
             monkeypatch,
@@ -610,9 +602,7 @@ class TestAdafruitADS:
         assert obj.device.ads.address == 0x49
         assert type(obj.device.ads) is getattr(chip_api, chip_class)
 
-    def test_close_does_not_close_shared_bus(
-        self, monkeypatch, module_name, chip_module, chip_class
-    ):
+    def test_close_does_not_close_shared_bus(self, monkeypatch, module_name, chip_module, chip_class):
         class SharedBus:
             close_calls = 0
 
@@ -652,9 +642,7 @@ class TestAdafruitADS:
         obj.logger = logging.getLogger("control")
         obj.device_info = {"config": {}}
 
-        with caplog.at_level(logging.ERROR, logger="control"), pytest.raises(
-            RuntimeError, match="boom"
-        ):
+        with caplog.at_level(logging.ERROR, logger="control"), pytest.raises(RuntimeError, match="boom"):
             obj._init_device()
 
         assert f"trying to initialize the {chip_class} device" in caplog.text

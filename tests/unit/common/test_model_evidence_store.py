@@ -442,9 +442,7 @@ def test_current_grey_fit_and_candidate_evidence_round_trip_without_state_space_
 
 
 def test_retired_schema_confidence_remains_audit_history_but_cannot_authorize_activation(ds):
-    retired = _confidence("retired-confidence", timestamp_ms=500).model_copy(
-        update={"schema_version": 2}
-    )
+    retired = _confidence("retired-confidence", timestamp_ms=500).model_copy(update={"schema_version": 2})
     append_model_evidence((retired,))
 
     with pytest.raises(ValueError, match="activation-authority-changed"):
@@ -579,9 +577,7 @@ def test_activation_commit_rejects_wrong_record_type_and_mixed_provenance(ds) ->
     with pytest.raises(ValueError, match="requires activation evidence"):
         commit_model_activation(_forecast("not-an-activation", 100))
 
-    poison = _confidence("older-poison", timestamp_ms=399).model_copy(
-        update={"provenance_digest": _DIGEST}
-    )
+    poison = _confidence("older-poison", timestamp_ms=399).model_copy(update={"provenance_digest": _DIGEST})
     append_model_evidence((poison, _confidence()))
     with pytest.raises(ValueError, match="activation-authority-changed"):
         commit_model_activation(_activation())
@@ -598,9 +594,7 @@ def test_activation_commit_rejects_wrong_record_type_and_mixed_provenance(ds) ->
         ("active", None, "requires expected prepared phase"),
     ],
 )
-def test_activation_phase_validates_cas_transition_shape(
-    phase, expected_phase, message, ds
-) -> None:
+def test_activation_phase_validates_cas_transition_shape(phase, expected_phase, message, ds) -> None:
     with pytest.raises(ValueError, match=message):
         commit_model_activation_phase(
             SimpleNamespace(phase=phase),
@@ -613,9 +607,7 @@ def test_prepared_activation_requires_current_authority_and_consistent_provenanc
     with pytest.raises(ValueError, match="activation-authority-changed"):
         commit_model_activation_phase(prepared)
 
-    poison = _confidence("older-poison", timestamp_ms=399).model_copy(
-        update={"provenance_digest": _DIGEST}
-    )
+    poison = _confidence("older-poison", timestamp_ms=399).model_copy(update={"provenance_digest": _DIGEST})
     append_model_evidence((poison, _confidence()))
     with pytest.raises(ValueError, match="activation-authority-changed"):
         commit_model_activation_phase(prepared)

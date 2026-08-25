@@ -324,7 +324,9 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
     # ends with is what the user comes back to (ruling 6, 2026-07-26).
     # notify_data is array-addressed, so it travels as a notify.replace op
     # rather than a `set` member (common/control_delta.py:34).
-    enqueue_control_delta(control_delta(ops=[{"op": "notify.replace", "entries": control["notify_data"]}]), origin="wizard")
+    enqueue_control_delta(
+        control_delta(ops=[{"op": "notify.replace", "entries": control["notify_data"]}]), origin="wizard"
+    )
 
     percent = 10
     status = "Updating Settings..."

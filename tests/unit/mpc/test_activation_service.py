@@ -505,7 +505,6 @@ def test_activation_classifies_cleanup_failure_after_success_and_attempts_all_cl
     )
     outcome = harness.service.activate(harness.request, now_ms=_NOW_MS)
 
-
     assert outcome == ActivationRejected(
         ActivationRejectionCategory.CLEANUP_FAILED,
         "activation-cleanup-failed",

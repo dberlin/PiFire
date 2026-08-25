@@ -219,9 +219,7 @@ def fit_params(t, temp, Q, *, T_amb, init, sigma=0.0, n_delay=0, log_bounds=None
             raise ValueError(f"log_bounds must contain exactly {tuple(sorted(_FREE))}")
         pairs = tuple(log_bounds[key] for key in _FREE)
         if any(
-            len(pair) != 2
-            or not all(math.isfinite(float(value)) for value in pair)
-            or float(pair[0]) >= float(pair[1])
+            len(pair) != 2 or not all(math.isfinite(float(value)) for value in pair) or float(pair[0]) >= float(pair[1])
             for pair in pairs
         ):
             raise ValueError("each log bound must be a finite increasing pair")

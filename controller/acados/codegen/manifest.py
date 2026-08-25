@@ -71,6 +71,7 @@ def _run_git(arguments: list[str], *, cwd: Path) -> str:
         raise EnvironmentMismatch(f"unable to inspect acados revision: {detail}")
     return completed.stdout.rstrip("\r\n")
 
+
 def _require_clean_worktree(repository: Path, label: str) -> None:
     status = _run_git(
         [
@@ -82,9 +83,7 @@ def _require_clean_worktree(repository: Path, label: str) -> None:
         cwd=repository,
     )
     if status:
-        raise EnvironmentMismatch(
-            f"{label} worktree is dirty; regeneration attribution is invalid:\n{status}"
-        )
+        raise EnvironmentMismatch(f"{label} worktree is dirty; regeneration attribution is invalid:\n{status}")
 
 
 def _require_clean_acados_worktrees(
@@ -104,9 +103,7 @@ def collect_environment(repository_root: str | Path) -> dict[str, Any]:
     Path(repository_root).resolve()
     configured_source = os.environ.get("ACADOS_SOURCE_DIR")
     if not configured_source:
-        raise EnvironmentMismatch(
-            "ACADOS_SOURCE_DIR is unset; configure CMake and export its fetched source"
-        )
+        raise EnvironmentMismatch("ACADOS_SOURCE_DIR is unset; configure CMake and export its fetched source")
     acados = Path(configured_source).resolve()
     dependencies: dict[str, str] = {}
     output = _run_git(["submodule", "status", "--recursive"], cwd=acados)
@@ -115,9 +112,7 @@ def collect_environment(repository_root: str | Path) -> dict[str, Any]:
         fields = line[1:].split()
         if status != " " or len(fields) < 2:
             path = fields[1] if len(fields) >= 2 else line
-            raise EnvironmentMismatch(
-                f"acados recursive dependency is not at its initialized pin: {path}"
-            )
+            raise EnvironmentMismatch(f"acados recursive dependency is not at its initialized pin: {path}")
         dependencies[Path(fields[1]).as_posix()] = fields[0]
     _require_clean_acados_worktrees(acados, tuple(dependencies))
     source_url = _run_git(["remote", "get-url", "origin"], cwd=acados).strip()
@@ -155,9 +150,7 @@ def validate_environment(environment: Mapping[str, Any]) -> None:
     actual_dependencies = actual_acados.get("recursive_dependencies")
     expected_dependencies = expected_acados["recursive_dependencies"]
     if actual_dependencies != expected_dependencies:
-        raise EnvironmentMismatch(
-            "acados recursive dependency commits differ from the supported pins"
-        )
+        raise EnvironmentMismatch("acados recursive dependency commits differ from the supported pins")
 
     actual_versions = environment.get("python_generator_dependencies")
     expected_versions = PINNED_ENVIRONMENT["python_generator_dependencies"]
@@ -166,13 +159,8 @@ def validate_environment(environment: Mapping[str, Any]) -> None:
         actual_mapping = actual_versions if isinstance(actual_versions, Mapping) else {}
         for name in sorted(set(expected_versions) | set(actual_mapping)):
             if actual_mapping.get(name) != expected_versions.get(name):
-                mismatches.append(
-                    f"{name}: expected {expected_versions.get(name)}, "
-                    f"got {actual_mapping.get(name)}"
-                )
-        raise EnvironmentMismatch(
-            "Python generator dependency versions differ: " + "; ".join(mismatches)
-        )
+                mismatches.append(f"{name}: expected {expected_versions.get(name)}, got {actual_mapping.get(name)}")
+        raise EnvironmentMismatch("Python generator dependency versions differ: " + "; ".join(mismatches))
 
 
 def _sha256(path: Path) -> str:
@@ -192,9 +180,7 @@ def create_manifest(
     """Create schema 1 data from normalized solver trees."""
     repository = Path(repository_root).resolve()
     generated = Path(generated_root).resolve()
-    resolved_environment = (
-        collect_environment(repository) if environment is None else deepcopy(environment)
-    )
+    resolved_environment = collect_environment(repository) if environment is None else deepcopy(environment)
     validate_environment(resolved_environment)
 
     solvers: dict[str, Any] = {}
@@ -220,9 +206,7 @@ def create_manifest(
     return {
         "schema": SCHEMA_VERSION,
         "acados": resolved_environment["acados"],
-        "python_generator_dependencies": resolved_environment[
-            "python_generator_dependencies"
-        ],
+        "python_generator_dependencies": resolved_environment["python_generator_dependencies"],
         "model_definitions": model_definitions,
         "solvers": solvers,
         "files": files,

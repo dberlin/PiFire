@@ -118,7 +118,7 @@ def _finite_float(value):
         return None
     try:
         number = float(value)
-    except (OverflowError, ValueError):
+    except OverflowError, ValueError:
         return None
     return number if math.isfinite(number) else None
 
@@ -319,7 +319,7 @@ class ProbeHealthModel(QAbstractListModel):
     def _project(cls, item):
         try:
             wire = ThermocoupleHealthView.model_validate(item, strict=True)
-        except (TypeError, ValidationError):
+        except TypeError, ValidationError:
             return None
         raw = wire.model_dump(mode="json", by_alias=True, exclude_none=False)
         report = raw["report"]
@@ -337,9 +337,8 @@ class ProbeHealthModel(QAbstractListModel):
                 causes.append("Hardware reported a short circuit.")
             if "malfunction" in faults:
                 causes.append("Software detected an abnormal thermocouple response.")
-        unavailable = (
-            outcome in {"stopped", "unavailable"}
-            or (state == "confirmed" and report["temperatureValid"] is False)
+        unavailable = outcome in {"stopped", "unavailable"} or (
+            state == "confirmed" and report["temperatureValid"] is False
         )
         return {
             "device": raw["device"],
@@ -424,11 +423,7 @@ class ProbeHealthModel(QAbstractListModel):
         self.summaryChanged.emit()
 
     def invalid_labels(self):
-        return {
-            row["label"]
-            for row in self._rows
-            if row["state"] == "confirmed" and row["temperatureValid"] is False
-        }
+        return {row["label"] for row in self._rows if row["state"] == "confirmed" and row["temperatureValid"] is False}
 
     @Property(dict, notify=summaryChanged)
     def summary(self):

@@ -39,8 +39,8 @@ rs.mock("../../../../../src/helpers/settings/settingsApi", () => ({
 }));
 
 import { applyProbeMap } from "../../../../../src/helpers/probes/probeMapApi";
-import { useSettingsDraftStore } from "../../../../../src/helpers/settings/settingsDrafts";
 import { applySettings } from "../../../../../src/helpers/settings/settingsApi";
+import { useSettingsDraftStore } from "../../../../../src/helpers/settings/settingsDrafts";
 
 const applyMock = applyProbeMap as ReturnType<typeof rs.fn>;
 const applySettingsMock = rs.mocked(applySettings);
@@ -290,9 +290,13 @@ describe("ProbesTab", () => {
     const selector = await screen.findByLabelText("Software thermocouple detection");
 
     expect(selector).toHaveValue("observe");
-    expect(screen.getByText("Reports confirmed software-detected faults without stopping heating.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Reports confirmed software-detected faults without stopping heating."),
+    ).toBeInTheDocument();
     fireEvent.change(selector, { target: { value: "enforce" } });
-    expect(screen.getByText("Stops heating when the control probe has a confirmed fault.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Stops heating when the control probe has a confirmed fault."),
+    ).toBeInTheDocument();
   });
 
   it("saves a policy-only change without rewriting the probe map", async () => {
@@ -347,9 +351,7 @@ describe("ProbesTab", () => {
       {
         ...ctx(),
         phase: "unreachable",
-        thermocoupleHealth: [
-          health("Primary", "Grill", "confirmed", "unavailable", true),
-        ],
+        thermocoupleHealth: [health("Primary", "Grill", "confirmed", "unavailable", true)],
       },
       CATALOG,
     );

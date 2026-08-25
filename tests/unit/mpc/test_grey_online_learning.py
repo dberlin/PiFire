@@ -307,9 +307,7 @@ class _ImmediateFitWorker:
         ),
     ],
 )
-def test_orchestrator_connects_completed_history_to_fit_and_off_path_preparation_without_swap(
-    changes, origin
-) -> None:
+def test_orchestrator_connects_completed_history_to_fit_and_off_path_preparation_without_swap(changes, origin) -> None:
     worker = _ImmediateFitWorker()
     incumbent = object()
     identity = LiveLearningIdentity(
@@ -451,7 +449,6 @@ def test_identity_digest_changes_require_atomic_config_and_incumbent_replacement
     assert orchestrator.identity is identity
     assert candidate_controller.closed is False
 
-
     replacement_pair = object()
     orchestrator.update_identity(
         replacement_identity,
@@ -542,26 +539,32 @@ def test_orchestrator_carries_prepared_candidate_through_causal_evaluation_and_h
 
     incumbent_predict = lambda _origin: -1000.0
     challenger_predict = lambda _origin: 0.0
-    assert len(
-        orchestrator.register_causal_forecasts(
-            _frame(9),
-            incumbent_predict=incumbent_predict,
-            challenger_predict=challenger_predict,
+    assert (
+        len(
+            orchestrator.register_causal_forecasts(
+                _frame(9),
+                incumbent_predict=incumbent_predict,
+                challenger_predict=challenger_predict,
+            )
         )
-    ) == 5
+        == 5
+    )
     for sequence in range(10, 190):
         orchestrator.observe_completed_frame(_frame(sequence), identifiability=0.8)
     first = orchestrator.evaluate_ready_off_path()
     assert first.consecutive_wins == 1
     assert first.accepted is False
 
-    assert len(
-        orchestrator.register_causal_forecasts(
-            _frame(190),
-            incumbent_predict=incumbent_predict,
-            challenger_predict=challenger_predict,
+    assert (
+        len(
+            orchestrator.register_causal_forecasts(
+                _frame(190),
+                incumbent_predict=incumbent_predict,
+                challenger_predict=challenger_predict,
+            )
         )
-    ) == 5
+        == 5
+    )
     for sequence in range(191, 371):
         orchestrator.observe_completed_frame(_frame(sequence), identifiability=0.8)
     second = orchestrator.evaluate_ready_off_path()
@@ -618,14 +621,17 @@ def test_candidate_estimator_and_native_handle_are_built_and_dry_solved_off_path
 )
 def test_off_path_build_solve_and_timing_failures_reject_only_the_candidate(failure, reason) -> None:
     incumbent = object()
+
     def estimator_factory(config):
         if failure == "estimator":
             raise RuntimeError("estimator failed")
         return _Estimator(config)
+
     def native_factory(config):
         if failure == "native":
             raise RuntimeError("native failed")
         return _Native(config, fail=failure == "solve")
+
     prepared = prepare_candidate_off_path(
         _fit(),
         incumbent_pair=incumbent,
@@ -641,11 +647,14 @@ def test_off_path_build_solve_and_timing_failures_reject_only_the_candidate(fail
 
 def test_incumbent_and_challenger_share_one_exact_causal_origin_and_probe_frames_are_excluded() -> None:
     seen = []
+
     def predict(label):
         def inner(origin):
             seen.append((label, origin))
             return 100.0 if label == "incumbent" else 101.0
+
         return inner
+
     normal = paired_forecast_origin(
         _frame(12),
         horizon_steps=15,
@@ -660,15 +669,18 @@ def test_incumbent_and_challenger_share_one_exact_causal_origin_and_probe_frames
     assert normal.incumbent_prediction_c == 100.0
     assert normal.challenger_prediction_c == 101.0
     probe = _frame(13, calibration_stage="low", calibration_fit=True, probe_q=0.05)
-    assert paired_forecast_origin(
-        probe,
-        horizon_steps=15,
-        candidate_generation=9,
-        incumbent_digest=_INCUMBENT,
-        challenger_digest=_CHALLENGER,
-        incumbent_predict=predict("incumbent"),
-        challenger_predict=predict("challenger"),
-    ) is None
+    assert (
+        paired_forecast_origin(
+            probe,
+            horizon_steps=15,
+            candidate_generation=9,
+            incumbent_digest=_INCUMBENT,
+            challenger_digest=_CHALLENGER,
+            incumbent_predict=predict("incumbent"),
+            challenger_predict=predict("challenger"),
+        )
+        is None
+    )
 
 
 def _accepted_evaluation(prepared):

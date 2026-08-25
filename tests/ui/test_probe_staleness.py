@@ -170,7 +170,14 @@ def _primary_health(*, state, temperature_valid, outcome, current):
 def test_confirmed_invalid_health_beats_primary_last_value_even_when_health_transport_is_stale():
     backend = PiFireBackend(
         lambda: (
-            {"P": {"Grill": None}, "F": {}, "AUX": {}, "PSP": 250, "NT": {}, "LAST": {"Grill": {"temp": 225, "ts": NOW - 47_000}}},
+            {
+                "P": {"Grill": None},
+                "F": {},
+                "AUX": {},
+                "PSP": 250,
+                "NT": {},
+                "LAST": {"Grill": {"temp": 225, "ts": NOW - 47_000}},
+            },
             {"mode": "Error", "units": "F", "outpins": {}},
         ),
         lambda c, d: None,

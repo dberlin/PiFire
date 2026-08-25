@@ -102,7 +102,6 @@ class RecipeStatusPayload(WireModel):
     step: int
 
 
-
 class ThermocoupleHealthReportView(WireModel):
     state: Literal["unmonitored", "healthy", "suspected", "confirmed"]
     faults: list[Literal["open", "short", "malfunction"]]
@@ -169,7 +168,6 @@ class ThermocoupleHealthView(WireModel):
     freshness: ThermocoupleHealthFreshnessView
 
 
-
 class DashSocketPayload(WireModel):
     uuid: str
     errors: list[str]
@@ -219,8 +217,6 @@ class DashSocketPayload(WireModel):
     )
 
 
-
-
 class PelletSocketPayload(WireModel):
     uuid: str
     pellets: PelletDbSchema
@@ -259,5 +255,3 @@ class CommandResponseData(WireModel):
 
 class CommandResponse(ApiEnvelope[CommandResponseData]):
     pass
-
-

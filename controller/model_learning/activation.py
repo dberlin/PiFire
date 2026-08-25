@@ -25,9 +25,7 @@ _POLICY_BY_ORIGIN = {
     CandidateOrigin.OPERATOR_CALIBRATION: ActivationPolicy.OPERATOR_REVIEWED,
     CandidateOrigin.COOK_REFIT: ActivationPolicy.COOK_REFIT,
 }
-_ESTIMATOR_CONSTRUCTION_FIELDS = frozenset(
-    {"control_period", "est_q_temp", "est_q_dist", "est_r_meas"}
-)
+_ESTIMATOR_CONSTRUCTION_FIELDS = frozenset({"control_period", "est_q_temp", "est_q_dist", "est_r_meas"})
 
 
 def _nonblank(value: object, name: str) -> str:
@@ -117,11 +115,7 @@ class GreyControlPairDescriptor:
             missing = ", ".join(sorted(_ESTIMATOR_CONSTRUCTION_FIELDS - estimator_fields))
             raise ValueError(f"estimator construction configuration is missing: {missing}")
         model_configuration = (
-            {
-                key: value
-                for key, value in owned.items()
-                if key not in _ESTIMATOR_CONSTRUCTION_FIELDS
-            }
+            {key: value for key, value in owned.items() if key not in _ESTIMATOR_CONSTRUCTION_FIELDS}
             if estimator_fields
             else owned
         )
@@ -194,7 +188,9 @@ class PreparedActivationRecord:
             object.__setattr__(self, "phase", ActivationPhase(self.phase))
         _digest(self.transaction_id, "transaction_id")
         _generation(self.timestamp_ms, "timestamp_ms")
-        if not all(isinstance(pair, GreyControlPairDescriptor) for pair in (self.incumbent, self.candidate, self.rollback)):
+        if not all(
+            isinstance(pair, GreyControlPairDescriptor) for pair in (self.incumbent, self.candidate, self.rollback)
+        ):
             raise TypeError("activation record requires complete pair descriptors")
         if self.rollback != self.incumbent:
             raise ValueError("prepared rollback owner must be the exact incumbent pair")

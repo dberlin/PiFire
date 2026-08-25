@@ -91,15 +91,12 @@ def _diagnostics(native: _ffi.GreyDiagnostics) -> SolverDiagnostics:
         backend_status=int(native.backend_status),
         iterations=max(0, int(native.iterations)),
         solve_time_s=_bounded_native_float(native.solve_time_s),
-        objective=(
-            float(native.objective)
-            if math.isfinite(float(native.objective))
-            else 0.0
-        ),
+        objective=(float(native.objective) if math.isfinite(float(native.objective)) else 0.0),
         kkt_residual=_bounded_native_float(native.kkt_residual),
         constraint_residual=_bounded_native_float(native.constraint_residual),
         warm_started=bool(native.warm_started),
     )
+
 
 def _valid_native_diagnostics(native: _ffi.GreyDiagnostics) -> bool:
     finite_nonnegative = (
@@ -131,9 +128,7 @@ class AcadosGreyBoxMPC:
         if status != _ffi.STATUS_SUCCESS or not handle:
             if handle:
                 _ffi.destroy(handle)
-            raise RuntimeError(
-                "Failed to create grey-box solver: " + _status_detail(status)
-            )
+            raise RuntimeError("Failed to create grey-box solver: " + _status_detail(status))
         self.config = resolved
         self._handle: Any = handle
         self._lock = threading.Lock()
@@ -168,9 +163,7 @@ class AcadosGreyBoxMPC:
             equilibrium_q=equilibrium,
         )
         native_input.state[:] = state_values
-        native_output = _ffi.GreySolveOutput(
-            struct_size=ctypes.sizeof(_ffi.GreySolveOutput)
-        )
+        native_output = _ffi.GreySolveOutput(struct_size=ctypes.sizeof(_ffi.GreySolveOutput))
 
         with self._lock:
             handle = self._require_open()
@@ -202,9 +195,7 @@ class AcadosGreyBoxMPC:
             )
 
         sequence_q = np.ctypeslib.as_array(native_output.sequence_q)[:sequence_length]
-        sequence_residual = np.ctypeslib.as_array(
-            native_output.sequence_residual
-        )[:sequence_length]
+        sequence_residual = np.ctypeslib.as_array(native_output.sequence_residual)[:sequence_length]
         try:
             return GreyBoxSolve(
                 sequence_q=sequence_q,
@@ -223,9 +214,7 @@ class AcadosGreyBoxMPC:
             handle = self._require_open()
             status = _ffi.reset(handle)
         if status != _ffi.STATUS_SUCCESS:
-            raise RuntimeError(
-                "Failed to reset grey-box solver: " + _status_detail(status)
-            )
+            raise RuntimeError("Failed to reset grey-box solver: " + _status_detail(status))
 
     def close(self) -> None:
         with self._lock:

@@ -27,11 +27,7 @@ ALLOWLIST: set[tuple[str, str]] = {
 
 def test_no_duplicate_test_bodies():
     groups = find_duplicate_test_bodies(ROOT)
-    offenders = [
-        group
-        for group in groups
-        if not all((path, name) in ALLOWLIST for path, _line, name in group.members)
-    ]
+    offenders = [group for group in groups if not all((path, name) in ALLOWLIST for path, _line, name in group.members)]
 
     assert offenders == [], "\n".join(
         f"{group.line_count} identical lines:\n"

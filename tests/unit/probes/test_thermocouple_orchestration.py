@@ -490,9 +490,7 @@ def test_suspected_inference_keeps_numeric_output(recording_engines):
 
 
 @pytest.mark.parametrize("policy", list(ThermocoupleInferencePolicy))
-def test_hardware_confirmation_is_controller_clocked_and_policy_owned(
-    recording_engines, policy
-):
+def test_hardware_confirmation_is_controller_clocked_and_policy_owned(recording_engines, policy):
     probe = _probe("device", "port", "Probe", "Primary")
     hardware = ThermocoupleHealthReport.confirmed_hardware(
         (ThermocoupleFault.OPEN,),

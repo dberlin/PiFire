@@ -16,9 +16,9 @@ def _run_mapping(
     output = tmp_path / "target.txt"
     driver = tmp_path / "platform-test.cmake"
     driver.write_text(
-        "include(\"${PLATFORM_MODULE}\")\n"
-        "file(WRITE \"${TARGET_OUTPUT}\" "
-        "\"${ACADOS_PIFIRE_BLASFEO_TARGET}|${ACADOS_PIFIRE_HPIPM_TARGET}\")\n"
+        'include("${PLATFORM_MODULE}")\n'
+        'file(WRITE "${TARGET_OUTPUT}" '
+        '"${ACADOS_PIFIRE_BLASFEO_TARGET}|${ACADOS_PIFIRE_HPIPM_TARGET}")\n'
     )
     return subprocess.run(
         [
@@ -60,13 +60,9 @@ def test_cmake_maps_supported_native_targets_exactly(
     expected_blasfeo: str,
     expected_hpipm: str,
 ) -> None:
-    completed = _run_mapping(
-        tmp_path, system_name, processor, avx_available=avx_available
-    )
+    completed = _run_mapping(tmp_path, system_name, processor, avx_available=avx_available)
     assert completed.returncode == 0, completed.stderr
-    assert (tmp_path / "target.txt").read_text() == (
-        f"{expected_blasfeo}|{expected_hpipm}"
-    )
+    assert (tmp_path / "target.txt").read_text() == (f"{expected_blasfeo}|{expected_hpipm}")
 
 
 @pytest.mark.parametrize(

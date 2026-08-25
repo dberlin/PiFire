@@ -35,7 +35,7 @@ def _migration_json_blob(connection: sqlite3.Connection, key: str):
         return None
     try:
         return json.loads(row[0])
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except TypeError, ValueError, json.JSONDecodeError:
         return None
 
 
@@ -46,9 +46,7 @@ def _migration_authority_snapshot(value, *, current_only):
         return None
     snapshot = value.get("snapshot")
     if current_only and (
-        not isinstance(snapshot, dict)
-        or snapshot.get("version") != 4
-        or value.get("model_schema") != 4
+        not isinstance(snapshot, dict) or snapshot.get("version") != 4 or value.get("model_schema") != 4
     ):
         return None
     try:
@@ -96,9 +94,7 @@ def migrate_mpc_learning_authority(
 
             state = None
             activation_document = (
-                _migration_json_blob(conn, activation_input_key)
-                if activation_input_key is not None
-                else None
+                _migration_json_blob(conn, activation_input_key) if activation_input_key is not None else None
             )
             if activation_input_key is None:
                 row = _activation_state_row(conn)
@@ -109,13 +105,11 @@ def migrate_mpc_learning_authority(
                         if pair is None:
                             try:
                                 decoded = json.loads(fallback_json)
-                            except (TypeError, ValueError, json.JSONDecodeError):
+                            except TypeError, ValueError, json.JSONDecodeError:
                                 return None
                             return {
                                 "model_kind": (
-                                    decoded.get("model_kind", "grey-box")
-                                    if isinstance(decoded, dict)
-                                    else None
+                                    decoded.get("model_kind", "grey-box") if isinstance(decoded, dict) else None
                                 ),
                                 "model_schema": decoded.get("version") if isinstance(decoded, dict) else None,
                                 "snapshot": decoded,
@@ -194,11 +188,7 @@ def migrate_mpc_learning_authority(
 
             if source in ("active", "rollback") and isinstance(activation_document, dict):
                 selected_authority = activation_document.get(source)
-                selected_pair = (
-                    selected_authority.get("pair")
-                    if isinstance(selected_authority, dict)
-                    else None
-                )
+                selected_pair = selected_authority.get("pair") if isinstance(selected_authority, dict) else None
                 if isinstance(selected_pair, dict):
                     selected["revision"] = selected_pair["role_generation"]
                     selected["identities"] = {
@@ -209,11 +199,7 @@ def migrate_mpc_learning_authority(
                         "rollback_digest": None,
                         "rollback_generation": None,
                     }
-                    if (
-                        source == "active"
-                        and activation_input_key is None
-                        and state is not None
-                    ):
+                    if source == "active" and activation_input_key is None and state is not None:
                         selected["evidence"]["confidence_decision_id"] = state.evidence_decision_id
                         selected["origin"] = state.origin
                         selected["policy"] = state.policy
@@ -235,8 +221,7 @@ def migrate_mpc_learning_authority(
             reason = "schema-invalidated" if invalidated else None
             models = (
                 dict(controller_envelope["models"])
-                if isinstance(controller_envelope, dict)
-                and isinstance(controller_envelope.get("models"), dict)
+                if isinstance(controller_envelope, dict) and isinstance(controller_envelope.get("models"), dict)
                 else {}
             )
             models["mpc"] = selected
@@ -247,8 +232,7 @@ def migrate_mpc_learning_authority(
                 allow_nan=False,
             )
             conn.execute(
-                "INSERT INTO kv(key,value) VALUES(?,?) "
-                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                "INSERT INTO kv(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (MODEL_STATE_KEY, controller_json),
             )
 
@@ -267,8 +251,7 @@ def migrate_mpc_learning_authority(
                     "migration_reason": reason,
                 }
                 conn.execute(
-                    "INSERT INTO kv(key,value) VALUES(?,?) "
-                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    "INSERT INTO kv(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                     (
                         activation_input_key,
                         json.dumps(

@@ -42,13 +42,12 @@ from tests.unit.mpc._solver_fixtures import (
 from tests.unit.runtime._persistence_helpers import _pair_phase_state
 
 
-
-
 @dataclass(slots=True)
 class _PhaseSubmission:
     record: PreparedActivationRecord
     expected: ActivationPhase | None
     receipt: DurableActivationReceipt
+
 
 class _Persistence(ModelPersistenceWorker):
     def __init__(self) -> None:
@@ -152,7 +151,9 @@ def _factory() -> MpcPairFactory:
     )
 
 
-def _runtime(*, receipt_timeout: float = 2.0) -> tuple[
+def _runtime(
+    *, receipt_timeout: float = 2.0
+) -> tuple[
     ActivationRuntime,
     OwnedMpcPair,
     OwnedMpcPair,
@@ -373,9 +374,7 @@ def test_active_persistence_failures_restore_incumbent_and_durably_abort(failure
     aborted = persistence.phase_submissions[-1]
     assert aborted.record.phase is ActivationPhase.ABORTED
     assert aborted.record.reason == (
-        "activation-confidence-changed"
-        if failure == "cas-changed"
-        else "active-persistence-failed"
+        "activation-confidence-changed" if failure == "cas-changed" else "active-persistence-failed"
     )
     aborted.receipt._complete(durable=True)
     assert runtime.advance_activation()
@@ -544,9 +543,7 @@ def test_pending_abort_retries_automatically_on_later_lifecycle_advancement(
 
 
 def test_pending_abort_reuses_accepted_receipt_until_it_becomes_durable() -> None:
-    runtime, _incumbent, candidate, prepared, persistence = _runtime(
-        receipt_timeout=0.0
-    )
+    runtime, _incumbent, candidate, prepared, persistence = _runtime(receipt_timeout=0.0)
     assert runtime.queue_prepared_activation(prepared, candidate, _durable())
 
     assert not runtime.abort_prepared_activation(prepared, "lifecycle-failed")
@@ -574,9 +571,7 @@ def test_activation_advancement_never_waits_on_an_incomplete_abort_receipt(
         return original_wait(receipt, timeout)
 
     monkeypatch.setattr(DurableActivationReceipt, "wait", count_wait)
-    runtime, _incumbent, _candidate, prepared, persistence = _runtime(
-        receipt_timeout=0.0
-    )
+    runtime, _incumbent, _candidate, prepared, persistence = _runtime(receipt_timeout=0.0)
     assert runtime.queue_prepared_activation(prepared, _candidate, _durable())
     assert not runtime.abort_prepared_activation(prepared, "lifecycle-failed")
     assert len(waits) == 1
@@ -589,9 +584,7 @@ def test_activation_advancement_never_waits_on_an_incomplete_abort_receipt(
 
 
 def test_abort_is_type_safe_transaction_exact_and_idempotent() -> None:
-    runtime, _incumbent, candidate, prepared, persistence = _runtime(
-        receipt_timeout=0.0
-    )
+    runtime, _incumbent, candidate, prepared, persistence = _runtime(receipt_timeout=0.0)
     with pytest.raises(TypeError, match="PreparedActivationRecord"):
         runtime.abort_prepared_activation(SimpleNamespace(), "lifecycle-failed")
     assert not runtime.abort_prepared_activation(prepared, "lifecycle-failed")
@@ -763,9 +756,7 @@ def test_replace_active_pair_closes_displaced_owners_and_closed_runtime_rejects(
 def test_close_attempts_persistence_and_all_pairs_after_collaborator_failures() -> None:
     runtime, incumbent, candidate, prepared, persistence = _runtime()
     assert runtime.queue_prepared_activation(prepared, candidate, _durable())
-    persistence.flush_and_stop = lambda *, timeout=0.1: (_ for _ in ()).throw(
-        RuntimeError("flush failed")
-    )
+    persistence.flush_and_stop = lambda *, timeout=0.1: (_ for _ in ()).throw(RuntimeError("flush failed"))
     candidate.estimator.close = lambda: (_ for _ in ()).throw(RuntimeError("close failed"))
     with pytest.raises(RuntimeError, match="complete activation runtime ownership"):
         runtime.close()
@@ -837,9 +828,7 @@ def test_replacement_close_failure_leaves_current_active_owner_usable(
     try:
         with monkeypatch.context() as patch:
             patch.setattr(OwnedMpcPair, "close", fail_displaced_close)
-            with pytest.raises(
-                RuntimeError, match="could not retire displaced activation ownership"
-            ):
+            with pytest.raises(RuntimeError, match="could not retire displaced activation ownership"):
                 runtime.replace_active_pair(replacement, retain_current=False)
         assert runtime.active_pair is candidate
         assert candidate.authorized
@@ -875,7 +864,6 @@ def test_replacement_authorization_failure_restores_incumbent_owner(
     assert not candidate.closed
     candidate.close()
     runtime.close()
-
 
 
 def test_committed_replacement_retries_real_partial_core_close_on_runtime_close() -> None:
@@ -978,13 +966,9 @@ def test_later_retiree_close_failure_never_republishes_earlier_closed_owner(
     assert runtime.queue_prepared_activation(pending_record, pending, _durable())
 
     pending_solver = pending.solver
-    pending_solver.close = lambda: (_ for _ in ()).throw(
-        RuntimeError("later retiree close failed")
-    )
+    pending_solver.close = lambda: (_ for _ in ()).throw(RuntimeError("later retiree close failed"))
 
-    with pytest.raises(
-        RuntimeError, match="could not retire displaced activation ownership"
-    ):
+    with pytest.raises(RuntimeError, match="could not retire displaced activation ownership"):
         runtime.replace_active_pair(replacement, retain_current=False)
     assert runtime.active_pair is candidate
     assert candidate.authorized
@@ -995,6 +979,7 @@ def test_later_retiree_close_failure_never_republishes_earlier_closed_owner(
     pending_solver.close = lambda: None
     replacement.close()
     runtime.close()
+
 
 def test_replacement_closes_pending_candidate_exactly_once(monkeypatch) -> None:
     runtime, incumbent, candidate, prepared, _persistence = _runtime()

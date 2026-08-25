@@ -28,9 +28,7 @@ def _normalize_path(path: str) -> str:
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Require each named file to exceed a branch coverage minimum."
-    )
+    parser = argparse.ArgumentParser(description="Require each named file to exceed a branch coverage minimum.")
     parser.add_argument("--coverage", required=True, type=Path, help="coverage.py JSON report")
     parser.add_argument("--minimum", required=True, type=float, help="exclusive percentage minimum")
     parser.add_argument("files", nargs="+", help="source files to check")
@@ -53,11 +51,7 @@ def _read_branch_coverage(path: str, entry: object) -> BranchCoverage | str:
 
     covered = summary["covered_branches"]
     total = summary["num_branches"]
-    counts_are_valid = (
-        type(covered) is int
-        and type(total) is int
-        and 0 <= covered <= total
-    )
+    counts_are_valid = type(covered) is int and type(total) is int and 0 <= covered <= total
     if not counts_are_valid:
         return "invalid covered_branches and num_branches counts"
 
@@ -76,11 +70,7 @@ def main() -> int:
         return 1
 
     files = report.get("files", {}) if isinstance(report, dict) else {}
-    coverage_files = (
-        {_normalize_path(path): entry for path, entry in files.items()}
-        if isinstance(files, dict)
-        else {}
-    )
+    coverage_files = {_normalize_path(path): entry for path, entry in files.items()} if isinstance(files, dict) else {}
 
     failed: list[str] = []
     for path in requested_paths:
@@ -95,10 +85,7 @@ def main() -> int:
             failed.append(path)
             continue
 
-        comparison = (
-            f"{result.percent}% ({result.covered}/{result.total}) "
-            f"> {args.minimum}%"
-        )
+        comparison = f"{result.percent}% ({result.covered}/{result.total}) > {args.minimum}%"
         if result.percent > args.minimum:
             print(f"PASS {path}: {comparison}")
         else:

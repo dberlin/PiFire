@@ -1,7 +1,4 @@
-import {
-  projectProbeHealthList,
-  summarizeProbeHealth,
-} from "@pifire/core/dashboard/probeHealth";
+import { projectProbeHealthList, summarizeProbeHealth } from "@pifire/core/dashboard/probeHealth";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef } from "react";
 import { Outlet } from "react-router";

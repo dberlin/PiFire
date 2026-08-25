@@ -144,9 +144,18 @@ def test_success_changes_only_free_physics_and_preserves_fixed_structure_and_wei
         job.config.theta,
     )
     for fixed in (
-        "h_amb", "T_amb", "sigma", "delay_states", "state_size", "timestep_s",
-        "horizon_steps", "temperature_weight", "terminal_weight", "move_weight",
-        "residual_weight", "max_iterations",
+        "h_amb",
+        "T_amb",
+        "sigma",
+        "delay_states",
+        "state_size",
+        "timestep_s",
+        "horizon_steps",
+        "temperature_weight",
+        "terminal_weight",
+        "move_weight",
+        "residual_weight",
+        "max_iterations",
     ):
         assert getattr(success.config, fixed) == getattr(job.config, fixed)
     assert success.config.delay_states == 8
@@ -231,8 +240,6 @@ def test_fit_aligns_each_end_temperature_interval_with_the_following_frame_load(
     monkeypatch.setattr("controller.update_mpc.identifiability", lambda *_args, **_kwargs: 1.0)
     job = _job()
     _fit_grey_job(job)
-    expected = tuple(frame.realized_q for frame in job.observations[1:]) + (
-        job.observations[-1].realized_q,
-    )
+    expected = tuple(frame.realized_q for frame in job.observations[1:]) + (job.observations[-1].realized_q,)
     assert captured["q"] == expected
     assert captured["t"][0] == 0.0

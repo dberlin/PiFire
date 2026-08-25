@@ -33,7 +33,6 @@ from common.defaults import default_pellets
 from common.web_contracts.control import PelletActionRequest, PelletActionResponse
 
 
-
 def _log_key(log):
     """A millisecond key for `log` that no existing entry already holds.
 

@@ -93,6 +93,7 @@ def _socket_tick(consumers):
 
     settings = read_settings_store()
     pelletdb = read_pellets_store()
+
     # Keep probe assembly out of this liveness test, but use the real wire
     # structure rather than invalid empty dicts now that the producer validates
     # every frame against DashSocketPayload.

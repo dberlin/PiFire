@@ -27,6 +27,7 @@ CURRENT_INPUT = {
     "notify_targets": {"PitProbe": 0, "PinkProbe": 165},
 }
 
+
 def _assert_default_settings(actual):
     expected = default_settings()
     expected["lastupdated"] = actual["lastupdated"]
@@ -45,7 +46,6 @@ def _assert_default_pellets(actual):
     expected["log"] = {log_timestamp: {"pelletid": pellet_id, "deleted": False}}
     expected["lastupdated"] = actual["lastupdated"]
     assert actual == expected
-
 
 
 @pytest.fixture
@@ -390,18 +390,14 @@ def test_generic_keys_round_trip_detached_json_values_and_absence_raises(ds):
         ("pid_sp", []),
     ],
 )
-def test_controller_model_checkpoint_rejects_invalid_identity_or_shape(
-    ds, name, snapshot
-):
+def test_controller_model_checkpoint_rejects_invalid_identity_or_shape(ds, name, snapshot):
     assert runtime.write_controller_model_checkpoint(name, snapshot) is False
     assert datastore.get_blob("controller_model_state") is None
 
 
 @pytest.mark.parametrize("revision", [True, "1", -1])
 def test_controller_model_checkpoint_rejects_invalid_revisions(ds, revision):
-    assert (
-        runtime.write_controller_model_checkpoint("pid_sp", {"revision": revision}) is False
-    )
+    assert runtime.write_controller_model_checkpoint("pid_sp", {"revision": revision}) is False
     assert datastore.get_blob("controller_model_state") is None
 
 
@@ -422,9 +418,7 @@ def test_controller_model_checkpoint_rejects_non_json_snapshots(ds, snapshot):
     [
         pytest.param("{not json", id="malformed-json"),
         pytest.param(json.dumps([]), id="non-object-state"),
-        pytest.param(
-            json.dumps({"version": 2, "models": {}}), id="unsupported-version"
-        ),
+        pytest.param(json.dumps({"version": 2, "models": {}}), id="unsupported-version"),
         pytest.param(json.dumps({"version": 1, "models": []}), id="non-object-models"),
         pytest.param(
             json.dumps({"version": 1, "models": {"pid_sp": "not a snapshot"}}),
@@ -432,17 +426,13 @@ def test_controller_model_checkpoint_rejects_non_json_snapshots(ds, snapshot):
         ),
     ],
 )
-def test_controller_model_checkpoint_rejects_corrupt_stored_state_without_overwriting(
-    ds, stored
-):
+def test_controller_model_checkpoint_rejects_corrupt_stored_state_without_overwriting(ds, stored):
     if stored == "{not json":
         ds.connection().execute("PRAGMA ignore_check_constraints = ON")
     datastore.set_blob("controller_model_state", stored)
     ds.connection().execute("PRAGMA ignore_check_constraints = OFF")
 
-    assert (
-        runtime.write_controller_model_checkpoint("pid_sp", {"revision": 1}) is False
-    )
+    assert runtime.write_controller_model_checkpoint("pid_sp", {"revision": 1}) is False
     assert datastore.get_blob("controller_model_state") == stored
 
 
@@ -451,9 +441,7 @@ def test_controller_model_checkpoint_is_owned_monotonic_and_atomic(ds):
     assert runtime.write_controller_model_checkpoint("pid_sp", snapshot) is True
     snapshot["model"]["gain"] = 99
 
-    assert runtime.write_controller_model_checkpoint(
-        "pid_sp", {"revision": 3, "model": {"gain": 2.0}}
-    ) is False
+    assert runtime.write_controller_model_checkpoint("pid_sp", {"revision": 3, "model": {"gain": 2.0}}) is False
     assert runtime.read_generic_key("controller_model_state") == {
         "version": 1,
         "models": {"pid_sp": {"revision": 3, "model": {"gain": 1.5}}},
@@ -471,9 +459,7 @@ def test_controller_model_checkpoint_is_owned_monotonic_and_atomic(ds):
     )
     try:
         with pytest.raises(sqlite3.IntegrityError, match="simulated checkpoint failure"):
-            runtime.write_controller_model_checkpoint(
-                "pid_sp", {"revision": 4, "model": {"gain": 2.0}}
-            )
+            runtime.write_controller_model_checkpoint("pid_sp", {"revision": 4, "model": {"gain": 2.0}})
         assert runtime.read_generic_key("controller_model_state") == {
             "version": 1,
             "models": {"pid_sp": {"revision": 3, "model": {"gain": 1.5}}},

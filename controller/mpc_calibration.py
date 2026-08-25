@@ -26,6 +26,7 @@ from controller.mpc_allocator import AllocationResult, normalized_load_from_auge
 FloatArray: TypeAlias = npt.NDArray[np.float64]
 CalibrationClock = Callable[[], float]
 
+
 def _forecast_unavailable(
     _q_future: FloatArray,
     _ambient_future: FloatArray,

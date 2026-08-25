@@ -233,6 +233,8 @@ def test_manual_release_without_reseed_still_turns_auger_off(
     assert hold.state.manual_override["auger"] == 0
     assert hold.grill.get_output_status()["auger"] is False
     assert runner.applied == []
+
+
 def test_manual_release_without_reseed_preserves_already_off_auger(
     hold_cycle,
 ) -> None:
@@ -247,7 +249,6 @@ def test_manual_release_without_reseed_preserves_already_off_auger(
     assert hold.state.manual_override["auger"] == 0
     assert hold.grill.get_output_status()["auger"] is False
     assert runner.applied == []
-
 
 
 def test_operator_lid_toggle_opens_pause_and_turns_fan_off(

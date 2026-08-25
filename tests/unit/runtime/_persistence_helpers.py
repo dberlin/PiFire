@@ -23,6 +23,7 @@ from controller.mpc_factory import MpcPairFactory
 def _inactive_calibration(_load, _temperature, _forecast) -> CalibrationDecision:
     return CalibrationDecision(False, 0.0, None, CalibrationProgress())
 
+
 _PAIR_FACTORY = MpcPairFactory(
     DEFAULT_MPC_CONFIG,
     "C",

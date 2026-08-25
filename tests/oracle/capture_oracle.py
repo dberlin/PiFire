@@ -27,12 +27,8 @@ def _dump(name, value):
 def scenario_control_delta():
     c.datastore.delete_blob("control:general")
     c.SqliteQueue("queue_control_write").flush()
-    control_persistence.write_control_snapshot(
-        {"mode": "Stop", "nested": {"a": 1, "b": 2}}, origin="test"
-    )
-    control_persistence.enqueue_control_delta(
-        control_delta(set_values={"nested": {"b": 9, "c": 3}}), origin="webapp"
-    )
+    control_persistence.write_control_snapshot({"mode": "Stop", "nested": {"a": 1, "b": 2}}, origin="test")
+    control_persistence.enqueue_control_delta(control_delta(set_values={"nested": {"b": 9, "c": 3}}), origin="webapp")
     before = control_persistence.read_control()
     control_persistence.execute_control_writes()
     after = control_persistence.read_control()

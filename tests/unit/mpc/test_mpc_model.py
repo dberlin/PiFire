@@ -7,14 +7,10 @@ from controller.mpc_model import GreyBoxKF, simulate_grey_box
 PARAMS = dict(C_c=306.0, h_amb=0.55, T_amb=20.0)
 
 
-
-
 def test_kf_rejects_an_applied_load_outside_the_normalized_domain():
     kf = GreyBoxKF(t_step=25.0, q_temp=1e-2, q_dist=0.5, r_meas=0.04, x0=(20.0, 0.0), **PARAMS)
     with np.testing.assert_raises_regex(ValueError, "normalized combustion load"):
         kf.update(1.01, 100.0)
-
-
 
 
 def test_kf_offset_free_under_constant_disturbance():

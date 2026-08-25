@@ -117,7 +117,9 @@ describe("GrillGauge", () => {
 
     expect(screen.getByText("225")).toBeInTheDocument();
     expect(screen.getByText("FAULT")).toBeInTheDocument();
-    expect(screen.getByText("Fault detected — Observe mode did not stop heating.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Fault detected — Observe mode did not stop heating."),
+    ).toBeInTheDocument();
   });
 
   it("shows an em dash and stopped copy when the control probe is unavailable", () => {

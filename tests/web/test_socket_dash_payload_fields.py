@@ -189,10 +189,7 @@ def test_health_projection_defaults_missing_and_empty_reports_to_empty(ds):
 
     assert _project_thermocouple_health(settings, None, now=100.0) == []
     assert _project_thermocouple_health(settings, [], now=100.0) == []
-    assert (
-        _project_thermocouple_health(settings, _device_info("tc0", {}), now=100.0)
-        == []
-    )
+    assert _project_thermocouple_health(settings, _device_info("tc0", {}), now=100.0) == []
 
 
 @pytest.mark.parametrize(
@@ -205,9 +202,7 @@ def test_health_projection_defaults_missing_and_empty_reports_to_empty(ds):
         ("confirmed", ["hardware", "stuck-response"], "mixed"),
     ],
 )
-def test_health_projection_preserves_every_state_and_identifies_source(
-    ds, state, evidence, source
-):
+def test_health_projection_preserves_every_state_and_identifies_source(ds, state, evidence, source):
     from blueprints.mobile.socket_io import _project_thermocouple_health
 
     report = _report(
@@ -361,15 +356,10 @@ def test_health_projection_rejects_malformed_detail_and_computes_finite_age(ds):
         {"current": False, "lastReportedAgeS": 50.0},
         {"current": True, "lastReportedAgeS": 0.0},
     ]
-    assert all(
-        item["freshness"]["lastReportedAgeS"] >= 0.0
-        for item in result
-    )
+    assert all(item["freshness"]["lastReportedAgeS"] >= 0.0 for item in result)
 
 
-def test_health_projection_uses_producer_monotonic_clock_and_ages_current_threshold(
-    ds, monkeypatch
-):
+def test_health_projection_uses_producer_monotonic_clock_and_ages_current_threshold(ds, monkeypatch):
     from blueprints.mobile import socket_io
 
     settings = _health_settings(_probe("Grill", role="Primary"))

@@ -83,9 +83,7 @@ def _chain(job):
 
         def setup(controller):
             if arm == "baseline":
-                controller.active_control_pair.core._equilibrium_load = (
-                    lambda target, disturbance, identified: 0.0
-                )
+                controller.active_control_pair.core._equilibrium_load = lambda target, disturbance, identified: 0.0
 
         raw = _run_scenario(
             "mpc",

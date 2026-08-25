@@ -29,16 +29,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 @pytest.fixture
-def built_native_release(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[Path]:
-    built_library = (
-        PROJECT_ROOT
-        / "build"
-        / "acados-configure"
-        / "native-output"
-        / library_module._library_filename()
-    )
+def built_native_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    built_library = PROJECT_ROOT / "build" / "acados-configure" / "native-output" / library_module._library_filename()
     if not built_library.is_file():
         pytest.fail(
             f"Built native library is missing at {built_library}. "
@@ -66,9 +58,7 @@ def built_native_release(
         + "\n",
         encoding="utf-8",
     )
-    (release.parent.parent / "current").symlink_to(
-        release, target_is_directory=True
-    )
+    (release.parent.parent / "current").symlink_to(release, target_is_directory=True)
 
     monkeypatch.setattr(library_module, "__file__", str(package / "_library.py"))
     _ffi.load_grey_api.cache_clear()
@@ -82,9 +72,7 @@ def _state(temperature_c: float = 100.0, disturbance: float = 0.0) -> np.ndarray
     return np.array([0.2] * 8 + [temperature_c, disturbance], dtype=np.float64)
 
 
-def _solve(
-    solver: AcadosGreyBoxMPC, state: np.ndarray | None = None
-):
+def _solve(solver: AcadosGreyBoxMPC, state: np.ndarray | None = None):
     return solver.solve(
         _state() if state is None else state,
         setpoint_c=120.0,
@@ -171,14 +159,11 @@ def _advance_physics(
         derivatives = np.empty(10, dtype=np.float64)
         derivatives[0] = (q_total - current[0]) / delay_time_constant
         for index in range(1, 8):
-            derivatives[index] = (
-                current[index - 1] - current[index]
-            ) / delay_time_constant
+            derivatives[index] = (current[index - 1] - current[index]) / delay_time_constant
         derivatives[8] = (
             config.K_Q * current[7]
             - config.h_amb * (current[8] - config.T_amb)
-            - config.sigma
-            * ((current[8] + 273.15) ** 4 - (config.T_amb + 273.15) ** 4)
+            - config.sigma * ((current[8] + 273.15) ** 4 - (config.T_amb + 273.15) ** 4)
             + current[9]
         ) / config.C_c
         derivatives[9] = 0.0
@@ -321,19 +306,14 @@ def test_native_struct_size_guards_reject_mismatched_callers(
     try:
         bad_input = _native_input()
         bad_input.struct_size -= 1
-        assert (
-            _ffi.solve(handle, bad_input, _sentinel_output())
-            == _ffi.STATUS_STRUCT_SIZE_MISMATCH
-        )
+        assert _ffi.solve(handle, bad_input, _sentinel_output()) == _ffi.STATUS_STRUCT_SIZE_MISMATCH
 
         bad_output = _sentinel_output()
         bad_output.struct_size -= 1
-        assert (
-            _ffi.solve(handle, _native_input(), bad_output)
-            == _ffi.STATUS_STRUCT_SIZE_MISMATCH
-        )
+        assert _ffi.solve(handle, _native_input(), bad_output) == _ffi.STATUS_STRUCT_SIZE_MISMATCH
     finally:
         _ffi.destroy(handle)
+
 
 @pytest.mark.parametrize(
     ("invalid_argument", "expected_status"),
@@ -373,7 +353,6 @@ def test_native_guard_failures_fully_zero_valid_output(
     assert output.diagnostics.status == expected_status
 
 
-
 @pytest.mark.parametrize("horizon_steps", [5, 24])
 def test_native_solve_sets_selected_length_and_zeroes_unused_capacity(
     horizon_steps: int,
@@ -394,9 +373,7 @@ def test_native_solve_sets_selected_length_and_zeroes_unused_capacity(
     assert np.isfinite(q[:horizon_steps]).all()
     assert np.isfinite(residual[:horizon_steps]).all()
     np.testing.assert_array_equal(q[horizon_steps:], np.zeros(24 - horizon_steps))
-    np.testing.assert_array_equal(
-        residual[horizon_steps:], np.zeros(24 - horizon_steps)
-    )
+    np.testing.assert_array_equal(residual[horizon_steps:], np.zeros(24 - horizon_steps))
     assert np.isfinite(output.objective)
     assert output.diagnostics.status == _ffi.STATUS_SUCCESS
 
@@ -429,9 +406,7 @@ def test_solver_uses_selected_horizon_for_cold_warm_and_reset_solves(
     horizon_steps: int,
     built_native_release: Path,
 ) -> None:
-    solver = AcadosGreyBoxMPC(
-        GreyBoxMPCConfig(horizon_steps=horizon_steps, sigma=0.0)
-    )
+    solver = AcadosGreyBoxMPC(GreyBoxMPCConfig(horizon_steps=horizon_steps, sigma=0.0))
     try:
         cold = _solve(solver)
         warm = _solve(solver)
@@ -571,6 +546,7 @@ def test_wrapper_rejects_native_sequence_length_that_differs_from_handle(
 
     assert isinstance(raised.value.diagnostics, SolverDiagnostics)
 
+
 def test_wrapper_copies_only_selected_prefix_and_ignores_native_tail(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -685,9 +661,7 @@ def test_failed_solve_restores_exact_successful_primal_and_dual_warm_iterate(
             rtol=0.0,
             atol=1e-9,
         )
-        assert failed_recovery.diagnostics.iterations == (
-            control_recovery.diagnostics.iterations
-        )
+        assert failed_recovery.diagnostics.iterations == (control_recovery.diagnostics.iterations)
         assert failed_recovery.objective == pytest.approx(
             control_recovery.objective,
             rel=0.0,

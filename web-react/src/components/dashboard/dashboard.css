@@ -795,7 +795,7 @@
   @apply flex flex-col;
   max-width: 100%;
   margin-top: 2px;
-  font: 600 11px/1.15 "Barlow";
+  font: 600 11px / 1.15 "Barlow";
 }
 .pf-dash-probehealth strong {
   letter-spacing: 0.7px;
@@ -884,7 +884,7 @@
   @apply flex flex-col items-center text-center;
   max-width: min(360px, 80%);
   margin-top: 3px;
-  font: 600 12px/1.15 "Barlow";
+  font: 600 12px / 1.15 "Barlow";
 }
 .pf-dash-gauge-health strong {
   letter-spacing: 0.8px;

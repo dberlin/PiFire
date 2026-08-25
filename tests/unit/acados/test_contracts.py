@@ -87,7 +87,8 @@ def test_grey_config_rejects_booleans_as_numbers(field: str) -> None:
     ],
 )
 def test_grey_config_rejects_invalid_physical_and_solver_values(
-    field: str, value: float,
+    field: str,
+    value: float,
 ) -> None:
     with pytest.raises(ValueError, match=field):
         GreyBoxMPCConfig(**{field: value})
@@ -139,7 +140,8 @@ def test_grey_results_own_read_only_arrays_of_the_selected_length(
     [(4, 4), (25, 25), (5, 6), (6, 5)],
 )
 def test_grey_results_reject_unsupported_or_mismatched_sequence_lengths(
-    q_length: int, residual_length: int,
+    q_length: int,
+    residual_length: int,
 ) -> None:
     with pytest.raises(ValueError, match="sequence"):
         GreyBoxSolve(
@@ -159,7 +161,9 @@ def test_grey_results_reject_unsupported_or_mismatched_sequence_lengths(
     ],
 )
 def test_grey_results_reject_non_finite_native_values(
-    sequence_q: np.ndarray, sequence_residual: np.ndarray, objective: float,
+    sequence_q: np.ndarray,
+    sequence_residual: np.ndarray,
+    objective: float,
 ) -> None:
     with pytest.raises(ValueError, match="finite"):
         GreyBoxSolve(sequence_q, sequence_residual, objective, _diagnostics())

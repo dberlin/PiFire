@@ -38,7 +38,6 @@ def main():
     if check or shot:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-
     health_scenarios = (
         "none",
         "suspected",

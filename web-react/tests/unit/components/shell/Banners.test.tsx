@@ -1,8 +1,5 @@
 import type { ThermocoupleHealthView } from "@pifire/core/contracts/core";
-import {
-  projectProbeHealth,
-  summarizeProbeHealth,
-} from "@pifire/core/dashboard/probeHealth";
+import { projectProbeHealth, summarizeProbeHealth } from "@pifire/core/dashboard/probeHealth";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Banners } from "../../../../src/components/shell/Banners";

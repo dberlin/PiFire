@@ -160,6 +160,7 @@ def _default_pair_factory() -> MpcPairFactory:
 def _activation_rejection(category: ActivationRejectionCategory, reason: str) -> ActivationRejected:
     return ActivationRejected(category, reason)
 
+
 def _with_cleanup_failure(rejection: ActivationRejected) -> ActivationRejected:
     return replace(rejection, cleanup_failed=True)
 
@@ -272,12 +273,8 @@ class ModelActivationService:
 
         try:
             pair_factory = self._pair_factory_provider()
-            incumbent = pair_factory.migrate_legacy_descriptor(
-                GreyControlPairDescriptor.from_dict(incumbent_value)
-            )
-            candidate = pair_factory.migrate_legacy_descriptor(
-                GreyControlPairDescriptor.from_dict(candidate_value)
-            )
+            incumbent = pair_factory.migrate_legacy_descriptor(GreyControlPairDescriptor.from_dict(incumbent_value))
+            candidate = pair_factory.migrate_legacy_descriptor(GreyControlPairDescriptor.from_dict(candidate_value))
             if candidate.model_digest != request.candidate_digest:
                 raise ValueError("candidate-digest-changed")
         except (KeyError, TypeError) as error:
@@ -306,6 +303,7 @@ class ModelActivationService:
                     str(error),
                 )
             else:
+
                 def build_candidate(descriptor: GreyControlPairDescriptor) -> OwnedMpcPair:
                     nonlocal candidate_owner
                     candidate_owner = pair_factory.restore(descriptor)
@@ -320,11 +318,13 @@ class ModelActivationService:
                     incumbent_pair=incumbent_owner,
                     build_candidate=build_candidate,
                     validate_candidate=pair_factory.validate,
-                    native_dry_solve=lambda pair: pair_factory.dry_solve(
-                        pair,
-                        temperature_c=float(pair.solver.config.T_amb),
-                    ).accepted
-                    is True,
+                    native_dry_solve=lambda pair: (
+                        pair_factory.dry_solve(
+                            pair,
+                            temperature_c=float(pair.solver.config.T_amb),
+                        ).accepted
+                        is True
+                    ),
                     persist_prepared=persist_prepared,
                     clock_ms=lambda: now_ms,
                     receipt_timeout=2.0,
@@ -388,7 +388,7 @@ class ModelActivationService:
         try:
             active_pair = activation.active_pair
             rollback_pair = activation.rollback_pair
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return RollbackRejected(
                 RollbackRejectionCategory.CONFLICT,
                 "activation-lineage-missing",

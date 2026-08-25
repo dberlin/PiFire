@@ -1242,7 +1242,9 @@ describe("Dashboard thermocouple health wiring", () => {
 
     expect(screen.getByText("225")).toBeInTheDocument();
     expect(screen.getByText("Last reported: FAULT")).toBeInTheDocument();
-    expect(screen.getByText("Fault detected — Observe mode did not stop heating.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Fault detected — Observe mode did not stop heating."),
+    ).toBeInTheDocument();
     expect(screen.getByText("—")).toBeInTheDocument();
     expect(screen.getByText("Last reported: PROBE UNAVAILABLE")).toBeInTheDocument();
     expect(screen.getByText("Grill control continues.")).toBeInTheDocument();

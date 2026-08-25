@@ -34,8 +34,6 @@ def _enqueue_control_delta_calls(tree):
             yield node
 
 
-
-
 @pytest.mark.parametrize("relpath", DISPLAY_WRITERS)
 def test_every_display_write_hands_over_a_delta_envelope(relpath):
     path = ROOT / relpath

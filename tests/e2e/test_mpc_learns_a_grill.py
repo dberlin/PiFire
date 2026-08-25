@@ -239,9 +239,7 @@ def test_identification_off_is_invisible():
     # the wrong switch and must be rewritten around the new one.
     flagged = Controller({"enable_identification": True}, "F", _shipped_cycle_data())
     plain = Controller({}, "F", _shipped_cycle_data())
-    assert {k: flagged.cfg[k] for k in MODEL_PARAMETER_KEYS} == {
-        k: plain.cfg[k] for k in MODEL_PARAMETER_KEYS
-    }
+    assert {k: flagged.cfg[k] for k in MODEL_PARAMETER_KEYS} == {k: plain.cfg[k] for k in MODEL_PARAMETER_KEYS}
     # The acados backend carries the built horizon on its GreyBoxMPCConfig as
     # horizon_steps, which controller/mpc.py builds from cfg["n_horizon"]; the
     # old `mpc.settings.n_horizon` belonged to the previous MPC object.

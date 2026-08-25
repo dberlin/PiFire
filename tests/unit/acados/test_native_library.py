@@ -50,9 +50,7 @@ class _FakeLibrary:
 
 
 @pytest.fixture
-def published_release(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[tuple[Path, Path, Path]]:
+def published_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[Path, Path, Path]]:
     controller_root = tmp_path / "checkout" / "controller"
     package = controller_root / "acados"
     runtime_root = controller_root / "_native"
@@ -84,16 +82,8 @@ def published_release(
 
 
 @pytest.fixture
-def built_native_release(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[Path]:
-    built_library = (
-        PROJECT_ROOT
-        / "build"
-        / "acados-configure"
-        / "native-output"
-        / library_module._library_filename()
-    )
+def built_native_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    built_library = PROJECT_ROOT / "build" / "acados-configure" / "native-output" / library_module._library_filename()
     if not built_library.is_file():
         pytest.fail(
             f"Built native library is missing at {built_library}. "
@@ -121,9 +111,7 @@ def built_native_release(
         + "\n",
         encoding="utf-8",
     )
-    (release.parent.parent / "current").symlink_to(
-        release, target_is_directory=True
-    )
+    (release.parent.parent / "current").symlink_to(release, target_is_directory=True)
 
     monkeypatch.setattr(library_module, "__file__", str(package / "_library.py"))
     _ffi.load_grey_api.cache_clear()
@@ -183,6 +171,7 @@ def test_missing_runtime_publication_names_conditional_rebuild_command(
     assert loaded_paths == []
     assert load_native.cache_info().currsize == 0
 
+
 @pytest.mark.parametrize("artifact_name", ["manifest", "library"])
 def test_symlinked_release_artifacts_are_rejected_before_read_or_load(
     artifact_name: str,
@@ -207,7 +196,6 @@ def test_symlinked_release_artifacts_are_rejected_before_read_or_load(
 
     assert REBUILD_COMMAND in str(raised.value)
     assert loaded_paths == []
-
 
 
 def test_manifest_build_digest_must_match_selected_release(
@@ -309,9 +297,7 @@ def test_published_library_exposes_abi_v2(built_native_release: Path) -> None:
     assert library.acados_pifire_abi_version() == 2
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="ELF export inspection"
-)
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="ELF export inspection")
 def test_elf_library_exports_only_the_five_grey_abi_symbols(
     built_native_release: Path,
 ) -> None:
@@ -324,11 +310,7 @@ def test_elf_library_exports_only_the_five_grey_abi_symbols(
     exports = set()
     for line in result.stdout.splitlines():
         fields = line.split()
-        if (
-            len(fields) >= 8
-            and fields[4] in {"GLOBAL", "WEAK"}
-            and fields[6] != "UND"
-        ):
+        if len(fields) >= 8 and fields[4] in {"GLOBAL", "WEAK"} and fields[6] != "UND":
             exports.add(fields[7].partition("@")[0])
 
     assert exports == PUBLIC_ABI_SYMBOLS
@@ -344,10 +326,6 @@ def test_darwin_library_exports_only_the_five_grey_abi_symbols(
         text=True,
         check=True,
     )
-    exports = {
-        fields[-1].removeprefix("_")
-        for line in result.stdout.splitlines()
-        if (fields := line.split())
-    }
+    exports = {fields[-1].removeprefix("_") for line in result.stdout.splitlines() if (fields := line.split())}
 
     assert exports == PUBLIC_ABI_SYMBOLS

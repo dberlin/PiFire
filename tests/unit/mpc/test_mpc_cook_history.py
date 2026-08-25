@@ -66,9 +66,7 @@ def test_history_records_the_applied_normalized_load_not_the_command():
     c.update(100.0)
     _t, _temp, load_applied = c.cook_history()[-1]
     assert load_applied == pytest.approx(applied_before_solve)
-    assert load_applied != pytest.approx(
-        c.get_status()["last_combustion_load"]
-    )
+    assert load_applied != pytest.approx(c.get_status()["last_combustion_load"])
 
 
 def test_history_is_bounded(monkeypatch):

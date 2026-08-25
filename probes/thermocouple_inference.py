@@ -477,18 +477,14 @@ def fuse_thermocouple_health(
             {
                 "policy": policy.value,
                 "authority": (
-                    "stop"
-                    if policy is ThermocoupleInferencePolicy.ENFORCE and is_primary
-                    else "notify_only"
+                    "stop" if policy is ThermocoupleInferencePolicy.ENFORCE and is_primary else "notify_only"
                 ),
                 "is_primary": is_primary,
             }
         )
         fused = replace(
             inferred,
-            temperature_valid=(
-                policy is ThermocoupleInferencePolicy.OBSERVE and is_primary
-            ),
+            temperature_valid=(policy is ThermocoupleInferencePolicy.OBSERVE and is_primary),
             detail=detail,
         )
 
