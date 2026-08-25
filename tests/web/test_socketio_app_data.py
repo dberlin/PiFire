@@ -35,8 +35,6 @@ helpers and ``os.system("rm ...")``. The ``sio`` fixture patches
 tests/web/test_page_admin.py's hazard_guard. Nothing destructive runs.
 """
 
-import base64
-import builtins
 import json
 import threading
 import time
@@ -376,41 +374,6 @@ def test_get_probe_data_aux_section_direct_call(sio):
 # =====================================================================
 
 
-def test_encode_assets_missing_assets_key_is_a_noop(sio):
-    recipe_data = {"metadata": {"id": "rid1"}}
-    result = sio.mod._encode_assets(recipe_data)
-    assert result is recipe_data
-    assert "assets" not in result
-
-
-def test_encode_assets_missing_file_yields_empty_string(sio):
-    # No such file on disk -> `_encode_img`'s bare `except:` swallows the
-    # FileNotFoundError and returns "".
-    recipe_data = {"metadata": {"id": "rid1"}, "assets": [{"filename": "missing.jpg"}]}
-    result = sio.mod._encode_assets(recipe_data)
-    asset = result["assets"][0]
-    assert asset["encoded_image"] == ""
-    assert asset["encoded_thumb"] == ""
-
-
-def test_encode_img_success_reads_and_b64_encodes(sio, tmp_path):
-    # Redirect only the one expected cwd-relative path to a tmp_path file, so
-    # this doesn't write into the real repo's static/img/tmp tree.
-    real_open = builtins.open
-    expected_path = "./static/img/tmp/rid2/pic.jpg"
-    payload = b"hello-bytes"
-    (tmp_path / "pic.jpg").write_bytes(payload)
-
-    def fake_open(path, *args, **kwargs):
-        if path == expected_path:
-            return real_open(tmp_path / "pic.jpg", *args, **kwargs)
-        return real_open(path, *args, **kwargs)
-
-    with mock.patch("builtins.open", side_effect=fake_open):
-        encoded = sio.mod._encode_img("rid2", "pic.jpg")
-    assert encoded == base64.b64encode(payload).decode("utf-8")
-
-
 # =====================================================================
 # _check_control_status
 # =====================================================================
@@ -555,37 +518,6 @@ def test_dash_errors_carry_the_web_banner_grouped_after_the_other_two(sio):
 # =====================================================================
 # _get_system_info
 # =====================================================================
-
-
-def test_get_system_info_maps_control_and_system_info_fields(sio):
-    control = read_control()
-    control["system"] = {
-        "wifi_quality_value": 11,
-        "wifi_quality_max": 22,
-        "wifi_quality_percentage": 33,
-        "cpu_throttled": False,
-        "cpu_under_voltage": True,
-        "cpu_temp": 61.2,
-    }
-    write_control_snapshot(control, origin="test-socketio")
-    canned_system_info = {
-        "network_info": {"iface": "eth0"},
-        "hardware_info": {"cpu_info": {}},
-        "os_info": {"PRETTY_NAME": "X"},
-        "uptime": "up 1 day",
-    }
-    with mock.patch.object(sio.mod, "gather_system_info", return_value=(canned_system_info, {})):
-        info = sio.mod._get_system_info(read_control())
-    assert info["wifi_quality_value"] == 11
-    assert info["wifi_quality_max"] == 22
-    assert info["wifi_quality_percentage"] == 33
-    assert info["cpu_throttled"] is False
-    assert info["cpu_under_voltage"] is True
-    assert info["cpu_temp"] == 61.2
-    assert info["network_info"] == {"iface": "eth0"}
-    assert info["hardware_info"] == {"cpu_info": {}}
-    assert info["os_info"] == {"PRETTY_NAME": "X"}
-    assert info["uptime"] == "up 1 day"
 
 
 # =====================================================================

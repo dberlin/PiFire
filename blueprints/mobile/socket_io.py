@@ -16,7 +16,6 @@ Description: This library provides socketio functions for app.py
 import math
 import threading
 import time
-from base64 import b64encode
 from collections.abc import Mapping
 from threading import Event
 
@@ -28,16 +27,12 @@ from common.app import (
     CONTROL_DOWN_ERROR,
     api_response,
     create_ui_hash,
-    save_settings_and_flag_update,
-    update_probe_config,
 )
 from common.common import (
     ErrorKind,
     flush_events_records,
 )
-from common.control_delta import control_delta
 from common.persistence.control import (
-    enqueue_control_delta,
     read_control,
 )
 from common.persistence.runtime import (
@@ -57,16 +52,12 @@ from common.persistence.runtime import (
     seed_settings_store,
     write_connected_user,
 )
-from common.system import (
-    gather_system_info,
-)
 from common.web_contracts.core import (
     DashSocketPayload,
     PelletSocketPayload,
     ThermocoupleHealthView,
     project_thermocouple_health_outcome,
 )
-from config import Config
 from controller.learning_report import controller_learning_report_revision
 
 thread_lock = threading.Lock()
@@ -132,7 +123,6 @@ seed_pellets_store()
 flush_connected_users()
 flush_events_records()
 
-recipe_folder = Config.RECIPE_FOLDER
 
 """
 ==============================================================================
@@ -616,127 +606,6 @@ def _get_timer_notify_data(notify_data):
     return timer_info
 
 
-def _encode_assets(recipe_data):
-    img_size = ["full", "thumb"]
-    recipe_id = recipe_data["metadata"]["id"]
-    for size in img_size:
-        try:
-            for asset in recipe_data["assets"]:
-                if size == "full":
-                    asset["encoded_image"] = _encode_img(recipe_id, asset["filename"])
-                else:
-                    asset["encoded_thumb"] = _encode_img(recipe_id, asset["filename"], True)
-        except KeyError:
-            continue
-    return recipe_data
-
-
-def _encode_img(recipe_id, asset_filename, thumb=False):
-    filepath = f"./static/img/tmp/{recipe_id}/thumbs/" if thumb else f"./static/img/tmp/{recipe_id}/"
-    try:
-        with open(filepath + asset_filename, "rb") as img:
-            buffer = img.read()
-            asset_img = b64encode(buffer).decode("utf-8")
-    except:
-        asset_img = ""
-    return asset_img
-
-
-def _update_probe_config(settings, control, request):
-    probe_config = request["probes_action"]
-    probe_dto = probe_config
-
-    settings, control, result = update_probe_config(settings, control, probe_dto)
-
-    if result == "success":
-        control["settings_update"] = True
-        # update_probe_config (common/app.py) also raises probe_profile_update.
-        # It used to ride along on the whole-dict write; now it has to be named.
-        save_settings_and_flag_update(
-            settings, control, "settings_update", "probe_profile_update", origin="app-socketio"
-        )
-
-        return _response(result="OK", data=settings)
-    else:
-        return _response(result="Error", message="Error: Probe was not found")
-
-
-#: The notify_action DTO addresses ONE probe label and carries a flat bag of
-#: per-type fields; this is that flattening written down once. Each entry type
-#: maps to the DTO key whose PRESENCE means "set this entry" and to the
-#: notify_data field each DTO key feeds.
-_NOTIFY_DTO_FIELDS = {
-    "probe": (
-        "target_temp",
-        {
-            "target": "target_temp",
-            "shutdown": "target_shutdown",
-            "keep_warm": "target_keep_warm",
-            "req": "target_req",
-        },
-    ),
-    "probe_limit_high": (
-        "high_limit_temp",
-        {"target": "high_limit_temp", "shutdown": "high_limit_shutdown", "req": "high_limit_req"},
-    ),
-    "probe_limit_low": (
-        "low_limit_temp",
-        {
-            "target": "low_limit_temp",
-            "shutdown": "low_limit_shutdown",
-            "reignite": "low_limit_reignite",
-            "req": "low_limit_req",
-        },
-    ),
-}
-
-#: What each field becomes when the DTO omits its type's temp key -- the app
-#: says "this alert is off" by leaving the temperature out.
-_NOTIFY_CLEARED = {"target": 0, "shutdown": False, "keep_warm": False, "reignite": False, "req": False}
-
-
-def _notify_fields_from_dto(entry_type, notify_dto):
-    """The fields ONE notify_data entry of `entry_type` takes from the DTO.
-
-    A missing companion key (target_temp without target_shutdown) raises
-    KeyError, as it always has: the app sends the group or none of it, and a
-    default here would silently disarm a shutdown the user asked for.
-    """
-    temp_key, dto_keys = _NOTIFY_DTO_FIELDS[entry_type]
-    if temp_key not in notify_dto:
-        return {field: _NOTIFY_CLEARED[field] for field in dto_keys}
-    fields = {field: notify_dto[dto_key] for field, dto_key in dto_keys.items()}
-    fields["target"] = int(fields["target"])
-    return fields
-
-
-def _update_notify_data(control, request):
-    notify_dto = request["notify_action"]
-    label = notify_dto["label"]
-    # One notify.set per entry this DTO addresses, NOT a replace of the whole
-    # array. The DTO names a single label, so every other entry -- the other
-    # probes, the timer, the hopper -- is untouched, and a concurrent writer
-    # that armed one of them inside this control cycle keeps its write. The
-    # live read decides WHICH entries exist: notify.set appends a missing one,
-    # and this handler must not conjure a limit alert the probe never had.
-    ops = [
-        {
-            "op": "notify.set",
-            "label": label,
-            "type": entry["type"],
-            "fields": _notify_fields_from_dto(entry["type"], notify_dto),
-        }
-        for entry in control["notify_data"]
-        if entry["label"] == label and entry["type"] in _NOTIFY_DTO_FIELDS
-    ]
-    enqueue_control_delta(control_delta(ops=ops or None), origin="app-socketio")
-    return _response(result="OK")
-
-
-def _write_settings(settings, control):
-    save_settings_and_flag_update(settings, control, "settings_update", origin="app-socketio")
-
-
 def _check_control_status():
     """Record whether the control process's heartbeat is still fresh.
 
@@ -770,22 +639,3 @@ def _check_control_status():
 # `_response` relocated to `common/app.py` as `api_response`.
 # Kept as a thin local alias so the 67 call sites in this module don't churn.
 _response = api_response
-
-
-def _get_system_info(control):
-    system_info, _ = gather_system_info(control, origin="app-socketio")
-
-    info_details = {
-        "wifi_quality_value": control["system"]["wifi_quality_value"],
-        "wifi_quality_max": control["system"]["wifi_quality_max"],
-        "wifi_quality_percentage": control["system"]["wifi_quality_percentage"],
-        "cpu_throttled": control["system"]["cpu_throttled"],
-        "cpu_under_voltage": control["system"]["cpu_under_voltage"],
-        "cpu_temp": control["system"]["cpu_temp"],
-        "network_info": system_info["network_info"],
-        "hardware_info": system_info["hardware_info"],
-        "os_info": system_info["os_info"],
-        "uptime": system_info["uptime"],
-    }
-
-    return info_details
