@@ -178,7 +178,8 @@ guards it, and the generator only reads what that chain already produces.
 flattens them:
 
 ```python
-def _format_errors(errs): return [f"{'.'.join(...)}: {err['msg']}" for err in errs]
+def _format_errors(errs):
+    return [f"{'.'.join(...)}: {err['msg']}" for err in errs]
 ```
 
 `_api_post_settings_update` (`blueprints/api/routes.py:203`) then joins those

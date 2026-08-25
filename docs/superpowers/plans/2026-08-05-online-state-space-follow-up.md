@@ -364,7 +364,7 @@ Expected: exit 0 and zero incomplete/duplicate cells.
 If and only if artifact `decision.ship` is `true`, add:
 
 ```python
-online_model="scheduled-arx"
+online_model = "scheduled-arx"
 ```
 
 and expose `online_model` in `controllers.json` with choices `scheduled-arx` and `state-space`. Add tests proving state-space is restored/selected only when explicitly configured and still requires `enable_online_adaptation=true`.

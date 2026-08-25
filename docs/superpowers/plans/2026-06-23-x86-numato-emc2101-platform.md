@@ -72,7 +72,7 @@ import os
 import sys
 
 # Ensure the repository root is importable so `grillplat`, `common`, etc. resolve.
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 ```
 
 - [ ] **Step 5: Write a smoke test**
@@ -129,6 +129,7 @@ def _make_bus(tmp_path, index, name):
 
 def test_find_i2c_bus_single_match(tmp_path):
     from grillplat.x86_numato_emc2101 import find_i2c_bus
+
     _make_bus(tmp_path, 0, "Synopsys DesignWare I2C adapter")
     _make_bus(tmp_path, 7, "CP2112 SMBus Bridge on hidraw0")
     assert find_i2c_bus(match="CP2112", devices_path=str(tmp_path)) == 7
@@ -136,12 +137,14 @@ def test_find_i2c_bus_single_match(tmp_path):
 
 def test_find_i2c_bus_case_insensitive(tmp_path):
     from grillplat.x86_numato_emc2101 import find_i2c_bus
+
     _make_bus(tmp_path, 3, "cp2112 smbus bridge")
     assert find_i2c_bus(match="CP2112", devices_path=str(tmp_path)) == 3
 
 
 def test_find_i2c_bus_no_match_raises(tmp_path):
     from grillplat.x86_numato_emc2101 import find_i2c_bus
+
     _make_bus(tmp_path, 0, "Synopsys DesignWare I2C adapter")
     with pytest.raises(RuntimeError):
         find_i2c_bus(match="CP2112", devices_path=str(tmp_path))
@@ -149,6 +152,7 @@ def test_find_i2c_bus_no_match_raises(tmp_path):
 
 def test_find_i2c_bus_multiple_matches_raises(tmp_path):
     from grillplat.x86_numato_emc2101 import find_i2c_bus
+
     _make_bus(tmp_path, 4, "CP2112 SMBus Bridge on hidraw0")
     _make_bus(tmp_path, 5, "CP2112 SMBus Bridge on hidraw1")
     with pytest.raises(RuntimeError):
@@ -182,9 +186,9 @@ Create `grillplat/x86_numato_emc2101.py`:
 # *****************************************
 
 """
-	==============================
-	  Imported Libraries
-	==============================
+==============================
+  Imported Libraries
+==============================
 """
 
 import glob
@@ -205,35 +209,36 @@ from grillplat.numato_usbrelay import NumatoUSBRelay
 	==============================
 """
 
-def find_i2c_bus(match='CP2112', devices_path='/sys/bus/i2c/devices'):
-	"""
-	Find the integer i2c bus number whose adapter name contains `match`.
 
-	Scans `<devices_path>/i2c-*/name`.  Raises RuntimeError if zero or more
-	than one adapter matches, so the caller can fail clearly.
-	"""
-	match_lower = match.lower()
-	found = []
-	for bus_dir in glob.glob(os.path.join(devices_path, 'i2c-*')):
-		name_file = os.path.join(bus_dir, 'name')
-		try:
-			with open(name_file) as handle:
-				name = handle.read().strip()
-		except OSError:
-			continue
-		if match_lower in name.lower():
-			# Bus number is the trailing integer of the i2c-N directory name.
-			try:
-				bus_num = int(os.path.basename(bus_dir).split('-')[-1])
-			except ValueError:
-				continue
-			found.append(bus_num)
+def find_i2c_bus(match="CP2112", devices_path="/sys/bus/i2c/devices"):
+    """
+    Find the integer i2c bus number whose adapter name contains `match`.
 
-	if len(found) == 1:
-		return found[0]
-	if not found:
-		raise RuntimeError(f'No i2c adapter found matching {match!r} under {devices_path}')
-	raise RuntimeError(f'Multiple i2c adapters match {match!r}: {sorted(found)}')
+    Scans `<devices_path>/i2c-*/name`.  Raises RuntimeError if zero or more
+    than one adapter matches, so the caller can fail clearly.
+    """
+    match_lower = match.lower()
+    found = []
+    for bus_dir in glob.glob(os.path.join(devices_path, "i2c-*")):
+        name_file = os.path.join(bus_dir, "name")
+        try:
+            with open(name_file) as handle:
+                name = handle.read().strip()
+        except OSError:
+            continue
+        if match_lower in name.lower():
+            # Bus number is the trailing integer of the i2c-N directory name.
+            try:
+                bus_num = int(os.path.basename(bus_dir).split("-")[-1])
+            except ValueError:
+                continue
+            found.append(bus_num)
+
+    if len(found) == 1:
+        return found[0]
+    if not found:
+        raise RuntimeError(f"No i2c adapter found matching {match!r} under {devices_path}")
+    raise RuntimeError(f"Multiple i2c adapters match {match!r}: {sorted(found)}")
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -274,13 +279,16 @@ import pytest
 def platform():
     """A GrillPlatform with all hardware mocked out."""
     import grillplat.x86_numato_emc2101 as mod
-    with mock.patch.object(mod, 'NumatoUSBRelay') as relay_cls, \
-         mock.patch.object(mod, 'EMC2101') as emc_cls, \
-         mock.patch.object(mod, 'ExtendedI2C') as i2c_cls, \
-         mock.patch.object(mod, 'find_i2c_bus', return_value=7):
+
+    with (
+        mock.patch.object(mod, "NumatoUSBRelay") as relay_cls,
+        mock.patch.object(mod, "EMC2101") as emc_cls,
+        mock.patch.object(mod, "ExtendedI2C") as i2c_cls,
+        mock.patch.object(mod, "find_i2c_bus", return_value=7),
+    ):
         config = {
-            'outputs': {'power': 0, 'igniter': 1, 'auger': 2, 'fan': 3},
-            'frequency': 100,
+            "outputs": {"power": 0, "igniter": 1, "auger": 2, "fan": 3},
+            "frequency": 100,
         }
         plat = mod.GrillPlatform(config)
         plat._relay_cls = relay_cls
@@ -292,7 +300,7 @@ def platform():
 def test_init_opens_relay_and_emc(platform):
     # Relay opened on the default device; EMC2101 constructed on discovered bus.
     platform._relay_cls.assert_called_once()
-    assert platform._relay_cls.call_args.args[0] == '/dev/ttyACM0'
+    assert platform._relay_cls.call_args.args[0] == "/dev/ttyACM0"
     platform._i2c_cls.assert_called_once_with(7)
     platform._emc_cls.assert_called_once()
 
@@ -315,10 +323,10 @@ def test_get_output_status_reflects_cached_state(platform):
     platform.auger_on()
     platform.igniter_on()
     status = platform.get_output_status()
-    assert status['auger'] is True
-    assert status['igniter'] is True
-    assert status['power'] is False
-    assert status['fan'] is False
+    assert status["auger"] is True
+    assert status["igniter"] is True
+    assert status["power"] is False
+    assert status["fan"] is False
 
 
 def test_get_input_status_is_false_when_standalone(platform):
@@ -336,107 +344,103 @@ Append to `grillplat/x86_numato_emc2101.py`:
 
 ```python
 """
-	==============================
-	  Class Definition
-	==============================
+==============================
+  Class Definition
+==============================
 """
 
 # Default Numato relay index for each PiFire output.
-_DEFAULT_OUTPUTS = {'power': 0, 'igniter': 1, 'auger': 2, 'fan': 3}
+_DEFAULT_OUTPUTS = {"power": 0, "igniter": 1, "auger": 2, "fan": 3}
 
 
 class GrillPlatform:
+    def __init__(self, config):
+        self.logger = create_logger("control")
+        self.config = config
 
-	def __init__(self, config):
-		self.logger = create_logger('control')
-		self.config = config
+        outputs = config.get("outputs", {}) or {}
+        self.relay_map = {name: int(outputs.get(name, default)) for name, default in _DEFAULT_OUTPUTS.items()}
 
-		outputs = config.get('outputs', {}) or {}
-		self.relay_map = {
-			name: int(outputs.get(name, default))
-			for name, default in _DEFAULT_OUTPUTS.items()
-		}
+        numato_cfg = config.get("numato", {}) or {}
+        self.device = numato_cfg.get("device", "/dev/ttyACM0")
+        self.baudrate = int(numato_cfg.get("baudrate", 921600))
 
-		numato_cfg = config.get('numato', {}) or {}
-		self.device = numato_cfg.get('device', '/dev/ttyACM0')
-		self.baudrate = int(numato_cfg.get('baudrate', 921600))
+        emc_cfg = config.get("emc2101", {}) or {}
+        self.i2c_bus_match = emc_cfg.get("i2c_bus_match", "CP2112")
+        address = emc_cfg.get("address", 0x4C)
+        if isinstance(address, str):
+            address = int(address, 16)
+        self.emc_address = address
 
-		emc_cfg = config.get('emc2101', {}) or {}
-		self.i2c_bus_match = emc_cfg.get('i2c_bus_match', 'CP2112')
-		address = emc_cfg.get('address', 0x4c)
-		if isinstance(address, str):
-			address = int(address, 16)
-		self.emc_address = address
+        self.frequency = config.get("frequency", 100)
+        self.standalone = config.get("standalone", True)
 
-		self.frequency = config.get('frequency', 100)
-		self.standalone = config.get('standalone', True)
+        # Cached commanded output state (avoids a serial round-trip per poll).
+        self._output_state = {"auger": False, "fan": False, "igniter": False, "power": False}
+        self._fan_speed_percent = 0
 
-		# Cached commanded output state (avoids a serial round-trip per poll).
-		self._output_state = {'auger': False, 'fan': False, 'igniter': False, 'power': False}
-		self._fan_speed_percent = 0
+        # Fan ramp control.
+        self._ramp_thread = None
+        self._ramp_stop = threading.Event()
 
-		# Fan ramp control.
-		self._ramp_thread = None
-		self._ramp_stop = threading.Event()
+        # Open the relay board.
+        self.relay = NumatoUSBRelay(self.device, baudrate=self.baudrate)
 
-		# Open the relay board.
-		self.relay = NumatoUSBRelay(self.device, baudrate=self.baudrate)
+        # Open the EMC2101 on the CP2112 bridge bus.
+        bus_num = find_i2c_bus(match=self.i2c_bus_match)
+        self.emc = EMC2101(ExtendedI2C(bus_num))
 
-		# Open the EMC2101 on the CP2112 bridge bus.
-		bus_num = find_i2c_bus(match=self.i2c_bus_match)
-		self.emc = EMC2101(ExtendedI2C(bus_num))
+        # Start in a known state: all relays off, fan stopped.
+        self.relay.reset()
+        self.emc.manual_fan_speed = 0
 
-		# Start in a known state: all relays off, fan stopped.
-		self.relay.reset()
-		self.emc.manual_fan_speed = 0
+    # MARK: Output control
+    def _set_output(self, name, state):
+        # Call relay_on/relay_off directly (not relay_set) so the action is
+        # explicit and observable when the relay driver is mocked in tests.
+        index = self.relay_map[name]
+        if state:
+            self.relay.relay_on(index)
+        else:
+            self.relay.relay_off(index)
+        self._output_state[name] = state
 
-	# MARK: Output control
-	def _set_output(self, name, state):
-		# Call relay_on/relay_off directly (not relay_set) so the action is
-		# explicit and observable when the relay driver is mocked in tests.
-		index = self.relay_map[name]
-		if state:
-			self.relay.relay_on(index)
-		else:
-			self.relay.relay_off(index)
-		self._output_state[name] = state
+    def auger_on(self):
+        self.logger.debug("auger_on: Turning on auger")
+        self._set_output("auger", True)
 
-	def auger_on(self):
-		self.logger.debug('auger_on: Turning on auger')
-		self._set_output('auger', True)
+    def auger_off(self):
+        self.logger.debug("auger_off: Turning off auger")
+        self._set_output("auger", False)
 
-	def auger_off(self):
-		self.logger.debug('auger_off: Turning off auger')
-		self._set_output('auger', False)
+    def igniter_on(self):
+        self.logger.debug("igniter_on: Turning on igniter")
+        self._set_output("igniter", True)
 
-	def igniter_on(self):
-		self.logger.debug('igniter_on: Turning on igniter')
-		self._set_output('igniter', True)
+    def igniter_off(self):
+        self.logger.debug("igniter_off: Turning off igniter")
+        self._set_output("igniter", False)
 
-	def igniter_off(self):
-		self.logger.debug('igniter_off: Turning off igniter')
-		self._set_output('igniter', False)
+    def power_on(self):
+        self.logger.debug("power_on: Powering on grill platform")
+        self._set_output("power", True)
 
-	def power_on(self):
-		self.logger.debug('power_on: Powering on grill platform')
-		self._set_output('power', True)
+    def power_off(self):
+        self.logger.debug("power_off: Powering off grill platform")
+        self._set_output("power", False)
 
-	def power_off(self):
-		self.logger.debug('power_off: Powering off grill platform')
-		self._set_output('power', False)
+    def get_input_status(self):
+        # No selector/shutdown inputs on this platform.
+        return False
 
-	def get_input_status(self):
-		# No selector/shutdown inputs on this platform.
-		return False
-
-	def get_output_status(self):
-		self.current = {
-			'auger': self._output_state['auger'],
-			'igniter': self._output_state['igniter'],
-			'power': self._output_state['power'],
-			'fan': self._output_state['fan'],
-		}
-		return self.current
+    def get_output_status(self):
+        self.current = {
+            "auger": self._output_state["auger"],
+            "igniter": self._output_state["igniter"],
+            "power": self._output_state["power"],
+            "fan": self._output_state["fan"],
+        }
+        return self.current
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -476,11 +480,14 @@ import pytest
 @pytest.fixture
 def platform():
     import grillplat.x86_numato_emc2101 as mod
-    with mock.patch.object(mod, 'NumatoUSBRelay'), \
-         mock.patch.object(mod, 'EMC2101'), \
-         mock.patch.object(mod, 'ExtendedI2C'), \
-         mock.patch.object(mod, 'find_i2c_bus', return_value=7):
-        config = {'outputs': {'power': 0, 'igniter': 1, 'auger': 2, 'fan': 3}, 'frequency': 100}
+
+    with (
+        mock.patch.object(mod, "NumatoUSBRelay"),
+        mock.patch.object(mod, "EMC2101"),
+        mock.patch.object(mod, "ExtendedI2C"),
+        mock.patch.object(mod, "find_i2c_bus", return_value=7),
+    ):
+        config = {"outputs": {"power": 0, "igniter": 1, "auger": 2, "fan": 3}, "frequency": 100}
         yield mod.GrillPlatform(config)
 
 
@@ -488,7 +495,7 @@ def test_fan_on_closes_relay_and_sets_speed(platform):
     platform.fan_on(60)
     platform.relay.relay_on.assert_called_with(3)
     assert platform.emc.manual_fan_speed == 60
-    assert platform.get_output_status()['fan'] is True
+    assert platform.get_output_status()["fan"] is True
 
 
 def test_fan_off_zeroes_speed_and_opens_relay(platform):
@@ -496,35 +503,35 @@ def test_fan_off_zeroes_speed_and_opens_relay(platform):
     platform.fan_off()
     platform.relay.relay_off.assert_called_with(3)
     assert platform.emc.manual_fan_speed == 0
-    assert platform.get_output_status()['fan'] is False
+    assert platform.get_output_status()["fan"] is False
 
 
 def test_set_duty_cycle_sets_manual_fan_speed_directly(platform):
     platform.set_duty_cycle(42)
     # No inversion: requested percent maps directly to EMC2101 duty.
     assert platform.emc.manual_fan_speed == 42
-    assert platform.get_output_status()['pwm'] == 42
+    assert platform.get_output_status()["pwm"] == 42
 
 
 def test_fan_toggle_flips_state(platform):
-    assert platform.get_output_status()['fan'] is False
+    assert platform.get_output_status()["fan"] is False
     platform.fan_toggle()
-    assert platform.get_output_status()['fan'] is True
+    assert platform.get_output_status()["fan"] is True
     platform.fan_toggle()
-    assert platform.get_output_status()['fan'] is False
+    assert platform.get_output_status()["fan"] is False
 
 
 def test_set_pwm_frequency_stored_and_reported(platform):
     platform.set_pwm_frequency(30)
     assert platform.frequency == 30
-    assert platform.get_output_status()['frequency'] == 30
+    assert platform.get_output_status()["frequency"] == 30
 
 
 def test_get_output_status_includes_pwm_and_frequency(platform):
     platform.fan_on(75)
     status = platform.get_output_status()
-    assert status['pwm'] == 75
-    assert status['frequency'] == 100
+    assert status["pwm"] == 75
+    assert status["frequency"] == 100
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -537,71 +544,76 @@ Expected: FAIL — `AttributeError: 'GrillPlatform' object has no attribute 'fan
 Add these methods to `GrillPlatform` (place after the output-control methods, before `get_output_status`):
 
 ```python
-	# MARK: Fan / PWM control
-	def fan_on(self, fan_speed_percent=100):
-		self.logger.debug('fan_on: Enabling fan power and setting speed to ' + str(fan_speed_percent))
-		self.relay.relay_on(self.relay_map['fan'])
-		self._output_state['fan'] = True
-		self._stop_ramp()
-		self.set_duty_cycle(fan_speed_percent)
+# MARK: Fan / PWM control
+def fan_on(self, fan_speed_percent=100):
+    self.logger.debug("fan_on: Enabling fan power and setting speed to " + str(fan_speed_percent))
+    self.relay.relay_on(self.relay_map["fan"])
+    self._output_state["fan"] = True
+    self._stop_ramp()
+    self.set_duty_cycle(fan_speed_percent)
 
-	def fan_off(self):
-		self.logger.debug('fan_off: Stopping fan and removing power')
-		self._stop_ramp()
-		self.emc.manual_fan_speed = 0
-		self._fan_speed_percent = 0
-		self.relay.relay_off(self.relay_map['fan'])
-		self._output_state['fan'] = False
 
-	def fan_toggle(self):
-		if self._output_state['fan']:
-			self.fan_off()
-		else:
-			self.fan_on()
+def fan_off(self):
+    self.logger.debug("fan_off: Stopping fan and removing power")
+    self._stop_ramp()
+    self.emc.manual_fan_speed = 0
+    self._fan_speed_percent = 0
+    self.relay.relay_off(self.relay_map["fan"])
+    self._output_state["fan"] = False
 
-	def set_duty_cycle(self, fan_speed_percent, override_ramping=True):
-		# Called by control.py (override_ramping=True) and by the ramp thread
-		# (override_ramping=False so it does not stop the thread it runs in).
-		if override_ramping:
-			self._stop_ramp()
-		# EMC2101 duty maps directly to fan speed percent (no inversion).
-		self.emc.manual_fan_speed = fan_speed_percent
-		self._fan_speed_percent = fan_speed_percent
 
-	def set_pwm_frequency(self, frequency=100):
-		self.logger.debug('set_pwm_frequency: Setting PWM frequency to ' + str(frequency))
-		self.frequency = frequency
-		# Best-effort: apply to the EMC2101 if the library exposes the property.
-		if hasattr(self.emc, 'pwm_frequency'):
-			try:
-				self.emc.pwm_frequency = frequency
-			except (ValueError, OSError) as exc:
-				self.logger.warning('set_pwm_frequency: EMC2101 rejected frequency: ' + str(exc))
+def fan_toggle(self):
+    if self._output_state["fan"]:
+        self.fan_off()
+    else:
+        self.fan_on()
 
-	def _stop_ramp(self):
-		# Stop any in-progress fan ramp. Defined here (not in Task 5) because the
-		# fan methods above call it; the ramp-start methods in Task 5 reuse it.
-		# Safe to call when no ramp is running (self._ramp_thread is None).
-		if self._ramp_thread is not None:
-			self._ramp_stop.set()
-			if self._ramp_thread is not threading.current_thread():
-				self._ramp_thread.join(timeout=5)
-			self._ramp_thread = None
+
+def set_duty_cycle(self, fan_speed_percent, override_ramping=True):
+    # Called by control.py (override_ramping=True) and by the ramp thread
+    # (override_ramping=False so it does not stop the thread it runs in).
+    if override_ramping:
+        self._stop_ramp()
+    # EMC2101 duty maps directly to fan speed percent (no inversion).
+    self.emc.manual_fan_speed = fan_speed_percent
+    self._fan_speed_percent = fan_speed_percent
+
+
+def set_pwm_frequency(self, frequency=100):
+    self.logger.debug("set_pwm_frequency: Setting PWM frequency to " + str(frequency))
+    self.frequency = frequency
+    # Best-effort: apply to the EMC2101 if the library exposes the property.
+    if hasattr(self.emc, "pwm_frequency"):
+        try:
+            self.emc.pwm_frequency = frequency
+        except (ValueError, OSError) as exc:
+            self.logger.warning("set_pwm_frequency: EMC2101 rejected frequency: " + str(exc))
+
+
+def _stop_ramp(self):
+    # Stop any in-progress fan ramp. Defined here (not in Task 5) because the
+    # fan methods above call it; the ramp-start methods in Task 5 reuse it.
+    # Safe to call when no ramp is running (self._ramp_thread is None).
+    if self._ramp_thread is not None:
+        self._ramp_stop.set()
+        if self._ramp_thread is not threading.current_thread():
+            self._ramp_thread.join(timeout=5)
+        self._ramp_thread = None
 ```
 
 Then replace `get_output_status` to also report `pwm` and `frequency`:
 
 ```python
-	def get_output_status(self):
-		self.current = {
-			'auger': self._output_state['auger'],
-			'igniter': self._output_state['igniter'],
-			'power': self._output_state['power'],
-			'fan': self._output_state['fan'],
-			'pwm': self._fan_speed_percent,
-			'frequency': self.frequency,
-		}
-		return self.current
+def get_output_status(self):
+    self.current = {
+        "auger": self._output_state["auger"],
+        "igniter": self._output_state["igniter"],
+        "power": self._output_state["power"],
+        "fan": self._output_state["fan"],
+        "pwm": self._fan_speed_percent,
+        "frequency": self.frequency,
+    }
+    return self.current
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -641,11 +653,14 @@ import pytest
 @pytest.fixture
 def platform():
     import grillplat.x86_numato_emc2101 as mod
-    with mock.patch.object(mod, 'NumatoUSBRelay'), \
-         mock.patch.object(mod, 'EMC2101'), \
-         mock.patch.object(mod, 'ExtendedI2C'), \
-         mock.patch.object(mod, 'find_i2c_bus', return_value=7):
-        config = {'outputs': {'power': 0, 'igniter': 1, 'auger': 2, 'fan': 3}, 'frequency': 100}
+
+    with (
+        mock.patch.object(mod, "NumatoUSBRelay"),
+        mock.patch.object(mod, "EMC2101"),
+        mock.patch.object(mod, "ExtendedI2C"),
+        mock.patch.object(mod, "find_i2c_bus", return_value=7),
+    ):
+        config = {"outputs": {"power": 0, "igniter": 1, "auger": 2, "fan": 3}, "frequency": 100}
         yield mod.GrillPlatform(config)
 
 
@@ -675,35 +690,43 @@ Expected: FAIL — `AttributeError: 'GrillPlatform' object has no attribute 'pwm
 Add to `GrillPlatform` (after the fan/PWM methods):
 
 ```python
-	# MARK: Fan ramp (Smoke Plus)
-	def pwm_fan_ramp(self, on_time=5, min_duty_cycle=20, max_duty_cycle=100):
-		self.logger.debug('pwm_fan_ramp: Starting fan ramp on_time=' + str(on_time) +
-			' min=' + str(min_duty_cycle) + ' max=' + str(max_duty_cycle))
-		self.relay.relay_on(self.relay_map['fan'])
-		self._output_state['fan'] = True
-		self._start_ramp(on_time, min_duty_cycle, max_duty_cycle)
+# MARK: Fan ramp (Smoke Plus)
+def pwm_fan_ramp(self, on_time=5, min_duty_cycle=20, max_duty_cycle=100):
+    self.logger.debug(
+        "pwm_fan_ramp: Starting fan ramp on_time="
+        + str(on_time)
+        + " min="
+        + str(min_duty_cycle)
+        + " max="
+        + str(max_duty_cycle)
+    )
+    self.relay.relay_on(self.relay_map["fan"])
+    self._output_state["fan"] = True
+    self._start_ramp(on_time, min_duty_cycle, max_duty_cycle)
 
-	def _start_ramp(self, on_time, min_duty_cycle, max_duty_cycle):
-		self._stop_ramp()
-		self._ramp_stop = threading.Event()
-		self._ramp_thread = threading.Thread(
-			target=self._ramp_device,
-			args=(on_time, min_duty_cycle, max_duty_cycle),
-			daemon=True,
-		)
-		self._ramp_thread.start()
 
-	def _ramp_device(self, on_time, min_duty_cycle, max_duty_cycle, fps=25):
-		# Linearly ramp the fan speed from min to max over on_time seconds.
-		# No inversion: values are fan-speed percent applied directly.
-		steps = max(int(fps * on_time), 1)
-		for i in range(steps):
-			fraction = i / steps
-			percent = min_duty_cycle + (max_duty_cycle - min_duty_cycle) * fraction
-			self.set_duty_cycle(round(percent, 2), override_ramping=False)
-			if self._ramp_stop.wait(1.0 / fps):
-				break
-		self.set_duty_cycle(max_duty_cycle, override_ramping=False)
+def _start_ramp(self, on_time, min_duty_cycle, max_duty_cycle):
+    self._stop_ramp()
+    self._ramp_stop = threading.Event()
+    self._ramp_thread = threading.Thread(
+        target=self._ramp_device,
+        args=(on_time, min_duty_cycle, max_duty_cycle),
+        daemon=True,
+    )
+    self._ramp_thread.start()
+
+
+def _ramp_device(self, on_time, min_duty_cycle, max_duty_cycle, fps=25):
+    # Linearly ramp the fan speed from min to max over on_time seconds.
+    # No inversion: values are fan-speed percent applied directly.
+    steps = max(int(fps * on_time), 1)
+    for i in range(steps):
+        fraction = i / steps
+        percent = min_duty_cycle + (max_duty_cycle - min_duty_cycle) * fraction
+        self.set_duty_cycle(round(percent, 2), override_ramping=False)
+        if self._ramp_stop.wait(1.0 / fps):
+            break
+    self.set_duty_cycle(max_duty_cycle, override_ramping=False)
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -743,43 +766,47 @@ import pytest
 @pytest.fixture
 def platform():
     import grillplat.x86_numato_emc2101 as mod
-    with mock.patch.object(mod, 'NumatoUSBRelay'), \
-         mock.patch.object(mod, 'EMC2101'), \
-         mock.patch.object(mod, 'ExtendedI2C'), \
-         mock.patch.object(mod, 'find_i2c_bus', return_value=7):
-        config = {'outputs': {'power': 0, 'igniter': 1, 'auger': 2, 'fan': 3}, 'frequency': 100}
+
+    with (
+        mock.patch.object(mod, "NumatoUSBRelay"),
+        mock.patch.object(mod, "EMC2101"),
+        mock.patch.object(mod, "ExtendedI2C"),
+        mock.patch.object(mod, "find_i2c_bus", return_value=7),
+    ):
+        config = {"outputs": {"power": 0, "igniter": 1, "auger": 2, "fan": 3}, "frequency": 100}
         yield mod.GrillPlatform(config)
 
 
 def test_check_throttled_reports_ok_and_false(platform):
     data = platform.check_throttled([])
-    assert data['result'] == 'OK'
-    assert data['data']['cpu_under_voltage'] is False
-    assert data['data']['cpu_throttled'] is False
+    assert data["result"] == "OK"
+    assert data["data"]["cpu_under_voltage"] is False
+    assert data["data"]["cpu_throttled"] is False
 
 
 def test_check_cpu_temp_uses_psutil(platform):
     import grillplat.x86_numato_emc2101 as mod
+
     fake_reading = mock.Mock(current=47.0)
-    with mock.patch('psutil.sensors_temperatures', return_value={'coretemp': [fake_reading]}):
+    with mock.patch("psutil.sensors_temperatures", return_value={"coretemp": [fake_reading]}):
         data = platform.check_cpu_temp([])
-    assert data['result'] == 'OK'
-    assert data['data']['cpu_temp'] == 47.0
+    assert data["result"] == "OK"
+    assert data["data"]["cpu_temp"] == 47.0
 
 
 def test_check_cpu_temp_handles_no_sensors(platform):
-    with mock.patch('psutil.sensors_temperatures', return_value={}):
+    with mock.patch("psutil.sensors_temperatures", return_value={}):
         data = platform.check_cpu_temp([])
-    assert data['data']['cpu_temp'] == 0.0
+    assert data["data"]["cpu_temp"] == 0.0
 
 
 def test_supported_commands_lists_commands(platform):
     data = platform.supported_commands([])
-    assert 'check_cpu_temp' in data['data']['supported_cmds']
+    assert "check_cpu_temp" in data["data"]["supported_cmds"]
 
 
 def test_check_alive_ok(platform):
-    assert platform.check_alive([])['result'] == 'OK'
+    assert platform.check_alive([])["result"] == "OK"
 
 
 def test_cleanup_stops_fan_and_closes_relay(platform):
@@ -799,194 +826,207 @@ Expected: FAIL — `AttributeError: 'GrillPlatform' object has no attribute 'che
 Add `cleanup` and the system commands to `GrillPlatform`. Place `cleanup` after the ramp methods:
 
 ```python
-	# MARK: Lifecycle
-	def cleanup(self):
-		self.logger.debug('cleanup: Shutting down outputs')
-		self._stop_ramp()
-		try:
-			self.emc.manual_fan_speed = 0
-		except Exception:
-			pass
-		try:
-			self.relay.reset()
-		finally:
-			self.relay.close()
+# MARK: Lifecycle
+def cleanup(self):
+    self.logger.debug("cleanup: Shutting down outputs")
+    self._stop_ramp()
+    try:
+        self.emc.manual_fan_speed = 0
+    except Exception:
+        pass
+    try:
+        self.relay.reset()
+    finally:
+        self.relay.close()
 ```
 
 Then add the system/platform commands:
 
 ```python
-	# MARK: System / Platform Commands
-	def supported_commands(self, arglist):
-		supported_commands = [
-			'check_throttled',
-			'check_wifi_quality',
-			'check_cpu_temp',
-			'supported_commands',
-			'check_alive',
-			'scan_bluetooth',
-			'os_info',
-			'network_info',
-			'hardware_info',
-		]
-		return {
-			'result': 'OK',
-			'message': 'Supported commands listed in "data".',
-			'data': {'supported_cmds': supported_commands},
-		}
+# MARK: System / Platform Commands
+def supported_commands(self, arglist):
+    supported_commands = [
+        "check_throttled",
+        "check_wifi_quality",
+        "check_cpu_temp",
+        "supported_commands",
+        "check_alive",
+        "scan_bluetooth",
+        "os_info",
+        "network_info",
+        "hardware_info",
+    ]
+    return {
+        "result": "OK",
+        "message": 'Supported commands listed in "data".',
+        "data": {"supported_cmds": supported_commands},
+    }
 
-	def check_throttled(self, arglist):
-		# Not applicable on x86 hardware.
-		return {
-			'result': 'OK',
-			'message': 'No under-voltage or throttling detected.',
-			'data': {'cpu_under_voltage': False, 'cpu_throttled': False},
-		}
 
-	def check_cpu_temp(self, arglist):
-		import psutil
-		temp = 0.0
-		result = 'OK'
-		message = 'Successfully obtained CPU temperature.'
-		try:
-			sensors = psutil.sensors_temperatures()
-			readings = []
-			for label in ('coretemp', 'k10temp', 'cpu_thermal', 'acpitz'):
-				if sensors.get(label):
-					readings = sensors[label]
-					break
-			if not readings:
-				for entries in sensors.values():
-					if entries:
-						readings = entries
-						break
-			if readings:
-				temp = float(readings[0].current)
-			else:
-				message = 'No CPU temperature sensors available.'
-		except Exception as exc:
-			result = 'ERROR'
-			message = 'Error obtaining CPU temperature: ' + str(exc)
-		if not is_float(str(temp)):  # is_float() only accepts strings
-			temp = 0.0
-		return {
-			'result': result,
-			'message': message,
-			'data': {'cpu_temp': float(temp)},
-		}
+def check_throttled(self, arglist):
+    # Not applicable on x86 hardware.
+    return {
+        "result": "OK",
+        "message": "No under-voltage or throttling detected.",
+        "data": {"cpu_under_voltage": False, "cpu_throttled": False},
+    }
 
-	def check_wifi_quality(self, arglist):
-		import subprocess
-		data = {'result': 'ERROR', 'message': 'Unable to obtain wifi quality data.', 'data': {}}
-		try:
-			output = subprocess.check_output(['iwconfig'])
-			lines = output.decode('utf-8').splitlines()
-			for line in lines:
-				if 'Link Quality=' in line:
-					quality_str = line.split('=')[1].strip()
-					quality_parts = quality_str.split(' ')[0]
-					try:
-						quality_value, quality_max = quality_parts.split('/')
-						percentage = (int(quality_value) / int(quality_max)) * 100
-						data['result'] = 'OK'
-						data['message'] = 'Successfully obtained wifi quality data.'
-						data['data']['wifi_quality_value'] = int(quality_value)
-						data['data']['wifi_quality_max'] = int(quality_max)
-						data['data']['wifi_quality_percentage'] = round(percentage, 2)
-					except ValueError:
-						pass
-		except Exception:
-			pass
-		return data
 
-	def check_alive(self, arglist):
-		return {
-			'result': 'OK',
-			'message': 'The control script is running.',
-			'data': {},
-		}
+def check_cpu_temp(self, arglist):
+    import psutil
 
-	def scan_bluetooth(self, arglist):
-		import asyncio
-		try:
-			from bleak import BleakScanner
-		except ImportError:
-			return {
-				'result': 'ERROR',
-				'message': 'bleak is not installed. Run: pip install bleak',
-				'data': {'bt_devices': []},
-			}
+    temp = 0.0
+    result = "OK"
+    message = "Successfully obtained CPU temperature."
+    try:
+        sensors = psutil.sensors_temperatures()
+        readings = []
+        for label in ("coretemp", "k10temp", "cpu_thermal", "acpitz"):
+            if sensors.get(label):
+                readings = sensors[label]
+                break
+        if not readings:
+            for entries in sensors.values():
+                if entries:
+                    readings = entries
+                    break
+        if readings:
+            temp = float(readings[0].current)
+        else:
+            message = "No CPU temperature sensors available."
+    except Exception as exc:
+        result = "ERROR"
+        message = "Error obtaining CPU temperature: " + str(exc)
+    if not is_float(str(temp)):  # is_float() only accepts strings
+        temp = 0.0
+    return {
+        "result": result,
+        "message": message,
+        "data": {"cpu_temp": float(temp)},
+    }
 
-		bt_devices = []
-		result = 'OK'
-		message = 'Bluetooth scan completed successfully.'
 
-		async def _scan():
-			discovered = await BleakScanner.discover(timeout=5.0)
-			for dev in discovered:
-				name = dev.name or 'Unknown'
-				bt_devices.append({'name': name, 'hw_id': dev.address.lower(), 'info': ''})
+def check_wifi_quality(self, arglist):
+    import subprocess
 
-		try:
-			asyncio.run(_scan())
-		except Exception as exc:
-			result = 'ERROR'
-			message = 'Bluetooth scan error: ' + str(exc)
-			self.logger.error('scan_bluetooth: Error during scan - ' + str(exc))
+    data = {"result": "ERROR", "message": "Unable to obtain wifi quality data.", "data": {}}
+    try:
+        output = subprocess.check_output(["iwconfig"])
+        lines = output.decode("utf-8").splitlines()
+        for line in lines:
+            if "Link Quality=" in line:
+                quality_str = line.split("=")[1].strip()
+                quality_parts = quality_str.split(" ")[0]
+                try:
+                    quality_value, quality_max = quality_parts.split("/")
+                    percentage = (int(quality_value) / int(quality_max)) * 100
+                    data["result"] = "OK"
+                    data["message"] = "Successfully obtained wifi quality data."
+                    data["data"]["wifi_quality_value"] = int(quality_value)
+                    data["data"]["wifi_quality_max"] = int(quality_max)
+                    data["data"]["wifi_quality_percentage"] = round(percentage, 2)
+                except ValueError:
+                    pass
+    except Exception:
+        pass
+    return data
 
-		return {
-			'result': result,
-			'message': message,
-			'data': {'bt_devices': bt_devices},
-		}
 
-	def os_info(self, arglist):
-		return {
-			'result': 'OK',
-			'message': 'OS information retrieved successfully.',
-			'data': get_os_info(),
-		}
+def check_alive(self, arglist):
+    return {
+        "result": "OK",
+        "message": "The control script is running.",
+        "data": {},
+    }
 
-	def network_info(self, arglist):
-		import netifaces
-		net_info = {}
-		for iface in netifaces.interfaces():
-			addrs = netifaces.ifaddresses(iface)
-			ip_addr = addrs.get(netifaces.AF_INET, [{}])[0].get('addr', 'N/A')
-			mac_addr = addrs.get(netifaces.AF_LINK, [{}])[0].get('addr', 'N/A')
-			net_info[iface] = {'ip_address': ip_addr, 'mac_address': mac_addr}
-		return {
-			'result': 'OK',
-			'message': 'Network information retrieved successfully.',
-			'data': net_info,
-		}
 
-	def hardware_info(self, arglist):
-		import psutil
-		cpu_info = {
-			'hardware': 'Unknown',
-			'model': 'Unknown',
-			'model_name': 'Unknown',
-			'cores': psutil.cpu_count(logical=True),
-			'frequency': psutil.cpu_freq().current if psutil.cpu_freq() else 'Unknown',
-		}
-		try:
-			with open('/proc/cpuinfo') as f:
-				for line in f:
-					if 'model name' in line.lower():
-						cpu_info['model_name'] = line.strip().split(':')[1].strip()
-		except OSError:
-			pass
-		mem_info = psutil.virtual_memory()
-		return {
-			'result': 'OK',
-			'message': 'Hardware information retrieved successfully.',
-			'data': {
-				'cpu_info': cpu_info,
-				'total_ram': mem_info.total,
-				'available_ram': mem_info.available,
-			},
-		}
+def scan_bluetooth(self, arglist):
+    import asyncio
+
+    try:
+        from bleak import BleakScanner
+    except ImportError:
+        return {
+            "result": "ERROR",
+            "message": "bleak is not installed. Run: pip install bleak",
+            "data": {"bt_devices": []},
+        }
+
+    bt_devices = []
+    result = "OK"
+    message = "Bluetooth scan completed successfully."
+
+    async def _scan():
+        discovered = await BleakScanner.discover(timeout=5.0)
+        for dev in discovered:
+            name = dev.name or "Unknown"
+            bt_devices.append({"name": name, "hw_id": dev.address.lower(), "info": ""})
+
+    try:
+        asyncio.run(_scan())
+    except Exception as exc:
+        result = "ERROR"
+        message = "Bluetooth scan error: " + str(exc)
+        self.logger.error("scan_bluetooth: Error during scan - " + str(exc))
+
+    return {
+        "result": result,
+        "message": message,
+        "data": {"bt_devices": bt_devices},
+    }
+
+
+def os_info(self, arglist):
+    return {
+        "result": "OK",
+        "message": "OS information retrieved successfully.",
+        "data": get_os_info(),
+    }
+
+
+def network_info(self, arglist):
+    import netifaces
+
+    net_info = {}
+    for iface in netifaces.interfaces():
+        addrs = netifaces.ifaddresses(iface)
+        ip_addr = addrs.get(netifaces.AF_INET, [{}])[0].get("addr", "N/A")
+        mac_addr = addrs.get(netifaces.AF_LINK, [{}])[0].get("addr", "N/A")
+        net_info[iface] = {"ip_address": ip_addr, "mac_address": mac_addr}
+    return {
+        "result": "OK",
+        "message": "Network information retrieved successfully.",
+        "data": net_info,
+    }
+
+
+def hardware_info(self, arglist):
+    import psutil
+
+    cpu_info = {
+        "hardware": "Unknown",
+        "model": "Unknown",
+        "model_name": "Unknown",
+        "cores": psutil.cpu_count(logical=True),
+        "frequency": psutil.cpu_freq().current if psutil.cpu_freq() else "Unknown",
+    }
+    try:
+        with open("/proc/cpuinfo") as f:
+            for line in f:
+                if "model name" in line.lower():
+                    cpu_info["model_name"] = line.strip().split(":")[1].strip()
+    except OSError:
+        pass
+    mem_info = psutil.virtual_memory()
+    return {
+        "result": "OK",
+        "message": "Hardware information retrieved successfully.",
+        "data": {
+            "cpu_info": cpu_info,
+            "total_ram": mem_info.total,
+            "available_ram": mem_info.available,
+        },
+    }
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -1028,24 +1068,24 @@ import os
 
 
 def _manifest():
-    path = os.path.join(os.path.dirname(__file__), '..', 'wizard', 'wizard_manifest.json')
+    path = os.path.join(os.path.dirname(__file__), "..", "wizard", "wizard_manifest.json")
     with open(path) as handle:
         return json.load(handle)
 
 
 def test_x86_platform_entry_present():
     manifest = _manifest()
-    entry = manifest['modules']['grillplatform']['x86_numato_emc2101']
-    assert entry['filename'] == 'x86_numato_emc2101'
-    assert 'adafruit-circuitpython-emc2101' in entry['py_dependencies']
+    entry = manifest["modules"]["grillplatform"]["x86_numato_emc2101"]
+    assert entry["filename"] == "x86_numato_emc2101"
+    assert "adafruit-circuitpython-emc2101" in entry["py_dependencies"]
 
 
 def test_x86_platform_settings_dependencies():
     manifest = _manifest()
-    deps = manifest['modules']['grillplatform']['x86_numato_emc2101']['settings_dependencies']
+    deps = manifest["modules"]["grillplatform"]["x86_numato_emc2101"]["settings_dependencies"]
     # Exposes the EMC2101 address and the i2c bus match string.
-    assert 'emc2101_address' in deps
-    assert 'i2c_bus_match' in deps
+    assert "emc2101_address" in deps
+    assert "i2c_bus_match" in deps
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**

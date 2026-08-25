@@ -104,9 +104,9 @@ def test_display_has_single_default_module():
     """Regression: the manifest must mark exactly one display module default
     (was two — ili9341b and ili9488b — causing dropdown/config disagreement)."""
     from common.common import read_wizard
+
     display = read_wizard()["modules"]["display"]
-    defaults = [name for name, entry in display.items()
-                if isinstance(entry, dict) and entry.get("default") is True]
+    defaults = [name for name, entry in display.items() if isinstance(entry, dict) and entry.get("default") is True]
     assert defaults == ["ili9341b"], f"expected single default ili9341b, got {defaults}"
 ```
 
@@ -185,6 +185,7 @@ _SECTIONS = ["grillplatform", "display", "distance", "probes"]
 In `app.py`, register alongside the other blueprints (mirror the `api_bp`/`wizard_bp` registration lines):
 ```python
 from blueprints.api_wizard import api_wizard_bp
+
 app.register_blueprint(api_wizard_bp)
 ```
 
@@ -246,19 +247,20 @@ def _build_state(settings, control):
             info = wizardInstallInfoDefaults(wizard_data, settings)
         else:
             info = wizardInstallInfoExisting(wizard_data, settings)
-        selections = {s: info["modules"].get(s, {}).get("profile_selected", [""])[0]
-                      if isinstance(info["modules"].get(s, {}).get("profile_selected"), list)
-                      else info["modules"].get(s, {}).get("profile_selected", "")
-                      for s in _SECTIONS if s in modules}
+        selections = {
+            s: info["modules"].get(s, {}).get("profile_selected", [""])[0]
+            if isinstance(info["modules"].get(s, {}).get("profile_selected"), list)
+            else info["modules"].get(s, {}).get("profile_selected", "")
+            for s in _SECTIONS
+            if s in modules
+        }
         settings_dep_values = {}
         for section in _SECTIONS:
             if section not in modules:
                 continue
             sel = selections.get(section)
             mod_data = modules.get(section, {}).get(sel)
-            settings_dep_values[section] = (
-                get_settings_dependencies_values(settings, mod_data) if mod_data else {}
-            )
+            settings_dep_values[section] = get_settings_dependencies_values(settings, mod_data) if mod_data else {}
         display_config = settings.get("display", {}).get("config", {})
 
     return {
@@ -360,13 +362,13 @@ Add to `tests/web/test_api_wizard.py`:
 ```python
 def test_scan_extended_i2c_returns_groups(ds, client, monkeypatch):
     import blueprints.api_wizard.routes as wr
+
     monkeypatch.setattr(
-        wr, "discover_extended_i2c_buses",
+        wr,
+        "discover_extended_i2c_buses",
         lambda *a, **k: [{"bus_num": 1, "name": "i2c-1", "serial": "ABC"}],
     )
-    resp = client.post("/api/wizard/scan",
-                       data=json.dumps({"kind": "extended"}),
-                       content_type="application/json")
+    resp = client.post("/api/wizard/scan", data=json.dumps({"kind": "extended"}), content_type="application/json")
     assert resp.status_code == 200
     body = resp.get_json()
     assert body["error"] is None
@@ -401,23 +403,42 @@ def wizard_scan():
         if kind == "extended":
             adapters = discover_extended_i2c_buses()
             groups = [
-                {"title": "By Bus Number",
-                 "items": [{"value": str(a["bus_num"]), "label": f'{a["name"]} (bus {a["bus_num"]})'} for a in adapters]},
-                {"title": "By Serial",
-                 "items": [{"value": a["serial"], "label": f'{a["name"]} [{a["serial"]}]'} for a in adapters if a.get("serial")]},
+                {
+                    "title": "By Bus Number",
+                    "items": [
+                        {"value": str(a["bus_num"]), "label": f"{a['name']} (bus {a['bus_num']})"} for a in adapters
+                    ],
+                },
+                {
+                    "title": "By Serial",
+                    "items": [
+                        {"value": a["serial"], "label": f"{a['name']} [{a['serial']}]"}
+                        for a in adapters
+                        if a.get("serial")
+                    ],
+                },
             ]
         elif kind == "mcp2221":
             devs = discover_mcp2221_devices()
-            groups = [{"title": "MCP2221 Devices",
-                       "items": [{"value": d["serial"], "label": d["serial"]} for d in devs]}]
+            groups = [
+                {"title": "MCP2221 Devices", "items": [{"value": d["serial"], "label": d["serial"]} for d in devs]}
+            ]
         elif kind == "ft232h":
             devs = discover_ft232h_devices()
-            groups = [{"title": "FT232H Devices",
-                       "items": [{"value": d["url"], "label": d.get("description", d["url"])} for d in devs]}]
+            groups = [
+                {
+                    "title": "FT232H Devices",
+                    "items": [{"value": d["url"], "label": d.get("description", d["url"])} for d in devs],
+                }
+            ]
         elif kind == "usb_serial":
             devs = discover_usb_serial_devices(payload.get("vid"), payload.get("pid"))
-            groups = [{"title": "USB Serial Devices",
-                       "items": [{"value": d["device"], "label": d.get("description", d["device"])} for d in devs]}]
+            groups = [
+                {
+                    "title": "USB Serial Devices",
+                    "items": [{"value": d["device"], "label": d.get("description", d["device"])} for d in devs],
+                }
+            ]
         else:
             error = f"Unknown scan kind: {kind}"
         if not error and not any(g["items"] for g in groups):
@@ -439,9 +460,9 @@ Expected: PASS.
 ```python
 def test_scan_no_results_returns_friendly_error(ds, client, monkeypatch):
     import blueprints.api_wizard.routes as wr
+
     monkeypatch.setattr(wr, "discover_extended_i2c_buses", lambda *a, **k: [])
-    resp = client.post("/api/wizard/scan", data=json.dumps({"kind": "extended"}),
-                       content_type="application/json")
+    resp = client.post("/api/wizard/scan", data=json.dumps({"kind": "extended"}), content_type="application/json")
     body = resp.get_json()
     assert body["error"] == "No devices found."
 ```
@@ -474,13 +495,19 @@ Add to `tests/web/test_api_wizard.py`:
 ```python
 def test_finish_blocked_when_not_stopped(ds, client, monkeypatch):
     import blueprints.api_wizard.routes as wr
+
     fired = []
     monkeypatch.setattr(wr.os, "system", lambda cmd: fired.append(cmd))  # neutralize installer
     from common.datastore_accessors import read_control, write_control
-    ctrl = read_control(); ctrl["mode"] = "Hold"; write_control(ctrl)
-    resp = client.post("/api/wizard/finish",
-                       data=json.dumps({"selections": {}, "settings_dep_values": {}, "display_config": {}}),
-                       content_type="application/json")
+
+    ctrl = read_control()
+    ctrl["mode"] = "Hold"
+    write_control(ctrl)
+    resp = client.post(
+        "/api/wizard/finish",
+        data=json.dumps({"selections": {}, "settings_dep_values": {}, "display_config": {}}),
+        content_type="application/json",
+    )
     assert resp.status_code == 409
     assert resp.get_json()["message"] == "system_active"
     assert fired == []  # installer must NOT fire
@@ -504,7 +531,7 @@ from common.datastore_accessors import get_wizard_install_status, set_wizard_ins
 def wizard_finish():
     settings = read_settings()
     control = read_control()
-    if control.get("mode") != "Stop":   # use the same Mode.STOP constant/string _wizard_finish uses
+    if control.get("mode") != "Stop":  # use the same Mode.STOP constant/string _wizard_finish uses
         return jsonify({"result": "error", "message": "system_active"}), 409
 
     payload = request.get_json(silent=True) or {}
@@ -518,7 +545,7 @@ def wizard_finish():
 
     # Bus-kind validation across all sections (mirror _wizard_finish's validate_bus_kinds(wizard_bus_kinds(...)))
     try:
-        bus_kinds = wizard_bus_kinds(settings, info)   # adapt to the real signature read from wizard.py
+        bus_kinds = wizard_bus_kinds(settings, info)  # adapt to the real signature read from wizard.py
         validate_bus_kinds(bus_kinds)
     except Exception as e:
         return jsonify({"result": "error", "message": "bus_conflict", "detail": str(e)}), 422
@@ -547,15 +574,17 @@ Expected: PASS.
 ```python
 def test_finish_fires_installer_when_stopped(ds, client, monkeypatch):
     import blueprints.api_wizard.routes as wr
+
     fired = []
     monkeypatch.setattr(wr.os, "system", lambda cmd: fired.append(cmd))
     monkeypatch.setattr(wr, "wizard_bus_kinds", lambda *a, **k: {})
     monkeypatch.setattr(wr, "validate_bus_kinds", lambda *a, **k: None)
     # control defaults to Stop in a fresh ds
-    resp = client.post("/api/wizard/finish",
-                       data=json.dumps({"selections": {"display": "ili9341b"},
-                                        "settings_dep_values": {}, "display_config": {}}),
-                       content_type="application/json")
+    resp = client.post(
+        "/api/wizard/finish",
+        data=json.dumps({"selections": {"display": "ili9341b"}, "settings_dep_values": {}, "display_config": {}}),
+        content_type="application/json",
+    )
     assert resp.status_code == 200 and resp.get_json()["result"] == "success"
     assert fired and "wizard.py" in fired[0]
 

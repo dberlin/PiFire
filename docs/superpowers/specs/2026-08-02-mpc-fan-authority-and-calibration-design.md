@@ -56,7 +56,7 @@ With `pwm_control == False` the computed duty is dropped on the floor. No log, n
 It is worse than a dropped command. `Controller.commands_fan()` returns `enable_fan_input`, and Hold setup does:
 
 ```python
-self.state.controller.controls_fan = self._runner.commands_fan()   # hold.py:94
+self.state.controller.controls_fan = self._runner.commands_fan()  # hold.py:94
 ```
 
 `controls_fan == True` then suppresses the temperature-profile PWM path as well (`hold.py:298-303`, guarded by `not self.state.controller.controls_fan`). With `FanPidEnabled == False` the fan-assist path (`hold.py:315-320`) is also inert.

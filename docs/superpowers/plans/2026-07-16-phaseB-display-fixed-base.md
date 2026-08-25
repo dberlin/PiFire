@@ -80,9 +80,7 @@ except OSError:
 def make_base(module, rotation=0, units="F"):
     mod = importlib.import_module(module)
     with mock.patch("os.system", side_effect=AssertionError("os.system blocked in snapshot harness")):
-        base = mod.DisplayBase(
-            dev_pins={}, buttonslevel="HIGH", rotation=rotation, units=units, config={}
-        )
+        base = mod.DisplayBase(dev_pins={}, buttonslevel="HIGH", rotation=rotation, units=units, config={})
     base._captured = None
     base._display_canvas = lambda canvas: setattr(base, "_captured", canvas)
     return base
@@ -133,7 +131,11 @@ SAMPLE_STATUS_DATA = {
 import pytest
 
 from tests.ui.fixed_base_harness import (
-    FONT_AVAILABLE, make_base, render, SAMPLE_IN_DATA, SAMPLE_STATUS_DATA,
+    FONT_AVAILABLE,
+    make_base,
+    render,
+    SAMPLE_IN_DATA,
+    SAMPLE_STATUS_DATA,
 )
 
 pytestmark = pytest.mark.skipif(not FONT_AVAILABLE, reason="trebuc.ttf not installed")
@@ -350,6 +352,7 @@ Replace the entire file body with:
 ```python
 """Compat shim: 320x480 fixed display base. Real implementation in base_fixed.
 Phase C repoints drivers straight at base_fixed and deletes this module."""
+
 from display.base_fixed import DisplayBase as _Base
 
 
@@ -363,6 +366,7 @@ class DisplayBase(_Base):
 
 ```python
 """Compat shim: 240x320 fixed display base. Real implementation in base_fixed."""
+
 from display.base_fixed import DisplayBase as _Base
 
 
@@ -444,6 +448,7 @@ Keep 240x240's `None`-guard `if self.in_data is None or self.in_data["primary_se
 
 ```python
 """Compat shim: 240x240 fixed display base. Real implementation in base_fixed."""
+
 from display.base_fixed import DisplayBase as _Base
 
 

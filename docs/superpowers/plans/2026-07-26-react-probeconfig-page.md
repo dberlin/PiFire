@@ -603,9 +603,7 @@ Modify `blueprints/api/routes.py`
           if not isinstance(module_data, dict):
               return True
           return bool(
-              module_data.get("py_dependencies")
-              or module_data.get("apt_dependencies")
-              or module_data.get("command_list")
+              module_data.get("py_dependencies") or module_data.get("apt_dependencies") or module_data.get("command_list")
           )
       ```
 
@@ -875,8 +873,11 @@ Modify `blueprints/api/routes.py`
           # does `if not request.json: abort(400)` before any handler runs, so an
           # empty JSON object gets a bare Werkzeug 400 with an HTML body -- there
           # is no "message" key to assert. Pinned separately below.
-          for bad in ({"probe_map": None}, {"probe_map": {"probe_devices": {}}},
-                      {"probe_map": {"probe_devices": [], "probe_info": "nope"}}):
+          for bad in (
+              {"probe_map": None},
+              {"probe_map": {"probe_devices": {}}},
+              {"probe_map": {"probe_devices": [], "probe_info": "nope"}},
+          ):
               resp = client.post("/api/probe_map", json=bad)
               assert resp.status_code == 400, bad
               assert resp.get_json()["message"] == "bad_probe_map"
@@ -990,9 +991,7 @@ Modify `blueprints/api/routes.py`
           live_map = settings["probe_settings"]["probe_map"]
           offenders = unsupported_new_modules(probe_map, live_map, manifest_modules)
           if offenders:
-              return jsonify(
-                  {"result": "error", "message": "modules_require_install", "modules": offenders}
-              ), 422
+              return jsonify({"result": "error", "message": "modules_require_install", "modules": offenders}), 422
 
           try:
               validate_bus_kinds(configured_bus_kinds(settings, probe_map))
@@ -1005,9 +1004,7 @@ Modify `blueprints/api/routes.py`
           # probe_profile_update is NOT enough on its own -- it only refills
           # per-port profiles on already-constructed devices (probes/base.py:393).
           save_settings_and_flag_update(settings, control, "settings_update", "probe_map_update", origin="api")
-          return jsonify(
-              {"result": "success", "message": "Probe map applied.", "data": {"probe_map": probe_map}}
-          ), 200
+          return jsonify({"result": "success", "message": "Probe map applied.", "data": {"probe_map": probe_map}}), 200
       ```
       and one entry in `_API_POST_ACTIONS` (`:355-362`), after `"pellets"`:
       ```python
@@ -1197,13 +1194,14 @@ Modify `blueprints/api/routes.py`
 - [x] **Step 7: Teach the fake.** In `tests/fakes/probes.py`, beside `update_probe_profiles`
       (`:32-33`):
       ```python
-          def __init__(self):
-              ...
-              self.update_probe_map_calls = []
+      def __init__(self):
+          ...
+          self.update_probe_map_calls = []
 
-          def update_probe_map(self, probe_map):
-              self.update_probe_map_calls.append(probe_map)
-              return []
+
+      def update_probe_map(self, probe_map):
+          self.update_probe_map_calls.append(probe_map)
+          return []
       ```
 
 - [x] **Step 8: Write the failing controller test.** In
@@ -1224,9 +1222,7 @@ Modify `blueprints/api/routes.py`
           _spy_dispatch(c)
           c.setup()
           c.tick()
-          assert ctx.devices.probe_complex.update_probe_map_calls == [
-              settings["probe_settings"]["probe_map"]
-          ]
+          assert ctx.devices.probe_complex.update_probe_map_calls == [settings["probe_settings"]["probe_map"]]
           assert store.read_control()["probe_map_update"] is False
 
 
@@ -1238,9 +1234,7 @@ Modify `blueprints/api/routes.py`
           control_data = base_control(mode="Stop")
           control_data["updated"] = False
           control_data.pop("probe_map_update", None)
-          c, ctx, store, grill, dist, notifier = make_controller(
-              base_settings(), control_data, base_pellet_db()
-          )
+          c, ctx, store, grill, dist, notifier = make_controller(base_settings(), control_data, base_pellet_db())
           _spy_dispatch(c)
           c.setup()
           c.tick()  # must not raise

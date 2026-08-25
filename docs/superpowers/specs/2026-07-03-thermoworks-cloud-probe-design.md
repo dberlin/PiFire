@@ -124,7 +124,7 @@ from aiohttp import ClientSession, ClientError
 from probes.base import ProbeInterface
 
 _STALE_MULTIPLIER = 3  # a channel's cached reading is considered stale (-> None)
-                        # after this many missed poll intervals
+# after this many missed poll intervals
 
 
 async def poll_once(client, device_serial, num_probes):
@@ -151,9 +151,9 @@ class ThermoworksCloudDevice:
         self.poll_interval = poll_interval
         self.logger = logging.getLogger("control")
 
-        self._cache = {}   # {channel_number: (value_C, last_telemetry_saved)}
+        self._cache = {}  # {channel_number: (value_C, last_telemetry_saved)}
         self._lock = threading.Lock()
-        self.status = {'connected': False, 'last_error': None, 'last_poll_time': None}
+        self.status = {"connected": False, "last_error": None, "last_poll_time": None}
 
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
@@ -167,8 +167,8 @@ class ThermoworksCloudDevice:
                 async with ClientSession() as session:
                     auth = await AuthFactory(session).build_auth(self.email, self.password)
                     client = ThermoworksCloud(auth)
-                    self.status['connected'] = True
-                    self.status['last_error'] = None
+                    self.status["connected"] = True
+                    self.status["last_error"] = None
                     while True:
                         channels = await poll_once(client, self.device_serial, self.num_probes)
                         now = datetime.now(timezone.utc)
@@ -176,12 +176,12 @@ class ThermoworksCloudDevice:
                             for channel, data in channels.items():
                                 if data is not None:
                                     self._cache[channel] = (data, now)
-                        self.status['last_poll_time'] = now
+                        self.status["last_poll_time"] = now
                         await asyncio.sleep(self.poll_interval)
             except Exception as exc:  # AuthenticationError, ClientError, etc.
-                self.status['connected'] = False
-                self.status['last_error'] = str(exc)
-                self.logger.error(f'thermoworks_cloud: {exc}')
+                self.status["connected"] = False
+                self.status["last_error"] = str(exc)
+                self.logger.error(f"thermoworks_cloud: {exc}")
                 await asyncio.sleep(max(self.poll_interval, 60))  # backoff, then re-login
 
     def get_channel_value_and_units(self, channel_number, units):
@@ -195,9 +195,9 @@ class ThermoworksCloudDevice:
         if age > self.poll_interval * _STALE_MULTIPLIER:
             return None
         value = data.value
-        if data.units == 'C' and units == 'F':
+        if data.units == "C" and units == "F":
             value = value * 9 / 5 + 32
-        elif data.units == 'F' and units == 'C':
+        elif data.units == "F" and units == "C":
             value = (value - 32) * 5 / 9
         return value
 
@@ -207,19 +207,22 @@ class ThermoworksCloudDevice:
 
 class ReadProbes(ProbeInterface):
     def __init__(self, probe_info, device_info, units):
-        config = device_info['config']
-        self.email = config.get('email', '')
-        self.password = config.get('password', '')
-        self.device_serial = config.get('device_serial', '')
-        self.num_probes = int(config.get('num_probes', 0))
-        self.poll_interval = int(config.get('poll_interval', 30))
+        config = device_info["config"]
+        self.email = config.get("email", "")
+        self.password = config.get("password", "")
+        self.device_serial = config.get("device_serial", "")
+        self.num_probes = int(config.get("num_probes", 0))
+        self.poll_interval = int(config.get("poll_interval", 30))
         super().__init__(probe_info, device_info, units)
 
     def _init_device(self):
         self.time_delay = 0
         self.device = ThermoworksCloudDevice(
-            self.email, self.password, self.device_serial,
-            self.num_probes, self.poll_interval,
+            self.email,
+            self.password,
+            self.device_serial,
+            self.num_probes,
+            self.poll_interval,
         )
 
     def read_all_ports(self, output_data):
@@ -229,14 +232,14 @@ class ReadProbes(ProbeInterface):
                 continue  # unused port beyond this device's discovered channel count
             output_value = self.device.get_channel_value_and_units(channel_number, self.units)
 
-            self.output_data['tr'][self.port_map[port]] = 0  # resistance NA
+            self.output_data["tr"][self.port_map[port]] = 0  # resistance NA
 
             if port == self.primary_port:
-                self.output_data['primary'][self.port_map[port]] = output_value
+                self.output_data["primary"][self.port_map[port]] = output_value
             elif port in self.food_ports:
-                self.output_data['food'][self.port_map[port]] = output_value
+                self.output_data["food"][self.port_map[port]] = output_value
             elif port in self.aux_ports:
-                self.output_data['aux'][self.port_map[port]] = output_value
+                self.output_data["aux"][self.port_map[port]] = output_value
 
         return self.output_data
 

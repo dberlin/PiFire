@@ -115,8 +115,12 @@ from blueprints.api_admin import admin_api
 @pytest.fixture
 def logdir(tmp_path):
     for name in (
-        "events.log", "events.log.1", "events.log.2",
-        "mqtt.log", "logfiles.txt", "notes.md",
+        "events.log",
+        "events.log.1",
+        "events.log.2",
+        "mqtt.log",
+        "logfiles.txt",
+        "notes.md",
     ):
         (tmp_path / name).write_text(f"{name}\n")
     return str(tmp_path)
@@ -131,7 +135,9 @@ def test_orders_members_oldest_first(logdir):
     #  RotatingFileHandler shifts suffixes UPWARD on rollover, so the highest
     #  number is the oldest and must be stitched first.
     assert admin_api.list_log_families(logdir)["events"] == [
-        "events.log.2", "events.log.1", "events.log",
+        "events.log.2",
+        "events.log.1",
+        "events.log",
     ]
 
 
@@ -689,9 +695,7 @@ from common import datastore
 
 def _write(name, count):
     for i in range(count):
-        datastore.execute_write(
-            "INSERT INTO logs(name, ts, message) VALUES(?,?,?)", (name, i, f"{name}-{i}")
-        )
+        datastore.execute_write("INSERT INTO logs(name, ts, message) VALUES(?,?,?)", (name, i, f"{name}-{i}"))
 
 
 def test_keeps_only_the_newest_rows(ds):
@@ -739,8 +743,7 @@ def prune_log(name, keep):
     nothing is deleted.
     """
     execute_write(
-        "DELETE FROM logs WHERE name=? AND id <= "
-        "(SELECT id FROM logs WHERE name=? ORDER BY id DESC LIMIT 1 OFFSET ?)",
+        "DELETE FROM logs WHERE name=? AND id <= (SELECT id FROM logs WHERE name=? ORDER BY id DESC LIMIT 1 OFFSET ?)",
         (name, name, keep),
     )
 ```
@@ -770,9 +773,7 @@ def _ensure_logs_retention(conn):
     unconditional DROP + CREATE writes to sqlite_master on every connection and
     takes a write lock."""
     desired = _logs_retention_ddl()
-    row = conn.execute(
-        "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='logs_prune'"
-    ).fetchone()
+    row = conn.execute("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='logs_prune'").fetchone()
     if row is not None and " ".join(row[0].split()) == " ".join(desired.split()):
         return
     conn.executescript(f"DROP TRIGGER IF EXISTS logs_prune;\n{desired};")
@@ -848,11 +849,15 @@ def test_the_suite_writes_no_files_into_the_repo_logs_dir(tmp_path):
     assert not common_mod.LOG_DIR.rstrip("/").endswith("./logs")
     common_mod.write_log("isolation canary")
     import os
-    assert "canary" not in "".join(
-        open(os.path.join("./logs", n)).read()
-        for n in os.listdir("./logs")
-        if n.startswith("events.log")
-    ) if os.path.isdir("./logs") else True
+
+    assert (
+        "canary"
+        not in "".join(
+            open(os.path.join("./logs", n)).read() for n in os.listdir("./logs") if n.startswith("events.log")
+        )
+        if os.path.isdir("./logs")
+        else True
+    )
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1492,9 +1497,7 @@ def test_listing_reports_families_alongside_the_flat_list(client, logdir):
     body = client.get("/api/admin/logs").get_json()["data"]
     #  `logs` keeps its exact shipped contract: the LogsCard depends on it.
     assert body["logs"] == ["events.log"]
-    assert body["families"] == [
-        {"stem": "events", "members": ["events.log.1", "events.log"], "bytes": 8}
-    ]
+    assert body["families"] == [{"stem": "events", "members": ["events.log.1", "events.log"], "bytes": 8}]
 ```
 
 Append to `web-react/src/helpers/logs/logsApi.test.ts`:

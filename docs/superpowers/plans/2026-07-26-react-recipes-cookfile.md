@@ -595,9 +595,7 @@ def file_details(folder, filenames):
         if status != "OK":
             out.append({"filename": name, "title": "ERROR", "thumbnail": ""})
             continue
-        thumbnail = (
-            unpack_thumb(metadata["thumbnail"], path, metadata["id"]) if "thumbnail" in metadata else ""
-        )
+        thumbnail = unpack_thumb(metadata["thumbnail"], path, metadata["id"]) if "thumbnail" in metadata else ""
         out.append({"filename": name, "title": metadata["title"], "thumbnail": thumbnail})
     return out
 
@@ -803,21 +801,56 @@ def _write_cookfile(history_dir, title):
     now_ms = int(time.time() * 1000)
     start_ms = now_ms - 3600_000
     ev = default_metrics()
-    ev.update({"id": 0, "starttime": start_ms, "endtime": now_ms, "mode": "Smoke",
-               "augerontime": 120, "pellet_level_start": 100, "pellet_level_end": 95})
+    ev.update(
+        {
+            "id": 0,
+            "starttime": start_ms,
+            "endtime": now_ms,
+            "mode": "Smoke",
+            "augerontime": 120,
+            "pellet_level_start": 100,
+            "pellet_level_end": 95,
+        }
+    )
     ev2 = default_metrics()
-    ev2.update({"id": 1, "starttime": now_ms, "endtime": now_ms, "mode": "Stop",
-                "augerontime": 30, "pellet_level_start": 95, "pellet_level_end": 90})
+    ev2.update(
+        {
+            "id": 1,
+            "starttime": now_ms,
+            "endtime": now_ms,
+            "mode": "Stop",
+            "augerontime": 30,
+            "pellet_level_start": 95,
+            "pellet_level_end": 90,
+        }
+    )
     files = {
-        "metadata.json": {"title": title, "starttime": start_ms, "endtime": now_ms, "units": "F",
-                          "thumbnail": "", "id": str(uuid.uuid4()), "version": version},
-        "graph_data.json": {"time_labels": [start_ms, now_ms],
-                            "chart_data": [{"label": "Grill", "borderColor": "#f00",
-                                            "data": [{"x": start_ms, "y": 225},
-                                                     {"x": now_ms, "y": 230}]}],
-                            "probe_mapper": {"probes": {"grill1": 0}, "targets": {}, "primarysp": {}}},
-        "raw_data.json": [{"T": start_ms, "P": {"grill1": 225}, "PSP": 225,
-                           "F": {"probe1": 150}, "NT": {"grill1": 225, "probe1": 165}, "AUX": {}}],
+        "metadata.json": {
+            "title": title,
+            "starttime": start_ms,
+            "endtime": now_ms,
+            "units": "F",
+            "thumbnail": "",
+            "id": str(uuid.uuid4()),
+            "version": version,
+        },
+        "graph_data.json": {
+            "time_labels": [start_ms, now_ms],
+            "chart_data": [
+                {"label": "Grill", "borderColor": "#f00", "data": [{"x": start_ms, "y": 225}, {"x": now_ms, "y": 230}]}
+            ],
+            "probe_mapper": {"probes": {"grill1": 0}, "targets": {}, "primarysp": {}},
+        },
+        "raw_data.json": [
+            {
+                "T": start_ms,
+                "P": {"grill1": 225},
+                "PSP": 225,
+                "F": {"probe1": 150},
+                "NT": {"grill1": 225, "probe1": 165},
+                "AUX": {},
+            }
+        ],
         "graph_labels.json": {"probes": {"grill1": "Grill"}, "targets": {}, "primarysp": {}},
         "events.json": [ev, ev2],
         "comments.json": [],
@@ -832,10 +865,22 @@ def _write_cookfile(history_dir, title):
 
 def _write_recipe(recipe_dir, title):
     files = {
-        "metadata.json": {"title": title, "id": str(uuid.uuid4()), "author": "", "description": "",
-                          "image": "", "thumbnail": "", "units": "F", "prep_time": 0,
-                          "cook_time": 0, "rating": 5, "difficulty": "Easy", "version": "1.1.0",
-                          "food_probes": 2, "username": ""},
+        "metadata.json": {
+            "title": title,
+            "id": str(uuid.uuid4()),
+            "author": "",
+            "description": "",
+            "image": "",
+            "thumbnail": "",
+            "units": "F",
+            "prep_time": 0,
+            "cook_time": 0,
+            "rating": 5,
+            "difficulty": "Easy",
+            "version": "1.1.0",
+            "food_probes": 2,
+            "username": "",
+        },
         "recipe.json": {"ingredients": [], "instructions": [], "steps": []},
         "comments.json": [],
         "assets.json": [],
@@ -1111,7 +1156,7 @@ def test_detail_formats_times_and_keeps_the_epochs(live_server, page, _isolated_
 
     assert isinstance(body["metadata"]["starttime_epoch"], int)
     assert isinstance(body["metadata"]["endtime_epoch"], int)
-    assert body["metadata"]["starttime"].count(":") == 2   # HH:MM:SS
+    assert body["metadata"]["starttime"].count(":") == 2  # HH:MM:SS
     assert body["metadata"]["endtime"].count(":") == 2
 
 
@@ -1120,8 +1165,14 @@ def test_detail_includes_event_totals(live_server, page, _isolated_folders):
     name = _write_cookfile(history_dir, "Totals-Cook")
     body = page.request.get(f"{live_server}/api/files/cookfiles/detail?file={name}").json()
     totals = body["event_totals"]
-    assert set(totals) >= {"augerontime", "estusage_m", "estusage_i", "cooktime",
-                           "pellet_level_start", "pellet_level_end"}
+    assert set(totals) >= {
+        "augerontime",
+        "estusage_m",
+        "estusage_i",
+        "cooktime",
+        "pellet_level_start",
+        "pellet_level_end",
+    }
 
 
 def test_chart_returns_the_full_graph_payload(live_server, page, _isolated_folders):
@@ -1408,7 +1459,7 @@ def test_export_events_csv(live_server, page, _isolated_folders):
     name = _write_cookfile(history_dir, "ExportEv-Cook")
     resp = page.request.get(f"{live_server}/api/files/cookfiles/export?file={name}&kind=events")
     assert resp.status == 200
-    assert len(resp.text().splitlines()) >= 3   # header + two events
+    assert len(resp.text().splitlines()) >= 3  # header + two events
 
 
 def test_export_works_under_a_non_default_history_folder(live_server, page, _isolated_folders):
@@ -1441,8 +1492,13 @@ def test_upload_saves_into_the_configured_folder(live_server, page, _isolated_fo
     try:
         resp = page.request.post(
             f"{live_server}/api/files/cookfiles/upload",
-            multipart={"file": {"name": "Uploaded.pifire", "mimeType": "application/octet-stream",
-                                "buffer": b"fake cookfile bytes"}},
+            multipart={
+                "file": {
+                    "name": "Uploaded.pifire",
+                    "mimeType": "application/octet-stream",
+                    "buffer": b"fake cookfile bytes",
+                }
+            },
         )
         assert resp.status == 200
         assert resp.json()["result"] == "OK"
@@ -1468,8 +1524,7 @@ def test_upload_filename_cannot_escape_the_folder(live_server, page, _isolated_f
 
     resp = page.request.post(
         f"{live_server}/api/files/cookfiles/upload",
-        multipart={"file": {"name": hostile_name, "mimeType": "application/octet-stream",
-                            "buffer": b"x"}},
+        multipart={"file": {"name": hostile_name, "mimeType": "application/octet-stream", "buffer": b"x"}},
     )
     assert resp.status in (200, 400)
     assert set(os.listdir(parent)) == parent_before, "an upload escaped the history folder"
@@ -1679,8 +1734,7 @@ def _read_member(history_dir, name, member):
 def test_title_rename_persists(live_server, page, _isolated_folders):
     history_dir, _ = _isolated_folders
     name = _write_cookfile(history_dir, "Title-Cook")
-    resp = page.request.post(f"{live_server}/api/files/cookfiles/title",
-                             data={"file": name, "title": "Sunday Brisket"})
+    resp = page.request.post(f"{live_server}/api/files/cookfiles/title", data={"file": name, "title": "Sunday Brisket"})
     assert resp.status == 200 and resp.json()["result"] == "OK"
     assert _read_member(history_dir, name, "metadata")["title"] == "Sunday Brisket"
 
@@ -1691,8 +1745,7 @@ def test_title_rename_does_not_rename_the_file(live_server, page, _isolated_fold
     break the open browser tab."""
     history_dir, _ = _isolated_folders
     name = _write_cookfile(history_dir, "Stable-Cook")
-    page.request.post(f"{live_server}/api/files/cookfiles/title",
-                      data={"file": name, "title": "Something Else"})
+    page.request.post(f"{live_server}/api/files/cookfiles/title", data={"file": name, "title": "Something Else"})
     assert os.path.isfile(history_dir + name)
 
 
@@ -1701,11 +1754,13 @@ def test_label_rename_updates_labels_mapper_and_chart_label(live_server, page, _
     TWO json members. All three effects are asserted."""
     history_dir, _ = _isolated_folders
     name = _write_cookfile(history_dir, "Label-Cook")
-    resp = page.request.post(f"{live_server}/api/files/cookfiles/label",
-                             data={"file": name, "old_label": "grill1", "new_label": "Main Grill"})
+    resp = page.request.post(
+        f"{live_server}/api/files/cookfiles/label",
+        data={"file": name, "old_label": "grill1", "new_label": "Main Grill"},
+    )
     assert resp.status == 200
     safe = resp.json()["data"]["new_label_safe"]
-    assert safe == "MainGrill"   # create_safe_name strips non-alnum (common/app.py:325)
+    assert safe == "MainGrill"  # create_safe_name strips non-alnum (common/app.py:325)
 
     labels = _read_member(history_dir, name, "graph_labels")
     assert labels["probes"][safe] == "Main Grill"
@@ -1719,10 +1774,14 @@ def test_label_rename_updates_labels_mapper_and_chart_label(live_server, page, _
 def test_label_rename_to_an_existing_label_is_refused(live_server, page, _isolated_folders):
     history_dir, _ = _isolated_folders
     name = _write_cookfile(history_dir, "Dup-Cook")
-    page.request.post(f"{live_server}/api/files/cookfiles/label",
-                      data={"file": name, "old_label": "grill1", "new_label": "Main Grill"})
-    resp = page.request.post(f"{live_server}/api/files/cookfiles/label",
-                             data={"file": name, "old_label": "MainGrill", "new_label": "Main Grill"})
+    page.request.post(
+        f"{live_server}/api/files/cookfiles/label",
+        data={"file": name, "old_label": "grill1", "new_label": "Main Grill"},
+    )
+    resp = page.request.post(
+        f"{live_server}/api/files/cookfiles/label",
+        data={"file": name, "old_label": "MainGrill", "new_label": "Main Grill"},
+    )
     assert resp.status == 409
     assert resp.json()["message"] == "label_exists"
 
@@ -1746,8 +1805,7 @@ def test_label_rename_requires_all_three_fields(live_server, page, _isolated_fol
 def test_recover_upgrade_rewrites_a_current_version_file_as_a_no_op(live_server, page, _isolated_folders):
     history_dir, _ = _isolated_folders
     name = _write_cookfile(history_dir, "Upgrade-Cook")
-    resp = page.request.post(f"{live_server}/api/files/cookfiles/recover",
-                             data={"file": name, "action": "upgrade"})
+    resp = page.request.post(f"{live_server}/api/files/cookfiles/recover", data={"file": name, "action": "upgrade"})
     assert resp.status == 200 and resp.json()["result"] == "OK"
     assert _read_member(history_dir, name, "metadata")["title"] == "Upgrade-Cook"
 
@@ -1755,16 +1813,14 @@ def test_recover_upgrade_rewrites_a_current_version_file_as_a_no_op(live_server,
 def test_recover_repair_runs_upgrade_then_fixup_assets(live_server, page, _isolated_folders):
     history_dir, _ = _isolated_folders
     name = _write_cookfile(history_dir, "Repair-Cook")
-    resp = page.request.post(f"{live_server}/api/files/cookfiles/recover",
-                             data={"file": name, "action": "repair"})
+    resp = page.request.post(f"{live_server}/api/files/cookfiles/recover", data={"file": name, "action": "repair"})
     assert resp.status == 200 and resp.json()["result"] == "OK"
 
 
 def test_recover_rejects_an_unknown_action(live_server, page, _isolated_folders):
     history_dir, _ = _isolated_folders
     name = _write_cookfile(history_dir, "Action-Cook")
-    resp = page.request.post(f"{live_server}/api/files/cookfiles/recover",
-                             data={"file": name, "action": "delete"})
+    resp = page.request.post(f"{live_server}/api/files/cookfiles/recover", data={"file": name, "action": "delete"})
     assert resp.status == 400
     assert resp.json()["data"]["field"] == "action"
 
@@ -1957,8 +2013,7 @@ def test_comment_lifecycle_add_update_delete(live_server, page, _isolated_folder
     assert data["assets"] == []
     assert _read_member(history_dir, name, "comments")[0]["text"] == "First light"
 
-    updated = page.request.post(url, data={"file": name, "action": "update", "id": cid,
-                                           "text": "Second light"})
+    updated = page.request.post(url, data={"file": name, "action": "update", "id": cid, "text": "Second light"})
     assert updated.status == 200
     assert updated.json()["data"]["edited"] != ""
     stored = _read_member(history_dir, name, "comments")[0]
@@ -1976,9 +2031,10 @@ def test_comment_text_keeps_its_newlines_and_is_never_html(live_server, page, _i
     XSS vector at worst."""
     history_dir, _ = _isolated_folders
     name = _write_cookfile(history_dir, "Newline-Cook")
-    body = page.request.post(f"{live_server}/api/files/cookfiles/comments",
-                             data={"file": name, "action": "add",
-                                   "text": "line one\nline two <script>x</script>"}).json()
+    body = page.request.post(
+        f"{live_server}/api/files/cookfiles/comments",
+        data={"file": name, "action": "add", "text": "line one\nline two <script>x</script>"},
+    ).json()
     assert body["data"]["text"] == "line one\nline two <script>x</script>"
     assert "<br>" not in body["data"]["text"]
 
@@ -1987,8 +2043,10 @@ def test_unknown_comment_id_is_404_not_a_false_success(live_server, page, _isola
     history_dir, _ = _isolated_folders
     name = _write_cookfile(history_dir, "MissingC-Cook")
     for action in ("update", "delete"):
-        resp = page.request.post(f"{live_server}/api/files/cookfiles/comments",
-                                 data={"file": name, "action": action, "id": "nope", "text": "x"})
+        resp = page.request.post(
+            f"{live_server}/api/files/cookfiles/comments",
+            data={"file": name, "action": action, "id": "nope", "text": "x"},
+        )
         assert resp.status == 404
         assert resp.json()["message"] == "comment_not_found"
 
@@ -2001,8 +2059,9 @@ def test_comment_on_an_unreadable_file_is_422_not_a_crash(live_server, page, _is
     history_dir, _ = _isolated_folders
     with open(history_dir + "Bad.pifire", "w") as f:
         f.write("nope")
-    resp = page.request.post(f"{live_server}/api/files/cookfiles/comments",
-                             data={"file": "Bad.pifire", "action": "add", "text": "x"})
+    resp = page.request.post(
+        f"{live_server}/api/files/cookfiles/comments", data={"file": "Bad.pifire", "action": "add", "text": "x"}
+    )
     assert resp.status == 422
 
 
@@ -2013,17 +2072,21 @@ def test_setting_a_comments_asset_list_replaces_it_wholesale(live_server, page, 
     ended up with, which cannot invert."""
     history_dir, _ = _isolated_folders
     name = _write_cookfile(history_dir, "Assets-Cook")
-    cid = page.request.post(f"{live_server}/api/files/cookfiles/comments",
-                            data={"file": name, "action": "add", "text": "c"}).json()["data"]["id"]
+    cid = page.request.post(
+        f"{live_server}/api/files/cookfiles/comments", data={"file": name, "action": "add", "text": "c"}
+    ).json()["data"]["id"]
 
-    resp = page.request.post(f"{live_server}/api/files/cookfiles/comments/assets",
-                             data={"file": name, "id": cid, "assets": ["a.png", "b.png"]})
+    resp = page.request.post(
+        f"{live_server}/api/files/cookfiles/comments/assets",
+        data={"file": name, "id": cid, "assets": ["a.png", "b.png"]},
+    )
     assert resp.status == 200
     assert resp.json()["data"]["assets"] == ["a.png", "b.png"]
     assert _read_member(history_dir, name, "comments")[0]["assets"] == ["a.png", "b.png"]
 
-    cleared = page.request.post(f"{live_server}/api/files/cookfiles/comments/assets",
-                                data={"file": name, "id": cid, "assets": []})
+    cleared = page.request.post(
+        f"{live_server}/api/files/cookfiles/comments/assets", data={"file": name, "id": cid, "assets": []}
+    )
     assert cleared.status == 200
     assert _read_member(history_dir, name, "comments")[0]["assets"] == []
 
@@ -2031,11 +2094,13 @@ def test_setting_a_comments_asset_list_replaces_it_wholesale(live_server, page, 
 def test_comment_assets_must_be_a_list_of_strings(live_server, page, _isolated_folders):
     history_dir, _ = _isolated_folders
     name = _write_cookfile(history_dir, "AssetType-Cook")
-    cid = page.request.post(f"{live_server}/api/files/cookfiles/comments",
-                            data={"file": name, "action": "add", "text": "c"}).json()["data"]["id"]
+    cid = page.request.post(
+        f"{live_server}/api/files/cookfiles/comments", data={"file": name, "action": "add", "text": "c"}
+    ).json()["data"]["id"]
     for bad in ("a.png", [1, 2], {"a": 1}):
-        resp = page.request.post(f"{live_server}/api/files/cookfiles/comments/assets",
-                                 data={"file": name, "id": cid, "assets": bad})
+        resp = page.request.post(
+            f"{live_server}/api/files/cookfiles/comments/assets", data={"file": name, "id": cid, "assets": bad}
+        )
         assert resp.status == 400
 ```
 
@@ -2228,8 +2293,7 @@ def _png(color=(0, 200, 0), size=(16, 16)):
     return buf.getvalue()
 
 
-def test_asset_upload_runs_the_real_pillow_pipeline(live_server, page, _isolated_folders,
-                                                    _static_img_tmp_cleanup):
+def test_asset_upload_runs_the_real_pillow_pipeline(live_server, page, _isolated_folders, _static_img_tmp_cleanup):
     """add_asset rotates, thumbnails and resizes with real Pillow
     (file_mgmt/media.py:26-61). Not mocked -- a mocked pipeline would not catch
     a thumbnail that never lands in the archive."""
@@ -2241,8 +2305,7 @@ def test_asset_upload_runs_the_real_pillow_pipeline(live_server, page, _isolated
 
     resp = page.request.post(
         f"{live_server}/api/files/cookfiles/assets/upload",
-        multipart={"file": name,
-                   "assets": {"name": "shot.png", "mimeType": "image/png", "buffer": _png()}},
+        multipart={"file": name, "assets": {"name": "shot.png", "mimeType": "image/png", "buffer": _png()}},
     )
     assert resp.status == 200
     stored = resp.json()["data"]["assets"]
@@ -2263,16 +2326,18 @@ def test_asset_upload_rejects_a_disallowed_extension(live_server, page, _isolate
     name = _write_cookfile(history_dir, "AssetBad-Cook")
     resp = page.request.post(
         f"{live_server}/api/files/cookfiles/assets/upload",
-        multipart={"file": name,
-                   "assets": {"name": "evil.svg", "mimeType": "image/svg+xml",
-                              "buffer": b"<svg onload=alert(1)>"}},
+        multipart={
+            "file": name,
+            "assets": {"name": "evil.svg", "mimeType": "image/svg+xml", "buffer": b"<svg onload=alert(1)>"},
+        },
     )
     assert resp.status == 400
     assert resp.json()["message"] == "disallowed_file"
 
 
-def test_asset_upload_filename_cannot_escape_the_staging_dir(live_server, page, _isolated_folders,
-                                                             _static_img_tmp_cleanup):
+def test_asset_upload_filename_cannot_escape_the_staging_dir(
+    live_server, page, _isolated_folders, _static_img_tmp_cleanup
+):
     """Traversal on the asset's own filename, distinct from the archive name."""
     history_dir, _ = _isolated_folders
     name = _write_cookfile(history_dir, "AssetTrav-Cook")
@@ -2280,14 +2345,12 @@ def test_asset_upload_filename_cannot_escape_the_staging_dir(live_server, page, 
     parent_before = set(os.listdir(parent))
     page.request.post(
         f"{live_server}/api/files/cookfiles/assets/upload",
-        multipart={"file": name,
-                   "assets": {"name": "../../escape.png", "mimeType": "image/png", "buffer": _png()}},
+        multipart={"file": name, "assets": {"name": "../../escape.png", "mimeType": "image/png", "buffer": _png()}},
     )
     assert set(os.listdir(parent)) == parent_before
 
 
-def test_uploaded_asset_is_served_from_static_img_tmp(live_server, page, _isolated_folders,
-                                                      _static_img_tmp_cleanup):
+def test_uploaded_asset_is_served_from_static_img_tmp(live_server, page, _isolated_folders, _static_img_tmp_cleanup):
     """The browser-serving invariant: bytes at /static/img/tmp/{id}/{asset}
     equal the fullsize asset inside the zip. Mirrors
     tests/web/test_page_cookfile.py:446-484."""
@@ -2296,9 +2359,10 @@ def test_uploaded_asset_is_served_from_static_img_tmp(live_server, page, _isolat
     parent_id = _read_member(history_dir, name, "metadata")["id"]
     stored = page.request.post(
         f"{live_server}/api/files/cookfiles/assets/upload",
-        multipart={"file": name,
-                   "assets": {"name": "served.png", "mimeType": "image/png",
-                              "buffer": _png((200, 20, 20), (24, 24))}},
+        multipart={
+            "file": name,
+            "assets": {"name": "served.png", "mimeType": "image/png", "buffer": _png((200, 20, 20), (24, 24))},
+        },
     ).json()["data"]["assets"]
     arc = f"{stored[0]['id']}.{stored[0]['type']}"
 
@@ -2311,43 +2375,40 @@ def test_uploaded_asset_is_served_from_static_img_tmp(live_server, page, _isolat
     assert not os.path.exists(f"/tmp/pifire/{parent_id}")
 
 
-def test_asset_delete_removes_it_from_the_archive_and_from_comments(live_server, page,
-                                                                    _isolated_folders,
-                                                                    _static_img_tmp_cleanup):
+def test_asset_delete_removes_it_from_the_archive_and_from_comments(
+    live_server, page, _isolated_folders, _static_img_tmp_cleanup
+):
     history_dir, _ = _isolated_folders
     name = _write_cookfile(history_dir, "AssetDel-Cook")
     stored = page.request.post(
         f"{live_server}/api/files/cookfiles/assets/upload",
-        multipart={"file": name,
-                   "assets": {"name": "gone.png", "mimeType": "image/png", "buffer": _png()}},
+        multipart={"file": name, "assets": {"name": "gone.png", "mimeType": "image/png", "buffer": _png()}},
     ).json()["data"]["assets"]
     arc = f"{stored[0]['id']}.{stored[0]['type']}"
 
-    cid = page.request.post(f"{live_server}/api/files/cookfiles/comments",
-                            data={"file": name, "action": "add", "text": "c"}).json()["data"]["id"]
-    page.request.post(f"{live_server}/api/files/cookfiles/comments/assets",
-                      data={"file": name, "id": cid, "assets": [arc]})
+    cid = page.request.post(
+        f"{live_server}/api/files/cookfiles/comments", data={"file": name, "action": "add", "text": "c"}
+    ).json()["data"]["id"]
+    page.request.post(
+        f"{live_server}/api/files/cookfiles/comments/assets", data={"file": name, "id": cid, "assets": [arc]}
+    )
 
-    resp = page.request.post(f"{live_server}/api/files/cookfiles/assets/delete",
-                             data={"file": name, "assets": [arc]})
+    resp = page.request.post(f"{live_server}/api/files/cookfiles/assets/delete", data={"file": name, "assets": [arc]})
     assert resp.status == 200
     assert _read_member(history_dir, name, "assets") == []
     assert _read_member(history_dir, name, "comments")[0]["assets"] == []
 
 
-def test_thumbnail_is_set_from_an_existing_asset(live_server, page, _isolated_folders,
-                                                 _static_img_tmp_cleanup):
+def test_thumbnail_is_set_from_an_existing_asset(live_server, page, _isolated_folders, _static_img_tmp_cleanup):
     history_dir, _ = _isolated_folders
     name = _write_cookfile(history_dir, "Thumb-Cook")
     stored = page.request.post(
         f"{live_server}/api/files/cookfiles/assets/upload",
-        multipart={"file": name,
-                   "assets": {"name": "t.png", "mimeType": "image/png", "buffer": _png()}},
+        multipart={"file": name, "assets": {"name": "t.png", "mimeType": "image/png", "buffer": _png()}},
     ).json()["data"]["assets"]
     arc = f"{stored[0]['id']}.{stored[0]['type']}"
 
-    resp = page.request.post(f"{live_server}/api/files/cookfiles/thumbnail",
-                             data={"file": name, "asset": arc})
+    resp = page.request.post(f"{live_server}/api/files/cookfiles/thumbnail", data={"file": name, "asset": arc})
     assert resp.status == 200
     assert _read_member(history_dir, name, "metadata")["thumbnail"] == arc
 
@@ -2358,8 +2419,9 @@ def test_thumbnail_rejects_an_asset_the_file_does_not_have(live_server, page, _i
     "asset123.png" for a file with no assets, producing a broken <img> forever."""
     history_dir, _ = _isolated_folders
     name = _write_cookfile(history_dir, "ThumbBad-Cook")
-    resp = page.request.post(f"{live_server}/api/files/cookfiles/thumbnail",
-                             data={"file": name, "asset": "does-not-exist.png"})
+    resp = page.request.post(
+        f"{live_server}/api/files/cookfiles/thumbnail", data={"file": name, "asset": "does-not-exist.png"}
+    )
     assert resp.status == 400
     assert resp.json()["data"]["field"] == "asset"
     assert _read_member(history_dir, name, "metadata")["thumbnail"] == ""

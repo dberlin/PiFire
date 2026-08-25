@@ -42,7 +42,7 @@ from common.process_mon import Process_Monitor
 
 
 def test_stop_monitor_terminates_the_thread():
-    mon = Process_Monitor('test', ['true'], timeout=30)
+    mon = Process_Monitor("test", ["true"], timeout=30)
     thread = mon.process_thread
     assert thread.is_alive()
     mon.start_monitor()
@@ -50,11 +50,11 @@ def test_stop_monitor_terminates_the_thread():
     # The heartbeat loop sleeps up to 1s between checks; give it margin to exit.
     thread.join(timeout=3)
     assert not thread.is_alive()
-    assert mon.status() == 'killed'
+    assert mon.status() == "killed"
 
 
 def test_kill_monitor_removed():
-    assert not hasattr(Process_Monitor, 'kill_monitor')
+    assert not hasattr(Process_Monitor, "kill_monitor")
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -91,7 +91,7 @@ import os
 import sys
 
 # Ensure the repository root is importable so `grillplat`, `common`, etc. resolve.
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 ```
 
 - [ ] **Step 6: Run the full suite and confirm a clean, non-hanging exit**
@@ -245,18 +245,22 @@ def test_hold_over_maxtemp_does_not_submit_controller_that_tick():
     # merged on_tick, so the controller is never advanced on the over-temp tick.
     # (In the old order on_tick ran before the safety check.)
     settings = base_settings()
-    settings['safety']['maxtemp'] = 500
-    settings['controller'] = settings.get('controller', {})
-    control_data = base_control(mode='Hold')
-    control_data['primary_setpoint'] = 225
+    settings["safety"]["maxtemp"] = 500
+    settings["controller"] = settings.get("controller", {})
+    control_data = base_control(mode="Hold")
+    control_data["primary_setpoint"] = 225
     probes = FakeProbes().script([550, 550, 550])  # over maxtemp from tick 1
-    runner = FakeControllerRunner(period=0.0).script(
-        [NormalizedOutput(cycle_ratio=0.5, fan=None)] * 4
+    runner = FakeControllerRunner(period=0.0).script([NormalizedOutput(cycle_ratio=0.5, fan=None)] * 4)
+    result = run_mode(
+        "Hold",
+        settings=settings,
+        control_data=control_data,
+        pellet_db=base_pellet_db(),
+        probes=probes,
+        grill=FakeGrillPlatform(),
+        runner=runner,
     )
-    result = run_mode('Hold', settings=settings, control_data=control_data,
-                      pellet_db=base_pellet_db(), probes=probes,
-                      grill=FakeGrillPlatform(), runner=runner)
-    assert result.final_control['mode'] == 'Error'
+    assert result.final_control["mode"] == "Error"
     assert runner.submitted_temps == []  # controller never advanced -- safety first
 
 
@@ -264,15 +268,20 @@ def test_hold_controller_receives_current_tick_ptemp():
     # sense->act: the controller is submitted an in-loop probe value, not a
     # pre-loop-only stash. Below maxtemp so the loop runs a few ticks.
     settings = base_settings()
-    control_data = base_control(mode='Hold')
-    control_data['primary_setpoint'] = 225
+    control_data = base_control(mode="Hold")
+    control_data["primary_setpoint"] = 225
     probes = FakeProbes().script([200, 205, 210, 215, 220])
-    runner = FakeControllerRunner(period=0.0).script(
-        [NormalizedOutput(cycle_ratio=0.5, fan=None)] * 8
+    runner = FakeControllerRunner(period=0.0).script([NormalizedOutput(cycle_ratio=0.5, fan=None)] * 8)
+    run_mode(
+        "Hold",
+        settings=settings,
+        control_data=control_data,
+        pellet_db=base_pellet_db(),
+        probes=probes,
+        probe_cap=4,
+        grill=FakeGrillPlatform(),
+        runner=runner,
     )
-    run_mode('Hold', settings=settings, control_data=control_data,
-             pellet_db=base_pellet_db(), probes=probes, probe_cap=4,
-             grill=FakeGrillPlatform(), runner=runner)
     # Every submitted temp is an in-loop read (200..220), proving on_tick uses
     # the fresh per-tick ptemp parameter.
     assert runner.submitted_temps
@@ -501,7 +510,8 @@ Add to `tests/test_mpc_integration.py`:
 ```python
 def test_controller_base_commands_fan_default_false():
     from controller.base import ControllerBase
-    cb = ControllerBase({}, 'C', {})
+
+    cb = ControllerBase({}, "C", {})
     assert cb.commands_fan() is False
 ```
 
@@ -511,21 +521,28 @@ def test_hold_mpc_commands_fan_suppresses_temp_profile_from_first_tick():
     # Startup window: an MPC that commands the fan must suppress the temp-profile
     # duty from tick 1, BEFORE its first controller interval elapses.
     settings = base_settings()
-    settings['platform']['dc_fan'] = True
-    settings['pwm']['update_time'] = 0  # temp-profile branch would fire every tick
-    control_data = base_control(mode='Hold')
-    control_data['pwm_control'] = True
-    control_data['primary_setpoint'] = 225
+    settings["platform"]["dc_fan"] = True
+    settings["pwm"]["update_time"] = 0  # temp-profile branch would fire every tick
+    control_data = base_control(mode="Hold")
+    control_data["pwm_control"] = True
+    control_data["primary_setpoint"] = 225
     probes = FakeProbes().script([210] * 8)
     grill = FakeGrillPlatform(dc_fan=True)
     runner = FakeControllerRunner(period=999, commands_fan=True).script(
         [NormalizedOutput(cycle_ratio=0.5, fan=None)] * 8  # never reaches a fan command in-window
     )
-    result = run_mode('Hold', settings=settings, control_data=control_data,
-                      pellet_db=base_pellet_db(), probes=probes, probe_cap=6,
-                      grill=grill, runner=runner)
+    result = run_mode(
+        "Hold",
+        settings=settings,
+        control_data=control_data,
+        pellet_db=base_pellet_db(),
+        probes=probes,
+        probe_cap=6,
+        grill=grill,
+        runner=runner,
+    )
     # Temp-profile duty (would be 75 for setpoint-ptemp=15) must NOT be applied.
-    assert ('set_duty_cycle', (75,)) not in result.grill_calls
+    assert ("set_duty_cycle", (75,)) not in result.grill_calls
 ```
 
 - [ ] **Step 2: Run to verify failure**
@@ -543,8 +560,8 @@ Expected: FAIL — `commands_fan` undefined; window test applies the temp-profil
 ```
 `controller/mpc.py` — override on its `Controller`:
 ```python
-    def commands_fan(self):
-        return bool(self.cfg.get('enable_fan_input', False))
+def commands_fan(self):
+    return bool(self.cfg.get("enable_fan_input", False))
 ```
 (Confirm the exact config key/attr the MPC uses to enable fan output — `enable_fan_input` per `controller/mpc.py`; use whatever governs whether `update()` returns a `fan` duty.)
 
@@ -562,9 +579,7 @@ Expected: FAIL — `commands_fan` undefined; window test applies the temp-profil
 In `controller/runtime/modes/hold.py`:
 - In `setup()`, after building the runner, set:
 ```python
-        self.state.controller.controls_fan = (
-            self._runner.commands_fan() if self._runner is not None else False
-        )
+self.state.controller.controls_fan = self._runner.commands_fan() if self._runner is not None else False
 ```
   Remove the `self.state.mpc_fan_active = False` line (the field is now the capability, set here).
 - In `on_tick`, the MPC-fan application block: keep applying `control['duty_cycle'] = fan_cmd['duty']` when a fan command arrives, but do NOT set the latch (the capability already holds). Where it read `self.state.mpc_fan_active = True`, remove that assignment.

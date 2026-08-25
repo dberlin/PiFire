@@ -73,10 +73,11 @@ Fills inventory coverage gaps #1–#6: Hold setup_safety→Error/Reignite, Hold 
 # Reuses the modes-golden harness builders (import them):
 from tests.characterization.test_modes_golden import build_ctx, run_cycle  # adjust to real names
 
+
 def test_hold_setup_safety_flameout_error(monkeypatch):
     # afterstarttemp condition -> evaluate_flameout == ERROR, retries == 0
     ctx, control, settings = build_ctx(mode="Hold", reigniteretries=0)
-    control["safety"]["afterstarttemp"] = ...   # value that forces ERROR verdict (mirror the Smoke test)
+    control["safety"]["afterstarttemp"] = ...  # value that forces ERROR verdict (mirror the Smoke test)
     notes = _capture_notifications(ctx, monkeypatch)
     run_cycle("Hold", ctx)
     out = ctx.store.read_control()
@@ -86,15 +87,16 @@ def test_hold_setup_safety_flameout_error(monkeypatch):
     # reigniteretries NOT decremented on the Error branch:
     assert out["safety"]["reigniteretries"] == 0
 
+
 def test_hold_setup_safety_flameout_reignite(monkeypatch):
     ctx, control, settings = build_ctx(mode="Hold", reigniteretries=1)
-    control["safety"]["afterstarttemp"] = ...   # forces REIGNITE verdict (retries > 0)
+    control["safety"]["afterstarttemp"] = ...  # forces REIGNITE verdict (retries > 0)
     notes = _capture_notifications(ctx, monkeypatch)
     run_cycle("Hold", ctx)
     out = ctx.store.read_control()
     assert out["mode"] == "Reignite"
     assert out["updated"] is True
-    assert out["safety"]["reigniteretries"] == 0        # decremented from 1
+    assert out["safety"]["reigniteretries"] == 0  # decremented from 1
     assert out["safety"]["reignitelaststate"] == "Hold"
     assert "Grill_Error_03" in notes
 ```
@@ -131,26 +133,33 @@ Fills inventory gaps #7–#12: `units_change→Stop`, Startup↔Prime prime-on-s
 
 ```python
 def test_next_mode_transitions_when_not_updated(monkeypatch):
-    ctrl = build_controller(monkeypatch)          # patches os.system; auto_power_off False
-    c = ctrl.ctx.store.read_control(); c["updated"] = False
+    ctrl = build_controller(monkeypatch)  # patches os.system; auto_power_off False
+    c = ctrl.ctx.store.read_control()
+    c["updated"] = False
     ctrl.ctx.store.write_control(c, WriteKind.OVERWRITE, origin="test")
     ctrl.next_mode("Hold", setpoint=225)
     out = ctrl.ctx.store.read_control()
     assert out["mode"] == "Hold"
-    assert out["primary_setpoint"] == 225         # Hold => setpoint applied
+    assert out["primary_setpoint"] == 225  # Hold => setpoint applied
     assert out["updated"] is True
+
 
 def test_next_mode_is_noop_when_already_updated(monkeypatch):
     ctrl = build_controller(monkeypatch)
-    c = ctrl.ctx.store.read_control(); c["updated"] = True; c["mode"] = "Error"
+    c = ctrl.ctx.store.read_control()
+    c["updated"] = True
+    c["mode"] = "Error"
     ctrl.ctx.store.write_control(c, WriteKind.OVERWRITE, origin="test")
-    ctrl.next_mode("Smoke")                        # guard: must NOT overwrite
+    ctrl.next_mode("Smoke")  # guard: must NOT overwrite
     out = ctrl.ctx.store.read_control()
-    assert out["mode"] == "Error"                 # safety trip survives
+    assert out["mode"] == "Error"  # safety trip survives
+
 
 def test_next_mode_forces_setpoint_zero_when_not_hold(monkeypatch):
     ctrl = build_controller(monkeypatch)
-    c = ctrl.ctx.store.read_control(); c["updated"] = False; c["primary_setpoint"] = 300
+    c = ctrl.ctx.store.read_control()
+    c["updated"] = False
+    c["primary_setpoint"] = 300
     ctrl.ctx.store.write_control(c, WriteKind.OVERWRITE, origin="test")
     ctrl.next_mode("Smoke", setpoint=225)
     assert ctrl.ctx.store.read_control()["primary_setpoint"] == 0
@@ -219,8 +228,7 @@ def _check_legal(from_mode, to_mode):
         raise TransitionError(f"illegal transition {from_mode} -> {to_mode}")
 
 
-def request_transition(ctx, control, to_mode, *, kind, setpoint=_UNSET,
-                       reignite_from=None, notify=None, display=None):
+def request_transition(ctx, control, to_mode, *, kind, setpoint=_UNSET, reignite_from=None, notify=None, display=None):
     store = ctx.store
     _check_legal(control.get("mode"), to_mode)
 

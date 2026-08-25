@@ -59,7 +59,7 @@ import threading
 
 from common.i2c_bus import _LockedI2C
 
-logger = logging.getLogger('control')
+logger = logging.getLogger("control")
 
 # MCP2221(A) chip's fixed USB VID/PID.
 MCP2221_VID = 0x04D8
@@ -77,14 +77,14 @@ def discover_mcp2221_devices():
     try:
         return sorted(
             (
-                {'serial': info.get('serial_number'), 'path': info.get('path')}
+                {"serial": info.get("serial_number"), "path": info.get("path")}
                 for info in hid.enumerate(MCP2221_VID, MCP2221_PID)
-                if info.get('serial_number')
+                if info.get("serial_number")
             ),
-            key=lambda d: d['serial'].lower(),
+            key=lambda d: d["serial"].lower(),
         )
     except Exception:
-        logger.debug('discover_mcp2221_devices: hid.enumerate failed', exc_info=True)
+        logger.debug("discover_mcp2221_devices: hid.enumerate failed", exc_info=True)
         return []
 
 
@@ -134,8 +134,8 @@ class _EasyMCP2221Backend:
         out_end = len(out_buffer) if out_end is None else out_end
         in_end = len(in_buffer) if in_end is None else in_end
         try:
-            self._device.I2C_write(address, bytes(out_buffer[out_start:out_end]), kind='nonstop')
-            data = self._device.I2C_read(address, in_end - in_start, kind='restart')
+            self._device.I2C_write(address, bytes(out_buffer[out_start:out_end]), kind="nonstop")
+            data = self._device.I2C_read(address, in_end - in_start, kind="restart")
         except self._errors as exc:
             raise OSError(str(exc)) from exc
         in_buffer[in_start:in_end] = data
@@ -161,11 +161,9 @@ def _open_mcp2221_device(selector):
 
     try:
         if selector:
-            logger.debug('open_i2c_bus[mcp2221]: opening MCP2221 with serial=%r', selector)
+            logger.debug("open_i2c_bus[mcp2221]: opening MCP2221 with serial=%r", selector)
             return _MCP2221Device(usbserial=str(selector), scan_serial=True)
-        logger.debug(
-            'open_i2c_bus[mcp2221]: opening first MCP2221 (VID 0x%04X / PID 0x%04X)', MCP2221_VID, MCP2221_PID
-        )
+        logger.debug("open_i2c_bus[mcp2221]: opening first MCP2221 (VID 0x%04X / PID 0x%04X)", MCP2221_VID, MCP2221_PID)
         return _MCP2221Device()
     except RuntimeError as exc:
         raise I2CBusConfigError(str(exc)) from exc
@@ -182,7 +180,7 @@ def construct_i2c_bus(selector):
         _mcp2221_bus_by_device[device] = bus
     else:
         logger.debug(
-            'open_i2c_bus[mcp2221]: selector=%r aliases an already-open MCP2221; reusing its shared bus/lock', selector
+            "open_i2c_bus[mcp2221]: selector=%r aliases an already-open MCP2221; reusing its shared bus/lock", selector
         )
     return bus
 ```
@@ -207,10 +205,10 @@ def reset_bus_state():
 In `_construct_bus`, replace the `mcp2221` branch:
 
 ```python
-    if kind == 'mcp2221':
-        from common import mcp2221
+if kind == "mcp2221":
+    from common import mcp2221
 
-        return mcp2221.construct_i2c_bus(selector)
+    return mcp2221.construct_i2c_bus(selector)
 ```
 
 Add a re-export near the top-level definitions so existing importers keep working (`blueprints/wizard/routes.py`, tests):
@@ -296,7 +294,7 @@ class FakeController:
         self.configured_url = None
         self.frequency = None
         self.writes = []
-        self.read_data = b'\x11\x22\x33'
+        self.read_data = b"\x11\x22\x33"
         self.present = {0x10, 0x50}
         self.terminated = False
 
@@ -321,13 +319,13 @@ def _clean():
 
 def _patch_controller():
     controller = FakeController()
-    return controller, mock.patch.object(ft232h, '_new_controller', return_value=controller)
+    return controller, mock.patch.object(ft232h, "_new_controller", return_value=controller)
 
 
 def test_construct_i2c_bus_returns_locked_i2c():
     controller, patch = _patch_controller()
     with patch:
-        bus = i2c_bus.open_i2c_bus('ft232h', '')
+        bus = i2c_bus.open_i2c_bus("ft232h", "")
     assert isinstance(bus, i2c_bus._LockedI2C)
 
 
@@ -341,8 +339,8 @@ def test_scan_uses_poll():
 def test_blank_and_one_selector_share_one_controller():
     controller, patch = _patch_controller()
     with patch as new_controller:
-        a = i2c_bus.open_i2c_bus('ft232h', '')
-        b = i2c_bus.open_i2c_bus('ft232h', '1')
+        a = i2c_bus.open_i2c_bus("ft232h", "")
+        b = i2c_bus.open_i2c_bus("ft232h", "1")
     assert a is b
     assert new_controller.call_count == 1  # one physical controller
 
@@ -353,11 +351,11 @@ def test_i2c_nack_becomes_oserror():
     controller = FakeController()
 
     def boom(length, **kwargs):
-        raise I2cNackError('nack')
+        raise I2cNackError("nack")
 
-    with mock.patch.object(ft232h, '_new_controller', return_value=controller):
+    with mock.patch.object(ft232h, "_new_controller", return_value=controller):
         backend = ft232h._PyFtdiI2CBackend(controller)
-    with mock.patch.object(FakePort, 'read', boom):
+    with mock.patch.object(FakePort, "read", boom):
         buf = bytearray(1)
         with pytest.raises(OSError):
             backend.readfrom_into(0x10, buf)
@@ -366,9 +364,9 @@ def test_i2c_nack_becomes_oserror():
 def test_runtime_rejects_basic_after_ft232h():
     controller, patch = _patch_controller()
     with patch:
-        i2c_bus.open_i2c_bus('ft232h', '')
+        i2c_bus.open_i2c_bus("ft232h", "")
         with pytest.raises(i2c_bus.I2CBusConfigError):
-            i2c_bus.open_i2c_bus('basic')
+            i2c_bus.open_i2c_bus("basic")
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -396,7 +394,7 @@ import threading
 
 from common.i2c_bus import _LockedI2C
 
-logger = logging.getLogger('control')
+logger = logging.getLogger("control")
 
 _I2C_FREQUENCY = 100_000  # Hz; matches Blinka's mpsse default.
 
@@ -411,26 +409,26 @@ def discover_ft232h_devices():
         return []
     try:
         devices = []
-        for descriptor, _interface_count in Ftdi.list_devices('ftdi://ftdi:232h/'):
-            url = f'ftdi://ftdi:232h:{descriptor.sn}/1' if descriptor.sn else 'ftdi://ftdi:232h/1'
-            devices.append({'url': url, 'serial': descriptor.sn, 'description': descriptor.description})
-        return sorted(devices, key=lambda d: (d['serial'] or '').lower())
+        for descriptor, _interface_count in Ftdi.list_devices("ftdi://ftdi:232h/"):
+            url = f"ftdi://ftdi:232h:{descriptor.sn}/1" if descriptor.sn else "ftdi://ftdi:232h/1"
+            devices.append({"url": url, "serial": descriptor.sn, "description": descriptor.description})
+        return sorted(devices, key=lambda d: (d["serial"] or "").lower())
     except Exception:
-        logger.debug('discover_ft232h_devices: Ftdi.list_devices failed', exc_info=True)
+        logger.debug("discover_ft232h_devices: Ftdi.list_devices failed", exc_info=True)
         return []
 
 
 def canonical_url(selector):
     """Canonical pyftdi url for an FT232H selector. Blank/'1'/None all mean
     'the first FT232H' -> one shared controller."""
-    sel = '' if selector in (None, '') else str(selector)
-    if sel in ('', '1'):
-        return '1'
+    sel = "" if selector in (None, "") else str(selector)
+    if sel in ("", "1"):
+        return "1"
     return sel
 
 
-_controllers = {}   # canonical_url -> I2cController
-_gpios = {}         # canonical_url -> Ft232hGpio
+_controllers = {}  # canonical_url -> I2cController
+_gpios = {}  # canonical_url -> Ft232hGpio
 _lock = threading.RLock()
 
 
@@ -455,7 +453,7 @@ def _get_controller(selector):
     with _lock:
         controller = _controllers.get(url)
         if controller is None:
-            logger.debug('ft232h: opening pyftdi I2cController url=%r @ %d Hz', url, _I2C_FREQUENCY)
+            logger.debug("ft232h: opening pyftdi I2cController url=%r @ %d Hz", url, _I2C_FREQUENCY)
             controller = _new_controller(url, _I2C_FREQUENCY)
             _controllers[url] = controller
         return controller
@@ -498,9 +496,7 @@ class _PyFtdiI2CBackend:
         out_end = len(out_buffer) if out_end is None else out_end
         in_end = len(in_buffer) if in_end is None else in_end
         try:
-            data = self._controller.get_port(address).exchange(
-                bytes(out_buffer[out_start:out_end]), in_end - in_start
-            )
+            data = self._controller.get_port(address).exchange(bytes(out_buffer[out_start:out_end]), in_end - in_start)
         except self._errors as exc:
             raise OSError(str(exc)) from exc
         in_buffer[in_start:in_end] = data
@@ -520,10 +516,10 @@ Delete `_construct_ft232h`, its `from adafruit_blinka...mpsse.i2c import I2C` im
 In `_construct_bus`, replace the `ft232h` branch:
 
 ```python
-    if kind == 'ft232h':
-        from common import ft232h
+if kind == "ft232h":
+    from common import ft232h
 
-        return ft232h.construct_i2c_bus(selector)
+    return ft232h.construct_i2c_bus(selector)
 ```
 
 Add a re-export wrapper (mirrors the mcp2221 one from Task 1):
@@ -617,48 +613,48 @@ def _controller_with_gpio():
 
 def test_setup_output_sets_direction_bits():
     controller, port = _controller_with_gpio()
-    with mock.patch.object(ft232h, '_new_controller', return_value=controller):
-        gpio = ft232h.open_gpio('')
-    gpio.setup_output('C0')  # bit 8
-    gpio.setup_output('D4')  # bit 4
+    with mock.patch.object(ft232h, "_new_controller", return_value=controller):
+        gpio = ft232h.open_gpio("")
+    gpio.setup_output("C0")  # bit 8
+    gpio.setup_output("D4")  # bit 4
     assert port.direction == (1 << 8) | (1 << 4)
 
 
 def test_set_toggles_only_its_own_bit():
     controller, port = _controller_with_gpio()
-    with mock.patch.object(ft232h, '_new_controller', return_value=controller):
-        gpio = ft232h.open_gpio('')
-    for name in ('C0', 'C1', 'C2', 'C3'):
+    with mock.patch.object(ft232h, "_new_controller", return_value=controller):
+        gpio = ft232h.open_gpio("")
+    for name in ("C0", "C1", "C2", "C3"):
         gpio.setup_output(name)
-    gpio.set('C1', True)   # bit 9
-    gpio.set('C3', True)   # bit 11
+    gpio.set("C1", True)  # bit 9
+    gpio.set("C3", True)  # bit 11
     assert port.value == (1 << 9) | (1 << 11)
-    gpio.set('C1', False)
+    gpio.set("C1", False)
     assert port.value == (1 << 11)  # C3 untouched
 
 
 def test_unknown_pin_name_raises():
     controller, port = _controller_with_gpio()
-    with mock.patch.object(ft232h, '_new_controller', return_value=controller):
-        gpio = ft232h.open_gpio('')
+    with mock.patch.object(ft232h, "_new_controller", return_value=controller):
+        gpio = ft232h.open_gpio("")
     with pytest.raises(ValueError):
-        gpio.setup_output('Z9')
+        gpio.setup_output("Z9")
 
 
 def test_reserved_i2c_pin_raises():
     controller, port = _controller_with_gpio()
-    with mock.patch.object(ft232h, '_new_controller', return_value=controller):
-        gpio = ft232h.open_gpio('')
-    for reserved in ('D0', 'D1', 'D2', 'D3'):
+    with mock.patch.object(ft232h, "_new_controller", return_value=controller):
+        gpio = ft232h.open_gpio("")
+    for reserved in ("D0", "D1", "D2", "D3"):
         with pytest.raises(ValueError):
             gpio.setup_output(reserved)
 
 
 def test_gpio_and_i2c_share_one_controller():
     controller, port = _controller_with_gpio()
-    with mock.patch.object(ft232h, '_new_controller', return_value=controller) as new_controller:
-        bus = i2c_bus.open_i2c_bus('ft232h', '')
-        gpio = ft232h.open_gpio('1')  # '' and '1' alias
+    with mock.patch.object(ft232h, "_new_controller", return_value=controller) as new_controller:
+        bus = i2c_bus.open_i2c_bus("ft232h", "")
+        gpio = ft232h.open_gpio("1")  # '' and '1' alias
     assert new_controller.call_count == 1
     assert isinstance(bus, i2c_bus._LockedI2C)
     assert gpio.set  # smoke
@@ -666,9 +662,9 @@ def test_gpio_and_i2c_share_one_controller():
 
 def test_open_gpio_is_cached_per_controller():
     controller, port = _controller_with_gpio()
-    with mock.patch.object(ft232h, '_new_controller', return_value=controller):
-        a = ft232h.open_gpio('')
-        b = ft232h.open_gpio('1')
+    with mock.patch.object(ft232h, "_new_controller", return_value=controller):
+        a = ft232h.open_gpio("")
+        b = ft232h.open_gpio("1")
     assert a is b
 ```
 
@@ -683,8 +679,8 @@ Append to `common/ft232h.py`:
 
 ```python
 def _pin_bits():
-    bits = {f'C{n}': 1 << (8 + n) for n in range(8)}
-    bits.update({f'D{n}': 1 << n for n in range(4, 8)})  # D4-D7; D0-D3 are I2C/unexposed
+    bits = {f"C{n}": 1 << (8 + n) for n in range(8)}
+    bits.update({f"D{n}": 1 << n for n in range(4, 8)})  # D4-D7; D0-D3 are I2C/unexposed
     return bits
 
 
@@ -706,7 +702,7 @@ class Ft232hGpio:
         try:
             return self.PIN_BITS[str(pin_name)]
         except KeyError:
-            raise ValueError(f'Unknown or reserved FT232H GPIO pin {pin_name!r} (use C0-C7 or D4-D7)')
+            raise ValueError(f"Unknown or reserved FT232H GPIO pin {pin_name!r} (use C0-C7 or D4-D7)")
 
     def setup_output(self, pin_name):
         bit = self._bit(pin_name)
@@ -779,15 +775,15 @@ class FakeGpio:
     so tests can assert what each relay pin was driven to."""
 
     def __init__(self):
-        self.outputs = set()     # pins configured as outputs
-        self.values = {}         # pin_name -> bool last written
+        self.outputs = set()  # pins configured as outputs
+        self.values = {}  # pin_name -> bool last written
 
     def setup_output(self, pin_name):
         # Mirror the real validation so bad-pin tests still exercise it.
         from common.ft232h import Ft232hGpio
 
         if str(pin_name) not in Ft232hGpio.PIN_BITS:
-            raise ValueError(f'Unknown or reserved FT232H GPIO pin {pin_name!r}')
+            raise ValueError(f"Unknown or reserved FT232H GPIO pin {pin_name!r}")
         self.outputs.add(pin_name)
         self.values.setdefault(pin_name, None)
 
@@ -806,10 +802,10 @@ def make_ft232h_platform(config):
 
     fake_gpio = FakeGpio()
     with (
-        mock.patch.object(mod, 'open_ft232h_gpio', return_value=fake_gpio),
-        mock.patch.object(mod, 'open_i2c_bus', return_value=mock.sentinel.ft232h_bus) as open_bus,
-        mock.patch.object(mod, 'EMC2101_LUT') as emc2101_cls,
-        mock.patch.object(mod, 'EMC2301') as emc2301_cls,
+        mock.patch.object(mod, "open_ft232h_gpio", return_value=fake_gpio),
+        mock.patch.object(mod, "open_i2c_bus", return_value=mock.sentinel.ft232h_bus) as open_bus,
+        mock.patch.object(mod, "EMC2101_LUT") as emc2101_cls,
+        mock.patch.object(mod, "EMC2301") as emc2301_cls,
     ):
         platform = mod.GrillPlatform(config)
         harness = types.SimpleNamespace(
@@ -827,64 +823,64 @@ def test_relay_only_init_opens_shared_bus_but_no_emc():
     with make_ft232h_platform(_relay_config()) as (plat, harness):
         assert plat.pwm_fan is False
         assert plat.emc is None
-        harness.open_bus.assert_called_once_with('ft232h', '1')
+        harness.open_bus.assert_called_once_with("ft232h", "1")
         harness.emc2101_cls.assert_not_called()
         harness.emc2301_cls.assert_not_called()
-        assert set(plat.relays) == {'power', 'igniter', 'auger', 'fan'}
+        assert set(plat.relays) == {"power", "igniter", "auger", "fan"}
         # Active-low, de-asserted at init -> True.
-        assert harness.gpio.values['C0'] is True
+        assert harness.gpio.values["C0"] is True
 
 
 def test_output_methods_toggle_mapped_active_low_pins():
     with make_ft232h_platform(_relay_config()) as (plat, harness):
         plat.auger_on()
-        assert harness.gpio.values['C2'] is False  # auger -> C2 asserted (active-low)
-        assert plat._output_state['auger'] is True
+        assert harness.gpio.values["C2"] is False  # auger -> C2 asserted (active-low)
+        assert plat._output_state["auger"] is True
         plat.auger_off()
-        assert harness.gpio.values['C2'] is True
-        assert plat._output_state['auger'] is False
+        assert harness.gpio.values["C2"] is True
+        assert plat._output_state["auger"] is False
 
 
 def test_power_and_igniter_use_mapped_pins():
     with make_ft232h_platform(_relay_config()) as (plat, harness):
         plat.power_on()
         plat.igniter_on()
-        assert harness.gpio.values['C0'] is False  # power -> C0
-        assert harness.gpio.values['C1'] is False  # igniter -> C1
+        assert harness.gpio.values["C0"] is False  # power -> C0
+        assert harness.gpio.values["C1"] is False  # igniter -> C1
 
 
 def test_active_high_trigger_level_not_inverted():
-    with make_ft232h_platform(_relay_config(triggerlevel='HIGH')) as (plat, harness):
-        assert harness.gpio.values['C0'] is False  # de-asserted at init (active-high)
+    with make_ft232h_platform(_relay_config(triggerlevel="HIGH")) as (plat, harness):
+        assert harness.gpio.values["C0"] is False  # de-asserted at init (active-high)
         plat.power_on()
-        assert harness.gpio.values['C0'] is True
+        assert harness.gpio.values["C0"] is True
 
 
 def test_custom_pin_mapping_is_honored():
-    with make_ft232h_platform(_relay_config(outputs={'power': 'D4', 'igniter': 'D5', 'auger': 'D6', 'fan': 'D7'})) as (
+    with make_ft232h_platform(_relay_config(outputs={"power": "D4", "igniter": "D5", "auger": "D6", "fan": "D7"})) as (
         plat,
         harness,
     ):
         plat.auger_on()
-        assert harness.gpio.values['D6'] is False
+        assert harness.gpio.values["D6"] is False
 
 
 def test_unknown_pin_name_raises_value_error():
     import pytest
 
     with pytest.raises(ValueError):
-        with make_ft232h_platform(_relay_config(outputs={'power': 'Z9', 'igniter': 'C1', 'auger': 'C2', 'fan': 'C3'})):
+        with make_ft232h_platform(_relay_config(outputs={"power": "Z9", "igniter": "C1", "auger": "C2", "fan": "C3"})):
             pass
 
 
 def test_relay_only_fan_on_off_and_toggle():
     with make_ft232h_platform(_relay_config()) as (plat, harness):
         plat.fan_on()
-        assert harness.gpio.values['C3'] is False  # fan -> C3 asserted
-        assert plat._output_state['fan'] is True
+        assert harness.gpio.values["C3"] is False  # fan -> C3 asserted
+        assert plat._output_state["fan"] is True
         plat.fan_toggle()
-        assert plat._output_state['fan'] is False
-        assert harness.gpio.values['C3'] is True
+        assert plat._output_state["fan"] is False
+        assert harness.gpio.values["C3"] is True
 
 
 def test_relay_only_set_duty_cycle_and_frequency_are_noops():
@@ -898,7 +894,7 @@ def test_get_output_status_relay_mode_has_no_pwm_keys():
     with make_ft232h_platform(_relay_config()) as (plat, harness):
         plat.auger_on()
         status = plat.get_output_status()
-        assert status == {'auger': True, 'igniter': False, 'power': False, 'fan': False}
+        assert status == {"auger": True, "igniter": False, "power": False, "fan": False}
 
 
 def test_get_input_status_is_false():
@@ -910,7 +906,7 @@ def test_cleanup_deasserts_pins():
     with make_ft232h_platform(_relay_config()) as (plat, harness):
         plat.power_on()
         plat.cleanup()
-        for pin in ('C0', 'C1', 'C2', 'C3'):
+        for pin in ("C0", "C1", "C2", "C3"):
             assert harness.gpio.values[pin] is True  # all de-asserted
 
 
@@ -919,7 +915,7 @@ def test_import_does_not_enable_ft232h_backend():
     import sys
 
     code = "import os, grillplat.ft232h_relay; assert 'BLINKA_FT232H' not in os.environ"
-    subprocess.run([sys.executable, '-c', code], check=True, cwd='.')
+    subprocess.run([sys.executable, "-c", code], check=True, cwd=".")
 ```
 
 - [ ] **Step 3: Run tests to verify they fail**
@@ -978,27 +974,27 @@ class _Relay:
 Replace the GPIO section of `__init__` (the block from the `open_i2c_bus` comment through the relay-build loop). Keep the `open_i2c_bus('ft232h', ...)` call first (it establishes/caches the shared controller), then build relays over `open_ft232h_gpio`:
 
 ```python
-        # Open the FT232H I2C bus through the shared factory FIRST. This creates
-        # (and caches) the single pyftdi I2cController, so the relay GPIO below
-        # and any ft232h I2C probe reuse one controller and one MPSSE engine.
-        self._ft232h_bus = open_i2c_bus('ft232h', self.url)
+# Open the FT232H I2C bus through the shared factory FIRST. This creates
+# (and caches) the single pyftdi I2cController, so the relay GPIO below
+# and any ft232h I2C probe reuse one controller and one MPSSE engine.
+self._ft232h_bus = open_i2c_bus("ft232h", self.url)
 
-        # Relay GPIO comes off that same controller via pyftdi's get_gpio() --
-        # no Adafruit Blinka `board`/`digitalio`, so no process-global board
-        # singleton to resolve to the wrong board.
-        gpio = open_ft232h_gpio(self.url)
-        self.relays = {}
+# Relay GPIO comes off that same controller via pyftdi's get_gpio() --
+# no Adafruit Blinka `board`/`digitalio`, so no process-global board
+# singleton to resolve to the wrong board.
+gpio = open_ft232h_gpio(self.url)
+self.relays = {}
+try:
+    for name, pin_name in self.pin_map.items():
+        gpio.setup_output(pin_name)
+        self.relays[name] = _Relay(gpio, pin_name, active_high)
+except Exception:
+    for relay in self.relays.values():
         try:
-            for name, pin_name in self.pin_map.items():
-                gpio.setup_output(pin_name)
-                self.relays[name] = _Relay(gpio, pin_name, active_high)
+            relay.close()
         except Exception:
-            for relay in self.relays.values():
-                try:
-                    relay.close()
-                except Exception:
-                    pass
-            raise
+            pass
+    raise
 ```
 
 Update the module docstring's "digitalio" mentions to reflect pyftdi (cosmetic). In `cleanup()`, the relay loop stays; `relay.close()` is now a no-op but the `relay.off()` still de-asserts — leave that loop as-is.

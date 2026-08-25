@@ -74,21 +74,24 @@ from enum import Enum
 
 def test_write_kind_is_enum_with_two_members():
     from common.common import WriteKind
+
     assert issubclass(WriteKind, Enum)
-    assert {m.name for m in WriteKind} == {'OVERWRITE', 'MERGE'}
+    assert {m.name for m in WriteKind} == {"OVERWRITE", "MERGE"}
 
 
 def test_write_control_requires_kind():
     # kind is positional & required: calling without it raises TypeError
     from common.common import write_control
+
     with pytest.raises(TypeError):
-        write_control({'mode': 'Stop'})
+        write_control({"mode": "Stop"})
 
 
 def test_write_control_rejects_non_writekind():
     from common.common import write_control
+
     with pytest.raises(TypeError):
-        write_control({'mode': 'Stop'}, True)  # legacy boolean no longer accepted
+        write_control({"mode": "Stop"}, True)  # legacy boolean no longer accepted
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -105,14 +108,14 @@ from enum import Enum
 
 
 class WriteKind(Enum):
-    OVERWRITE = 'overwrite'   # replace control:general wholesale (was direct_write=True)
-    MERGE = 'merge'           # queue a partial change, deep-merged on execute (was direct_write=False)
+    OVERWRITE = "overwrite"  # replace control:general wholesale (was direct_write=True)
+    MERGE = "merge"  # queue a partial change, deep-merged on execute (was direct_write=False)
 ```
 
 Replace `write_control` (currently 889-903):
 
 ```python
-def write_control(control, kind, origin='unknown'):
+def write_control(control, kind, origin="unknown"):
     """
     Write control to Valkey DB.
 
@@ -124,12 +127,12 @@ def write_control(control, kind, origin='unknown'):
     global cmdsts
 
     if kind is WriteKind.OVERWRITE:
-        cmdsts.set('control:general', json.dumps(control))
+        cmdsts.set("control:general", json.dumps(control))
     elif kind is WriteKind.MERGE:
-        control['origin'] = origin
-        cmdsts.rpush('control:write', json.dumps(control))
+        control["origin"] = origin
+        cmdsts.rpush("control:write", json.dumps(control))
     else:
-        raise TypeError(f'write_control: kind must be WriteKind, got {kind!r}')
+        raise TypeError(f"write_control: kind must be WriteKind, got {kind!r}")
 ```
 
 Update the two internal callers in `common/common.py`:
@@ -246,6 +249,7 @@ Run: `python -m pytest tests/test_clock.py -v`
 ```python
 # controller/runtime/clock.py
 """Injectable time source so the control loop is deterministically testable."""
+
 import time
 from abc import ABC, abstractmethod
 
@@ -309,43 +313,43 @@ from controller.runtime.store import InMemoryStore
 
 
 def test_overwrite_replaces_whole_control():
-    s = InMemoryStore(control={'mode': 'Stop', 'a': 1})
-    s.write_control({'mode': 'Hold'}, WriteKind.OVERWRITE)
-    assert s.read_control() == {'mode': 'Hold'}
+    s = InMemoryStore(control={"mode": "Stop", "a": 1})
+    s.write_control({"mode": "Hold"}, WriteKind.OVERWRITE)
+    assert s.read_control() == {"mode": "Hold"}
 
 
 def test_merge_is_deferred_until_execute():
-    s = InMemoryStore(control={'mode': 'Stop', 'nested': {'x': 1, 'y': 2}})
-    s.write_control({'nested': {'x': 9}}, WriteKind.MERGE, origin='display')
+    s = InMemoryStore(control={"mode": "Stop", "nested": {"x": 1, "y": 2}})
+    s.write_control({"nested": {"x": 9}}, WriteKind.MERGE, origin="display")
     # nothing changes until execute
-    assert s.read_control()['nested'] == {'x': 1, 'y': 2}
+    assert s.read_control()["nested"] == {"x": 1, "y": 2}
     s.execute_control_writes()
     # deep_update: x replaced, y preserved
-    assert s.read_control()['nested'] == {'x': 9, 'y': 2}
-    assert s.read_control()['mode'] == 'Stop'
+    assert s.read_control()["nested"] == {"x": 9, "y": 2}
+    assert s.read_control()["mode"] == "Stop"
 
 
 def test_merges_apply_in_fifo_order():
-    s = InMemoryStore(control={'v': 0})
-    s.write_control({'v': 1}, WriteKind.MERGE)
-    s.write_control({'v': 2}, WriteKind.MERGE)
+    s = InMemoryStore(control={"v": 0})
+    s.write_control({"v": 1}, WriteKind.MERGE)
+    s.write_control({"v": 2}, WriteKind.MERGE)
     s.execute_control_writes()
-    assert s.read_control()['v'] == 2
+    assert s.read_control()["v"] == 2
 
 
 def test_display_queue_drain_is_fifo_and_empties():
     s = InMemoryStore()
-    s.display_commands().push(('text', 'ERROR'))
-    s.display_commands().push(('clear', None))
-    assert s.display_commands().drain() == [('text', 'ERROR'), ('clear', None)]
+    s.display_commands().push(("text", "ERROR"))
+    s.display_commands().push(("clear", None))
+    assert s.display_commands().drain() == [("text", "ERROR"), ("clear", None)]
     assert s.display_commands().drain() == []
 
 
 def test_read_control_returns_a_copy():
-    s = InMemoryStore(control={'mode': 'Stop'})
+    s = InMemoryStore(control={"mode": "Stop"})
     c = s.read_control()
-    c['mode'] = 'Hold'
-    assert s.read_control()['mode'] == 'Stop'
+    c["mode"] = "Hold"
+    assert s.read_control()["mode"] == "Stop"
 ```
 
 - [ ] **Step 2: Run — Expected: FAIL (module missing)**
@@ -356,6 +360,7 @@ def test_read_control_returns_a_copy():
 # controller/runtime/store.py
 """State-access seam. ValkeyStore is the ONLY production code touching common's
 global Valkey funcs; InMemoryStore is the hermetic test double."""
+
 import copy
 from abc import ABC, abstractmethod
 from collections import deque
@@ -407,7 +412,7 @@ class Store(ABC):
     @abstractmethod
     def read_control(self): ...
     @abstractmethod
-    def write_control(self, control, kind, origin='control'): ...
+    def write_control(self, control, kind, origin="control"): ...
     @abstractmethod
     def execute_control_writes(self): ...
     # --- settings/status/current ---
@@ -453,8 +458,7 @@ class Store(ABC):
 
 
 class InMemoryStore(Store):
-    def __init__(self, control=None, settings=None, status=None, current=None,
-                 pellet_db=None, metrics=None):
+    def __init__(self, control=None, settings=None, status=None, current=None, pellet_db=None, metrics=None):
         self._control = copy.deepcopy(control) if control is not None else default_control()
         self._settings = copy.deepcopy(settings) if settings is not None else {}
         self._status = copy.deepcopy(status) if status is not None else {}
@@ -465,7 +469,7 @@ class InMemoryStore(Store):
         self._errors = []
         self._generic = {}
         self._tr = []
-        self._write_queue = deque()   # pending MERGE partials
+        self._write_queue = deque()  # pending MERGE partials
         self._systemq = _DequeQueue()
         self._systemo = _DequeQueue()
         self._displayq = _DequeQueue()
@@ -473,18 +477,18 @@ class InMemoryStore(Store):
     def read_control(self):
         return copy.deepcopy(self._control)
 
-    def write_control(self, control, kind, origin='control'):
+    def write_control(self, control, kind, origin="control"):
         if kind is WriteKind.OVERWRITE:
             self._control = copy.deepcopy(control)
         elif kind is WriteKind.MERGE:
             self._write_queue.append(copy.deepcopy(control))
         else:
-            raise TypeError(f'write_control: kind must be WriteKind, got {kind!r}')
+            raise TypeError(f"write_control: kind must be WriteKind, got {kind!r}")
 
     def execute_control_writes(self):
         while self._write_queue:
             partial = self._write_queue.popleft()
-            partial.pop('origin', None)
+            partial.pop("origin", None)
             self._control = deep_update(self._control, partial)
 
     def read_settings(self):
@@ -587,7 +591,7 @@ valkey = pytest.importorskip("valkey")
 
 def _valkey_available():
     try:
-        valkey.StrictValkey('localhost', 6379, socket_connect_timeout=0.2).ping()
+        valkey.StrictValkey("localhost", 6379, socket_connect_timeout=0.2).ping()
         return True
     except Exception:
         return False
@@ -598,17 +602,19 @@ pytestmark = pytest.mark.skipif(not _valkey_available(), reason="no local valkey
 
 def test_valkey_store_smoke():
     from controller.runtime.store import ValkeyStore
+
     s = ValkeyStore()
     s.read_control()  # smoke: must not raise
-    s.write_generic_key('parity_probe', {'ok': True})
+    s.write_generic_key("parity_probe", {"ok": True})
 
 
 def test_valkey_display_queue_roundtrip():
     from controller.runtime.store import ValkeyStore
+
     s = ValkeyStore()
     s.display_commands().flush()
-    s.display_commands().push(['text', 'ERROR'])
-    assert s.display_commands().drain() == [['text', 'ERROR']]
+    s.display_commands().push(["text", "ERROR"])
+    assert s.display_commands().drain() == [["text", "ERROR"]]
 ```
 
 - [ ] **Step 2: Run — Expected: PASS (skipped) if no valkey, else FAIL (ValkeyStore missing)**
@@ -649,14 +655,14 @@ class ValkeyStore(Store):
     the module-level Valkey connection."""
 
     def __init__(self):
-        self._systemq = _ValkeyQueueAdapter('control:systemq')
-        self._systemo = _ValkeyQueueAdapter('control:systemo')
-        self._displayq = _ValkeyQueueAdapter('control:displayq')
+        self._systemq = _ValkeyQueueAdapter("control:systemq")
+        self._systemo = _ValkeyQueueAdapter("control:systemo")
+        self._displayq = _ValkeyQueueAdapter("control:displayq")
 
     def read_control(self):
         return _c.read_control()
 
-    def write_control(self, control, kind, origin='control'):
+    def write_control(self, control, kind, origin="control"):
         _c.write_control(control, kind, origin=origin)
 
     def execute_control_writes(self):
@@ -759,27 +765,31 @@ from tests.fakes.notifier import FakeNotifier
 
 
 def test_grill_records_calls_and_toggles_output():
-    g = FakeGrillPlatform(outputs=('power', 'auger', 'fan', 'igniter'))
+    g = FakeGrillPlatform(outputs=("power", "auger", "fan", "igniter"))
     g.auger_on()
-    assert g.get_output_status()['auger'] is True
+    assert g.get_output_status()["auger"] is True
     g.auger_off()
-    assert g.get_output_status()['auger'] is False
-    assert ('auger_on', ()) in g.calls
-    assert g.calls[-1][0] == 'auger_off'
+    assert g.get_output_status()["auger"] is False
+    assert ("auger_on", ()) in g.calls
+    assert g.calls[-1][0] == "auger_off"
 
 
 def test_probes_yield_scripted_sequence():
     p = FakeProbes()
-    p.script([{'primary': {'Grill': 100}, 'food': {}, 'aux': {}, 'tr': {}},
-              {'primary': {'Grill': 110}, 'food': {}, 'aux': {}, 'tr': {}}])
-    assert list(p.read_probes()['primary'].values())[0] == 100
-    assert list(p.read_probes()['primary'].values())[0] == 110
+    p.script(
+        [
+            {"primary": {"Grill": 100}, "food": {}, "aux": {}, "tr": {}},
+            {"primary": {"Grill": 110}, "food": {}, "aux": {}, "tr": {}},
+        ]
+    )
+    assert list(p.read_probes()["primary"].values())[0] == 100
+    assert list(p.read_probes()["primary"].values())[0] == 110
 
 
 def test_notifier_records_sent():
     n = FakeNotifier()
-    n.send('Grill_Error_01')
-    assert n.sent == ['Grill_Error_01']
+    n.send("Grill_Error_01")
+    assert n.sent == ["Grill_Error_01"]
 ```
 
 - [ ] **Step 2: Run — Expected: FAIL (modules missing)**
@@ -789,13 +799,12 @@ def test_notifier_records_sent():
 ```python
 # tests/fakes/grill.py
 class FakeGrillPlatform:
-    def __init__(self, dc_fan=False, standalone=True, input_on=True,
-                 outputs=('power', 'auger', 'fan', 'igniter')):
+    def __init__(self, dc_fan=False, standalone=True, input_on=True, outputs=("power", "auger", "fan", "igniter")):
         self.calls = []
         self._input_on = input_on
         self._status = {k: False for k in outputs}
-        self._status['pwm'] = 100
-        self._status['frequency'] = 100
+        self._status["pwm"] = 100
+        self._status["frequency"] = 100
 
     def _rec(self, name, *args):
         self.calls.append((name, args))
@@ -803,50 +812,60 @@ class FakeGrillPlatform:
     def get_input_status(self):
         return self._input_on
 
-    def set_input(self, on):          # test helper
+    def set_input(self, on):  # test helper
         self._input_on = on
 
     def get_output_status(self):
         return dict(self._status)
 
     def set_pwm_frequency(self, f):
-        self._rec('set_pwm_frequency', f); self._status['frequency'] = f
+        self._rec("set_pwm_frequency", f)
+        self._status["frequency"] = f
 
     def set_duty_cycle(self, pct):
-        self._rec('set_duty_cycle', pct); self._status['pwm'] = pct
+        self._rec("set_duty_cycle", pct)
+        self._status["pwm"] = pct
 
     def igniter_on(self):
-        self._rec('igniter_on'); self._status['igniter'] = True
+        self._rec("igniter_on")
+        self._status["igniter"] = True
 
     def igniter_off(self):
-        self._rec('igniter_off'); self._status['igniter'] = False
+        self._rec("igniter_off")
+        self._status["igniter"] = False
 
     def auger_on(self):
-        self._rec('auger_on'); self._status['auger'] = True
+        self._rec("auger_on")
+        self._status["auger"] = True
 
     def auger_off(self):
-        self._rec('auger_off'); self._status['auger'] = False
+        self._rec("auger_off")
+        self._status["auger"] = False
 
     def fan_on(self, dc=None):
-        self._rec('fan_on', dc); self._status['fan'] = True
+        self._rec("fan_on", dc)
+        self._status["fan"] = True
 
     def fan_off(self):
-        self._rec('fan_off'); self._status['fan'] = False
+        self._rec("fan_off")
+        self._status["fan"] = False
 
     def power_on(self):
-        self._rec('power_on'); self._status['power'] = True
+        self._rec("power_on")
+        self._status["power"] = True
 
     def power_off(self):
-        self._rec('power_off'); self._status['power'] = False
+        self._rec("power_off")
+        self._status["power"] = False
 
     def pwm_fan_ramp(self, *a):
-        self._rec('pwm_fan_ramp', *a)
+        self._rec("pwm_fan_ramp", *a)
 
     def supported_commands(self, x):
-        return {'data': {'supported_cmds': []}}
+        return {"data": {"supported_cmds": []}}
 
     def cleanup(self):
-        self._rec('cleanup')
+        self._rec("cleanup")
 ```
 
 ```python
@@ -864,14 +883,14 @@ class FakeProbes:
             if isinstance(it, dict):
                 norm.append(it)
             else:
-                norm.append({'primary': {'Grill': it}, 'food': {}, 'aux': {}, 'tr': {}})
+                norm.append({"primary": {"Grill": it}, "food": {}, "aux": {}, "tr": {}})
         self._script = norm
         self._i = 0
         return self
 
     def read_probes(self):
         if not self._script:
-            return {'primary': {'Grill': 0}, 'food': {}, 'aux': {}, 'tr': {}}
+            return {"primary": {"Grill": 0}, "food": {}, "aux": {}, "tr": {}}
         item = self._script[min(self._i, len(self._script) - 1)]
         self._i += 1
         return item
@@ -941,7 +960,7 @@ class FakeControllerRunner:
         pass
 
     def reconfigure(self, settings, control):
-        return 'Active'
+        return "Active"
 
     def control_period(self):
         return self._period
@@ -980,6 +999,7 @@ git commit -m "test(control): add hardware/notifier/runner fakes"
 ```python
 # controller/runtime/context.py
 """Bundle of everything a control cycle needs. Passed instead of globals."""
+
 from dataclasses import dataclass
 
 
@@ -992,10 +1012,10 @@ class Devices:
 
 @dataclass
 class ControllerContext:
-    devices: object            # Devices
-    store: object              # Store
-    notifications: object      # Notifier
-    clock: object              # Clock
+    devices: object  # Devices
+    store: object  # Store
+    notifications: object  # Notifier
+    clock: object  # Clock
     event_log: object = None
     control_log: object = None
 ```
@@ -1019,12 +1039,10 @@ class ControllerContext:
 from controller.runtime.context import ControllerContext, Devices
 from controller.runtime.store import ValkeyStore
 from controller.runtime.clock import RealClock
-from controller.runtime.notifier import ValkeyNotifier   # Task 4.1
+from controller.runtime.notifier import ValkeyNotifier  # Task 4.1
 
 ctx = ControllerContext(
-    devices=Devices(grill_platform=grill_platform,
-                    probe_complex=probe_complex,
-                    dist_device=dist_device),
+    devices=Devices(grill_platform=grill_platform, probe_complex=probe_complex, dist_device=dist_device),
     store=ValkeyStore(),
     notifications=ValkeyNotifier(),
     clock=RealClock(),
@@ -1082,15 +1100,16 @@ class CaptureResult:
 def make_ctx(settings, control_data, pellet_db, probes, grill=None):
     store = InMemoryStore(control=control_data, settings=settings, pellet_db=pellet_db)
     grill = grill or FakeGrillPlatform(
-        dc_fan=settings['platform'].get('dc_fan', False),
-        standalone=settings['platform'].get('standalone', True),
-        outputs=tuple(settings['platform']['outputs']),
+        dc_fan=settings["platform"].get("dc_fan", False),
+        standalone=settings["platform"].get("standalone", True),
+        outputs=tuple(settings["platform"]["outputs"]),
     )
     notifier = FakeNotifier()
     ctx = ControllerContext(
-        devices=Devices(grill_platform=grill, probe_complex=probes,
-                        dist_device=FakeDistance()),
-        store=store, notifications=notifier, clock=ManualClock(),
+        devices=Devices(grill_platform=grill, probe_complex=probes, dist_device=FakeDistance()),
+        store=store,
+        notifications=notifier,
+        clock=ManualClock(),
     )
     return ctx, grill, notifier
 
@@ -1120,14 +1139,13 @@ from tests.fakes.probes import FakeProbes
 
 def test_smoke_over_maxtemp_triggers_error_and_notifies():
     settings = base_settings()
-    settings['safety']['maxtemp'] = 500
+    settings["safety"]["maxtemp"] = 500
     probes = FakeProbes().script([550, 550, 550])
-    control_data = base_control(mode='Smoke')
-    result = run_mode('Smoke', settings=settings, control_data=control_data,
-                      pellet_db=base_pellet_db(), probes=probes)
-    assert result.final_control['mode'] == 'Error'
-    assert 'Grill_Error_01' in result.notifications
-    assert ('text', 'ERROR') in result.display_commands
+    control_data = base_control(mode="Smoke")
+    result = run_mode("Smoke", settings=settings, control_data=control_data, pellet_db=base_pellet_db(), probes=probes)
+    assert result.final_control["mode"] == "Error"
+    assert "Grill_Error_01" in result.notifications
+    assert ("text", "ERROR") in result.display_commands
 ```
 
 - [ ] **Step 3: Run — Expected: PASS** (`python -m pytest tests/characterization -v`)
@@ -1164,6 +1182,7 @@ from controller.runtime.notifier import Notifier
 
 def test_valkey_notifier_is_a_notifier():
     from controller.runtime.notifier import ValkeyNotifier
+
     assert isinstance(ValkeyNotifier(), Notifier)
 ```
 
@@ -1174,6 +1193,7 @@ def test_valkey_notifier_is_a_notifier():
 ```python
 # controller/runtime/notifier.py
 """Notification seam so the control loop can be tested without a real backend."""
+
 from abc import ABC, abstractmethod
 
 
@@ -1189,14 +1209,17 @@ class Notifier(ABC):
 class ValkeyNotifier(Notifier):
     def send(self, name):
         from notify.notifications import send_notifications
+
         send_notifications(name)
 
     def check(self, settings, control, **kwargs):
         from notify.notifications import check_notify
+
         return check_notify(settings, control, **kwargs)
 
     def get_targets(self, notify_data):
         from common import get_notify_targets
+
         return get_notify_targets(notify_data)
 ```
 
@@ -1227,21 +1250,27 @@ git commit -m "feat(control): add Notifier interface + ValkeyNotifier"
 # tests/test_build_devices.py
 def _proto_settings():
     return {
-        'modules': {'grillplat': 'prototype', 'dist': 'prototype',
-                    'display': 'none', 'probes': 'prototype'},
-        'platform': {'devices': {}, 'buttonslevel': 'HIGH', 'outputs': ['power', 'auger', 'fan', 'igniter'],
-                     'dc_fan': False, 'standalone': True},
-        'pelletlevel': {'empty': 22, 'full': 4},
-        'globals': {'units': 'F', 'debug_mode': False},
-        'pwm': {'frequency': 100},
-        'probe_settings': {'probe_map': {'probe_info': []}},
+        "modules": {"grillplat": "prototype", "dist": "prototype", "display": "none", "probes": "prototype"},
+        "platform": {
+            "devices": {},
+            "buttonslevel": "HIGH",
+            "outputs": ["power", "auger", "fan", "igniter"],
+            "dc_fan": False,
+            "standalone": True,
+        },
+        "pelletlevel": {"empty": 22, "full": 4},
+        "globals": {"units": "F", "debug_mode": False},
+        "pwm": {"frequency": 100},
+        "probe_settings": {"probe_map": {"probe_info": []}},
     }
 
 
 def test_build_devices_prototype_platform_headless():
     from controller.runtime.devices import build_devices
+
     devices, display, errors = build_devices(
-        _proto_settings(), include_display=False, errors=[], event_log=None, control_log=None)
+        _proto_settings(), include_display=False, errors=[], event_log=None, control_log=None
+    )
     assert devices.grill_platform is not None
     assert devices.probe_complex is not None
     assert devices.dist_device is not None
@@ -1287,10 +1316,18 @@ from controller.runtime.runner import SyncControllerRunner, NormalizedOutput
 
 
 class _Core:
-    def __init__(self): self.target = None; self.period = 5.0
-    def set_target(self, sp): self.target = sp
-    def update(self, temp): return {'cycle_ratio': 0.4, 'fan': {'duty': 60}}
-    def get_control_period(self): return self.period
+    def __init__(self):
+        self.target = None
+        self.period = 5.0
+
+    def set_target(self, sp):
+        self.target = sp
+
+    def update(self, temp):
+        return {"cycle_ratio": 0.4, "fan": {"duty": 60}}
+
+    def get_control_period(self):
+        return self.period
 
 
 def test_sync_runner_normalizes_dict_output():
@@ -1299,12 +1336,14 @@ def test_sync_runner_normalizes_dict_output():
     out = r.latest_from(200.0)
     assert isinstance(out, NormalizedOutput)
     assert out.cycle_ratio == 0.4
-    assert out.fan == {'duty': 60}
+    assert out.fan == {"duty": 60}
 
 
 def test_sync_runner_float_output_has_no_fan():
     class FloatCore(_Core):
-        def update(self, temp): return 0.25
+        def update(self, temp):
+            return 0.25
+
     out = SyncControllerRunner(FloatCore()).latest_from(190.0)
     assert out.cycle_ratio == 0.25 and out.fan is None
 ```
@@ -1317,13 +1356,14 @@ def test_sync_runner_float_output_has_no_fan():
 # controller/runtime/runner.py
 """Temperature-controller execution seam (PID/MPC/etc). Sync impl == today's
 inline behavior; a ThreadedControllerRunner may be added later for MPC."""
+
 import importlib
 from abc import ABC, abstractmethod
 from collections import namedtuple
 
 from controller.base import normalize_controller_output
 
-NormalizedOutput = namedtuple('NormalizedOutput', ['cycle_ratio', 'fan'])
+NormalizedOutput = namedtuple("NormalizedOutput", ["cycle_ratio", "fan"])
 
 
 class ControllerRunner(ABC):
@@ -1361,7 +1401,7 @@ class SyncControllerRunner(ControllerRunner):
 
     def reconfigure(self, settings, control):
         core, status = _build_core(settings, control)
-        if status == 'Active':
+        if status == "Active":
             self._core = core
         return status
 
@@ -1374,15 +1414,15 @@ class SyncControllerRunner(ControllerRunner):
 
 def _build_core(settings, control):
     try:
-        controller_type = settings['controller']['selected']
-        module = importlib.import_module(f'controller.{controller_type}')
+        controller_type = settings["controller"]["selected"]
+        module = importlib.import_module(f"controller.{controller_type}")
     except Exception:
-        return None, 'Inactive'
+        return None, "Inactive"
     core = module.Controller(
-        settings['controller']['config'][controller_type],
-        settings['globals']['units'], settings['cycle_data'])
-    core.set_target(control['primary_setpoint'])
-    return core, 'Active'
+        settings["controller"]["config"][controller_type], settings["globals"]["units"], settings["cycle_data"]
+    )
+    core.set_target(control["primary_setpoint"])
+    return core, "Active"
 
 
 def build_runner(settings, control):
@@ -1451,15 +1491,14 @@ Design ref: spec §"Pure-logic modules". Each module is its own task (same 5-ste
 
 ```python
 # tests/test_logic_safety.py
-from controller.runtime.logic.safety import (
-    startup_temp_bounds, evaluate_flameout, over_max_temp, SafetyVerdict)
+from controller.runtime.logic.safety import startup_temp_bounds, evaluate_flameout, over_max_temp, SafetyVerdict
 
 
 def test_startup_temp_bounds_clamps_to_min_and_max():
-    s = {'minstartuptemp': 100, 'maxstartuptemp': 200}
-    assert startup_temp_bounds(50, s) == 100     # 0.9*50=45 -> min 100
-    assert startup_temp_bounds(1000, s) == 200   # 0.9*1000=900 -> max 200
-    assert startup_temp_bounds(150, s) == 135    # 0.9*150=135 within range
+    s = {"minstartuptemp": 100, "maxstartuptemp": 200}
+    assert startup_temp_bounds(50, s) == 100  # 0.9*50=45 -> min 100
+    assert startup_temp_bounds(1000, s) == 200  # 0.9*1000=900 -> max 200
+    assert startup_temp_bounds(150, s) == 135  # 0.9*150=135 within range
 
 
 def test_evaluate_flameout():
@@ -1469,8 +1508,8 @@ def test_evaluate_flameout():
 
 
 def test_over_max_temp():
-    assert over_max_temp(501, {'maxtemp': 500}) is True
-    assert over_max_temp(500, {'maxtemp': 500}) is False
+    assert over_max_temp(501, {"maxtemp": 500}) is True
+    assert over_max_temp(500, {"maxtemp": 500}) is False
 ```
 
 - [ ] **Step 2: Run — FAIL.**  **Step 3: Implement:**
@@ -1478,18 +1517,19 @@ def test_over_max_temp():
 ```python
 # controller/runtime/logic/safety.py
 """Pure safety decisions extracted from _work_cycle. No I/O."""
+
 from enum import Enum
 
 
 class SafetyVerdict(Enum):
-    OK = 'ok'
-    REIGNITE = 'reignite'
-    ERROR = 'error'
+    OK = "ok"
+    REIGNITE = "reignite"
+    ERROR = "error"
 
 
 def startup_temp_bounds(ptemp, safety_settings):
-    bound = int(max(ptemp * 0.9, safety_settings['minstartuptemp']))
-    return int(min(bound, safety_settings['maxstartuptemp']))
+    bound = int(max(ptemp * 0.9, safety_settings["minstartuptemp"]))
+    return int(min(bound, safety_settings["maxstartuptemp"]))
 
 
 def evaluate_flameout(ptemp, startup_temp, reignite_retries):
@@ -1499,7 +1539,7 @@ def evaluate_flameout(ptemp, startup_temp, reignite_retries):
 
 
 def over_max_temp(ptemp, safety_settings):
-    return ptemp > safety_settings['maxtemp']
+    return ptemp > safety_settings["maxtemp"]
 ```
 
 - [ ] **Step 4: Run — PASS.**  **Step 5: Commit** `feat(control): add pure safety logic`.
@@ -1608,23 +1648,32 @@ from display import DisplayFeeder
 
 
 class _FakeDisplay:
-    def __init__(self): self.calls = []
-    def display_status(self, i, s): self.calls.append(('status', i, s))
-    def display_text(self, t): self.calls.append(('text', t))
-    def clear_display(self): self.calls.append(('clear',))
-    def display_splash(self): self.calls.append(('splash',))
+    def __init__(self):
+        self.calls = []
+
+    def display_status(self, i, s):
+        self.calls.append(("status", i, s))
+
+    def display_text(self, t):
+        self.calls.append(("text", t))
+
+    def clear_display(self):
+        self.calls.append(("clear",))
+
+    def display_splash(self):
+        self.calls.append(("splash",))
 
 
 def test_feeder_pushes_status_and_drains_display_queue():
-    store = InMemoryStore(current={'P': {}}, status={'mode': 'Hold', 'units': 'F'})
-    store.display_commands().push(('text', 'ERROR'))
-    store.display_commands().push(('clear', None))
+    store = InMemoryStore(current={"P": {}}, status={"mode": "Hold", "units": "F"})
+    store.display_commands().push(("text", "ERROR"))
+    store.display_commands().push(("clear", None))
     disp = _FakeDisplay()
     DisplayFeeder(disp, store, ManualClock()).tick()
-    assert ('status', {'P': {}}, {'mode': 'Hold', 'units': 'F'}) in disp.calls
-    assert ('text', 'ERROR') in disp.calls
-    assert ('clear',) in disp.calls
-    assert disp.calls.index(('text', 'ERROR')) < disp.calls.index(('clear',))
+    assert ("status", {"P": {}}, {"mode": "Hold", "units": "F"}) in disp.calls
+    assert ("text", "ERROR") in disp.calls
+    assert ("clear",) in disp.calls
+    assert disp.calls.index(("text", "ERROR")) < disp.calls.index(("clear",))
 ```
 
 - [ ] **Step 2: Run — FAIL.**  **Step 3: Implement** `display.py`:
@@ -1632,6 +1681,7 @@ def test_feeder_pushes_status_and_drains_display_queue():
 ```python
 #!/usr/bin/env python3
 """PiFire Display Process — renders from Valkey, independent of the controller."""
+
 from common import read_settings
 from controller.runtime.devices import build_devices
 from controller.runtime.store import ValkeyStore
@@ -1648,11 +1698,11 @@ class DisplayFeeder:
         if in_data and status:
             self.display.display_status(in_data, status)
         for cmd, arg in self.store.display_commands().drain():
-            if cmd == 'text':
+            if cmd == "text":
                 self.display.display_text(arg)
-            elif cmd == 'clear':
+            elif cmd == "clear":
                 self.display.clear_display()
-            elif cmd == 'splash':
+            elif cmd == "splash":
                 self.display.display_splash()
 
     def run(self):
@@ -1661,10 +1711,11 @@ class DisplayFeeder:
             self.clock.sleep(0.1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     settings = read_settings()
     _devices, display_device, _errors = build_devices(
-        settings, include_display=True, errors=[], event_log=None, control_log=None)
+        settings, include_display=True, errors=[], event_log=None, control_log=None
+    )
     DisplayFeeder(display_device, ValkeyStore(), RealClock()).run()
 ```
 

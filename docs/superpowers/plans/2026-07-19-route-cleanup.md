@@ -32,6 +32,8 @@ Phase D refactored `settings`, `admin`, `probeconfig`, `mobile/socket_io.py`. Th
        ("POST", "display"): _settings_display,
        ("GET", "smartstart"): _settings_smartstart_get,
    }
+
+
    def settings_page(action=None):
        ...
        handler = _SETTINGS_DISPATCH.get((request.method, action))

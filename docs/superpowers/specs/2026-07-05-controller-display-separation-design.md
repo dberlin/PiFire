@@ -109,10 +109,11 @@ conflating the two.
 
 ```python
 class WriteKind(Enum):
-    OVERWRITE = "overwrite"   # replace control:general wholesale (was direct_write=True)
-    MERGE     = "merge"       # queue a partial change, deep-merged on execute (was direct_write=False)
+    OVERWRITE = "overwrite"  # replace control:general wholesale (was direct_write=True)
+    MERGE = "merge"  # queue a partial change, deep-merged on execute (was direct_write=False)
 
-def write_control(control, kind: WriteKind, origin="unknown"):   # kind REQUIRED, positional
+
+def write_control(control, kind: WriteKind, origin="unknown"):  # kind REQUIRED, positional
     global cmdsts
     if kind is WriteKind.OVERWRITE:
         cmdsts.set("control:general", json.dumps(control))
@@ -134,10 +135,10 @@ partial into current control, write back `OVERWRITE`) are unchanged.
 ```python
 @dataclass
 class ControllerContext:
-    devices: Devices          # grill_platform, probe_complex, dist_device
-    store: Store              # all Valkey-backed state access
-    notifications: Notifier   # send_notifications / check_notify / get_notify_targets
-    clock: Clock              # now() / sleep() — injected, never wall-clock directly
+    devices: Devices  # grill_platform, probe_complex, dist_device
+    store: Store  # all Valkey-backed state access
+    notifications: Notifier  # send_notifications / check_notify / get_notify_targets
+    clock: Clock  # now() / sleep() — injected, never wall-clock directly
     event_log: Logger
     control_log: Logger
 ```
@@ -182,32 +183,36 @@ specifics come exclusively through hooks.
 ```python
 class ControlMode:
     name: str
+
     def __init__(self, ctx: ControllerContext, state: WorkCycleState): ...
 
     # --- template hooks, overridden per mode ---
-    def setup(self): ...                       # pre-loop device state, cycle params, runner init
-    def setup_safety(self): ...                # pre-loop safety (mode-specific)
-    def on_tick(self, now): ...                # per-iteration mode logic
-    def check_safety(self, now): ...           # per-iteration safety (mode-specific; default no-op)
-    def should_exit(self, now) -> bool: ...    # mode-specific exit conditions
-    def status_fragment(self) -> dict: ...     # mode-specific status fields (default {})
-    def teardown(self): ...                    # mode-specific post-loop cleanup
+    def setup(self): ...  # pre-loop device state, cycle params, runner init
+    def setup_safety(self): ...  # pre-loop safety (mode-specific)
+    def on_tick(self, now): ...  # per-iteration mode logic
+    def check_safety(self, now): ...  # per-iteration safety (mode-specific; default no-op)
+    def should_exit(self, now) -> bool: ...  # mode-specific exit conditions
+    def status_fragment(self) -> dict: ...  # mode-specific status fields (default {})
+    def teardown(self): ...  # mode-specific post-loop cleanup
 
     # --- shared skeleton, NOT overridden ---
     def run(self):
-        self.setup(); self.setup_safety()
+        self.setup()
+        self.setup_safety()
         while self._active():
             now = self.ctx.clock.now()
             self._drain_control_and_system_commands()
-            if self._mode_change_requested(): break
+            if self._mode_change_requested():
+                break
             self._apply_settings_updates()
             self._handle_manual_overrides()
             self._read_probes_and_write_current()
             self.on_tick(now)
-            self._universal_safety(now)          # ONLY the max-temp cutoff
-            self.check_safety(now)               # mode-specific safety
+            self._universal_safety(now)  # ONLY the max-temp cutoff
+            self.check_safety(now)  # mode-specific safety
             self._publish_status_and_history(now)
-            if self.should_exit(now): break
+            if self.should_exit(now):
+                break
             self.ctx.clock.sleep(0.05)
         self.teardown()
         self._final_cleanup()
@@ -295,17 +300,19 @@ under `controller/runtime/logic/`.
 ```python
 class ControllerRunner(ABC):
     def set_target(self, setpoint): ...
-    def submit(self, temp): ...                  # feed newest measurement
-    def latest(self) -> NormalizedOutput: ...    # most recent (output, fan_cmd), normalized
+    def submit(self, temp): ...  # feed newest measurement
+    def latest(self) -> NormalizedOutput: ...  # most recent (output, fan_cmd), normalized
     def reconfigure(self, settings, control): ...
+
 
 class SyncControllerRunner(ControllerRunner):
     """Computes inline; deterministic; == today's behavior. Ships now."""
 
+
 class ThreadedControllerRunner(ControllerRunner):
     """Same interface, compute on its own timer; latest() returns a snapshot.
-       Fast-follow — pays off for expensive controllers (MPC). Not on this
-       refactor's critical path."""
+    Fast-follow — pays off for expensive controllers (MPC). Not on this
+    refactor's critical path."""
 ```
 
 The work cycle only calls `runner.submit(ptemp)` / `runner.latest()`; it no
@@ -331,8 +338,8 @@ unchanged to protect functionality (renaming them is a separate migration).
 orchestrator, so both use the same queue via the store:
 
 ```python
-ctx.store.display_commands().push(('text', 'ERROR'))   # was display_device.display_text('ERROR')
-ctx.store.display_commands().push(('clear', None))      # was display_device.clear_display()
+ctx.store.display_commands().push(("text", "ERROR"))  # was display_device.display_text('ERROR')
+ctx.store.display_commands().push(("clear", None))  # was display_device.clear_display()
 ```
 
 `display_status(in_data, status_data)` (`:702, :1023`) is **not** pushed — that
@@ -346,15 +353,18 @@ carries only transient `text`/`clear`/`splash` signals.
 class DisplayFeeder:
     def __init__(self, display, store, clock):
         self.display, self.store, self.clock = display, store, clock
+
     def run(self):
         while True:
             in_data, status = self.store.read_current(), self.store.read_status()
             if in_data and status:
-                self.display.display_status(in_data, status)   # legacy: renders; flex: no-op
+                self.display.display_status(in_data, status)  # legacy: renders; flex: no-op
             for cmd, arg in self.store.display_commands().drain():
-                {'text': lambda: self.display.display_text(arg),
-                 'clear': self.display.clear_display,
-                 'splash': self.display.display_splash}[cmd]()
+                {
+                    "text": lambda: self.display.display_text(arg),
+                    "clear": self.display.clear_display,
+                    "splash": self.display.display_splash,
+                }[cmd]()
             self.clock.sleep(0.1)
 ```
 

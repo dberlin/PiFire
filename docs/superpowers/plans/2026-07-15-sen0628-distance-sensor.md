@@ -1006,7 +1006,16 @@ def test_usb_serial_scan_filters_by_vid_pid(monkeypatch):
     def _fake_discover(vid=None, pid=None):
         captured["vid"] = vid
         captured["pid"] = pid
-        return [{"device": "/dev/ttyACM0", "description": "SEN0628", "manufacturer": "", "serial_number": "", "vid": vid, "pid": pid}]
+        return [
+            {
+                "device": "/dev/ttyACM0",
+                "description": "SEN0628",
+                "manufacturer": "",
+                "serial_number": "",
+                "vid": vid,
+                "pid": pid,
+            }
+        ]
 
     monkeypatch.setattr(wizard_routes, "discover_usb_serial_devices", _fake_discover)
 

@@ -93,7 +93,7 @@ and `find_i2c_bus`; `probes/base.py` re-exports them so existing
 `grillplat/x86_numato.py` imports from here instead of keeping its own copy.
 
 ```python
-def open_i2c_bus(bus_kind='basic', bus_selector=None):
+def open_i2c_bus(bus_kind="basic", bus_selector=None):
     """Return a busio.I2C-compatible bus for the given kind.
 
     bus_selector is the stored i2c_bus_num value:
@@ -206,12 +206,13 @@ the FT232H bus.
 A pure function in `common/i2c_bus.py`:
 
 ```python
-USB_HID_KINDS = {'ft232h', 'mcp2221'}
+USB_HID_KINDS = {"ft232h", "mcp2221"}
+
 
 def validate_bus_kinds(kinds):
     """Raise I2CBusConfigError if the set of bus kinds cannot coexist."""
     kinds = {k for k in kinds if k}
-    if 'basic' in kinds and (kinds & USB_HID_KINDS):
+    if "basic" in kinds and (kinds & USB_HID_KINDS):
         raise I2CBusConfigError(
             "'basic' I2C can't share a process with a USB-HID bus "
             "(ft232h/mcp2221): Blinka's board backend is process-global. "

@@ -136,10 +136,12 @@ class FrameObservation:
     continuous: bool
     role_generation: int
 
+
 @dataclass(frozen=True, slots=True)
 class AffinePrediction:
     free_output_c: NDArray[np.float64]
     input_response_c: NDArray[np.float64]
+
 
 @dataclass(frozen=True, slots=True)
 class ModelUpdate:
@@ -679,7 +681,7 @@ Expected: missing flag/coordinator behavior.
 Add to `_DEFAULTS` and `controllers.json`:
 
 ```python
-enable_online_adaptation=False
+enable_online_adaptation = False
 ```
 
 Friendly label: `Online Model Adaptation`. Description: `Learn a scheduled linear model during cooks and let it take over after repeated validation wins. Experimental. [Default=false]`.
@@ -821,12 +823,21 @@ Require schema, source revision, fixed seeds, plant/scenario identities, baselin
 
 ```python
 REQUIRED = {
-    "pct_within_5f", "overshoot_f", "settle_s", "rmse_f",
-    "steady_peak_to_peak_f", "auger_on_s", "transitions_per_hour",
-    "requested_realized_load_error", "deadline_misses",
-    "stale_result_episodes", "prediction_rmse_60_c",
-    "prediction_rmse_300_c", "braking_error_c",
-    "promotions", "rollbacks",
+    "pct_within_5f",
+    "overshoot_f",
+    "settle_s",
+    "rmse_f",
+    "steady_peak_to_peak_f",
+    "auger_on_s",
+    "transitions_per_hour",
+    "requested_realized_load_error",
+    "deadline_misses",
+    "stale_result_episodes",
+    "prediction_rmse_60_c",
+    "prediction_rmse_300_c",
+    "braking_error_c",
+    "promotions",
+    "rollbacks",
 }
 ```
 

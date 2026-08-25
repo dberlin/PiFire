@@ -387,8 +387,7 @@ In `blueprints/tuner/routes.py`, above `tuner_page`:
 #: the client never asks for it. Reachable is not the same as offered.
 _RENDERABLE_FRAGMENTS = {
     name: (
-        "{% from 'tuner/_macro_tuner.html' import render_" + name + " %}"
-        "{{ render_" + name + "(settings, control) }}"
+        "{% from 'tuner/_macro_tuner.html' import render_" + name + " %}{{ render_" + name + "(settings, control) }}"
     )
     for name in (
         "manual_instruction_card",
@@ -715,9 +714,7 @@ def tuner_session():
         if moved:
             values.update({"mode": Mode.MONITOR, "updated": True})
         set_control(**values)
-        return jsonify(
-            api_response("OK", None, {"open": True, "mode": Mode.MONITOR, "restored": moved})
-        ), 200
+        return jsonify(api_response("OK", None, {"open": True, "mode": Mode.MONITOR, "restored": moved})), 200
 
     control = read_control()
     restored = control.get("mode") == Mode.MONITOR
@@ -726,7 +723,11 @@ def tuner_session():
         values.update({"mode": Mode.STOP, "updated": True})
     set_control(**values)
     return jsonify(
-        api_response("OK", None, {"open": False, "mode": control.get("mode") if not restored else Mode.STOP, "restored": restored})
+        api_response(
+            "OK",
+            None,
+            {"open": False, "mode": control.get("mode") if not restored else Mode.STOP, "restored": restored},
+        )
     ), 200
 ```
 
@@ -1053,7 +1054,7 @@ def tuner_coefficients():
                 if isinstance(entry.get(key), bool):
                     raise TypeError(key)
             by_segment[segment] = (float(entry["temp"]), float(entry["trohms"]))
-        except (TypeError, ValueError, KeyError):
+        except TypeError, ValueError, KeyError:
             return error("bad_request", 400, field="points")
 
     if set(by_segment) != set(SEGMENTS):
@@ -1071,9 +1072,7 @@ def tuner_coefficients():
     _labels, chart = calc_shh_chart(
         a, b, c, units=units, temp_range=220, tr_points=[int(high_r), int(medium_r), int(low_r)]
     )
-    return jsonify(
-        api_response("OK", None, {"a": a, "b": b, "c": c, "chart": chart, "chart_ok": bool(chart)})
-    ), 200
+    return jsonify(api_response("OK", None, {"a": a, "b": b, "c": c, "chart": chart, "chart_ok": bool(chart)})), 200
 ```
 
 - [ ] **Step 4: Run the module**

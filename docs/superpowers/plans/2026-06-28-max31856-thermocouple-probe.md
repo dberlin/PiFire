@@ -80,6 +80,7 @@ def _install_fake_adafruit(monkeypatch):
 def _load_probe(monkeypatch):
     _install_fake_adafruit(monkeypatch)
     import probes.max31856_adafruit as probe
+
     importlib.reload(probe)  # bind the fake adafruit_max31856
     return probe
 
@@ -97,18 +98,18 @@ def test_init_device_wires_bus_type_and_settings(monkeypatch):
     monkeypatch.setattr(probe, "resolve_spi_bus", fake_resolve)
 
     obj = probe.ReadProbes.__new__(probe.ReadProbes)  # bypass heavy base __init__
-    obj.device_info = {"config": {
-        "spi_bus_kind": "mcp2210", "cs": "5",
-        "tc_type": "J", "averaging": "8", "noise_rejection": "50"}}
+    obj.device_info = {
+        "config": {"spi_bus_kind": "mcp2210", "cs": "5", "tc_type": "J", "averaging": "8", "noise_rejection": "50"}
+    }
     obj._init_device()
 
     assert captured["default_cs"] == "D6"
     assert obj.device_info["ports"] == ["TC0"]
     sensor = obj.device.sensor
     assert sensor.spi == "SPI" and sensor.cs == "CS"
-    assert sensor.thermocouple_type == "TC_J"   # 'J' mapped via ThermocoupleType
-    assert sensor.averaging == 8                 # int-parsed
-    assert sensor.noise_rejection == 50          # int-parsed
+    assert sensor.thermocouple_type == "TC_J"  # 'J' mapped via ThermocoupleType
+    assert sensor.averaging == 8  # int-parsed
+    assert sensor.noise_rejection == 50  # int-parsed
 
 
 def test_init_device_defaults(monkeypatch):
@@ -120,9 +121,9 @@ def test_init_device_defaults(monkeypatch):
     obj._init_device()
 
     sensor = obj.device.sensor
-    assert sensor.thermocouple_type == "TC_K"   # default K
-    assert sensor.averaging == 1                 # default 1
-    assert sensor.noise_rejection == 60          # default 60
+    assert sensor.thermocouple_type == "TC_K"  # default K
+    assert sensor.averaging == 1  # default 1
+    assert sensor.noise_rejection == 60  # default 60
 
 
 def test_temperature_property(monkeypatch):
@@ -131,6 +132,7 @@ def test_temperature_property(monkeypatch):
 
     class S:
         temperature = 123.4
+
     dev.sensor = S()
     assert dev.temperature == 123.4
 ```
@@ -147,7 +149,7 @@ Write the file below. **Use TAB indentation** (match `probes/max31865_adafruit.p
 ```python
 #!/usr/bin/env python3
 
-'''
+"""
 *****************************************
 PiFire Probes MAX31856 Adafruit Module
 *****************************************
@@ -156,100 +158,101 @@ Description:
   This module utilizes the MAX31856 thermocouple hardware and returns
   temperature data. Depends on: pip3 install adafruit-circuitpython-max31856
 
-	Ex Device Definition:
+        Ex Device Definition:
 
-	device = {
-			'device' : 'your_device_name',	# Unique name for the device
-			'module' : 'max31856_adafruit',	# Must be populated for this module to load properly
-			'ports' : ['TC0'],				# Defined in the module
-			'config' : {
-				'cs' : 'D6',				# SPI Chip Select (board pin or MCP2210 GP index)
-				'spi_bus_kind' : 'basic',	# 'basic' (native SPI) or 'mcp2210'
-				'mcp2210_serial' : '',		# Optional MCP2210 USB serial
-				'tc_type' : 'K',			# Thermocouple type B/E/J/K/N/R/S/T (default K)
-				'averaging' : 1,			# Averaging samples 1/2/4/8/16 (default 1)
-				'noise_rejection' : 60		# Mains noise rejection 50/60 Hz (default 60)
-			}
-		}
+        device = {
+                        'device' : 'your_device_name',	# Unique name for the device
+                        'module' : 'max31856_adafruit',	# Must be populated for this module to load properly
+                        'ports' : ['TC0'],				# Defined in the module
+                        'config' : {
+                                'cs' : 'D6',				# SPI Chip Select (board pin or MCP2210 GP index)
+                                'spi_bus_kind' : 'basic',	# 'basic' (native SPI) or 'mcp2210'
+                                'mcp2210_serial' : '',		# Optional MCP2210 USB serial
+                                'tc_type' : 'K',			# Thermocouple type B/E/J/K/N/R/S/T (default K)
+                                'averaging' : 1,			# Averaging samples 1/2/4/8/16 (default 1)
+                                'noise_rejection' : 60		# Mains noise rejection 50/60 Hz (default 60)
+                        }
+                }
 
-'''
+"""
 
-'''
+"""
 *****************************************
  Imported Libraries
 *****************************************
-'''
+"""
 import logging
 import adafruit_max31856
 from probes.base import ProbeInterface, resolve_spi_bus
 
 # Config string -> adafruit_max31856.ThermocoupleType.* enum value
 _TC_TYPES = {
-	'B': adafruit_max31856.ThermocoupleType.B,
-	'E': adafruit_max31856.ThermocoupleType.E,
-	'J': adafruit_max31856.ThermocoupleType.J,
-	'K': adafruit_max31856.ThermocoupleType.K,
-	'N': adafruit_max31856.ThermocoupleType.N,
-	'R': adafruit_max31856.ThermocoupleType.R,
-	'S': adafruit_max31856.ThermocoupleType.S,
-	'T': adafruit_max31856.ThermocoupleType.T,
+    "B": adafruit_max31856.ThermocoupleType.B,
+    "E": adafruit_max31856.ThermocoupleType.E,
+    "J": adafruit_max31856.ThermocoupleType.J,
+    "K": adafruit_max31856.ThermocoupleType.K,
+    "N": adafruit_max31856.ThermocoupleType.N,
+    "R": adafruit_max31856.ThermocoupleType.R,
+    "S": adafruit_max31856.ThermocoupleType.S,
+    "T": adafruit_max31856.ThermocoupleType.T,
 }
 
-'''
+"""
 *****************************************
  Class Definitions
 *****************************************
-'''
+"""
 
-class TCDevice():
-	''' MAX31856 Thermocouple Device Based on the Adafruit Module '''
-	def __init__(self, spi, cs, tc_type='K', averaging=1, noise_rejection=60):
-		self.status = {}
-		self.sensor = adafruit_max31856.MAX31856(
-			spi, cs, thermocouple_type=_TC_TYPES[tc_type])
-		self.sensor.averaging = averaging
-		self.sensor.noise_rejection = noise_rejection
 
-	@property
-	def temperature(self):
-		return self.sensor.temperature
+class TCDevice:
+    """MAX31856 Thermocouple Device Based on the Adafruit Module"""
 
-	def get_status(self):
-		return self.status
+    def __init__(self, spi, cs, tc_type="K", averaging=1, noise_rejection=60):
+        self.status = {}
+        self.sensor = adafruit_max31856.MAX31856(spi, cs, thermocouple_type=_TC_TYPES[tc_type])
+        self.sensor.averaging = averaging
+        self.sensor.noise_rejection = noise_rejection
+
+    @property
+    def temperature(self):
+        return self.sensor.temperature
+
+    def get_status(self):
+        return self.status
+
 
 class ReadProbes(ProbeInterface):
+    def __init__(self, probe_info, device_info, units):
+        super().__init__(probe_info, device_info, units)
 
-	def __init__(self, probe_info, device_info, units):
-		super().__init__(probe_info, device_info, units)
+    def _init_device(self):
+        self.time_delay = 0
+        self.device_info["ports"] = ["TC0"]
+        config = self.device_info["config"]
+        spi, cs = resolve_spi_bus(config, default_cs="D6")
+        tc_type = config.get("tc_type", "K")
+        averaging = int(config.get("averaging", 1))
+        noise_rejection = int(config.get("noise_rejection", 60))
+        self.device = TCDevice(spi, cs, tc_type, averaging, noise_rejection)
 
-	def _init_device(self):
-		self.time_delay = 0
-		self.device_info['ports'] = ['TC0']
-		config = self.device_info['config']
-		spi, cs = resolve_spi_bus(config, default_cs='D6')
-		tc_type = config.get('tc_type', 'K')
-		averaging = int(config.get('averaging', 1))
-		noise_rejection = int(config.get('noise_rejection', 60))
-		self.device = TCDevice(spi, cs, tc_type, averaging, noise_rejection)
+    def read_all_ports(self, output_data):
+        """Read temperature from device"""
+        tempC = round(self.device.temperature, 1)
+        tempF = int(tempC * (9 / 5) + 32)  # Celsius to Fahrenheit
+        port = self.device_info["ports"][0]
 
-	def read_all_ports(self, output_data):
-		''' Read temperature from device '''
-		tempC = round(self.device.temperature, 1)
-		tempF = int(tempC * (9/5) + 32) # Celsius to Fahrenheit
-		port = self.device_info['ports'][0]
+        """ Thermocouples have no resistance reading """
+        self.output_data["tr"][self.port_map[port]] = 0
 
-		''' Thermocouples have no resistance reading '''
-		self.output_data['tr'][self.port_map[port]] = 0
+        """ Store the temperature in the output data structure """
+        if port == self.primary_port:
+            self.output_data["primary"][self.port_map[port]] = tempF if self.units == "F" else tempC
+        elif port in self.food_ports:
+            self.output_data["food"][self.port_map[port]] = tempF if self.units == "F" else tempC
+        elif port in self.aux_ports:
+            self.output_data["aux"][self.port_map[port]] = tempF if self.units == "F" else tempC
 
-		''' Store the temperature in the output data structure '''
-		if port == self.primary_port:
-			self.output_data['primary'][self.port_map[port]] = tempF if self.units == 'F' else tempC
-		elif port in self.food_ports:
-			self.output_data['food'][self.port_map[port]] = tempF if self.units == 'F' else tempC
-		elif port in self.aux_ports:
-			self.output_data['aux'][self.port_map[port]] = tempF if self.units == 'F' else tempC
-
-		return self.output_data
+        return self.output_data
 ```
 
 - [ ] **Step 4: Run the test to verify it passes**
@@ -297,8 +300,7 @@ def test_manifest_max31856_entry():
     assert ds["ports"] == ["TC0"]
 
     labels = [item["label"] for item in ds["config"]]
-    for required in ("cs", "spi_bus_kind", "mcp2210_serial",
-                     "tc_type", "averaging", "noise_rejection"):
+    for required in ("cs", "spi_bus_kind", "mcp2210_serial", "tc_type", "averaging", "noise_rejection"):
         assert required in labels
 
     tc = next(i for i in ds["config"] if i["label"] == "tc_type")

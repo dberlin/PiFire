@@ -191,6 +191,7 @@ Delete the whole `index()` route (`app.py:144-151`). After the mobile registrati
  real backend routes win over the catch-all)
 ==============================================================================
 """
+
 from blueprints.spa import spa_bp
 
 app.register_blueprint(spa_bp)
@@ -390,6 +391,7 @@ def test_server_error_template_renders(flask_app):
     # `flask_app` is the fixture name in tests/web/conftest.py (not `app`).
     with flask_app.test_request_context():
         from flask import render_template
+
         html = render_template("server_error.html")
         assert html  # non-empty, no TemplateNotFound
 ```
@@ -436,9 +438,22 @@ def test_retired_page_routes_are_gone(flask_app):
     # real Flask rule anymore. (api_wizard/api_tuner live under /api/, so the
     # bare /wizard//tuner/ checks don't touch them.)
     for prefix in (
-        "/dash", "/admin/", "/settings/", "/tuner/", "/history/", "/metrics/",
-        "/pellets/", "/recipes/", "/cookfile/", "/probeconfig/", "/manual/",
-        "/events/", "/logs/", "/manifest/", "/wizard/", "/update/",
+        "/dash",
+        "/admin/",
+        "/settings/",
+        "/tuner/",
+        "/history/",
+        "/metrics/",
+        "/pellets/",
+        "/recipes/",
+        "/cookfile/",
+        "/probeconfig/",
+        "/manual/",
+        "/events/",
+        "/logs/",
+        "/manifest/",
+        "/wizard/",
+        "/update/",
     ):
         stale = [r for r in rules if r.startswith(prefix)]
         assert not stale, f"{prefix} still routed: {stale}"

@@ -75,20 +75,20 @@ Replace the two `discover_mcp2221_devices` tests in `tests/test_i2c_bus.py` (cur
 
 ```python
 def test_discover_mcp2221_devices_lists_serials():
-	hid_mod = types_module_with(
-		enumerate=lambda vid, pid: [
-			{'serial_number': 'AAAA', 'path': b'/dev/hidraw0'},
-			{'serial_number': 'BBBB', 'path': b'/dev/hidraw1'},
-		]
-	)
-	with mock.patch.dict('sys.modules', {'hid': hid_mod}):
-		devices = i2c_bus.discover_mcp2221_devices()
-	assert devices == [{'serial': 'AAAA', 'path': b'/dev/hidraw0'}, {'serial': 'BBBB', 'path': b'/dev/hidraw1'}]
+    hid_mod = types_module_with(
+        enumerate=lambda vid, pid: [
+            {"serial_number": "AAAA", "path": b"/dev/hidraw0"},
+            {"serial_number": "BBBB", "path": b"/dev/hidraw1"},
+        ]
+    )
+    with mock.patch.dict("sys.modules", {"hid": hid_mod}):
+        devices = i2c_bus.discover_mcp2221_devices()
+    assert devices == [{"serial": "AAAA", "path": b"/dev/hidraw0"}, {"serial": "BBBB", "path": b"/dev/hidraw1"}]
 
 
 def test_discover_mcp2221_devices_empty_without_hid_module():
-	with mock.patch.dict('sys.modules', {'hid': None}):
-		assert i2c_bus.discover_mcp2221_devices() == []
+    with mock.patch.dict("sys.modules", {"hid": None}):
+        assert i2c_bus.discover_mcp2221_devices() == []
 ```
 
 Leave `_fake_mcp2221_modules` (lines 115-157) and the three `test_open_mcp2221_*` tests (lines 160-186) untouched for now — they still exercise the old `_construct_mcp2221`, which Task 4 rewrites.
@@ -105,24 +105,24 @@ In `common/i2c_bus.py`, replace lines 168-186:
 
 ```python
 def discover_mcp2221_devices():
-	"""Best-effort list of connected MCP2221 USB devices ({'serial', 'path'}),
-	for the wizard's Discover button. Returns [] if the `hid` module or the
-	Blinka MCP2221 backend aren't importable, or no devices are present --
-	never raises."""
-	try:
-		import hid
-		from adafruit_blinka.microcontroller.mcp2221 import mcp2221 as _mcp_mod
-	except ImportError:
-		return []
-	try:
-		return [
-			{'serial': info.get('serial_number'), 'path': info.get('path')}
-			for info in hid.enumerate(_mcp_mod.MCP2221.VID, _mcp_mod.MCP2221.PID)
-			if info.get('serial_number')
-		]
-	except Exception:
-		logger.debug('discover_mcp2221_devices: hid.enumerate failed', exc_info=True)
-		return []
+    """Best-effort list of connected MCP2221 USB devices ({'serial', 'path'}),
+    for the wizard's Discover button. Returns [] if the `hid` module or the
+    Blinka MCP2221 backend aren't importable, or no devices are present --
+    never raises."""
+    try:
+        import hid
+        from adafruit_blinka.microcontroller.mcp2221 import mcp2221 as _mcp_mod
+    except ImportError:
+        return []
+    try:
+        return [
+            {"serial": info.get("serial_number"), "path": info.get("path")}
+            for info in hid.enumerate(_mcp_mod.MCP2221.VID, _mcp_mod.MCP2221.PID)
+            if info.get("serial_number")
+        ]
+    except Exception:
+        logger.debug("discover_mcp2221_devices: hid.enumerate failed", exc_info=True)
+        return []
 ```
 
 with:
@@ -135,22 +135,22 @@ _MCP2221_PID = 0x00DD
 
 
 def discover_mcp2221_devices():
-	"""Best-effort list of connected MCP2221 USB devices ({'serial', 'path'}),
-	for the wizard's Discover button. Returns [] if the `hid` module isn't
-	importable, or no devices are present -- never raises."""
-	try:
-		import hid
-	except ImportError:
-		return []
-	try:
-		return [
-			{'serial': info.get('serial_number'), 'path': info.get('path')}
-			for info in hid.enumerate(_MCP2221_VID, _MCP2221_PID)
-			if info.get('serial_number')
-		]
-	except Exception:
-		logger.debug('discover_mcp2221_devices: hid.enumerate failed', exc_info=True)
-		return []
+    """Best-effort list of connected MCP2221 USB devices ({'serial', 'path'}),
+    for the wizard's Discover button. Returns [] if the `hid` module isn't
+    importable, or no devices are present -- never raises."""
+    try:
+        import hid
+    except ImportError:
+        return []
+    try:
+        return [
+            {"serial": info.get("serial_number"), "path": info.get("path")}
+            for info in hid.enumerate(_MCP2221_VID, _MCP2221_PID)
+            if info.get("serial_number")
+        ]
+    except Exception:
+        logger.debug("discover_mcp2221_devices: hid.enumerate failed", exc_info=True)
+        return []
 ```
 
 - [ ] **Step 4: Run the tests to verify they pass**
@@ -199,76 +199,76 @@ Add a fake device double and the new tests (anywhere in the file; suggested: rig
 
 ```python
 class _FakeI2CDevice:
-	"""Stand-in for an EasyMCP2221.Device -- records every I2C_write/I2C_read
-	call, returns a canned read result, and can be told to raise a canned
-	exception (simulating NotAckError etc.) instead."""
+    """Stand-in for an EasyMCP2221.Device -- records every I2C_write/I2C_read
+    call, returns a canned read result, and can be told to raise a canned
+    exception (simulating NotAckError etc.) instead."""
 
-	def __init__(self, read_result=b'', raise_exc=None):
-		self.read_result = read_result
-		self.raise_exc = raise_exc
-		self.calls = []
+    def __init__(self, read_result=b"", raise_exc=None):
+        self.read_result = read_result
+        self.raise_exc = raise_exc
+        self.calls = []
 
-	def I2C_write(self, addr, data, kind='regular', timeout_ms=20):
-		self.calls.append(('write', addr, bytes(data), kind))
-		if self.raise_exc:
-			raise self.raise_exc
+    def I2C_write(self, addr, data, kind="regular", timeout_ms=20):
+        self.calls.append(("write", addr, bytes(data), kind))
+        if self.raise_exc:
+            raise self.raise_exc
 
-	def I2C_read(self, addr, size=1, kind='regular', timeout_ms=20):
-		self.calls.append(('read', addr, size, kind))
-		if self.raise_exc:
-			raise self.raise_exc
-		return self.read_result
+    def I2C_read(self, addr, size=1, kind="regular", timeout_ms=20):
+        self.calls.append(("read", addr, size, kind))
+        if self.raise_exc:
+            raise self.raise_exc
+        return self.read_result
 
 
 def test_easymcp2221_backend_writeto_nonempty_calls_i2c_write():
-	device = _FakeI2CDevice()
-	backend = i2c_bus._EasyMCP2221Backend(device)
-	backend.writeto(0x40, b'\x01\x02')
-	assert device.calls == [('write', 0x40, b'\x01\x02', 'regular')]
+    device = _FakeI2CDevice()
+    backend = i2c_bus._EasyMCP2221Backend(device)
+    backend.writeto(0x40, b"\x01\x02")
+    assert device.calls == [("write", 0x40, b"\x01\x02", "regular")]
 
 
 def test_easymcp2221_backend_writeto_empty_does_presence_read():
-	device = _FakeI2CDevice()
-	backend = i2c_bus._EasyMCP2221Backend(device)
-	backend.writeto(0x40, b'')
-	assert device.calls == [('read', 0x40, 1, 'regular')]
+    device = _FakeI2CDevice()
+    backend = i2c_bus._EasyMCP2221Backend(device)
+    backend.writeto(0x40, b"")
+    assert device.calls == [("read", 0x40, 1, "regular")]
 
 
 def test_easymcp2221_backend_readfrom_into_fills_buffer():
-	device = _FakeI2CDevice(read_result=b'\x0a\x0b\x0c')
-	backend = i2c_bus._EasyMCP2221Backend(device)
-	buf = bytearray(3)
-	backend.readfrom_into(0x40, buf)
-	assert bytes(buf) == b'\x0a\x0b\x0c'
-	assert device.calls == [('read', 0x40, 3, 'regular')]
+    device = _FakeI2CDevice(read_result=b"\x0a\x0b\x0c")
+    backend = i2c_bus._EasyMCP2221Backend(device)
+    buf = bytearray(3)
+    backend.readfrom_into(0x40, buf)
+    assert bytes(buf) == b"\x0a\x0b\x0c"
+    assert device.calls == [("read", 0x40, 3, "regular")]
 
 
 def test_easymcp2221_backend_writeto_then_readfrom_uses_nonstop_restart():
-	device = _FakeI2CDevice(read_result=b'\xaa\xbb')
-	backend = i2c_bus._EasyMCP2221Backend(device)
-	out = bytearray(2)
-	backend.writeto_then_readfrom(0x40, b'\x00', out)
-	assert bytes(out) == b'\xaa\xbb'
-	assert device.calls == [
-		('write', 0x40, b'\x00', 'nonstop'),
-		('read', 0x40, 2, 'restart'),
-	]
+    device = _FakeI2CDevice(read_result=b"\xaa\xbb")
+    backend = i2c_bus._EasyMCP2221Backend(device)
+    out = bytearray(2)
+    backend.writeto_then_readfrom(0x40, b"\x00", out)
+    assert bytes(out) == b"\xaa\xbb"
+    assert device.calls == [
+        ("write", 0x40, b"\x00", "nonstop"),
+        ("read", 0x40, 2, "restart"),
+    ]
 
 
 def test_easymcp2221_backend_scan_collects_acking_addresses():
-	device = _FakeI2CDevice()
-	backend = i2c_bus._EasyMCP2221Backend(device)
-	assert backend.scan() == list(range(0x08, 0x78))
+    device = _FakeI2CDevice()
+    backend = i2c_bus._EasyMCP2221Backend(device)
+    assert backend.scan() == list(range(0x08, 0x78))
 
 
-@pytest.mark.parametrize('exc_cls', [NotAckError, TimeoutError, LowSCLError, LowSDAError])
+@pytest.mark.parametrize("exc_cls", [NotAckError, TimeoutError, LowSCLError, LowSDAError])
 def test_easymcp2221_backend_translates_i2c_errors_to_oserror(exc_cls):
-	device = _FakeI2CDevice(raise_exc=exc_cls('boom'))
-	backend = i2c_bus._EasyMCP2221Backend(device)
-	with pytest.raises(OSError):
-		backend.writeto(0x40, b'\x01')
-	with pytest.raises(OSError):
-		backend.readfrom_into(0x40, bytearray(1))
+    device = _FakeI2CDevice(raise_exc=exc_cls("boom"))
+    backend = i2c_bus._EasyMCP2221Backend(device)
+    with pytest.raises(OSError):
+        backend.writeto(0x40, b"\x01")
+    with pytest.raises(OSError):
+        backend.readfrom_into(0x40, bytearray(1))
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -283,77 +283,77 @@ In `common/i2c_bus.py`, insert this class right after `_LockedI2C.deinit` (after
 
 ```python
 class _EasyMCP2221Backend:
-	"""Adapt an EasyMCP2221.Device to the scan/writeto/readfrom_into/
-	writeto_then_readfrom surface _LockedI2C expects (the same surface the
-	Blinka ft232h backend provides).
+    """Adapt an EasyMCP2221.Device to the scan/writeto/readfrom_into/
+    writeto_then_readfrom surface _LockedI2C expects (the same surface the
+    Blinka ft232h backend provides).
 
-	Translates EasyMCP2221's NotAckError/TimeoutError/LowSCLError/LowSDAError
-	into OSError, which is what adafruit_bus_device.I2CDevice's device-probe
-	logic (and PiFire's own probe code) already knows how to treat as "no
-	device at this address" / "bus fault"."""
+    Translates EasyMCP2221's NotAckError/TimeoutError/LowSCLError/LowSDAError
+    into OSError, which is what adafruit_bus_device.I2CDevice's device-probe
+    logic (and PiFire's own probe code) already knows how to treat as "no
+    device at this address" / "bus fault"."""
 
-	def __init__(self, device):
-		from EasyMCP2221.exceptions import LowSCLError, LowSDAError, NotAckError, TimeoutError
+    def __init__(self, device):
+        from EasyMCP2221.exceptions import LowSCLError, LowSDAError, NotAckError, TimeoutError
 
-		self._device = device
-		self._errors = (NotAckError, TimeoutError, LowSCLError, LowSDAError)
+        self._device = device
+        self._errors = (NotAckError, TimeoutError, LowSCLError, LowSDAError)
 
-	def scan(self):
-		found = []
-		for address in range(0x08, 0x78):
-			try:
-				self._device.I2C_read(address, 1)
-			except self._errors:
-				continue
-			found.append(address)
-		return found
+    def scan(self):
+        found = []
+        for address in range(0x08, 0x78):
+            try:
+                self._device.I2C_read(address, 1)
+            except self._errors:
+                continue
+            found.append(address)
+        return found
 
-	def writeto(self, address, buffer, *, start=0, end=None, **kwargs):
-		end = len(buffer) if end is None else end
-		data = bytes(buffer[start:end])
-		try:
-			if data:
-				self._device.I2C_write(address, data)
-			else:
-				# EasyMCP2221.I2C_write rejects empty data; a zero-length
-				# writeto is only ever used as a device-presence probe
-				# (adafruit_bus_device.I2CDevice.__probe_for_device), so a
-				# 1-byte read serves the same purpose.
-				self._device.I2C_read(address, 1)
-		except self._errors as exc:
-			raise OSError(str(exc)) from exc
+    def writeto(self, address, buffer, *, start=0, end=None, **kwargs):
+        end = len(buffer) if end is None else end
+        data = bytes(buffer[start:end])
+        try:
+            if data:
+                self._device.I2C_write(address, data)
+            else:
+                # EasyMCP2221.I2C_write rejects empty data; a zero-length
+                # writeto is only ever used as a device-presence probe
+                # (adafruit_bus_device.I2CDevice.__probe_for_device), so a
+                # 1-byte read serves the same purpose.
+                self._device.I2C_read(address, 1)
+        except self._errors as exc:
+            raise OSError(str(exc)) from exc
 
-	def readfrom_into(self, address, buffer, *, start=0, end=None, **kwargs):
-		end = len(buffer) if end is None else end
-		try:
-			data = self._device.I2C_read(address, end - start)
-		except self._errors as exc:
-			raise OSError(str(exc)) from exc
-		buffer[start:end] = data
+    def readfrom_into(self, address, buffer, *, start=0, end=None, **kwargs):
+        end = len(buffer) if end is None else end
+        try:
+            data = self._device.I2C_read(address, end - start)
+        except self._errors as exc:
+            raise OSError(str(exc)) from exc
+        buffer[start:end] = data
 
-	def writeto_then_readfrom(
-		self, address, out_buffer, in_buffer, *, out_start=0, out_end=None, in_start=0, in_end=None, **kwargs
-	):
-		out_end = len(out_buffer) if out_end is None else out_end
-		in_end = len(in_buffer) if in_end is None else in_end
-		try:
-			self._device.I2C_write(address, bytes(out_buffer[out_start:out_end]), kind='nonstop')
-			data = self._device.I2C_read(address, in_end - in_start, kind='restart')
-		except self._errors as exc:
-			raise OSError(str(exc)) from exc
-		in_buffer[in_start:in_end] = data
+    def writeto_then_readfrom(
+        self, address, out_buffer, in_buffer, *, out_start=0, out_end=None, in_start=0, in_end=None, **kwargs
+    ):
+        out_end = len(out_buffer) if out_end is None else out_end
+        in_end = len(in_buffer) if in_end is None else in_end
+        try:
+            self._device.I2C_write(address, bytes(out_buffer[out_start:out_end]), kind="nonstop")
+            data = self._device.I2C_read(address, in_end - in_start, kind="restart")
+        except self._errors as exc:
+            raise OSError(str(exc)) from exc
+        in_buffer[in_start:in_end] = data
 ```
 
 Also update `_LockedI2C`'s docstring (line 291-296) to no longer claim every wrapped backend is a Blinka backend:
 
 ```python
 class _LockedI2C:
-	"""Wrap an I2C backend (Blinka's ft232h backend, or an EasyMCP2221
-	backend for mcp2221) so Adafruit drivers can use it.
+    """Wrap an I2C backend (Blinka's ft232h backend, or an EasyMCP2221
+    backend for mcp2221) so Adafruit drivers can use it.
 
-	The backend classes expose scan/writeto/readfrom_into/writeto_then_readfrom
-	but not try_lock/unlock, which adafruit_bus_device.I2CDevice requires. Add a
-	reentrant lock and delegate I/O to the backend."""
+    The backend classes expose scan/writeto/readfrom_into/writeto_then_readfrom
+    but not try_lock/unlock, which adafruit_bus_device.I2CDevice requires. Add a
+    reentrant lock and delegate I/O to the backend."""
 ```
 
 - [ ] **Step 4: Run the tests to verify they pass**
@@ -398,73 +398,73 @@ Replace them with:
 
 ```python
 def _fake_easymcp2221_module(not_found_serials=frozenset()):
-	"""Build a fake EasyMCP2221 module exposing a Device class that records
-	every (usbserial, scan_serial) construction as its own independent
-	instance -- never a shared singleton, which is the whole point of this
-	swap -- and raises RuntimeError like the real library when usbserial is
-	in not_found_serials.
+    """Build a fake EasyMCP2221 module exposing a Device class that records
+    every (usbserial, scan_serial) construction as its own independent
+    instance -- never a shared singleton, which is the whole point of this
+    swap -- and raises RuntimeError like the real library when usbserial is
+    in not_found_serials.
 
-	Returns (modules_dict_for_sys_modules, the fake Device class)."""
-	import types
+    Returns (modules_dict_for_sys_modules, the fake Device class)."""
+    import types
 
-	class _FakeDevice:
-		instances = []
+    class _FakeDevice:
+        instances = []
 
-		def __init__(self, usbserial=None, scan_serial=False):
-			if usbserial in not_found_serials:
-				raise RuntimeError(f'No device found with serial number {usbserial}.')
-			self.usbserial = usbserial
-			self.scan_serial = scan_serial
-			_FakeDevice.instances.append(self)
+        def __init__(self, usbserial=None, scan_serial=False):
+            if usbserial in not_found_serials:
+                raise RuntimeError(f"No device found with serial number {usbserial}.")
+            self.usbserial = usbserial
+            self.scan_serial = scan_serial
+            _FakeDevice.instances.append(self)
 
-	mod = types.ModuleType('EasyMCP2221')
-	mod.Device = _FakeDevice
-	return {'EasyMCP2221': mod}, _FakeDevice
+    mod = types.ModuleType("EasyMCP2221")
+    mod.Device = _FakeDevice
+    return {"EasyMCP2221": mod}, _FakeDevice
 
 
 def test_open_mcp2221_no_selector_constructs_backend():
-	modules, FakeDevice = _fake_easymcp2221_module()
-	with mock.patch.dict('sys.modules', modules):
-		bus = i2c_bus.open_i2c_bus('mcp2221', '')
-	assert isinstance(bus, i2c_bus._LockedI2C)
-	assert len(FakeDevice.instances) == 1
-	assert FakeDevice.instances[0].usbserial is None
-	assert FakeDevice.instances[0].scan_serial is False
+    modules, FakeDevice = _fake_easymcp2221_module()
+    with mock.patch.dict("sys.modules", modules):
+        bus = i2c_bus.open_i2c_bus("mcp2221", "")
+    assert isinstance(bus, i2c_bus._LockedI2C)
+    assert len(FakeDevice.instances) == 1
+    assert FakeDevice.instances[0].usbserial is None
+    assert FakeDevice.instances[0].scan_serial is False
 
 
 def test_open_mcp2221_selector_opens_matching_serial():
-	modules, FakeDevice = _fake_easymcp2221_module()
-	with mock.patch.dict('sys.modules', modules):
-		bus = i2c_bus.open_i2c_bus('mcp2221', 'BBBB')
-	assert isinstance(bus, i2c_bus._LockedI2C)
-	assert len(FakeDevice.instances) == 1
-	assert FakeDevice.instances[0].usbserial == 'BBBB'
-	assert FakeDevice.instances[0].scan_serial is True
+    modules, FakeDevice = _fake_easymcp2221_module()
+    with mock.patch.dict("sys.modules", modules):
+        bus = i2c_bus.open_i2c_bus("mcp2221", "BBBB")
+    assert isinstance(bus, i2c_bus._LockedI2C)
+    assert len(FakeDevice.instances) == 1
+    assert FakeDevice.instances[0].usbserial == "BBBB"
+    assert FakeDevice.instances[0].scan_serial is True
 
 
 def test_open_mcp2221_selector_not_found_raises():
-	modules, FakeDevice = _fake_easymcp2221_module(not_found_serials={'ZZZZ'})
-	with mock.patch.dict('sys.modules', modules):
-		with pytest.raises(i2c_bus.I2CBusConfigError):
-			i2c_bus.open_i2c_bus('mcp2221', 'ZZZZ')
+    modules, FakeDevice = _fake_easymcp2221_module(not_found_serials={"ZZZZ"})
+    with mock.patch.dict("sys.modules", modules):
+        with pytest.raises(i2c_bus.I2CBusConfigError):
+            i2c_bus.open_i2c_bus("mcp2221", "ZZZZ")
 
 
 def test_open_mcp2221_two_selectors_stay_independently_live():
-	"""Regression test for the bug this whole change fixes: Blinka's MCP2221
-	backend was a single process-wide singleton, so opening a second serial
-	silently re-pointed the first bus's HID handle at the second device.
-	EasyMCP2221.Device is per-adapter, so two different selectors must
-	produce two distinct, independently-live Device instances."""
-	modules, FakeDevice = _fake_easymcp2221_module()
-	with mock.patch.dict('sys.modules', modules):
-		bus_a = i2c_bus.open_i2c_bus('mcp2221', 'AAAA')
-		bus_b = i2c_bus.open_i2c_bus('mcp2221', 'BBBB')
-	assert bus_a is not bus_b
-	assert len(FakeDevice.instances) == 2
-	dev_a, dev_b = FakeDevice.instances
-	assert dev_a is not dev_b
-	assert dev_a.usbserial == 'AAAA'
-	assert dev_b.usbserial == 'BBBB'
+    """Regression test for the bug this whole change fixes: Blinka's MCP2221
+    backend was a single process-wide singleton, so opening a second serial
+    silently re-pointed the first bus's HID handle at the second device.
+    EasyMCP2221.Device is per-adapter, so two different selectors must
+    produce two distinct, independently-live Device instances."""
+    modules, FakeDevice = _fake_easymcp2221_module()
+    with mock.patch.dict("sys.modules", modules):
+        bus_a = i2c_bus.open_i2c_bus("mcp2221", "AAAA")
+        bus_b = i2c_bus.open_i2c_bus("mcp2221", "BBBB")
+    assert bus_a is not bus_b
+    assert len(FakeDevice.instances) == 2
+    dev_a, dev_b = FakeDevice.instances
+    assert dev_a is not dev_b
+    assert dev_a.usbserial == "AAAA"
+    assert dev_b.usbserial == "BBBB"
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -479,57 +479,57 @@ In `common/i2c_bus.py`, replace lines 357-386:
 
 ```python
 def _construct_mcp2221(selector):
-	from adafruit_blinka.microcontroller.mcp2221 import mcp2221 as _mcp_mod
-	from adafruit_blinka.microcontroller.mcp2221.i2c import I2C as _MCP2221_I2C
+    from adafruit_blinka.microcontroller.mcp2221 import mcp2221 as _mcp_mod
+    from adafruit_blinka.microcontroller.mcp2221.i2c import I2C as _MCP2221_I2C
 
-	if selector:
-		# Point the Blinka MCP2221 singleton at the adapter with this serial.
-		logger.debug('open_i2c_bus[mcp2221]: selecting MCP2221 with serial=%r', selector)
-		import hid
+    if selector:
+        # Point the Blinka MCP2221 singleton at the adapter with this serial.
+        logger.debug("open_i2c_bus[mcp2221]: selecting MCP2221 with serial=%r", selector)
+        import hid
 
-		path = None
-		for info in hid.enumerate(_mcp_mod.MCP2221.VID, _mcp_mod.MCP2221.PID):
-			if info.get('serial_number') == str(selector):
-				path = info['path']
-				break
-		if path is None:
-			raise I2CBusConfigError(f'No MCP2221 found with serial {selector!r}.')
-		logger.debug('open_i2c_bus[mcp2221]: serial %r -> hid path %r', selector, path)
-		handle = _mcp_mod.mcp2221._hid
-		try:
-			handle.close()
-		except Exception:
-			pass
-		handle.open_path(path)
-	else:
-		logger.debug(
-			'open_i2c_bus[mcp2221]: opening first MCP2221 (VID 0x%04X / PID 0x%04X)',
-			_mcp_mod.MCP2221.VID,
-			_mcp_mod.MCP2221.PID,
-		)
-	return _LockedI2C(_MCP2221_I2C())
+        path = None
+        for info in hid.enumerate(_mcp_mod.MCP2221.VID, _mcp_mod.MCP2221.PID):
+            if info.get("serial_number") == str(selector):
+                path = info["path"]
+                break
+        if path is None:
+            raise I2CBusConfigError(f"No MCP2221 found with serial {selector!r}.")
+        logger.debug("open_i2c_bus[mcp2221]: serial %r -> hid path %r", selector, path)
+        handle = _mcp_mod.mcp2221._hid
+        try:
+            handle.close()
+        except Exception:
+            pass
+        handle.open_path(path)
+    else:
+        logger.debug(
+            "open_i2c_bus[mcp2221]: opening first MCP2221 (VID 0x%04X / PID 0x%04X)",
+            _mcp_mod.MCP2221.VID,
+            _mcp_mod.MCP2221.PID,
+        )
+    return _LockedI2C(_MCP2221_I2C())
 ```
 
 with:
 
 ```python
 def _construct_mcp2221(selector):
-	from EasyMCP2221 import Device as _MCP2221Device
+    from EasyMCP2221 import Device as _MCP2221Device
 
-	try:
-		if selector:
-			logger.debug('open_i2c_bus[mcp2221]: opening MCP2221 with serial=%r', selector)
-			device = _MCP2221Device(usbserial=str(selector), scan_serial=True)
-		else:
-			logger.debug(
-				'open_i2c_bus[mcp2221]: opening first MCP2221 (VID 0x%04X / PID 0x%04X)',
-				_MCP2221_VID,
-				_MCP2221_PID,
-			)
-			device = _MCP2221Device()
-	except RuntimeError as exc:
-		raise I2CBusConfigError(str(exc)) from exc
-	return _LockedI2C(_EasyMCP2221Backend(device))
+    try:
+        if selector:
+            logger.debug("open_i2c_bus[mcp2221]: opening MCP2221 with serial=%r", selector)
+            device = _MCP2221Device(usbserial=str(selector), scan_serial=True)
+        else:
+            logger.debug(
+                "open_i2c_bus[mcp2221]: opening first MCP2221 (VID 0x%04X / PID 0x%04X)",
+                _MCP2221_VID,
+                _MCP2221_PID,
+            )
+            device = _MCP2221Device()
+    except RuntimeError as exc:
+        raise I2CBusConfigError(str(exc)) from exc
+    return _LockedI2C(_EasyMCP2221Backend(device))
 ```
 
 `RuntimeError` is what `EasyMCP2221.Device.__init__` raises both when no MCP2221 is connected at all and when a given serial isn't found — translating it to `I2CBusConfigError` preserves the old function's contract (a typed, "this configuration cannot work on this host" error) for callers/tests that already expect it.

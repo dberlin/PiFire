@@ -40,7 +40,7 @@ Add to `tests/test_mpc_integration.py`:
 def test_controller_base_wants_async_default_false():
     from controller.base import ControllerBase
 
-    cb = ControllerBase({}, 'C', {})
+    cb = ControllerBase({}, "C", {})
     assert cb.wants_async() is False
 ```
 
@@ -88,20 +88,22 @@ In `controller/runtime/runner.py`, add two abstract methods to `ControllerRunner
 ```
 and implement them on `SyncControllerRunner`:
 ```python
-    def wants_async(self):
-        return self._core.wants_async()
+def wants_async(self):
+    return self._core.wants_async()
 
-    def stop(self):
-        pass
+
+def stop(self):
+    pass
 ```
 
 In `tests/fakes/runner.py`, extend `FakeControllerRunner.__init__` signature to `def __init__(self, period=None, commands_fan=False, wants_async=False):`, store `self._wants_async = wants_async`, and add:
 ```python
-    def wants_async(self):
-        return self._wants_async
+def wants_async(self):
+    return self._wants_async
 
-    def stop(self):
-        pass
+
+def stop(self):
+    pass
 ```
 
 - [ ] **Step 4: Run the tests to verify they pass**
@@ -160,7 +162,7 @@ class FakeCore:
         self.target = None
         self.updates = []
         self.updated = threading.Event()
-        self.tag = 'core-a'
+        self.tag = "core-a"
 
     def get_control_period(self):
         return self._period
@@ -177,7 +179,7 @@ class FakeCore:
     def update(self, temp):
         self.updates.append(temp)
         self.updated.set()
-        return {'cycle_ratio': self._ratio, 'fan': None}
+        return {"cycle_ratio": self._ratio, "fan": None}
 
 
 class BlockingCore(FakeCore):
@@ -260,7 +262,7 @@ def test_threaded_runner_controller_state_snapshot():
     r = ThreadedControllerRunner(core)
     try:
         snap = r.controller_state()
-        assert snap['tag'] == 'core-a'  # well-formed before first solve
+        assert snap["tag"] == "core-a"  # well-formed before first solve
         assert snap is not core.__dict__  # a copy, not the live dict
     finally:
         r.stop()
@@ -271,11 +273,11 @@ def test_build_runner_selects_threaded_for_wants_async_core(monkeypatch):
 
     core = FakeCore()  # wants_async() -> True
 
-    monkeypatch.setattr(runner_mod, '_build_core', lambda *a, **k: (core, 'Active'))
+    monkeypatch.setattr(runner_mod, "_build_core", lambda *a, **k: (core, "Active"))
     r, status = build_runner({}, {})
     try:
         assert isinstance(r, ThreadedControllerRunner)
-        assert status == 'Active'
+        assert status == "Active"
     finally:
         r.stop()
 
@@ -287,7 +289,7 @@ def test_build_runner_selects_sync_for_non_async_core(monkeypatch):
         def wants_async(self):
             return False
 
-    monkeypatch.setattr(runner_mod, '_build_core', lambda *a, **k: (SyncCore(), 'Active'))
+    monkeypatch.setattr(runner_mod, "_build_core", lambda *a, **k: (SyncCore(), "Active"))
     r, status = build_runner({}, {})
     assert isinstance(r, SyncControllerRunner)
     r.stop()  # no-op
@@ -360,7 +362,7 @@ class ThreadedControllerRunner(ControllerRunner):
 
     def reconfigure(self, settings, control, logger=None):
         core, status = _build_core(settings, control, logger=logger)
-        if status == 'Active':
+        if status == "Active":
             with self._lock:
                 self._pending_core = core
         return status

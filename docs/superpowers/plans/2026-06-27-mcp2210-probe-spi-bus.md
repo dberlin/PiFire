@@ -58,6 +58,7 @@ import mcp2210
 
 # --- _gp_index ---
 
+
 def test_gp_index_parses_all_forms():
     assert base._gp_index(3) == 3
     assert base._gp_index("3") == 3
@@ -77,6 +78,7 @@ def test_gp_index_rejects_non_numeric():
 
 # --- resolve_mcp2210 caching ---
 
+
 def test_resolve_mcp2210_caches_per_serial(monkeypatch):
     base._MCP2210_CACHE.clear()
     created = []
@@ -88,10 +90,10 @@ def test_resolve_mcp2210_caches_per_serial(monkeypatch):
 
     monkeypatch.setattr(mcp2210, "MCP2210", FakeMCP)
     a = base.resolve_mcp2210(None)
-    b = base.resolve_mcp2210("")        # same canonical key as None
+    b = base.resolve_mcp2210("")  # same canonical key as None
     c = base.resolve_mcp2210(None)
-    assert a is b is c                  # one shared instance
-    assert created == [None]            # constructed exactly once
+    assert a is b is c  # one shared instance
+    assert created == [None]  # constructed exactly once
     d = base.resolve_mcp2210("ABC")
     assert d is not a
     assert created == [None, "ABC"]
@@ -100,20 +102,22 @@ def test_resolve_mcp2210_caches_per_serial(monkeypatch):
 
 # --- resolve_spi_bus: mcp2210 path ---
 
+
 def test_resolve_spi_bus_mcp2210(monkeypatch):
     class FakeMCP:
         spi = "SPIBUS"
+
         def digital_inout(self, n):
             return ("CS", n)
 
     monkeypatch.setattr(base, "resolve_mcp2210", lambda serial=None: FakeMCP())
-    spi, cs = base.resolve_spi_bus(
-        {"spi_bus_kind": "mcp2210", "cs": "5"}, default_cs="D6")
+    spi, cs = base.resolve_spi_bus({"spi_bus_kind": "mcp2210", "cs": "5"}, default_cs="D6")
     assert spi == "SPIBUS"
     assert cs == ("CS", 5)
 
 
 # --- resolve_spi_bus: basic path (regression for the GPIOn KeyError bug) ---
+
 
 def _install_fake_board(monkeypatch):
     fake_board = types.ModuleType("board")
@@ -133,8 +137,7 @@ def _install_fake_board(monkeypatch):
 
 def test_resolve_spi_bus_basic_stored_gpio_value(monkeypatch):
     dio = _install_fake_board(monkeypatch)
-    spi, cs = base.resolve_spi_bus(
-        {"spi_bus_kind": "basic", "cs": "GPIO6"}, default_cs="D6")
+    spi, cs = base.resolve_spi_bus({"spi_bus_kind": "basic", "cs": "GPIO6"}, default_cs="D6")
     assert spi == "BOARD_SPI"
     assert isinstance(cs, dio) and cs.pin == "BOARD_D6"
 
@@ -161,21 +164,20 @@ Expected: FAIL — `AttributeError: module 'probes.base' has no attribute '_gp_i
 Insert this block in `probes/base.py` **immediately after** the `resolve_i2c_bus` function and **before** the `## Class Definitions` banner comment. **Use TAB indentation** (the file uses tabs):
 
 ```python
-'''
+"""
 *****************************************
  SPI Bus Helpers
 *****************************************
-'''
+"""
 
 # Stored chip-select value -> board pin attribute name. The wizard stores the
 # `list_values` entry, which for this field is the BCM name 'GPIOn'; the 'Dn'
 # Adafruit name is accepted too so a legacy stored value or an in-code default
 # still resolves. 'GPIO6' and 'D6' are the same physical pin (board.D6).
 _SPI_CS_BOARD_PINS = {}
-for _spi_cs_n in (2, 3, 4, 5, 6, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                  23, 24, 25, 26, 27):
-	_SPI_CS_BOARD_PINS[f'GPIO{_spi_cs_n}'] = f'D{_spi_cs_n}'
-	_SPI_CS_BOARD_PINS[f'D{_spi_cs_n}'] = f'D{_spi_cs_n}'
+for _spi_cs_n in (2, 3, 4, 5, 6, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27):
+    _SPI_CS_BOARD_PINS[f"GPIO{_spi_cs_n}"] = f"D{_spi_cs_n}"
+    _SPI_CS_BOARD_PINS[f"D{_spi_cs_n}"] = f"D{_spi_cs_n}"
 del _spi_cs_n
 
 # Cache of opened MCP2210 bridges, keyed by serial. A USB-HID handle can be
@@ -184,66 +186,66 @@ _MCP2210_CACHE = {}
 
 
 def resolve_mcp2210(serial=None):
-	'''
-	Open (and cache) a single MCP2210 USB-to-SPI bridge per serial and return
-	the shared instance. The MCP2210 HID handle can be opened only once, so
-	probes sharing a bridge must share one instance; the cache guarantees that.
-	serial=None or '' selects the first MCP2210 by VID/PID (0x04D8/0x00DE) and is
-	cached under one canonical key.
-	'''
-	key = serial or ''  # None and '' both mean "the first/only bridge"
-	if key not in _MCP2210_CACHE:
-		from mcp2210 import MCP2210
-		_MCP2210_CACHE[key] = MCP2210(serial=serial or None)
-	return _MCP2210_CACHE[key]
+    """
+    Open (and cache) a single MCP2210 USB-to-SPI bridge per serial and return
+    the shared instance. The MCP2210 HID handle can be opened only once, so
+    probes sharing a bridge must share one instance; the cache guarantees that.
+    serial=None or '' selects the first MCP2210 by VID/PID (0x04D8/0x00DE) and is
+    cached under one canonical key.
+    """
+    key = serial or ""  # None and '' both mean "the first/only bridge"
+    if key not in _MCP2210_CACHE:
+        from mcp2210 import MCP2210
+
+        _MCP2210_CACHE[key] = MCP2210(serial=serial or None)
+    return _MCP2210_CACHE[key]
 
 
 def _gp_index(cs):
-	'''
-	Parse an MCP2210 GPIO chip-select spec to an int 0-8. Accepts 0-8, 'GP3', or
-	'GPIO3'. Raises ValueError for anything else, so a misconfigured CS fails
-	clearly rather than driving the wrong pin.
-	'''
-	text = str(cs).strip().upper()
-	if text.startswith('GPIO'):
-		text = text[4:]
-	elif text.startswith('GP'):
-		text = text[2:]
-	if not text.isdigit():
-		raise ValueError(f'Invalid MCP2210 chip-select {cs!r}; expected GP0-GP8')
-	index = int(text)
-	if not 0 <= index <= 8:
-		raise ValueError(f'MCP2210 chip-select out of range: {cs!r} (GP0-GP8)')
-	return index
+    """
+    Parse an MCP2210 GPIO chip-select spec to an int 0-8. Accepts 0-8, 'GP3', or
+    'GPIO3'. Raises ValueError for anything else, so a misconfigured CS fails
+    clearly rather than driving the wrong pin.
+    """
+    text = str(cs).strip().upper()
+    if text.startswith("GPIO"):
+        text = text[4:]
+    elif text.startswith("GP"):
+        text = text[2:]
+    if not text.isdigit():
+        raise ValueError(f"Invalid MCP2210 chip-select {cs!r}; expected GP0-GP8")
+    index = int(text)
+    if not 0 <= index <= 8:
+        raise ValueError(f"MCP2210 chip-select out of range: {cs!r} (GP0-GP8)")
+    return index
 
 
 def resolve_spi_bus(config, default_cs):
-	'''
-	Build the (spi, chip_select) pair for an SPI probe from its config dict.
-	  spi_bus_kind 'basic'   -> board.SPI() + digitalio.DigitalInOut(board pin)
-	  spi_bus_kind 'mcp2210' -> shared MCP2210.spi + mcp.digital_inout(GP index)
-	Reads standardized keys: spi_bus_kind (default 'basic'), cs (default
-	`default_cs`), mcp2210_serial (default ''). Returns objects ready for an
-	adafruit_bus_device / SPIDevice-based sensor constructor. Raises ValueError
-	on an unknown spi_bus_kind or an unknown board chip-select. board/digitalio
-	are imported lazily so this module imports without Blinka present.
-	'''
-	kind = config.get('spi_bus_kind', 'basic')
-	cs = config.get('cs', default_cs)
-	if kind == 'mcp2210':
-		mcp = resolve_mcp2210(config.get('mcp2210_serial') or None)
-		return mcp.spi, mcp.digital_inout(_gp_index(cs))
-	if kind == 'basic':
-		import board
-		import digitalio
-		try:
-			pin_attr = _SPI_CS_BOARD_PINS[cs]
-		except KeyError:
-			raise ValueError(
-				f'Unknown SPI chip-select {cs!r} for native board.SPI()')
-		return board.SPI(), digitalio.DigitalInOut(getattr(board, pin_attr))
-	raise ValueError(
-		f'Unknown spi_bus_kind {kind!r}; expected "basic" or "mcp2210"')
+    """
+    Build the (spi, chip_select) pair for an SPI probe from its config dict.
+      spi_bus_kind 'basic'   -> board.SPI() + digitalio.DigitalInOut(board pin)
+      spi_bus_kind 'mcp2210' -> shared MCP2210.spi + mcp.digital_inout(GP index)
+    Reads standardized keys: spi_bus_kind (default 'basic'), cs (default
+    `default_cs`), mcp2210_serial (default ''). Returns objects ready for an
+    adafruit_bus_device / SPIDevice-based sensor constructor. Raises ValueError
+    on an unknown spi_bus_kind or an unknown board chip-select. board/digitalio
+    are imported lazily so this module imports without Blinka present.
+    """
+    kind = config.get("spi_bus_kind", "basic")
+    cs = config.get("cs", default_cs)
+    if kind == "mcp2210":
+        mcp = resolve_mcp2210(config.get("mcp2210_serial") or None)
+        return mcp.spi, mcp.digital_inout(_gp_index(cs))
+    if kind == "basic":
+        import board
+        import digitalio
+
+        try:
+            pin_attr = _SPI_CS_BOARD_PINS[cs]
+        except KeyError:
+            raise ValueError(f"Unknown SPI chip-select {cs!r} for native board.SPI()")
+        return board.SPI(), digitalio.DigitalInOut(getattr(board, pin_attr))
+    raise ValueError(f'Unknown spi_bus_kind {kind!r}; expected "basic" or "mcp2210"')
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -292,6 +294,7 @@ def test_max31865_init_device_uses_resolver(monkeypatch):
 
     import importlib
     import probes.max31865_adafruit as probe
+
     importlib.reload(probe)  # bind the fake adafruit_max31865
 
     captured = {}
@@ -304,9 +307,9 @@ def test_max31865_init_device_uses_resolver(monkeypatch):
     monkeypatch.setattr(probe, "resolve_spi_bus", fake_resolve)
 
     obj = probe.ReadProbes.__new__(probe.ReadProbes)  # bypass heavy base __init__
-    obj.device_info = {"config": {
-        "spi_bus_kind": "mcp2210", "cs": "5",
-        "rtd_nominal": "1000", "ref_resistor": "430", "wires": "3"}}
+    obj.device_info = {
+        "config": {"spi_bus_kind": "mcp2210", "cs": "5", "rtd_nominal": "1000", "ref_resistor": "430", "wires": "3"}
+    }
     obj._init_device()
 
     assert captured["default_cs"] == "D6"
@@ -329,57 +332,60 @@ Replace the file's imports/`LOOKUP_TABLE`/`RTDDevice`/`_init_device` so it reads
 Replace lines 28–108 (the imports block through the end of `_init_device`) with:
 
 ```python
-'''
+"""
 *****************************************
  Imported Libraries
 *****************************************
-'''
+"""
+
 import logging
 import adafruit_max31865
 from probes.base import ProbeInterface, resolve_spi_bus
 
-'''
+"""
 *****************************************
  Class Definitions
 *****************************************
-'''
+"""
 
-class RTDDevice():
-	''' MAX31865 Device Based on the Adafruit Module '''
-	def __init__(self, spi, cs, rtd_nominal=1000, ref_resistor=4300, wires=2):
-		self.wires = wires
-		self.rtd_nominal = rtd_nominal
-		self.ref_resistor = ref_resistor
-		self.status = {}
-		self.sensor = adafruit_max31865.MAX31865(
-			spi, cs, rtd_nominal=self.rtd_nominal,
-			ref_resistor=self.ref_resistor, wires=self.wires)
 
-	@property
-	def temperature(self):
-		return self.sensor.temperature
+class RTDDevice:
+    """MAX31865 Device Based on the Adafruit Module"""
 
-	@property
-	def resistance(self):
-		return self.sensor.resistance
+    def __init__(self, spi, cs, rtd_nominal=1000, ref_resistor=4300, wires=2):
+        self.wires = wires
+        self.rtd_nominal = rtd_nominal
+        self.ref_resistor = ref_resistor
+        self.status = {}
+        self.sensor = adafruit_max31865.MAX31865(
+            spi, cs, rtd_nominal=self.rtd_nominal, ref_resistor=self.ref_resistor, wires=self.wires
+        )
 
-	def get_status(self):
-		return self.status
+    @property
+    def temperature(self):
+        return self.sensor.temperature
+
+    @property
+    def resistance(self):
+        return self.sensor.resistance
+
+    def get_status(self):
+        return self.status
+
 
 class ReadProbes(ProbeInterface):
+    def __init__(self, probe_info, device_info, units):
+        super().__init__(probe_info, device_info, units)
 
-	def __init__(self, probe_info, device_info, units):
-		super().__init__(probe_info, device_info, units)
-
-	def _init_device(self):
-		self.time_delay = 0
-		self.device_info['ports'] = ['RTD0']
-		config = self.device_info['config']
-		spi, cs = resolve_spi_bus(config, default_cs='D6')
-		rtd_nominal = int(config.get('rtd_nominal', 1000))
-		ref_resistor = int(config.get('ref_resistor', 4300))
-		wires = int(config.get('wires', 2))
-		self.device = RTDDevice(spi, cs, rtd_nominal, ref_resistor, wires)
+    def _init_device(self):
+        self.time_delay = 0
+        self.device_info["ports"] = ["RTD0"]
+        config = self.device_info["config"]
+        spi, cs = resolve_spi_bus(config, default_cs="D6")
+        rtd_nominal = int(config.get("rtd_nominal", 1000))
+        ref_resistor = int(config.get("ref_resistor", 4300))
+        wires = int(config.get("wires", 2))
+        self.device = RTDDevice(spi, cs, rtd_nominal, ref_resistor, wires)
 ```
 
 Leave `read_all_ports` (and everything after it) exactly as it is.
@@ -429,8 +435,7 @@ def test_manifest_max31865_has_spi_bus_fields():
     assert "spi_bus_kind" in labels
     assert "mcp2210_serial" in labels
 
-    kind = next(i for i in entry["device_specific"]["config"]
-                if i["label"] == "spi_bus_kind")
+    kind = next(i for i in entry["device_specific"]["config"] if i["label"] == "spi_bus_kind")
     assert kind["list_values"] == ["basic", "mcp2210"]
     assert kind["default"] == "basic"
 

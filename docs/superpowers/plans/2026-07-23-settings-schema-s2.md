@@ -101,10 +101,7 @@ class SettingsValidationError(ValueError):
 
 
 def _format_errors(exc: ValidationError) -> list[str]:
-    return [
-        f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}"
-        for err in exc.errors()
-    ]
+    return [f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in exc.errors()]
 
 
 def validate_settings_tree(settings: dict) -> dict:
@@ -210,11 +207,17 @@ def _assert_store_strict(read_settings):
 
 def test_settings_safety_post_writes_strict(client_and_store):
     client, read_settings = client_and_store
-    client.post("/settings/safety", data={
-        "minstartuptemp": "75", "maxstartuptemp": "100", "maxtemp": "550",
-        "reigniteretries": "1", "startup_check": "on",
-        "manual_override_time": "30",
-    })
+    client.post(
+        "/settings/safety",
+        data={
+            "minstartuptemp": "75",
+            "maxstartuptemp": "100",
+            "maxtemp": "550",
+            "reigniteretries": "1",
+            "startup_check": "on",
+            "manual_override_time": "30",
+        },
+    )
     _assert_store_strict(read_settings)
 ```
 

@@ -18,9 +18,9 @@ from mcp2210 import MCP2210
 from adafruit_bus_device.spi_device import SPIDevice
 import adafruit_max31865
 
-mcp = MCP2210()                      # opens first MCP2210 by VID/PID
-spi = mcp.spi                        # busio.SPI-compatible bus
-cs  = mcp.get_pin(0)                 # digitalio-compatible CS on GP0
+mcp = MCP2210()  # opens first MCP2210 by VID/PID
+spi = mcp.spi  # busio.SPI-compatible bus
+cs = mcp.get_pin(0)  # digitalio-compatible CS on GP0
 sensor = adafruit_max31865.MAX31865(spi, cs)
 print(sensor.temperature)
 ```

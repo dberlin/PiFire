@@ -500,6 +500,7 @@ No other status codes.
           assert isinstance(pellets["woods"], list)
           assert isinstance(pellets["log"], dict)
 
+
       def test_post_pellets_edit_brands_round_trip(live_server, page):
           add = page.request.post(
               f"{live_server}/api/pellets",
@@ -516,20 +517,18 @@ No other status codes.
           assert rm.status == 200
           assert "REST Brand" not in read_pellets_from_server()["brands"]
 
+
       def test_post_pellets_unknown_action(live_server, page):
-          resp = page.request.post(
-              f"{live_server}/api/pellets", data={"action": "nope", "data": {}}
-          )
+          resp = page.request.post(f"{live_server}/api/pellets", data={"action": "nope", "data": {}})
           assert resp.status == 200
           body = resp.json()
           assert body["result"] == "Error"
           assert body["message"] == "Error: Received request without valid action"
 
+
       def test_post_pellets_hopper_check_sets_control_flag(live_server, page):
           apply_control(lambda c: c.__setitem__("hopper_check", False))
-          resp = page.request.post(
-              f"{live_server}/api/pellets", data={"action": "hopper_check", "data": {}}
-          )
+          resp = page.request.post(f"{live_server}/api/pellets", data={"action": "hopper_check", "data": {}})
           assert resp.json()["result"] == "OK"
           drain_control_writes()
           assert read_control_from_server()["hopper_check"] is True
@@ -568,9 +567,7 @@ No other status codes.
           """
           handler = PELLETS_DISPATCH.get(request_json.get("action"))
           if handler is None:
-              return jsonify(
-                  api_response(result="Error", message="Error: Received request without valid action")
-              ), 200
+              return jsonify(api_response(result="Error", message="Error: Received request without valid action")), 200
           pelletdb = read_pellet_db()
           return jsonify(handler(pelletdb, request_json.get("data") or {})), 200
       ```

@@ -40,43 +40,43 @@ In `tests/test_emc2301.py`, first change the `_build_emc` helper to thread a `po
 
 ```python
 def _build_emc(seed=None, poles=2):
-	"""Construct an EMC2301 with a FakeI2C, optionally pre-seeding registers
-	before __init__ runs. Returns (emc, fake)."""
-	import grillplat.emc2301 as mod
+    """Construct an EMC2301 with a FakeI2C, optionally pre-seeding registers
+    before __init__ runs. Returns (emc, fake)."""
+    import grillplat.emc2301 as mod
 
-	fake = FakeI2C()
-	if seed:
-		fake.registers.update(seed)
-	with mock.patch.object(mod, 'I2CDevice', return_value=fake):
-		emc = mod.EMC2301(object(), address=0x2F, poles=poles)
-	return emc, fake
+    fake = FakeI2C()
+    if seed:
+        fake.registers.update(seed)
+    with mock.patch.object(mod, "I2CDevice", return_value=fake):
+        emc = mod.EMC2301(object(), address=0x2F, poles=poles)
+    return emc, fake
 ```
 
 Then add these tests (anywhere after the existing init tests):
 
 ```python
 def test_init_sets_edges_for_default_two_poles():
-	_, fake = _build_emc()
-	# EDGES bits [4:3] == poles-1 == 1 (0b01) for the default 2-pole fan.
-	assert (fake.registers[0x32] >> 3) & 0x03 == 1
+    _, fake = _build_emc()
+    # EDGES bits [4:3] == poles-1 == 1 (0b01) for the default 2-pole fan.
+    assert (fake.registers[0x32] >> 3) & 0x03 == 1
 
 
 def test_init_sets_edges_for_four_poles_preserving_other_bits():
-	# Seed 0x32 with RANGE=0b11 (bits 6:5) and update-time bits 0b101; init must
-	# set EDGES to 0b11 (4 poles) while preserving RANGE and update-time bits.
-	_, fake = _build_emc(seed={0x32: 0b0110_0101}, poles=4)
-	assert (fake.registers[0x32] >> 3) & 0x03 == 3  # EDGES == poles-1 == 3
-	assert (fake.registers[0x32] >> 5) & 0x03 == 3  # RANGE preserved (0b11)
-	assert fake.registers[0x32] & 0x07 == 0b101  # update-time bits preserved
+    # Seed 0x32 with RANGE=0b11 (bits 6:5) and update-time bits 0b101; init must
+    # set EDGES to 0b11 (4 poles) while preserving RANGE and update-time bits.
+    _, fake = _build_emc(seed={0x32: 0b0110_0101}, poles=4)
+    assert (fake.registers[0x32] >> 3) & 0x03 == 3  # EDGES == poles-1 == 3
+    assert (fake.registers[0x32] >> 5) & 0x03 == 3  # RANGE preserved (0b11)
+    assert fake.registers[0x32] & 0x07 == 0b101  # update-time bits preserved
 
 
 def test_init_rejects_invalid_poles():
-	import grillplat.emc2301 as mod
+    import grillplat.emc2301 as mod
 
-	with mock.patch.object(mod, 'I2CDevice', return_value=FakeI2C()):
-		for bad in (0, 5):
-			with pytest.raises(ValueError):
-				mod.EMC2301(object(), address=0x2F, poles=bad)
+    with mock.patch.object(mod, "I2CDevice", return_value=FakeI2C()):
+        for bad in (0, 5):
+            with pytest.raises(ValueError):
+                mod.EMC2301(object(), address=0x2F, poles=bad)
 ```
 
 - [ ] **Step 2: Run the new tests to verify they fail**
@@ -103,18 +103,18 @@ _EDGES_MASK = 0x18  # Fan Config 1 bits [4:3]: tach edges, set to match poles
 In `grillplat/emc2301.py`, change the constructor signature and body. Replace:
 
 ```python
-	def __init__(self, i2c_bus, address=_DEFAULT_ADDRESS):
-		self.i2c_device = I2CDevice(i2c_bus, address)
+def __init__(self, i2c_bus, address=_DEFAULT_ADDRESS):
+    self.i2c_device = I2CDevice(i2c_bus, address)
 ```
 
 with:
 
 ```python
-	def __init__(self, i2c_bus, address=_DEFAULT_ADDRESS, poles=2):
-		if poles not in (1, 2, 3, 4):
-			raise ValueError('poles must be 1-4')
-		self.poles = poles
-		self.i2c_device = I2CDevice(i2c_bus, address)
+def __init__(self, i2c_bus, address=_DEFAULT_ADDRESS, poles=2):
+    if poles not in (1, 2, 3, 4):
+        raise ValueError("poles must be 1-4")
+    self.poles = poles
+    self.i2c_device = I2CDevice(i2c_bus, address)
 ```
 
 Then, at the end of `__init__` (after the existing `self._write_register(_REG_FAN_SETTING, 0x00)` line), append the EDGES write:
@@ -157,39 +157,39 @@ In `tests/test_emc2301.py`, add a tach-seeding helper (near the top, after `_bui
 
 ```python
 def _seed_tach(count):
-	"""Return a register seed dict encoding a 13-bit tach `count` into the
-	TACH high/low registers (inverse of the driver's ((msb<<8)|lsb)>>3)."""
-	return {0x3E: (count >> 5) & 0xFF, 0x3F: (count << 3) & 0xF8}
+    """Return a register seed dict encoding a 13-bit tach `count` into the
+    TACH high/low registers (inverse of the driver's ((msb<<8)|lsb)>>3)."""
+    return {0x3E: (count >> 5) & 0xFF, 0x3F: (count << 3) & 0xF8}
 ```
 
 Then add the `fan_speed` tests:
 
 ```python
 def test_fan_speed_default_range_multiplier_two():
-	# Power-on default Fan Config 1 0x2B has RANGE bits 0b01 -> m=2.
-	seed = {0x32: 0x2B}
-	seed.update(_seed_tach(1024))
-	emc, _ = _build_emc(seed=seed)
-	assert emc.fan_speed == round((2 * 3932160) / 1024, 2)
+    # Power-on default Fan Config 1 0x2B has RANGE bits 0b01 -> m=2.
+    seed = {0x32: 0x2B}
+    seed.update(_seed_tach(1024))
+    emc, _ = _build_emc(seed=seed)
+    assert emc.fan_speed == round((2 * 3932160) / 1024, 2)
 
 
 def test_fan_speed_reads_range_multiplier_one_live():
-	# RANGE bits 0b00 -> m=1; the same count must yield half the RPM of the
-	# m=2 case, proving the multiplier is read from the register, not assumed.
-	seed = {0x32: 0x03}  # RANGE=00; EDGES/UDT bits are irrelevant to m
-	seed.update(_seed_tach(1024))
-	emc, _ = _build_emc(seed=seed)
-	assert emc.fan_speed == round((1 * 3932160) / 1024, 2)
+    # RANGE bits 0b00 -> m=1; the same count must yield half the RPM of the
+    # m=2 case, proving the multiplier is read from the register, not assumed.
+    seed = {0x32: 0x03}  # RANGE=00; EDGES/UDT bits are irrelevant to m
+    seed.update(_seed_tach(1024))
+    emc, _ = _build_emc(seed=seed)
+    assert emc.fan_speed == round((1 * 3932160) / 1024, 2)
 
 
 def test_fan_speed_stalled_fan_returns_zero():
-	emc, _ = _build_emc(seed=_seed_tach(0x1FFF))
-	assert emc.fan_speed == 0.0
+    emc, _ = _build_emc(seed=_seed_tach(0x1FFF))
+    assert emc.fan_speed == 0.0
 
 
 def test_fan_speed_zero_count_returns_zero():
-	emc, _ = _build_emc(seed=_seed_tach(0))
-	assert emc.fan_speed == 0.0
+    emc, _ = _build_emc(seed=_seed_tach(0))
+    assert emc.fan_speed == 0.0
 ```
 
 Note: `_build_emc`'s `__init__` runs a read-modify-write on `0x32` that sets the EDGES bits but preserves the RANGE bits [6:5] from the seed — so the RANGE values asserted above survive construction. The stall/zero tests don't seed `0x32` at all; the early `0.0` return fires before any RANGE read, so the (default) RANGE bits are irrelevant there.
@@ -224,18 +224,18 @@ _RPM_CONSTANT = 3932160
 In `grillplat/emc2301.py`, add the property after the `pwm_frequency` setter (the last method in the class):
 
 ```python
-	@property
-	def fan_speed(self):
-		"""Measured fan speed in RPM from the tachometer, or 0.0 if the fan is
-		stopped/stalled. Reads the RANGE multiplier live so the result is
-		correct regardless of how RANGE is configured."""
-		msb = self._read_register(_REG_TACH_HIGH)
-		lsb = self._read_register(_REG_TACH_LOW)
-		count = ((msb << 8) | lsb) >> 3
-		if count == 0 or count >= _TACH_STALL_COUNT:
-			return 0.0
-		multiplier = _RANGE_TO_MULTIPLIER[(self._read_register(_REG_FAN_CONFIG1) >> 5) & 0x03]
-		return round((multiplier * _RPM_CONSTANT) / count, 2)
+@property
+def fan_speed(self):
+    """Measured fan speed in RPM from the tachometer, or 0.0 if the fan is
+    stopped/stalled. Reads the RANGE multiplier live so the result is
+    correct regardless of how RANGE is configured."""
+    msb = self._read_register(_REG_TACH_HIGH)
+    lsb = self._read_register(_REG_TACH_LOW)
+    count = ((msb << 8) | lsb) >> 3
+    if count == 0 or count >= _TACH_STALL_COUNT:
+        return 0.0
+    multiplier = _RANGE_TO_MULTIPLIER[(self._read_register(_REG_FAN_CONFIG1) >> 5) & 0x03]
+    return round((multiplier * _RPM_CONSTANT) / count, 2)
 ```
 
 - [ ] **Step 5: Run the tests to verify they pass**

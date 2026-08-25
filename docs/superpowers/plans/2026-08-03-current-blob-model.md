@@ -867,23 +867,25 @@ In the `Store` ABC, immediately after the `read_current` declaration:
 Replace `InMemoryStore.flush_current` and `InMemoryStore.write_current` (lines 227-248) with:
 
 ```python
-    def _probe_info(self):
-        return self._settings.get("probe_settings", {}).get("probe_map", {}).get("probe_info", [])
+def _probe_info(self):
+    return self._settings.get("probe_settings", {}).get("probe_map", {}).get("probe_info", [])
 
-    def flush_current(self):
-        # Mirror common.datastore_accessors.flush_current: rebuild a zeroed
-        # structure from the configured probe_map rather than blanking in
-        # place, so a probe added or removed since the last write is reflected.
-        self._current = dump_legacy(zeroed_current(self._probe_info()), exclude_timestamp=True)
-        return copy.deepcopy(self._current)
 
-    def write_current(self, in_data):
-        # Mirror common.datastore_accessors.write_current: the caller hands in
-        # probe_history-shaped data, and what is STORED is the transformed
-        # blob.
-        previous = load_current(self._current)
-        schema = build_current(in_data, previous, int(time.time() * 1000))
-        self._current = dump_legacy(schema)
+def flush_current(self):
+    # Mirror common.datastore_accessors.flush_current: rebuild a zeroed
+    # structure from the configured probe_map rather than blanking in
+    # place, so a probe added or removed since the last write is reflected.
+    self._current = dump_legacy(zeroed_current(self._probe_info()), exclude_timestamp=True)
+    return copy.deepcopy(self._current)
+
+
+def write_current(self, in_data):
+    # Mirror common.datastore_accessors.write_current: the caller hands in
+    # probe_history-shaped data, and what is STORED is the transformed
+    # blob.
+    previous = load_current(self._current)
+    schema = build_current(in_data, previous, int(time.time() * 1000))
+    self._current = dump_legacy(schema)
 ```
 
 Then add, immediately after `read_current`:

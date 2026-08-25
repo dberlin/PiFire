@@ -77,9 +77,11 @@ Create tests that use two tiny local Pydantic models and assert:
 class Child(WireModel):
     count: int
 
+
 class Parent(WireModel):
     child: Child
     mode: Literal["one", "two"]
+
 
 bundle = ContractBundle("test", (Parent, Child), "test.gen.ts")
 first = render_bundle_schema(bundle)
@@ -108,11 +110,14 @@ Use these exact base contracts:
 ```python
 FiniteFloat = Annotated[float, Field(allow_inf_nan=False, strict=True)]
 
+
 class WireModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
+
 class ExtensibleWireModel(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True, strict=True)
+
 
 @dataclass(frozen=True, slots=True)
 class ContractBundle:

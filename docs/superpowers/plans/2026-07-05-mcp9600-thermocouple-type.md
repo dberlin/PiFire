@@ -42,40 +42,40 @@ import pytest
 def _install_fakes(monkeypatch):
     """Install fake hardware modules so the probe imports without hardware."""
     # adafruit_mcp9600 with an MCP9600 that captures its constructor args
-    mcp_mod = types.ModuleType('adafruit_mcp9600')
+    mcp_mod = types.ModuleType("adafruit_mcp9600")
 
     class FakeMCP9600:
-        def __init__(self, i2c, address=0x67, tctype='K'):
+        def __init__(self, i2c, address=0x67, tctype="K"):
             self.i2c = i2c
             self.address = address
             self.tctype = tctype
             self.temperature = 0.0
 
     mcp_mod.MCP9600 = FakeMCP9600
-    monkeypatch.setitem(sys.modules, 'adafruit_mcp9600', mcp_mod)
+    monkeypatch.setitem(sys.modules, "adafruit_mcp9600", mcp_mod)
 
     # board / busio
-    board_mod = types.ModuleType('board')
-    board_mod.SCL = 'SCL'
-    board_mod.SDA = 'SDA'
-    monkeypatch.setitem(sys.modules, 'board', board_mod)
+    board_mod = types.ModuleType("board")
+    board_mod.SCL = "SCL"
+    board_mod.SDA = "SDA"
+    monkeypatch.setitem(sys.modules, "board", board_mod)
 
-    busio_mod = types.ModuleType('busio')
-    busio_mod.I2C = lambda scl, sda: ('I2C', scl, sda)
-    monkeypatch.setitem(sys.modules, 'busio', busio_mod)
+    busio_mod = types.ModuleType("busio")
+    busio_mod.I2C = lambda scl, sda: ("I2C", scl, sda)
+    monkeypatch.setitem(sys.modules, "busio", busio_mod)
 
     # adafruit_extended_bus.ExtendedI2C
-    ext_mod = types.ModuleType('adafruit_extended_bus')
-    ext_mod.ExtendedI2C = lambda bus: ('ExtI2C', bus)
-    monkeypatch.setitem(sys.modules, 'adafruit_extended_bus', ext_mod)
+    ext_mod = types.ModuleType("adafruit_extended_bus")
+    ext_mod.ExtendedI2C = lambda bus: ("ExtI2C", bus)
+    monkeypatch.setitem(sys.modules, "adafruit_extended_bus", ext_mod)
 
     # adafruit_bus_device.i2c_device.I2CDevice
-    busdev_pkg = types.ModuleType('adafruit_bus_device')
-    i2cdev_mod = types.ModuleType('adafruit_bus_device.i2c_device')
+    busdev_pkg = types.ModuleType("adafruit_bus_device")
+    i2cdev_mod = types.ModuleType("adafruit_bus_device.i2c_device")
     i2cdev_mod.I2CDevice = object
     busdev_pkg.i2c_device = i2cdev_mod
-    monkeypatch.setitem(sys.modules, 'adafruit_bus_device', busdev_pkg)
-    monkeypatch.setitem(sys.modules, 'adafruit_bus_device.i2c_device', i2cdev_mod)
+    monkeypatch.setitem(sys.modules, "adafruit_bus_device", busdev_pkg)
+    monkeypatch.setitem(sys.modules, "adafruit_bus_device.i2c_device", i2cdev_mod)
 
     return mcp_mod
 
@@ -92,12 +92,12 @@ def test_init_device_wires_tc_type(monkeypatch):
     probe = _load_probe(monkeypatch)
 
     obj = probe.ReadProbes.__new__(probe.ReadProbes)  # bypass heavy base __init__
-    obj.device_info = {'config': {'i2c_bus_addr': '0x66', 'tc_type': 'J'}}
+    obj.device_info = {"config": {"i2c_bus_addr": "0x66", "tc_type": "J"}}
     obj._init_device()
 
-    assert obj.device_info['ports'] == ['KTT0']
+    assert obj.device_info["ports"] == ["KTT0"]
     sensor = obj.device.sensor
-    assert sensor.tctype == 'J'  # configured type passed through
+    assert sensor.tctype == "J"  # configured type passed through
     assert sensor.address == 0x66  # parsed from hex string
 
 
@@ -105,11 +105,11 @@ def test_init_device_defaults(monkeypatch):
     probe = _load_probe(monkeypatch)
 
     obj = probe.ReadProbes.__new__(probe.ReadProbes)
-    obj.device_info = {'config': {}}  # no keys -> all defaults
+    obj.device_info = {"config": {}}  # no keys -> all defaults
     obj._init_device()
 
     sensor = obj.device.sensor
-    assert sensor.tctype == 'K'  # default K
+    assert sensor.tctype == "K"  # default K
     assert sensor.address == 0x67  # default address
 ```
 
@@ -123,34 +123,36 @@ Expected: `test_init_device_wires_tc_type` FAILS on `assert sensor.tctype == 'J'
 In `probes/mcp9600_adafruit.py`, change `KTTDevice.__init__` to accept and pass through `tc_type`:
 
 ```python
-	def __init__(self, i2c_bus_addr=0x67, i2c_bus_kind='basic', i2c_bus_num=0, tc_type='K'):
-		self.logger = logging.getLogger('control')
-		self.status = {}
+def __init__(self, i2c_bus_addr=0x67, i2c_bus_kind="basic", i2c_bus_num=0, tc_type="K"):
+    self.logger = logging.getLogger("control")
+    self.status = {}
 
-		if i2c_bus_kind == 'basic':
-			# Create the I2C bus
-			self.i2c = busio.I2C(board.SCL, board.SDA)
-		elif i2c_bus_kind == 'extended':
-			self.i2c = ExtendedI2C(resolve_i2c_bus(i2c_bus_num))
+    if i2c_bus_kind == "basic":
+        # Create the I2C bus
+        self.i2c = busio.I2C(board.SCL, board.SDA)
+    elif i2c_bus_kind == "extended":
+        self.i2c = ExtendedI2C(resolve_i2c_bus(i2c_bus_num))
 
-		self.sensor = MCP9600(self.i2c, address=i2c_bus_addr, tctype=tc_type)
+    self.sensor = MCP9600(self.i2c, address=i2c_bus_addr, tctype=tc_type)
 ```
 
 In `ReadProbes._init_device`, read `tc_type` from config and pass it to `KTTDevice`:
 
 ```python
-	def _init_device(self):
-		self.time_delay = 0
-		self.device_info['ports'] = ['KTT0']
-		i2c_bus_addr = int(self.device_info['config'].get('i2c_bus_addr', '0x67'), 16)
-		i2c_bus_kind = self.device_info['config'].get('i2c_bus_kind', 'basic')
-		i2c_bus_num = self.device_info['config'].get('i2c_bus_num', 0)
-		tc_type = self.device_info['config'].get('tc_type', 'K')
-		try:
-			self.device = KTTDevice(i2c_bus_addr=i2c_bus_addr, i2c_bus_kind=i2c_bus_kind, i2c_bus_num=i2c_bus_num, tc_type=tc_type)
-		except:
-			self.logger.error('Something went wrong when trying to initialize the MCP9600 device.')
-			raise
+def _init_device(self):
+    self.time_delay = 0
+    self.device_info["ports"] = ["KTT0"]
+    i2c_bus_addr = int(self.device_info["config"].get("i2c_bus_addr", "0x67"), 16)
+    i2c_bus_kind = self.device_info["config"].get("i2c_bus_kind", "basic")
+    i2c_bus_num = self.device_info["config"].get("i2c_bus_num", 0)
+    tc_type = self.device_info["config"].get("tc_type", "K")
+    try:
+        self.device = KTTDevice(
+            i2c_bus_addr=i2c_bus_addr, i2c_bus_kind=i2c_bus_kind, i2c_bus_num=i2c_bus_num, tc_type=tc_type
+        )
+    except:
+        self.logger.error("Something went wrong when trying to initialize the MCP9600 device.")
+        raise
 ```
 
 Also update the module docstring's example device definition `config` block (near the top of the file) to include the new option, so the example matches reality:
@@ -197,21 +199,21 @@ import os
 
 def test_manifest_mcp9600_entry():
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    manifest = json.load(open(os.path.join(repo_root, 'wizard', 'wizard_manifest.json')))
-    probes = manifest['modules']['probes']
-    assert 'mcp9600_adafruit' in probes
-    entry = probes['mcp9600_adafruit']
+    manifest = json.load(open(os.path.join(repo_root, "wizard", "wizard_manifest.json")))
+    probes = manifest["modules"]["probes"]
+    assert "mcp9600_adafruit" in probes
+    entry = probes["mcp9600_adafruit"]
 
-    ds = entry['device_specific']
-    assert ds['type'] == 'thermocouple'
-    assert ds['ports'] == ['KTT0']
+    ds = entry["device_specific"]
+    assert ds["type"] == "thermocouple"
+    assert ds["ports"] == ["KTT0"]
 
-    labels = [item['label'] for item in ds['config']]
-    assert 'tc_type' in labels
+    labels = [item["label"] for item in ds["config"]]
+    assert "tc_type" in labels
 
-    tc = next(i for i in ds['config'] if i['label'] == 'tc_type')
-    assert tc['list_values'] == ['B', 'E', 'J', 'K', 'N', 'R', 'S', 'T']
-    assert tc['default'] == 'K'
+    tc = next(i for i in ds["config"] if i["label"] == "tc_type")
+    assert tc["list_values"] == ["B", "E", "J", "K", "N", "R", "S", "T"]
+    assert tc["default"] == "K"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**

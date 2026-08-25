@@ -102,9 +102,7 @@ _SWAY_IGNORED_STDERR_PATTERNS = (
         r"\[wlr\] \[backend/drm/atomic\.c:\d+\] connector \S+: "
         r"Atomic commit failed: Device or resource busy$"
     ),
-    re.compile(
-        r"\[sway/desktop/output\.c:\d+\] Page-flip failed on output \S+$"
-    ),
+    re.compile(r"\[sway/desktop/output\.c:\d+\] Page-flip failed on output \S+$"),
 )
 
 

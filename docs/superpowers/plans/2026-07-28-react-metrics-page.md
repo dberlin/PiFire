@@ -467,9 +467,7 @@ def seed(mode="Smoke", augerontime=100, duration_ms=60_000):
     row["augerontime"] = augerontime
     row["primary_setpoint"] = 225
     append_metric(row)
-    update_metrics(
-        {"starttime": START, "endtime": 0 if duration_ms == 0 else START + duration_ms}
-    )
+    update_metrics({"starttime": START, "endtime": 0 if duration_ms == 0 else START + duration_ms})
 
 
 def test_listing_is_empty_when_nothing_has_been_recorded(ds, client):

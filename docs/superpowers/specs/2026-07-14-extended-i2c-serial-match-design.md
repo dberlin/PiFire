@@ -86,8 +86,8 @@ numeric/name-match branches:
 ```python
 def resolve_i2c_bus(bus):
     spec = str(bus).strip()
-    if spec.lower().startswith('serial:'):
-        return find_i2c_bus_by_serial(spec.split(':', 1)[1].strip())
+    if spec.lower().startswith("serial:"):
+        return find_i2c_bus_by_serial(spec.split(":", 1)[1].strip())
     if spec.isdigit():
         return int(spec)
     return find_i2c_bus(spec)

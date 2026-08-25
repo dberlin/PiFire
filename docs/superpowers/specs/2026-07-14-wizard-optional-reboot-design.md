@@ -98,7 +98,7 @@ the concrete fix for the DSI/QtQuick over-flagging bug.
 human-readable `Results:` block, prints one final line:
 
 ```python
-print(f'REBOOT_REQUIRED={reboot_required}'.lower())  # -> "reboot_required=true"/"...=false"
+print(f"REBOOT_REQUIRED={reboot_required}".lower())  # -> "reboot_required=true"/"...=false"
 ```
 
 (lowercased for a consistent, case-normalized sentinel regardless of caller.)

@@ -216,10 +216,7 @@ def lttb_indices(values, times, budget):
         range_end = min(int((i + 1) * bucket_size) + 1, n)
         best, best_area = range_start, -1.0
         for j in range(range_start, range_end):
-            area = abs(
-                (times[a] - avg_x) * (values[j] - values[a])
-                - (times[a] - times[j]) * (avg_y - values[a])
-            )
+            area = abs((times[a] - avg_x) * (values[j] - values[a]) - (times[a] - times[j]) * (avg_y - values[a]))
             if area > best_area:
                 best_area, best = area, j
         kept.append(best)
@@ -311,18 +308,16 @@ from file_mgmt.downsample import select_indices
 Compute the window's indices once, before the build loop, and iterate over them instead of `range(..., step)`:
 
 ```python
-    window_start = max(0, list_length - num_items)
-    window = list(range(window_start, list_length))
-    if reduce and window:
-        # Fidelity-driven: keep the shape within `data_points`-gated tolerance
-        # rather than keeping every Nth sample (which erased short events).
-        series = [list(v[window_start:list_length]) for v in history["P"].values()]
-        series += [list(v[window_start:list_length]) for v in history["F"].values()]
-        times = [float(t) for t in history["T"][window_start:list_length]]
-        chosen = select_indices(
-            series, times, tolerance=tolerance, min_points=data_points, max_points=max_points
-        )
-        window = [window_start + i for i in chosen]
+window_start = max(0, list_length - num_items)
+window = list(range(window_start, list_length))
+if reduce and window:
+    # Fidelity-driven: keep the shape within `data_points`-gated tolerance
+    # rather than keeping every Nth sample (which erased short events).
+    series = [list(v[window_start:list_length]) for v in history["P"].values()]
+    series += [list(v[window_start:list_length]) for v in history["F"].values()]
+    times = [float(t) for t in history["T"][window_start:list_length]]
+    chosen = select_indices(series, times, tolerance=tolerance, min_points=data_points, max_points=max_points)
+    window = [window_start + i for i in chosen]
 ```
 
 then change the build loop from `for index in range(list_length - num_items, list_length, step):` to `for index in window:`. Keep every append inside the loop exactly as-is.
@@ -478,7 +473,7 @@ def history_chart():
     else:
         try:
             minutes = int(raw)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return jsonify({"result": "error", "message": "invalid_minutes"}), 400
         if minutes < 1:
             return jsonify({"result": "error", "message": "invalid_minutes"}), 400

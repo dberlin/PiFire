@@ -56,18 +56,21 @@ Copied pattern from `tests/unit/probes/test_max31856_probe.py`. Install a fake h
 import sys, types, importlib
 import pytest
 
+
 def install_fake(name, **attrs):
     fake = types.ModuleType(name)
     for k, v in attrs.items():
         setattr(fake, k, v)
     return fake
 
+
 def load_probe(monkeypatch, module_path, fakes):
     for name, mod in fakes.items():
         monkeypatch.setitem(sys.modules, name, mod)
     probe = importlib.import_module(module_path)
-    importlib.reload(probe)   # rebind top-level hardware imports to the fakes
+    importlib.reload(probe)  # rebind top-level hardware imports to the fakes
     return probe
+
 
 def bare_readprobes(probe, device_info):
     obj = probe.ReadProbes.__new__(probe.ReadProbes)  # skip hardware __init__
@@ -156,20 +159,28 @@ For each of average/median/highest/lowest, assert the aggregation math and the `
 import pytest
 from probes.base import ProbeInterface  # noqa: F401  ensures base import path is valid
 
+
 def _output_data():
     return {
         "primary": {"Grill1": 100, "Grill2": 200},
-        "food": {}, "aux": {}, "tr": {},
+        "food": {},
+        "aux": {},
+        "tr": {},
     }
+
 
 def _device(module, probes_list, port="VIRT0"):
     return {
-        "device": "virt", "module": module, "ports": [port],
+        "device": "virt",
+        "module": module,
+        "ports": [port],
         "config": {"probes_list": probes_list},
     }
 
+
 def _make(module_path, module, probes_list):
     import importlib
+
     probe = importlib.import_module(module_path)
     obj = probe.ReadProbes(
         probe_info={"probes": []},
@@ -177,6 +188,7 @@ def _make(module_path, module, probes_list):
         units="F",
     )
     return obj
+
 
 def test_virtual_average_means_primary_probes():
     obj = _make("probes.virtual_average", "virtual_average", ["Grill1", "Grill2"])
@@ -232,12 +244,15 @@ git commit -F <msg-file>   # subject: test(probes): cover virtual aggregators + 
 ```python
 def _controller(units="F"):
     from controller.fuzzy import Controller
+
     return Controller(config={}, units=units, cycle_data={"HoldCycleTime": 20})
+
 
 def test_set_target_converts_celsius_to_fahrenheit():
     c = _controller(units="C")
-    c.set_target(100)          # 100C -> 212F
+    c.set_target(100)  # 100C -> 212F
     assert c.set_point == 212
+
 
 def test_update_returns_cycle_ratio_between_0_and_1():
     c = _controller()
@@ -253,8 +268,11 @@ def test_update_returns_cycle_ratio_between_0_and_1():
 ```python
 def test_ml_controller_predicts_cycle_ratio(monkeypatch):
     import controller.ml as ml
+
     class FakeModel:
-        def predict(self, X): return [0.42]
+        def predict(self, X):
+            return [0.42]
+
     monkeypatch.setattr(ml, "load", lambda path: FakeModel())
     c = ml.Controller(config={}, units="F", cycle_data={"HoldCycleTime": 20})
     c.set_target(225)
@@ -268,6 +286,7 @@ Read `controller/ml.py` fully first for `update()`'s exact body/signature and as
 ```python
 def test_create_new_model_fits_and_dumps(monkeypatch, tmp_path):
     import controller.update_ml as um
+
     csv = tmp_path / "ds.csv"
     csv.write_text("current,setpoint,rate_change,cycle_ratio\n105,165,1,1\n139,165,1.6,0.22\n169,165,1.4,0.05\n")
     dumped = {}

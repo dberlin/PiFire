@@ -34,38 +34,38 @@ Add to `tests/test_i2c_bus.py` (near the existing `test_find_i2c_bus_debug_logs_
 
 ```python
 def test_read_usb_serial_resolves_via_sysfs_walk(tmp_path):
-	usb_device = tmp_path / 'devices' / 'usb1' / '1-1'
-	usb_device.mkdir(parents=True)
-	(usb_device / 'serial').write_text('AB12\n')
-	(usb_device / 'idVendor').write_text('04d8\n')
-	iface = usb_device / '1-1:1.0'
-	iface.mkdir()
-	bus_dir = iface / 'i2c-7'
-	bus_dir.mkdir()
-	(bus_dir / 'name').write_text('MCP2221 usb-i2c bridge\n')
+    usb_device = tmp_path / "devices" / "usb1" / "1-1"
+    usb_device.mkdir(parents=True)
+    (usb_device / "serial").write_text("AB12\n")
+    (usb_device / "idVendor").write_text("04d8\n")
+    iface = usb_device / "1-1:1.0"
+    iface.mkdir()
+    bus_dir = iface / "i2c-7"
+    bus_dir.mkdir()
+    (bus_dir / "name").write_text("MCP2221 usb-i2c bridge\n")
 
-	assert i2c_bus._read_usb_serial(str(bus_dir)) == 'AB12'
+    assert i2c_bus._read_usb_serial(str(bus_dir)) == "AB12"
 
 
 def test_read_usb_serial_returns_none_without_usb_ancestor(tmp_path):
-	bus_dir = tmp_path / 'i2c-1'
-	bus_dir.mkdir()
-	(bus_dir / 'name').write_text('bcm2835 I2C adapter\n')
+    bus_dir = tmp_path / "i2c-1"
+    bus_dir.mkdir()
+    (bus_dir / "name").write_text("bcm2835 I2C adapter\n")
 
-	assert i2c_bus._read_usb_serial(str(bus_dir)) is None
+    assert i2c_bus._read_usb_serial(str(bus_dir)) is None
 
 
 def test_read_usb_serial_ignores_serial_file_without_idvendor(tmp_path):
-	# A directory with a 'serial' file but no 'idVendor' isn't a USB device
-	# level (e.g. a power_supply sysfs node) -- must not be mistaken for one.
-	not_usb = tmp_path / 'not_a_usb_device'
-	not_usb.mkdir()
-	(not_usb / 'serial').write_text('DECOY\n')
-	bus_dir = not_usb / 'i2c-2'
-	bus_dir.mkdir()
-	(bus_dir / 'name').write_text('some adapter\n')
+    # A directory with a 'serial' file but no 'idVendor' isn't a USB device
+    # level (e.g. a power_supply sysfs node) -- must not be mistaken for one.
+    not_usb = tmp_path / "not_a_usb_device"
+    not_usb.mkdir()
+    (not_usb / "serial").write_text("DECOY\n")
+    bus_dir = not_usb / "i2c-2"
+    bus_dir.mkdir()
+    (bus_dir / "name").write_text("some adapter\n")
 
-	assert i2c_bus._read_usb_serial(str(bus_dir)) is None
+    assert i2c_bus._read_usb_serial(str(bus_dir)) is None
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -79,27 +79,27 @@ Add to `common/i2c_bus.py`, directly above `def find_i2c_bus(...)`:
 
 ```python
 def _read_usb_serial(bus_dir, max_hops=15):
-	"""Return the USB iSerial of `bus_dir`'s (an i2c-N sysfs directory) USB
-	ancestor, or None if it has none within `max_hops` parent directories (a
-	non-USB adapter, e.g. a Pi's onboard I2C). Requires the ancestor to have
-	both a 'serial' and an 'idVendor' file -- the USB *device* level in sysfs,
-	as opposed to an interface level or an unrelated subsystem node that might
-	also expose a 'serial' file (e.g. power_supply)."""
-	current = os.path.realpath(bus_dir)
-	for _ in range(max_hops):
-		parent = os.path.dirname(current)
-		if parent == current:
-			return None
-		current = parent
-		serial_path = os.path.join(current, 'serial')
-		vendor_path = os.path.join(current, 'idVendor')
-		if os.path.isfile(serial_path) and os.path.isfile(vendor_path):
-			try:
-				with open(serial_path) as handle:
-					return handle.read().strip()
-			except OSError:
-				return None
-	return None
+    """Return the USB iSerial of `bus_dir`'s (an i2c-N sysfs directory) USB
+    ancestor, or None if it has none within `max_hops` parent directories (a
+    non-USB adapter, e.g. a Pi's onboard I2C). Requires the ancestor to have
+    both a 'serial' and an 'idVendor' file -- the USB *device* level in sysfs,
+    as opposed to an interface level or an unrelated subsystem node that might
+    also expose a 'serial' file (e.g. power_supply)."""
+    current = os.path.realpath(bus_dir)
+    for _ in range(max_hops):
+        parent = os.path.dirname(current)
+        if parent == current:
+            return None
+        current = parent
+        serial_path = os.path.join(current, "serial")
+        vendor_path = os.path.join(current, "idVendor")
+        if os.path.isfile(serial_path) and os.path.isfile(vendor_path):
+            try:
+                with open(serial_path) as handle:
+                    return handle.read().strip()
+            except OSError:
+                return None
+    return None
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -140,18 +140,18 @@ Add to `tests/test_i2c_bus.py`:
 
 ```python
 def test_enumerate_i2c_adapters_includes_serial(tmp_path):
-	usb_device = tmp_path / 'devices' / 'usb1' / '1-1'
-	usb_device.mkdir(parents=True)
-	(usb_device / 'serial').write_text('AB12')
-	(usb_device / 'idVendor').write_text('04d8')
-	devices_dir = usb_device / '1-1:1.0'
-	devices_dir.mkdir()
-	bus_dir = devices_dir / 'i2c-7'
-	bus_dir.mkdir()
-	(bus_dir / 'name').write_text('MCP2221 usb-i2c bridge')
+    usb_device = tmp_path / "devices" / "usb1" / "1-1"
+    usb_device.mkdir(parents=True)
+    (usb_device / "serial").write_text("AB12")
+    (usb_device / "idVendor").write_text("04d8")
+    devices_dir = usb_device / "1-1:1.0"
+    devices_dir.mkdir()
+    bus_dir = devices_dir / "i2c-7"
+    bus_dir.mkdir()
+    (bus_dir / "name").write_text("MCP2221 usb-i2c bridge")
 
-	adapters = i2c_bus._enumerate_i2c_adapters(devices_path=str(devices_dir))
-	assert adapters == [{'bus_num': 7, 'name': 'MCP2221 usb-i2c bridge', 'serial': 'AB12'}]
+    adapters = i2c_bus._enumerate_i2c_adapters(devices_path=str(devices_dir))
+    assert adapters == [{"bus_num": 7, "name": "MCP2221 usb-i2c bridge", "serial": "AB12"}]
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -164,50 +164,50 @@ Expected: FAIL with `AttributeError: module 'common.i2c_bus' has no attribute '_
 Replace the body of `find_i2c_bus` in `common/i2c_bus.py` (currently lines 62-94) with:
 
 ```python
-def _enumerate_i2c_adapters(devices_path='/sys/bus/i2c/devices'):
-	"""Return [{'bus_num': int, 'name': str, 'serial': str | None}, ...] for
-	every i2c-dev adapter under devices_path. 'serial' is the USB iSerial of
-	the adapter's USB ancestor (via _read_usb_serial), or None if it has none
-	(e.g. an onboard/non-USB adapter)."""
-	adapters = []
-	for bus_dir in glob.glob(os.path.join(devices_path, 'i2c-*')):
-		try:
-			with open(os.path.join(bus_dir, 'name')) as handle:
-				name = handle.read().strip()
-		except OSError:
-			continue
-		try:
-			bus_num = int(os.path.basename(bus_dir).split('-')[-1])
-		except ValueError:
-			continue
-		adapters.append({'bus_num': bus_num, 'name': name, 'serial': _read_usb_serial(bus_dir)})
-	return adapters
+def _enumerate_i2c_adapters(devices_path="/sys/bus/i2c/devices"):
+    """Return [{'bus_num': int, 'name': str, 'serial': str | None}, ...] for
+    every i2c-dev adapter under devices_path. 'serial' is the USB iSerial of
+    the adapter's USB ancestor (via _read_usb_serial), or None if it has none
+    (e.g. an onboard/non-USB adapter)."""
+    adapters = []
+    for bus_dir in glob.glob(os.path.join(devices_path, "i2c-*")):
+        try:
+            with open(os.path.join(bus_dir, "name")) as handle:
+                name = handle.read().strip()
+        except OSError:
+            continue
+        try:
+            bus_num = int(os.path.basename(bus_dir).split("-")[-1])
+        except ValueError:
+            continue
+        adapters.append({"bus_num": bus_num, "name": name, "serial": _read_usb_serial(bus_dir)})
+    return adapters
 
 
-def find_i2c_bus(match, devices_path='/sys/bus/i2c/devices'):
-	"""
-	Return the integer i2c bus number whose adapter name contains `match`
-	(case-insensitive), e.g. 'CP2112' for a USB-to-I2C bridge. Scans
-	`<devices_path>/i2c-*/name`. Raises RuntimeError if zero or more than one
-	adapter matches, so the caller fails clearly rather than guessing.
-	"""
-	match_lower = str(match).lower()
-	adapters = _enumerate_i2c_adapters(devices_path)
+def find_i2c_bus(match, devices_path="/sys/bus/i2c/devices"):
+    """
+    Return the integer i2c bus number whose adapter name contains `match`
+    (case-insensitive), e.g. 'CP2112' for a USB-to-I2C bridge. Scans
+    `<devices_path>/i2c-*/name`. Raises RuntimeError if zero or more than one
+    adapter matches, so the caller fails clearly rather than guessing.
+    """
+    match_lower = str(match).lower()
+    adapters = _enumerate_i2c_adapters(devices_path)
 
-	found = [a['bus_num'] for a in adapters if match_lower in a['name'].lower()]
-	available = (
-		', '.join(f'i2c-{a["bus_num"]} ({a["name"]!r})' for a in sorted(adapters, key=lambda a: a['bus_num']))
-		or '(none)'
-	)
-	logger.debug('find_i2c_bus: matching %r among adapters: %s', match, available)
-	if len(found) == 1:
-		logger.debug('find_i2c_bus: %r matched i2c-%d', match, found[0])
-		return found[0]
-	if not found:
-		raise RuntimeError(
-			f'No i2c adapter found matching {match!r} under {devices_path}. Available adapters: {available}'
-		)
-	raise RuntimeError(f'Multiple i2c adapters match {match!r}: {sorted(found)}. Available adapters: {available}')
+    found = [a["bus_num"] for a in adapters if match_lower in a["name"].lower()]
+    available = (
+        ", ".join(f"i2c-{a['bus_num']} ({a['name']!r})" for a in sorted(adapters, key=lambda a: a["bus_num"]))
+        or "(none)"
+    )
+    logger.debug("find_i2c_bus: matching %r among adapters: %s", match, available)
+    if len(found) == 1:
+        logger.debug("find_i2c_bus: %r matched i2c-%d", match, found[0])
+        return found[0]
+    if not found:
+        raise RuntimeError(
+            f"No i2c adapter found matching {match!r} under {devices_path}. Available adapters: {available}"
+        )
+    raise RuntimeError(f"Multiple i2c adapters match {match!r}: {sorted(found)}. Available adapters: {available}")
 ```
 
 - [ ] **Step 4: Run tests to verify they pass, including existing regression tests**
@@ -248,58 +248,58 @@ Add to `tests/test_i2c_bus.py`:
 
 ```python
 def _make_usb_i2c_adapter(root, usb_name, serial, bus_num, adapter_name, devices_dir):
-	usb_dev = root / usb_name
-	usb_dev.mkdir(parents=True)
-	(usb_dev / 'serial').write_text(serial)
-	(usb_dev / 'idVendor').write_text('04d8')
-	iface = usb_dev / f'{usb_name}:1.0'
-	iface.mkdir()
-	bus_dir = iface / f'i2c-{bus_num}'
-	bus_dir.mkdir()
-	(bus_dir / 'name').write_text(adapter_name)
-	(devices_dir / f'i2c-{bus_num}').symlink_to(bus_dir)
+    usb_dev = root / usb_name
+    usb_dev.mkdir(parents=True)
+    (usb_dev / "serial").write_text(serial)
+    (usb_dev / "idVendor").write_text("04d8")
+    iface = usb_dev / f"{usb_name}:1.0"
+    iface.mkdir()
+    bus_dir = iface / f"i2c-{bus_num}"
+    bus_dir.mkdir()
+    (bus_dir / "name").write_text(adapter_name)
+    (devices_dir / f"i2c-{bus_num}").symlink_to(bus_dir)
 
 
 def test_find_i2c_bus_by_serial_matches(tmp_path):
-	devices_dir = tmp_path / 'devices_path'
-	devices_dir.mkdir()
-	_make_usb_i2c_adapter(tmp_path, 'usb1', 'AB12', 7, 'MCP2221 usb-i2c bridge', devices_dir)
+    devices_dir = tmp_path / "devices_path"
+    devices_dir.mkdir()
+    _make_usb_i2c_adapter(tmp_path, "usb1", "AB12", 7, "MCP2221 usb-i2c bridge", devices_dir)
 
-	assert i2c_bus.find_i2c_bus_by_serial('AB12', devices_path=str(devices_dir)) == 7
+    assert i2c_bus.find_i2c_bus_by_serial("AB12", devices_path=str(devices_dir)) == 7
 
 
 def test_find_i2c_bus_by_serial_no_match_raises(tmp_path):
-	devices_dir = tmp_path / 'devices_path'
-	devices_dir.mkdir()
-	_make_usb_i2c_adapter(tmp_path, 'usb1', 'AB12', 7, 'MCP2221 usb-i2c bridge', devices_dir)
+    devices_dir = tmp_path / "devices_path"
+    devices_dir.mkdir()
+    _make_usb_i2c_adapter(tmp_path, "usb1", "AB12", 7, "MCP2221 usb-i2c bridge", devices_dir)
 
-	with pytest.raises(RuntimeError, match='No i2c adapter found with serial'):
-		i2c_bus.find_i2c_bus_by_serial('DEADBEEF', devices_path=str(devices_dir))
+    with pytest.raises(RuntimeError, match="No i2c adapter found with serial"):
+        i2c_bus.find_i2c_bus_by_serial("DEADBEEF", devices_path=str(devices_dir))
 
 
 def test_find_i2c_bus_by_serial_ambiguous_raises(tmp_path):
-	devices_dir = tmp_path / 'devices_path'
-	devices_dir.mkdir()
-	_make_usb_i2c_adapter(tmp_path, 'usb1', 'AB12', 1, 'MCP2221 usb-i2c bridge', devices_dir)
-	_make_usb_i2c_adapter(tmp_path, 'usb2', 'AB12', 2, 'MCP2221 usb-i2c bridge', devices_dir)
+    devices_dir = tmp_path / "devices_path"
+    devices_dir.mkdir()
+    _make_usb_i2c_adapter(tmp_path, "usb1", "AB12", 1, "MCP2221 usb-i2c bridge", devices_dir)
+    _make_usb_i2c_adapter(tmp_path, "usb2", "AB12", 2, "MCP2221 usb-i2c bridge", devices_dir)
 
-	with pytest.raises(RuntimeError, match='Multiple i2c adapters have serial'):
-		i2c_bus.find_i2c_bus_by_serial('AB12', devices_path=str(devices_dir))
+    with pytest.raises(RuntimeError, match="Multiple i2c adapters have serial"):
+        i2c_bus.find_i2c_bus_by_serial("AB12", devices_path=str(devices_dir))
 
 
 def test_find_i2c_bus_by_serial_is_exact_not_substring(tmp_path):
-	devices_dir = tmp_path / 'devices_path'
-	devices_dir.mkdir()
-	_make_usb_i2c_adapter(tmp_path, 'usb1', 'AB1234', 7, 'MCP2221 usb-i2c bridge', devices_dir)
+    devices_dir = tmp_path / "devices_path"
+    devices_dir.mkdir()
+    _make_usb_i2c_adapter(tmp_path, "usb1", "AB1234", 7, "MCP2221 usb-i2c bridge", devices_dir)
 
-	with pytest.raises(RuntimeError, match='No i2c adapter found with serial'):
-		i2c_bus.find_i2c_bus_by_serial('AB12', devices_path=str(devices_dir))
+    with pytest.raises(RuntimeError, match="No i2c adapter found with serial"):
+        i2c_bus.find_i2c_bus_by_serial("AB12", devices_path=str(devices_dir))
 
 
 def test_resolve_i2c_bus_serial_prefix_dispatches(monkeypatch):
-	monkeypatch.setattr(i2c_bus, 'find_i2c_bus_by_serial', lambda serial: 42 if serial == 'AB12' else None)
-	assert resolve_i2c_bus('serial:AB12') == 42
-	assert resolve_i2c_bus('SERIAL:AB12') == 42  # prefix keyword is case-insensitive
+    monkeypatch.setattr(i2c_bus, "find_i2c_bus_by_serial", lambda serial: 42 if serial == "AB12" else None)
+    assert resolve_i2c_bus("serial:AB12") == 42
+    assert resolve_i2c_bus("SERIAL:AB12") == 42  # prefix keyword is case-insensitive
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -312,57 +312,57 @@ Expected: FAIL with `AttributeError: module 'common.i2c_bus' has no attribute 'f
 Add to `common/i2c_bus.py`, directly below `find_i2c_bus`:
 
 ```python
-def find_i2c_bus_by_serial(serial, devices_path='/sys/bus/i2c/devices'):
-	"""
-	Return the integer i2c bus number whose adapter's USB iSerial exactly
-	equals `serial` (case-sensitive, no substring matching -- a serial is
-	meant to be unambiguous). Raises RuntimeError if zero or more than one
-	adapter matches, listing every available adapter (with its serial, if
-	any) so the error is actionable without a second lookup.
-	"""
-	target = str(serial)
-	adapters = _enumerate_i2c_adapters(devices_path)
+def find_i2c_bus_by_serial(serial, devices_path="/sys/bus/i2c/devices"):
+    """
+    Return the integer i2c bus number whose adapter's USB iSerial exactly
+    equals `serial` (case-sensitive, no substring matching -- a serial is
+    meant to be unambiguous). Raises RuntimeError if zero or more than one
+    adapter matches, listing every available adapter (with its serial, if
+    any) so the error is actionable without a second lookup.
+    """
+    target = str(serial)
+    adapters = _enumerate_i2c_adapters(devices_path)
 
-	found = [a['bus_num'] for a in adapters if a['serial'] == target]
-	available = (
-		', '.join(
-			f'i2c-{a["bus_num"]} (serial={a["serial"]!r})' for a in sorted(adapters, key=lambda a: a['bus_num'])
-		)
-		or '(none)'
-	)
-	logger.debug('find_i2c_bus_by_serial: matching %r among adapters: %s', serial, available)
-	if len(found) == 1:
-		logger.debug('find_i2c_bus_by_serial: %r matched i2c-%d', serial, found[0])
-		return found[0]
-	if not found:
-		raise RuntimeError(
-			f'No i2c adapter found with serial {serial!r} under {devices_path}. Available adapters: {available}'
-		)
-	raise RuntimeError(f'Multiple i2c adapters have serial {serial!r}: {sorted(found)}. Available adapters: {available}')
+    found = [a["bus_num"] for a in adapters if a["serial"] == target]
+    available = (
+        ", ".join(f"i2c-{a['bus_num']} (serial={a['serial']!r})" for a in sorted(adapters, key=lambda a: a["bus_num"]))
+        or "(none)"
+    )
+    logger.debug("find_i2c_bus_by_serial: matching %r among adapters: %s", serial, available)
+    if len(found) == 1:
+        logger.debug("find_i2c_bus_by_serial: %r matched i2c-%d", serial, found[0])
+        return found[0]
+    if not found:
+        raise RuntimeError(
+            f"No i2c adapter found with serial {serial!r} under {devices_path}. Available adapters: {available}"
+        )
+    raise RuntimeError(
+        f"Multiple i2c adapters have serial {serial!r}: {sorted(found)}. Available adapters: {available}"
+    )
 ```
 
 Replace `resolve_i2c_bus` (currently lines 97-109) with:
 
 ```python
 def resolve_i2c_bus(bus):
-	"""
-	Resolve an extended-i2c-bus spec to a bus number. Accepts an int or numeric
-	string (e.g. 3 / '3' -> /dev/i2c-3, used directly), a 'serial:<ISERIAL>'
-	USB-serial match (e.g. 'serial:0012AB34' -> discovered via
-	find_i2c_bus_by_serial, the only way to distinguish two identical USB-to-I2C
-	bridges), or an adapter-name match string (e.g. 'CP2112' -> discovered via
-	find_i2c_bus, robust against the dynamic bus numbers USB-to-I2C bridges get).
-	"""
-	spec = str(bus).strip()
-	if spec.lower().startswith('serial:'):
-		serial = spec.split(':', 1)[1].strip()
-		logger.debug('resolve_i2c_bus: %r is a USB-serial match, discovering the bus number', bus)
-		return find_i2c_bus_by_serial(serial)
-	if spec.isdigit():
-		logger.debug('resolve_i2c_bus: %r is a numeric bus -> /dev/i2c-%s', bus, spec)
-		return int(spec)
-	logger.debug('resolve_i2c_bus: %r is an adapter-name match, discovering the bus number', bus)
-	return find_i2c_bus(spec)
+    """
+    Resolve an extended-i2c-bus spec to a bus number. Accepts an int or numeric
+    string (e.g. 3 / '3' -> /dev/i2c-3, used directly), a 'serial:<ISERIAL>'
+    USB-serial match (e.g. 'serial:0012AB34' -> discovered via
+    find_i2c_bus_by_serial, the only way to distinguish two identical USB-to-I2C
+    bridges), or an adapter-name match string (e.g. 'CP2112' -> discovered via
+    find_i2c_bus, robust against the dynamic bus numbers USB-to-I2C bridges get).
+    """
+    spec = str(bus).strip()
+    if spec.lower().startswith("serial:"):
+        serial = spec.split(":", 1)[1].strip()
+        logger.debug("resolve_i2c_bus: %r is a USB-serial match, discovering the bus number", bus)
+        return find_i2c_bus_by_serial(serial)
+    if spec.isdigit():
+        logger.debug("resolve_i2c_bus: %r is a numeric bus -> /dev/i2c-%s", bus, spec)
+        return int(spec)
+    logger.debug("resolve_i2c_bus: %r is an adapter-name match, discovering the bus number", bus)
+    return find_i2c_bus(spec)
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -404,62 +404,62 @@ Add to `tests/test_i2c_bus.py`:
 
 ```python
 def test_discover_extended_i2c_buses_wraps_enumeration(tmp_path):
-	usb_device = tmp_path / 'devices' / 'usb1' / '1-1'
-	usb_device.mkdir(parents=True)
-	(usb_device / 'serial').write_text('AB12')
-	(usb_device / 'idVendor').write_text('04d8')
-	iface = usb_device / '1-1:1.0'
-	iface.mkdir()
-	bus_dir = iface / 'i2c-7'
-	bus_dir.mkdir()
-	(bus_dir / 'name').write_text('MCP2221 usb-i2c bridge')
+    usb_device = tmp_path / "devices" / "usb1" / "1-1"
+    usb_device.mkdir(parents=True)
+    (usb_device / "serial").write_text("AB12")
+    (usb_device / "idVendor").write_text("04d8")
+    iface = usb_device / "1-1:1.0"
+    iface.mkdir()
+    bus_dir = iface / "i2c-7"
+    bus_dir.mkdir()
+    (bus_dir / "name").write_text("MCP2221 usb-i2c bridge")
 
-	assert i2c_bus.discover_extended_i2c_buses(devices_path=str(iface)) == [
-		{'bus_num': 7, 'name': 'MCP2221 usb-i2c bridge', 'serial': 'AB12'}
-	]
+    assert i2c_bus.discover_extended_i2c_buses(devices_path=str(iface)) == [
+        {"bus_num": 7, "name": "MCP2221 usb-i2c bridge", "serial": "AB12"}
+    ]
 
 
 def test_discover_extended_i2c_buses_empty_when_missing_path():
-	assert i2c_bus.discover_extended_i2c_buses(devices_path='/no/such/path') == []
+    assert i2c_bus.discover_extended_i2c_buses(devices_path="/no/such/path") == []
 
 
 def test_discover_mcp2221_devices_lists_serials():
-	modules, handle, ctor = _fake_mcp2221_modules(
-		enumerate_result=[
-			{'serial_number': 'AAAA', 'path': b'/dev/hidraw0'},
-			{'serial_number': 'BBBB', 'path': b'/dev/hidraw1'},
-		]
-	)
-	with mock.patch.dict('sys.modules', modules):
-		devices = i2c_bus.discover_mcp2221_devices()
-	assert devices == [
-		{'serial': 'AAAA', 'path': b'/dev/hidraw0'},
-		{'serial': 'BBBB', 'path': b'/dev/hidraw1'},
-	]
+    modules, handle, ctor = _fake_mcp2221_modules(
+        enumerate_result=[
+            {"serial_number": "AAAA", "path": b"/dev/hidraw0"},
+            {"serial_number": "BBBB", "path": b"/dev/hidraw1"},
+        ]
+    )
+    with mock.patch.dict("sys.modules", modules):
+        devices = i2c_bus.discover_mcp2221_devices()
+    assert devices == [
+        {"serial": "AAAA", "path": b"/dev/hidraw0"},
+        {"serial": "BBBB", "path": b"/dev/hidraw1"},
+    ]
 
 
 def test_discover_mcp2221_devices_empty_without_hid_module():
-	with mock.patch.dict('sys.modules', {'hid': None}):
-		assert i2c_bus.discover_mcp2221_devices() == []
+    with mock.patch.dict("sys.modules", {"hid": None}):
+        assert i2c_bus.discover_mcp2221_devices() == []
 
 
 def test_discover_ft232h_devices_lists_urls():
-	descriptor = types_module_with(sn='FT9', description='Single RS232-HS')
+    descriptor = types_module_with(sn="FT9", description="Single RS232-HS")
 
-	class FakeFtdi:
-		@staticmethod
-		def list_devices(url):
-			return [(descriptor, 1)]
+    class FakeFtdi:
+        @staticmethod
+        def list_devices(url):
+            return [(descriptor, 1)]
 
-	fake_mod = types_module_with(Ftdi=FakeFtdi)
-	with mock.patch.dict('sys.modules', {'pyftdi.ftdi': fake_mod}):
-		devices = i2c_bus.discover_ft232h_devices()
-	assert devices == [{'url': 'ftdi://ftdi:232h:FT9/1', 'serial': 'FT9', 'description': 'Single RS232-HS'}]
+    fake_mod = types_module_with(Ftdi=FakeFtdi)
+    with mock.patch.dict("sys.modules", {"pyftdi.ftdi": fake_mod}):
+        devices = i2c_bus.discover_ft232h_devices()
+    assert devices == [{"url": "ftdi://ftdi:232h:FT9/1", "serial": "FT9", "description": "Single RS232-HS"}]
 
 
 def test_discover_ft232h_devices_empty_without_pyftdi():
-	with mock.patch.dict('sys.modules', {'pyftdi.ftdi': None}):
-		assert i2c_bus.discover_ft232h_devices() == []
+    with mock.patch.dict("sys.modules", {"pyftdi.ftdi": None}):
+        assert i2c_bus.discover_ft232h_devices() == []
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -472,51 +472,51 @@ Expected: FAIL with `AttributeError: module 'common.i2c_bus' has no attribute 'd
 Add to `common/i2c_bus.py`, directly below `find_i2c_bus_by_serial`:
 
 ```python
-def discover_extended_i2c_buses(devices_path='/sys/bus/i2c/devices'):
-	"""Best-effort list of every extended-kind (kernel i2c-dev) adapter
-	present, for the wizard's Discover button. Returns [] if devices_path
-	doesn't exist or has no adapters; never raises."""
-	return _enumerate_i2c_adapters(devices_path)
+def discover_extended_i2c_buses(devices_path="/sys/bus/i2c/devices"):
+    """Best-effort list of every extended-kind (kernel i2c-dev) adapter
+    present, for the wizard's Discover button. Returns [] if devices_path
+    doesn't exist or has no adapters; never raises."""
+    return _enumerate_i2c_adapters(devices_path)
 
 
 def discover_mcp2221_devices():
-	"""Best-effort list of connected MCP2221 USB devices ({'serial', 'path'}),
-	for the wizard's Discover button. Returns [] if the `hid` module or the
-	Blinka MCP2221 backend aren't importable, or no devices are present --
-	never raises."""
-	try:
-		import hid
-		from adafruit_blinka.microcontroller.mcp2221 import mcp2221 as _mcp_mod
-	except ImportError:
-		return []
-	try:
-		return [
-			{'serial': info.get('serial_number'), 'path': info.get('path')}
-			for info in hid.enumerate(_mcp_mod.MCP2221.VID, _mcp_mod.MCP2221.PID)
-			if info.get('serial_number')
-		]
-	except Exception:
-		logger.debug('discover_mcp2221_devices: hid.enumerate failed', exc_info=True)
-		return []
+    """Best-effort list of connected MCP2221 USB devices ({'serial', 'path'}),
+    for the wizard's Discover button. Returns [] if the `hid` module or the
+    Blinka MCP2221 backend aren't importable, or no devices are present --
+    never raises."""
+    try:
+        import hid
+        from adafruit_blinka.microcontroller.mcp2221 import mcp2221 as _mcp_mod
+    except ImportError:
+        return []
+    try:
+        return [
+            {"serial": info.get("serial_number"), "path": info.get("path")}
+            for info in hid.enumerate(_mcp_mod.MCP2221.VID, _mcp_mod.MCP2221.PID)
+            if info.get("serial_number")
+        ]
+    except Exception:
+        logger.debug("discover_mcp2221_devices: hid.enumerate failed", exc_info=True)
+        return []
 
 
 def discover_ft232h_devices():
-	"""Best-effort list of connected FT232H USB devices ({'url', 'serial',
-	'description'}), for the wizard's Discover button. Returns [] if pyftdi
-	isn't importable or no devices are present -- never raises."""
-	try:
-		from pyftdi.ftdi import Ftdi
-	except ImportError:
-		return []
-	try:
-		devices = []
-		for descriptor, _interface_count in Ftdi.list_devices('ftdi://ftdi:232h/'):
-			url = f'ftdi://ftdi:232h:{descriptor.sn}/1' if descriptor.sn else 'ftdi://ftdi:232h/1'
-			devices.append({'url': url, 'serial': descriptor.sn, 'description': descriptor.description})
-		return devices
-	except Exception:
-		logger.debug('discover_ft232h_devices: Ftdi.list_devices failed', exc_info=True)
-		return []
+    """Best-effort list of connected FT232H USB devices ({'url', 'serial',
+    'description'}), for the wizard's Discover button. Returns [] if pyftdi
+    isn't importable or no devices are present -- never raises."""
+    try:
+        from pyftdi.ftdi import Ftdi
+    except ImportError:
+        return []
+    try:
+        devices = []
+        for descriptor, _interface_count in Ftdi.list_devices("ftdi://ftdi:232h/"):
+            url = f"ftdi://ftdi:232h:{descriptor.sn}/1" if descriptor.sn else "ftdi://ftdi:232h/1"
+            devices.append({"url": url, "serial": descriptor.sn, "description": descriptor.description})
+        return devices
+    except Exception:
+        logger.debug("discover_ft232h_devices: Ftdi.list_devices failed", exc_info=True)
+        return []
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -559,38 +559,38 @@ EOF
 Add to `tests/test_webapp_sqlite.py` (near `test_probeconfig_add_usb_hid_probe_not_blocked_by_stale_platform_bus`):
 
 ```python
-@pytest.mark.skipif(flask_app is None, reason=f'app import failed (unrelated to datastore): {_APP_IMPORT_ERROR}')
+@pytest.mark.skipif(flask_app is None, reason=f"app import failed (unrelated to datastore): {_APP_IMPORT_ERROR}")
 def test_i2c_bus_scan_extended_lists_discovered_adapters(monkeypatch):
-	flask_app.config.update(TESTING=True)
-	client = flask_app.test_client()
+    flask_app.config.update(TESTING=True)
+    client = flask_app.test_client()
 
-	import blueprints.wizard.routes as wizard_routes
+    import blueprints.wizard.routes as wizard_routes
 
-	monkeypatch.setattr(
-		wizard_routes,
-		'discover_extended_i2c_buses',
-		lambda: [{'bus_num': 7, 'name': 'MCP2221 usb-i2c bridge', 'serial': 'AB12'}],
-	)
+    monkeypatch.setattr(
+        wizard_routes,
+        "discover_extended_i2c_buses",
+        lambda: [{"bus_num": 7, "name": "MCP2221 usb-i2c bridge", "serial": "AB12"}],
+    )
 
-	resp = client.post('/wizard/i2c_bus_scan', data={'itemID': 'distance_devspec_i2c_bus_num', 'kind': 'extended'})
-	assert resp.status_code == 200
-	body = resp.get_data(as_text=True)
-	assert 'i2c-7' in body
-	assert 'serial:AB12' in body
+    resp = client.post("/wizard/i2c_bus_scan", data={"itemID": "distance_devspec_i2c_bus_num", "kind": "extended"})
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "i2c-7" in body
+    assert "serial:AB12" in body
 
 
-@pytest.mark.skipif(flask_app is None, reason=f'app import failed (unrelated to datastore): {_APP_IMPORT_ERROR}')
+@pytest.mark.skipif(flask_app is None, reason=f"app import failed (unrelated to datastore): {_APP_IMPORT_ERROR}")
 def test_i2c_bus_scan_no_devices_shows_error(monkeypatch):
-	flask_app.config.update(TESTING=True)
-	client = flask_app.test_client()
+    flask_app.config.update(TESTING=True)
+    client = flask_app.test_client()
 
-	import blueprints.wizard.routes as wizard_routes
+    import blueprints.wizard.routes as wizard_routes
 
-	monkeypatch.setattr(wizard_routes, 'discover_mcp2221_devices', lambda: [])
+    monkeypatch.setattr(wizard_routes, "discover_mcp2221_devices", lambda: [])
 
-	resp = client.post('/wizard/i2c_bus_scan', data={'itemID': 'distance_devspec_i2c_bus_num', 'kind': 'mcp2221'})
-	assert resp.status_code == 200
-	assert 'No mcp2221 I2C buses discovered.' in resp.get_data(as_text=True)
+    resp = client.post("/wizard/i2c_bus_scan", data={"itemID": "distance_devspec_i2c_bus_num", "kind": "mcp2221"})
+    assert resp.status_code == 200
+    assert "No mcp2221 I2C buses discovered." in resp.get_data(as_text=True)
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -610,54 +610,54 @@ to:
 
 ```python
 from common.i2c_bus import (
-	I2CBusConfigError,
-	discover_extended_i2c_buses,
-	discover_ft232h_devices,
-	discover_mcp2221_devices,
-	validate_bus_kinds,
+    I2CBusConfigError,
+    discover_extended_i2c_buses,
+    discover_ft232h_devices,
+    discover_mcp2221_devices,
+    validate_bus_kinds,
 )
 ```
 
 Then add a new action branch directly after the `if action == 'thermoworks_discover':` block (after its closing `return render_template_string(...)`, before the `""" Create Temporary Probe Device/Port Structure..."""` comment):
 
 ```python
-		if action == 'i2c_bus_scan':
-			itemID = r['itemID']
-			kind = r.get('kind', '')
-			candidates = []
-			error = None
+if action == "i2c_bus_scan":
+    itemID = r["itemID"]
+    kind = r.get("kind", "")
+    candidates = []
+    error = None
 
-			try:
-				if kind == 'extended':
-					for adapter in discover_extended_i2c_buses():
-						candidates.append(
-							{'value': str(adapter['bus_num']), 'label': f"i2c-{adapter['bus_num']} ({adapter['name']})"}
-						)
-						if adapter['serial']:
-							candidates.append(
-								{
-									'value': f'serial:{adapter["serial"]}',
-									'label': f'{adapter["name"]} — serial {adapter["serial"]}',
-								}
-							)
-				elif kind == 'mcp2221':
-					for device in discover_mcp2221_devices():
-						candidates.append({'value': device['serial'], 'label': f'MCP2221 serial {device["serial"]}'})
-				elif kind == 'ft232h':
-					for device in discover_ft232h_devices():
-						candidates.append(
-							{'value': device['url'], 'label': f'{device["description"] or "FT232H"} ({device["url"]})'}
-						)
-				else:
-					error = f"Unknown I2C bus kind {kind!r}. Select Extended, FT232H, or MCP2221 first."
+    try:
+        if kind == "extended":
+            for adapter in discover_extended_i2c_buses():
+                candidates.append(
+                    {"value": str(adapter["bus_num"]), "label": f"i2c-{adapter['bus_num']} ({adapter['name']})"}
+                )
+                if adapter["serial"]:
+                    candidates.append(
+                        {
+                            "value": f"serial:{adapter['serial']}",
+                            "label": f"{adapter['name']} — serial {adapter['serial']}",
+                        }
+                    )
+        elif kind == "mcp2221":
+            for device in discover_mcp2221_devices():
+                candidates.append({"value": device["serial"], "label": f"MCP2221 serial {device['serial']}"})
+        elif kind == "ft232h":
+            for device in discover_ft232h_devices():
+                candidates.append(
+                    {"value": device["url"], "label": f"{device['description'] or 'FT232H'} ({device['url']})"}
+                )
+        else:
+            error = f"Unknown I2C bus kind {kind!r}. Select Extended, FT232H, or MCP2221 first."
 
-				if not candidates and error is None:
-					error = f'No {kind} I2C buses discovered.'
-			except Exception as e:
-				error = f'Something bad happened: {e}'
+        if not candidates and error is None:
+            error = f"No {kind} I2C buses discovered."
+    except Exception as e:
+        error = f"Something bad happened: {e}"
 
-			render_string = "{% from 'probeconfig/_macro_probes_config.html' import render_i2c_scan_table %}{{ render_i2c_scan_table(itemID, candidates, error) }}"
-			return render_template_string(render_string, itemID=itemID, candidates=candidates, error=error)
+    render_string = "{% from 'probeconfig/_macro_probes_config.html' import render_i2c_scan_table %}{{ render_i2c_scan_table(itemID, candidates, error) }}"
+    return render_template_string(render_string, itemID=itemID, candidates=candidates, error=error)
 ```
 
 - [ ] **Step 4: Add the results-table macro**
@@ -908,21 +908,21 @@ EOF
 
 ```python
 def test_busio_probe_bus_num_is_free_text_and_documents_bridges():
-	"""The busio probe i2c_bus_num field (which drives the Extended bus) is
-	free text with a Discover button, and its description documents both
-	bridge-name matches and the serial: selector."""
-	manifest = _manifest()
-	checked = 0
-	for name in ('mcp9600_adafruit', 'ads1115_adafruit', 'ads1015_adafruit'):
-		cfg = manifest['modules']['probes'][name]['device_specific']['config']
-		field = next(c for c in cfg if c['label'] == 'i2c_bus_num')
-		assert field['type'] == 'i2c_bus_num'
-		assert 'list_values' not in field
-		assert 'CP2112' in field['description']
-		assert 'MCP2221' in field['description']
-		assert 'serial:' in field['description']
-		checked += 1
-	assert checked == 3
+    """The busio probe i2c_bus_num field (which drives the Extended bus) is
+    free text with a Discover button, and its description documents both
+    bridge-name matches and the serial: selector."""
+    manifest = _manifest()
+    checked = 0
+    for name in ("mcp9600_adafruit", "ads1115_adafruit", "ads1015_adafruit"):
+        cfg = manifest["modules"]["probes"][name]["device_specific"]["config"]
+        field = next(c for c in cfg if c["label"] == "i2c_bus_num")
+        assert field["type"] == "i2c_bus_num"
+        assert "list_values" not in field
+        assert "CP2112" in field["description"]
+        assert "MCP2221" in field["description"]
+        assert "serial:" in field["description"]
+        checked += 1
+    assert checked == 3
 ```
 
 Leave `test_every_bridge_selector_offers_mcp2221` and `test_find_i2c_bus_matches_mcp2221_adapter` as-is for now (the former's manifest-wide `options` walk is updated in Task 9, once the last `options`-based `i2c_bus_num` entries are also converted).
@@ -1038,17 +1038,17 @@ EOF
 Add to `tests/test_webapp_sqlite.py`:
 
 ```python
-@pytest.mark.skipif(flask_app is None, reason=f'app import failed (unrelated to datastore): {_APP_IMPORT_ERROR}')
+@pytest.mark.skipif(flask_app is None, reason=f"app import failed (unrelated to datastore): {_APP_IMPORT_ERROR}")
 def test_wizard_modulecard_renders_i2c_bus_num_as_free_text():
-	flask_app.config.update(TESTING=True)
-	client = flask_app.test_client()
+    flask_app.config.update(TESTING=True)
+    client = flask_app.test_client()
 
-	resp = client.post('/wizard/modulecard', data={'module': 'vl53l0x', 'section': 'distance'})
-	assert resp.status_code == 200
-	body = resp.get_data(as_text=True)
-	assert 'type="text"' in body
-	assert 'Discover' in body
-	assert '<select' not in body or 'device_distance_i2c_bus_num' not in body.split('<select')[1][:500]
+    resp = client.post("/wizard/modulecard", data={"module": "vl53l0x", "section": "distance"})
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert 'type="text"' in body
+    assert "Discover" in body
+    assert "<select" not in body or "device_distance_i2c_bus_num" not in body.split("<select")[1][:500]
 ```
 
 Add a new file `tests/test_wizard_install_info_defaults.py`:
@@ -1057,37 +1057,37 @@ Add a new file `tests/test_wizard_install_info_defaults.py`:
 from blueprints.wizard.wizard import wizardInstallInfoDefaults
 
 _WIZARD_DATA = {
-	'modules': {
-		'grillplatform': {
-			'x86': {
-				'default': True,
-				'settings_dependencies': {
-					'i2c_bus_kind': {
-						'options': {'basic': 'Basic', 'extended': 'Extended'},
-						'settings': ['platform', 'fan_controller', 'i2c_bus_kind'],
-					},
-					'i2c_bus_num': {
-						'type': 'i2c_bus_num',
-						'default': 'CP2112',
-						'settings': ['platform', 'fan_controller', 'i2c_bus_num'],
-					},
-				},
-			}
-		},
-		'display': {'none': {'default': True, 'settings_dependencies': {}}},
-		'distance': {'none': {'default': True, 'settings_dependencies': {}}},
-	},
-	'boards': {'x86': {'probe_map': {'probe_devices': []}}},
+    "modules": {
+        "grillplatform": {
+            "x86": {
+                "default": True,
+                "settings_dependencies": {
+                    "i2c_bus_kind": {
+                        "options": {"basic": "Basic", "extended": "Extended"},
+                        "settings": ["platform", "fan_controller", "i2c_bus_kind"],
+                    },
+                    "i2c_bus_num": {
+                        "type": "i2c_bus_num",
+                        "default": "CP2112",
+                        "settings": ["platform", "fan_controller", "i2c_bus_num"],
+                    },
+                },
+            }
+        },
+        "display": {"none": {"default": True, "settings_dependencies": {}}},
+        "distance": {"none": {"default": True, "settings_dependencies": {}}},
+    },
+    "boards": {"x86": {"probe_map": {"probe_devices": []}}},
 }
 
 
 def test_wizard_install_info_defaults_handles_options_free_field():
-	settings = {'display': {'config': {'none': {}}}}
-	info = wizardInstallInfoDefaults(_WIZARD_DATA, settings)
-	# 'options'-based dependency still seeds its first key.
-	assert info['modules']['grillplatform']['settings']['i2c_bus_kind'] == 'basic'
-	# 'type: i2c_bus_num' dependency (no 'options') seeds its explicit 'default'.
-	assert info['modules']['grillplatform']['settings']['i2c_bus_num'] == 'CP2112'
+    settings = {"display": {"config": {"none": {}}}}
+    info = wizardInstallInfoDefaults(_WIZARD_DATA, settings)
+    # 'options'-based dependency still seeds its first key.
+    assert info["modules"]["grillplatform"]["settings"]["i2c_bus_kind"] == "basic"
+    # 'type: i2c_bus_num' dependency (no 'options') seeds its explicit 'default'.
+    assert info["modules"]["grillplatform"]["settings"]["i2c_bus_num"] == "CP2112"
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -1103,24 +1103,24 @@ Expected: FAIL -- the response still contains a `<select>` for `device_distance_
 In `blueprints/wizard/wizard.py`, replace (currently lines 57-61):
 
 ```python
-					for setting in wizardData['modules'][component][module]['settings_dependencies']:
-						""" Populate all settings with default value """
-						wizardInstallInfo['modules'][component]['settings'][setting] = list(
-							wizardData['modules'][component][module]['settings_dependencies'][setting]['options'].keys()
-						)[0]
+for setting in wizardData["modules"][component][module]["settings_dependencies"]:
+    """ Populate all settings with default value """
+    wizardInstallInfo["modules"][component]["settings"][setting] = list(
+        wizardData["modules"][component][module]["settings_dependencies"][setting]["options"].keys()
+    )[0]
 ```
 
 with:
 
 ```python
-					for setting in wizardData['modules'][component][module]['settings_dependencies']:
-						""" Populate all settings with default value """
-						dep = wizardData['modules'][component][module]['settings_dependencies'][setting]
-						if 'options' in dep:
-							default_value = list(dep['options'].keys())[0]
-						else:
-							default_value = dep.get('default', '')
-						wizardInstallInfo['modules'][component]['settings'][setting] = default_value
+for setting in wizardData["modules"][component][module]["settings_dependencies"]:
+    """ Populate all settings with default value """
+    dep = wizardData["modules"][component][module]["settings_dependencies"][setting]
+    if "options" in dep:
+        default_value = list(dep["options"].keys())[0]
+    else:
+        default_value = dep.get("default", "")
+    wizardInstallInfo["modules"][component]["settings"][setting] = default_value
 ```
 
 - [ ] **Step 4: Wire the dispatch in `_macro_wizard_card.html`**
@@ -1212,32 +1212,32 @@ EOF
 
 ```python
 def test_every_i2c_bus_num_field_documents_both_bridges_and_serial_match():
-	"""Every i2c_bus_num field (settings-dependency or device_specific) is
-	free text (type: i2c_bus_num) and documents CP2112, MCP2221, and the
-	serial: selector in its description, so no field silently regresses to a
-	fixed dropdown that can't express a USB serial."""
-	manifest = _manifest()
-	found = 0
+    """Every i2c_bus_num field (settings-dependency or device_specific) is
+    free text (type: i2c_bus_num) and documents CP2112, MCP2221, and the
+    serial: selector in its description, so no field silently regresses to a
+    fixed dropdown that can't express a USB serial."""
+    manifest = _manifest()
+    found = 0
 
-	def walk(node):
-		nonlocal found
-		if isinstance(node, dict):
-			if node.get('type') == 'i2c_bus_num' or (
-				'i2c_bus_num' in node.get('settings', []) if isinstance(node.get('settings'), list) else False
-			):
-				found += 1
-				assert node.get('type') == 'i2c_bus_num', f'i2c_bus_num field is not free text: {node}'
-				assert 'CP2112' in node['description']
-				assert 'MCP2221' in node['description']
-				assert 'serial:' in node['description']
-			for value in node.values():
-				walk(value)
-		elif isinstance(node, list):
-			for value in node:
-				walk(value)
+    def walk(node):
+        nonlocal found
+        if isinstance(node, dict):
+            if node.get("type") == "i2c_bus_num" or (
+                "i2c_bus_num" in node.get("settings", []) if isinstance(node.get("settings"), list) else False
+            ):
+                found += 1
+                assert node.get("type") == "i2c_bus_num", f"i2c_bus_num field is not free text: {node}"
+                assert "CP2112" in node["description"]
+                assert "MCP2221" in node["description"]
+                assert "serial:" in node["description"]
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
 
-	walk(manifest['modules'])
-	assert found == 13, f'expected 13 i2c_bus_num fields (5 probe + 7 distance + 1 fan controller), found {found}'
+    walk(manifest["modules"])
+    assert found == 13, f"expected 13 i2c_bus_num fields (5 probe + 7 distance + 1 fan controller), found {found}"
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**

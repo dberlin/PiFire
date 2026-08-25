@@ -81,9 +81,18 @@ def test_draft_persists_and_resumes_probe_map_and_units(ds, client):
         "selections": {"display": "ili9341b"},
         "settings_dep_values": {},
         "display_config": {},
-        "probe_map": {"probe_devices": [{"device": "D1", "module": "ads1115_adafruit",
-                       "module_filename": "ads1115_adafruit", "ports": ["ADC0"], "config": {}}],
-                      "probe_info": []},
+        "probe_map": {
+            "probe_devices": [
+                {
+                    "device": "D1",
+                    "module": "ads1115_adafruit",
+                    "module_filename": "ads1115_adafruit",
+                    "ports": ["ADC0"],
+                    "config": {},
+                }
+            ],
+            "probe_info": [],
+        },
         "probes_units": "C",
     }
     r1 = client.post("/api/wizard/draft", data=json.dumps(draft), content_type="application/json")
@@ -95,8 +104,13 @@ def test_draft_persists_and_resumes_probe_map_and_units(ds, client):
 
 
 def test_draft_clear_drops_probe_map_and_units(ds, client):
-    draft = {"selections": {}, "settings_dep_values": {}, "display_config": {},
-             "probe_map": {"probe_devices": [{"device": "D1"}], "probe_info": []}, "probes_units": "C"}
+    draft = {
+        "selections": {},
+        "settings_dep_values": {},
+        "display_config": {},
+        "probe_map": {"probe_devices": [{"device": "D1"}], "probe_info": []},
+        "probes_units": "C",
+    }
     client.post("/api/wizard/draft", data=json.dumps(draft), content_type="application/json")
     client.post("/api/wizard/draft", data=json.dumps({"clear": True}), content_type="application/json")
     body = client.get("/api/wizard/state").get_json()
@@ -202,6 +216,7 @@ jj desc -m "feat(api-wizard): carry probe_map, probe_profiles, probes_units in /
 ```python
 def test_finish_uses_probe_map_from_payload(ds, client, monkeypatch):
     import blueprints.api_wizard.routes as wr
+
     fired = []
     monkeypatch.setattr(wr.os, "system", lambda cmd: fired.append(cmd))
     monkeypatch.setattr(wr, "wizard_bus_kinds", lambda *a, **k: {})
@@ -210,10 +225,20 @@ def test_finish_uses_probe_map_from_payload(ds, client, monkeypatch):
     monkeypatch.setattr(wr, "store_wizard_install_info", lambda info: captured.update(info))
     payload = {
         "selections": {"grillplatform": "custom", "display": "ili9341b", "distance": "hcsr04"},
-        "settings_dep_values": {}, "display_config": {},
-        "probe_map": {"probe_devices": [{"device": "PAYLOAD_DEV", "module": "ads1115_adafruit",
-                       "module_filename": "ads1115_adafruit", "ports": ["ADC0"], "config": {}}],
-                      "probe_info": []},
+        "settings_dep_values": {},
+        "display_config": {},
+        "probe_map": {
+            "probe_devices": [
+                {
+                    "device": "PAYLOAD_DEV",
+                    "module": "ads1115_adafruit",
+                    "module_filename": "ads1115_adafruit",
+                    "ports": ["ADC0"],
+                    "config": {},
+                }
+            ],
+            "probe_info": [],
+        },
         "probes_units": "C",
     }
     resp = client.post("/api/wizard/finish", data=json.dumps(payload), content_type="application/json")
@@ -285,10 +310,14 @@ jj desc -m "feat(api-wizard): /finish reads client-held probe_map + probes_units
 ```python
 def test_scan_bluetooth_returns_rows(ds, client, monkeypatch):
     import blueprints.api_wizard.routes as wr
+
     monkeypatch.setattr(wr, "get_supported_cmds", lambda: ["scan_bluetooth"])
     monkeypatch.setattr(wr, "process_command", lambda **k: None)
-    monkeypatch.setattr(wr, "get_system_command_output",
-        lambda **k: {"result": "OK", "data": {"bt_devices": [{"name": "iBBQ", "hw_id": "AA:BB", "info": ""}]}})
+    monkeypatch.setattr(
+        wr,
+        "get_system_command_output",
+        lambda **k: {"result": "OK", "data": {"bt_devices": [{"name": "iBBQ", "hw_id": "AA:BB", "info": ""}]}},
+    )
     monkeypatch.setattr(wr, "parse_bt_device_info", lambda devs: devs)
     resp = client.post("/api/wizard/scan/bluetooth", data=json.dumps({}), content_type="application/json")
     body = resp.get_json()
@@ -298,6 +327,7 @@ def test_scan_bluetooth_returns_rows(ds, client, monkeypatch):
 
 def test_scan_bluetooth_unsupported_is_friendly_error(ds, client, monkeypatch):
     import blueprints.api_wizard.routes as wr
+
     monkeypatch.setattr(wr, "get_supported_cmds", lambda: [])
     resp = client.post("/api/wizard/scan/bluetooth", data=json.dumps({}), content_type="application/json")
     body = resp.get_json()
@@ -311,9 +341,13 @@ def test_scan_thermoworks_auth_error(ds, client, monkeypatch):
 
     def _boom(*a, **k):
         raise AuthenticationError("bad creds")
+
     monkeypatch.setattr(wr, "_thermoworks_discover", _boom)
-    resp = client.post("/api/wizard/scan/thermoworks",
-        data=json.dumps({"email": "x@y.z", "password": "nope"}), content_type="application/json")
+    resp = client.post(
+        "/api/wizard/scan/thermoworks",
+        data=json.dumps({"email": "x@y.z", "password": "nope"}),
+        content_type="application/json",
+    )
     body = resp.get_json()
     assert body["rows"] == []
     assert "Could not log in" in body["error"]
@@ -321,10 +355,17 @@ def test_scan_thermoworks_auth_error(ds, client, monkeypatch):
 
 def test_scan_thermoworks_returns_rows(ds, client, monkeypatch):
     import blueprints.api_wizard.routes as wr
-    monkeypatch.setattr(wr, "_thermoworks_discover",
-        lambda email, password: [{"label": "Signals", "type": "signals", "serial": "S1", "num_channels": 4}])
-    resp = client.post("/api/wizard/scan/thermoworks",
-        data=json.dumps({"email": "x@y.z", "password": "ok"}), content_type="application/json")
+
+    monkeypatch.setattr(
+        wr,
+        "_thermoworks_discover",
+        lambda email, password: [{"label": "Signals", "type": "signals", "serial": "S1", "num_channels": 4}],
+    )
+    resp = client.post(
+        "/api/wizard/scan/thermoworks",
+        data=json.dumps({"email": "x@y.z", "password": "ok"}),
+        content_type="application/json",
+    )
     body = resp.get_json()
     assert body["error"] is None
     assert body["rows"][0]["serial"] == "S1"
@@ -435,10 +476,12 @@ jj desc -m "feat(api-wizard): add /scan/bluetooth and /scan/thermoworks endpoint
 
 ```python
 def test_validate_bus_kinds_clean(ds, client):
-    devs = [{"device": "D1", "module": "ads1115_adafruit",
-             "config": {"i2c_bus_kind": "basic"}, "ports": ["ADC0"]}]
-    resp = client.post("/api/wizard/probes/validate-bus-kinds",
-        data=json.dumps({"probe_devices": devs}), content_type="application/json")
+    devs = [{"device": "D1", "module": "ads1115_adafruit", "config": {"i2c_bus_kind": "basic"}, "ports": ["ADC0"]}]
+    resp = client.post(
+        "/api/wizard/probes/validate-bus-kinds",
+        data=json.dumps({"probe_devices": devs}),
+        content_type="application/json",
+    )
     assert resp.status_code == 200
     assert resp.get_json()["ok"] is True
 
@@ -449,10 +492,13 @@ def test_validate_bus_kinds_conflict(ds, client, monkeypatch):
 
     def _boom(*a, **k):
         raise I2CBusConfigError("'basic' I2C can't share a process with a USB-HID bus")
+
     monkeypatch.setattr(wr, "validate_bus_kinds", _boom)
-    resp = client.post("/api/wizard/probes/validate-bus-kinds",
+    resp = client.post(
+        "/api/wizard/probes/validate-bus-kinds",
         data=json.dumps({"probe_devices": [{"device": "D1", "config": {"i2c_bus_kind": "basic"}}]}),
-        content_type="application/json")
+        content_type="application/json",
+    )
     body = resp.get_json()
     assert body["ok"] is False
     assert "USB-HID" in body["detail"]

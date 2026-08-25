@@ -44,70 +44,70 @@ from probes.kalman import TempKalman
 
 
 def _feed_constant(kf, value, steps, dt=0.05, start=0.0):
-	t = start
-	out = None
-	for _ in range(steps):
-		t += dt
-		out = kf.update(value, now=t)
-	return out, t
+    t = start
+    out = None
+    for _ in range(steps):
+        t += dt
+        out = kf.update(value, now=t)
+    return out, t
 
 
 def test_converges_to_constant():
-	kf = TempKalman(units='F')
-	out, _ = _feed_constant(kf, 250.0, steps=60)
-	assert abs(out - 250.0) < 0.5
+    kf = TempKalman(units="F")
+    out, _ = _feed_constant(kf, 250.0, steps=60)
+    assert abs(out - 250.0) < 0.5
 
 
 def test_first_reading_returns_immediately():
-	kf = TempKalman(units='F')
-	out = kf.update(137.0, now=0.05)
-	assert out == 137.0
+    kf = TempKalman(units="F")
+    out = kf.update(137.0, now=0.05)
+    assert out == 137.0
 
 
 def test_reduces_noise_on_constant():
-	rng = random.Random(0)
-	kf = TempKalman(units='F')
-	ins, outs = [], []
-	t = 0.0
-	for i in range(300):
-		t += 0.05
-		z = 250.0 + rng.gauss(0, 2.0)
-		o = kf.update(z, now=t)
-		if i >= 20:
-			ins.append(z)
-			outs.append(o)
-	assert statistics.pstdev(outs) < statistics.pstdev(ins)
+    rng = random.Random(0)
+    kf = TempKalman(units="F")
+    ins, outs = [], []
+    t = 0.0
+    for i in range(300):
+        t += 0.05
+        z = 250.0 + rng.gauss(0, 2.0)
+        o = kf.update(z, now=t)
+        if i >= 20:
+            ins.append(z)
+            outs.append(o)
+    assert statistics.pstdev(outs) < statistics.pstdev(ins)
 
 
 def test_tracks_ramp_with_low_lag():
-	kf = TempKalman(units='F')
-	rate, dt = 1.5, 0.05
-	t, temp, out = 0.0, 100.0, None
-	for _ in range(400):
-		temp += rate * dt
-		t += dt
-		out = kf.update(temp, now=t)
-	lag = (temp - out) / rate
-	assert -0.2 < lag < 0.2
+    kf = TempKalman(units="F")
+    rate, dt = 1.5, 0.05
+    t, temp, out = 0.0, 100.0, None
+    for _ in range(400):
+        temp += rate * dt
+        t += dt
+        out = kf.update(temp, now=t)
+    lag = (temp - out) / rate
+    assert -0.2 < lag < 0.2
 
 
 def test_irregular_dt_stays_stable():
-	rng = random.Random(1)
-	kf = TempKalman(units='F')
-	t, out = 0.0, None
-	for _ in range(200):
-		t += 0.05 + rng.uniform(-0.02, 0.05)
-		out = kf.update(250.0, now=t)
-	assert math.isfinite(out)
-	assert abs(out - 250.0) < 1.0
+    rng = random.Random(1)
+    kf = TempKalman(units="F")
+    t, out = 0.0, None
+    for _ in range(200):
+        t += 0.05 + rng.uniform(-0.02, 0.05)
+        out = kf.update(250.0, now=t)
+    assert math.isfinite(out)
+    assert abs(out - 250.0) < 1.0
 
 
 def test_celsius_returns_one_decimal_and_scaled_tuning():
-	kf = TempKalman(units='C')
-	assert kf.R == 1.25
-	out = kf.update(100.0, now=0.05)
-	assert isinstance(out, float)
-	assert out == 100.0
+    kf = TempKalman(units="C")
+    assert kf.R == 1.25
+    out = kf.update(100.0, now=0.05)
+    assert isinstance(out, float)
+    assert out == 100.0
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -137,8 +137,8 @@ import time
 #   q    : white-acceleration process-noise spectral density
 #   gate : reject readings farther than this many sigma from the prediction
 _TUNING = {
-	'F': {'R': 4.0, 'q': 0.5, 'gate': 5.0},
-	'C': {'R': 1.25, 'q': 0.15, 'gate': 5.0},
+    "F": {"R": 4.0, "q": 0.5, "gate": 5.0},
+    "C": {"R": 1.25, "q": 0.15, "gate": 5.0},
 }
 
 _DT_MIN = 0.01
@@ -146,67 +146,67 @@ _DT_MAX = 1.0
 
 
 class TempKalman:
-	def __init__(self, units='F'):
-		tuning = _TUNING['C'] if units == 'C' else _TUNING['F']
-		self.units = units
-		self.R = tuning['R']
-		self.q = tuning['q']
-		self.gate2 = tuning['gate'] ** 2
-		self.reset()
+    def __init__(self, units="F"):
+        tuning = _TUNING["C"] if units == "C" else _TUNING["F"]
+        self.units = units
+        self.R = tuning["R"]
+        self.q = tuning["q"]
+        self.gate2 = tuning["gate"] ** 2
+        self.reset()
 
-	def reset(self):
-		self.x = None			# temperature estimate
-		self.v = 0.0			# rate estimate (deg/sec)
-		self.P = [[self.R, 0.0], [0.0, self.R]]
-		self.last_time = None
-		self.none_streak = 0
+    def reset(self):
+        self.x = None  # temperature estimate
+        self.v = 0.0  # rate estimate (deg/sec)
+        self.P = [[self.R, 0.0], [0.0, self.R]]
+        self.last_time = None
+        self.none_streak = 0
 
-	def update(self, reading, now=None):
-		if now is None:
-			now = time.monotonic()
+    def update(self, reading, now=None):
+        if now is None:
+            now = time.monotonic()
 
-		# First valid reading (fresh or post-reset): initialize, don't predict.
-		if self.x is None or self.last_time is None:
-			self.x = float(reading)
-			self.v = 0.0
-			self.P = [[self.R, 0.0], [0.0, self.R]]
-			self.last_time = now
-			return round(self.x, 1)
+        # First valid reading (fresh or post-reset): initialize, don't predict.
+        if self.x is None or self.last_time is None:
+            self.x = float(reading)
+            self.v = 0.0
+            self.P = [[self.R, 0.0], [0.0, self.R]]
+            self.last_time = now
+            return round(self.x, 1)
 
-		dt = now - self.last_time
-		if dt < _DT_MIN:
-			dt = _DT_MIN
-		elif dt > _DT_MAX:
-			dt = _DT_MAX
-		self.last_time = now
+        dt = now - self.last_time
+        if dt < _DT_MIN:
+            dt = _DT_MIN
+        elif dt > _DT_MAX:
+            dt = _DT_MAX
+        self.last_time = now
 
-		# --- Predict: x = F x ; P = F P F^T + Q  (F = [[1, dt], [0, 1]]) ---
-		self.x += self.v * dt
-		P = self.P
-		p00 = P[0][0] + dt * (P[1][0] + P[0][1]) + dt * dt * P[1][1]
-		p01 = P[0][1] + dt * P[1][1]
-		p10 = P[1][0] + dt * P[1][1]
-		p11 = P[1][1]
-		dt2 = dt * dt
-		dt3 = dt2 * dt
-		dt4 = dt3 * dt
-		p00 += self.q * dt4 / 4.0
-		p01 += self.q * dt3 / 2.0
-		p10 += self.q * dt3 / 2.0
-		p11 += self.q * dt2
+        # --- Predict: x = F x ; P = F P F^T + Q  (F = [[1, dt], [0, 1]]) ---
+        self.x += self.v * dt
+        P = self.P
+        p00 = P[0][0] + dt * (P[1][0] + P[0][1]) + dt * dt * P[1][1]
+        p01 = P[0][1] + dt * P[1][1]
+        p10 = P[1][0] + dt * P[1][1]
+        p11 = P[1][1]
+        dt2 = dt * dt
+        dt3 = dt2 * dt
+        dt4 = dt3 * dt
+        p00 += self.q * dt4 / 4.0
+        p01 += self.q * dt3 / 2.0
+        p10 += self.q * dt3 / 2.0
+        p11 += self.q * dt2
 
-		# --- Update (measure temperature only, H = [1, 0]) ---
-		y = reading - self.x
-		s = p00 + self.R
-		k0 = p00 / s
-		k1 = p10 / s
-		self.x += k0 * y
-		self.v += k1 * y
-		self.P = [
-			[(1 - k0) * p00, (1 - k0) * p01],
-			[p10 - k1 * p00, p11 - k1 * p01],
-		]
-		return round(self.x, 1)
+        # --- Update (measure temperature only, H = [1, 0]) ---
+        y = reading - self.x
+        s = p00 + self.R
+        k0 = p00 / s
+        k1 = p10 / s
+        self.x += k0 * y
+        self.v += k1 * y
+        self.P = [
+            [(1 - k0) * p00, (1 - k0) * p01],
+            [p10 - k1 * p00, p11 - k1 * p01],
+        ]
+        return round(self.x, 1)
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -241,36 +241,36 @@ Append to `tests/test_kalman.py`:
 
 ```python
 def test_rejects_single_spike():
-	kf = TempKalman(units='F')
-	_, t = _feed_constant(kf, 250.0, steps=40)
-	before = kf.update(250.0, now=t + 0.05)
-	after = kf.update(900.0, now=t + 0.10)
-	assert abs(after - before) < 1.0
+    kf = TempKalman(units="F")
+    _, t = _feed_constant(kf, 250.0, steps=40)
+    before = kf.update(250.0, now=t + 0.05)
+    after = kf.update(900.0, now=t + 0.10)
+    assert abs(after - before) < 1.0
 
 
 def test_none_reading_returns_none():
-	kf = TempKalman(units='F')
-	kf.update(250.0, now=0.05)
-	assert kf.update(None) is None
+    kf = TempKalman(units="F")
+    kf.update(250.0, now=0.05)
+    assert kf.update(None) is None
 
 
 def test_resets_after_three_nones():
-	kf = TempKalman(units='F')
-	_, t = _feed_constant(kf, 250.0, steps=40)
-	assert kf.update(None) is None
-	assert kf.update(None) is None
-	assert kf.update(None) is None
-	# After reset the next valid reading re-initializes and is returned as-is.
-	assert kf.update(100.0, now=t + 0.05) == 100.0
+    kf = TempKalman(units="F")
+    _, t = _feed_constant(kf, 250.0, steps=40)
+    assert kf.update(None) is None
+    assert kf.update(None) is None
+    assert kf.update(None) is None
+    # After reset the next valid reading re-initializes and is returned as-is.
+    assert kf.update(100.0, now=t + 0.05) == 100.0
 
 
 def test_single_none_keeps_state_warm():
-	kf = TempKalman(units='F')
-	out, t = _feed_constant(kf, 250.0, steps=40)
-	assert kf.update(None) is None
-	resumed = kf.update(250.0, now=t + 0.10)
-	# One dropped read must not force a re-init; estimate stays near 250.
-	assert abs(resumed - 250.0) < 1.0
+    kf = TempKalman(units="F")
+    out, t = _feed_constant(kf, 250.0, steps=40)
+    assert kf.update(None) is None
+    resumed = kf.update(250.0, now=t + 0.10)
+    # One dropped read must not force a re-init; estimate stays near 250.
+    assert abs(resumed - 250.0) < 1.0
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -291,64 +291,64 @@ _NONE_RESET_THRESHOLD = 3
 Replace the entire `update` method with this version:
 
 ```python
-	def update(self, reading, now=None):
-		if reading is None:
-			self.none_streak += 1
-			if self.none_streak >= _NONE_RESET_THRESHOLD:
-				self.reset()
-			return None
+def update(self, reading, now=None):
+    if reading is None:
+        self.none_streak += 1
+        if self.none_streak >= _NONE_RESET_THRESHOLD:
+            self.reset()
+        return None
 
-		self.none_streak = 0
-		if now is None:
-			now = time.monotonic()
+    self.none_streak = 0
+    if now is None:
+        now = time.monotonic()
 
-		# First valid reading (fresh or post-reset): initialize, don't predict.
-		if self.x is None or self.last_time is None:
-			self.x = float(reading)
-			self.v = 0.0
-			self.P = [[self.R, 0.0], [0.0, self.R]]
-			self.last_time = now
-			return round(self.x, 1)
+    # First valid reading (fresh or post-reset): initialize, don't predict.
+    if self.x is None or self.last_time is None:
+        self.x = float(reading)
+        self.v = 0.0
+        self.P = [[self.R, 0.0], [0.0, self.R]]
+        self.last_time = now
+        return round(self.x, 1)
 
-		dt = now - self.last_time
-		if dt < _DT_MIN:
-			dt = _DT_MIN
-		elif dt > _DT_MAX:
-			dt = _DT_MAX
-		self.last_time = now
+    dt = now - self.last_time
+    if dt < _DT_MIN:
+        dt = _DT_MIN
+    elif dt > _DT_MAX:
+        dt = _DT_MAX
+    self.last_time = now
 
-		# --- Predict: x = F x ; P = F P F^T + Q  (F = [[1, dt], [0, 1]]) ---
-		self.x += self.v * dt
-		P = self.P
-		p00 = P[0][0] + dt * (P[1][0] + P[0][1]) + dt * dt * P[1][1]
-		p01 = P[0][1] + dt * P[1][1]
-		p10 = P[1][0] + dt * P[1][1]
-		p11 = P[1][1]
-		dt2 = dt * dt
-		dt3 = dt2 * dt
-		dt4 = dt3 * dt
-		p00 += self.q * dt4 / 4.0
-		p01 += self.q * dt3 / 2.0
-		p10 += self.q * dt3 / 2.0
-		p11 += self.q * dt2
+    # --- Predict: x = F x ; P = F P F^T + Q  (F = [[1, dt], [0, 1]]) ---
+    self.x += self.v * dt
+    P = self.P
+    p00 = P[0][0] + dt * (P[1][0] + P[0][1]) + dt * dt * P[1][1]
+    p01 = P[0][1] + dt * P[1][1]
+    p10 = P[1][0] + dt * P[1][1]
+    p11 = P[1][1]
+    dt2 = dt * dt
+    dt3 = dt2 * dt
+    dt4 = dt3 * dt
+    p00 += self.q * dt4 / 4.0
+    p01 += self.q * dt3 / 2.0
+    p10 += self.q * dt3 / 2.0
+    p11 += self.q * dt2
 
-		# --- Gate: reject readings too far from the prediction ---
-		y = reading - self.x
-		s = p00 + self.R
-		if (y * y) / s > self.gate2:
-			self.P = [[p00, p01], [p10, p11]]
-			return round(self.x, 1)
+    # --- Gate: reject readings too far from the prediction ---
+    y = reading - self.x
+    s = p00 + self.R
+    if (y * y) / s > self.gate2:
+        self.P = [[p00, p01], [p10, p11]]
+        return round(self.x, 1)
 
-		# --- Update (measure temperature only, H = [1, 0]) ---
-		k0 = p00 / s
-		k1 = p10 / s
-		self.x += k0 * y
-		self.v += k1 * y
-		self.P = [
-			[(1 - k0) * p00, (1 - k0) * p01],
-			[p10 - k1 * p00, p11 - k1 * p01],
-		]
-		return round(self.x, 1)
+    # --- Update (measure temperature only, H = [1, 0]) ---
+    k0 = p00 / s
+    k1 = p10 / s
+    self.x += k0 * y
+    self.v += k1 * y
+    self.P = [
+        [(1 - k0) * p00, (1 - k0) * p01],
+        [p10 - k1 * p00, p11 - k1 * p01],
+    ]
+    return round(self.x, 1)
 ```
 
 - [ ] **Step 4: Run the full filter test file to verify all pass**
@@ -401,17 +401,17 @@ from probes.kalman import TempKalman
 In `probes/base.py` `_build_ports()` (around lines 233-235), change:
 
 ```python
-		self.port_queues = {}
-		for port in self.port_map:
-			self.port_queues[port] = TempQueue(qlength=10, units=self.units)
+self.port_queues = {}
+for port in self.port_map:
+    self.port_queues[port] = TempQueue(qlength=10, units=self.units)
 ```
 
 to:
 
 ```python
-		self.port_filters = {}
-		for port in self.port_map:
-			self.port_filters[port] = TempKalman(units=self.units)
+self.port_filters = {}
+for port in self.port_map:
+    self.port_filters[port] = TempKalman(units=self.units)
 ```
 
 - [ ] **Step 4: Swap the read-loop call**
@@ -419,20 +419,22 @@ to:
 In `probes/base.py` `read_all_ports()` (around lines 349-355), change:
 
 ```python
-			""" Enqueue the Temperature Readings to Port Queues """
-			if port_values[port] == None:
-				""" If the read value is None, pass that to the output instead of adding to the queue """
-				output_value = None
-			else:
-				self.port_queues[port].enqueue(port_values[port])
-				output_value = self.port_queues[port].average()
+"""Enqueue the Temperature Readings to Port Queues"""
+
+if port_values[port] == None:
+    """ If the read value is None, pass that to the output instead of adding to the queue """
+    output_value = None
+else:
+    self.port_queues[port].enqueue(port_values[port])
+    output_value = self.port_queues[port].average()
 ```
 
 to:
 
 ```python
-			""" Filter the Temperature Reading (Kalman); None passes through """
-			output_value = self.port_filters[port].update(port_values[port])
+"""Filter the Temperature Reading (Kalman); None passes through"""
+
+output_value = self.port_filters[port].update(port_values[port])
 ```
 
 - [ ] **Step 5: Delete the obsolete module**

@@ -87,9 +87,7 @@ def test_enforced_inferred_primary_is_invalid():
 
 
 def test_confirmed_hardware_wins_even_when_inference_is_off():
-    hardware = ThermocoupleHealthReport.confirmed_hardware(
-        (ThermocoupleFault.OPEN,), now=10.0, status=0x10
-    )
+    hardware = ThermocoupleHealthReport.confirmed_hardware((ThermocoupleFault.OPEN,), now=10.0, status=0x10)
     fused = fuse_thermocouple_health(
         hardware=hardware,
         inferred=None,

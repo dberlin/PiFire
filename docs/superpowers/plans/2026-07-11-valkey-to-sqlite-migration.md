@@ -85,6 +85,7 @@ Run ONCE against the unmodified codebase with a live valkey-server:
 Commit the resulting tests/oracle/fixtures/*.json. The SQLite rewrite is
 asserted byte-for-byte against these (see tests/test_datastore.py::test_oracle_*).
 """
+
 import json
 import os
 
@@ -216,12 +217,20 @@ def test_pragmas_applied(ds):
 
 
 def test_schema_tables_exist(ds):
-    names = {r[0] for r in ds.connection().execute(
-        "SELECT name FROM sqlite_master WHERE type='table'")}
-    for t in ["kv", "history", "metrics", "logs",
-              "queue_control_write", "queue_systemq", "queue_systemo",
-              "queue_displayq", "queue_autotune",
-              "list_warnings", "list_users_connected"]:
+    names = {r[0] for r in ds.connection().execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    for t in [
+        "kv",
+        "history",
+        "metrics",
+        "logs",
+        "queue_control_write",
+        "queue_systemq",
+        "queue_systemo",
+        "queue_displayq",
+        "queue_autotune",
+        "list_warnings",
+        "list_users_connected",
+    ]:
         assert t in names, t
 
 
@@ -254,6 +263,7 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'common.datastore'`.
 # common/datastore.py
 """SQLite datastore: thread-local connection, schema, transactions, first-boot
 import. The only module that opens the database; common.py talks to it."""
+
 import os
 import sqlite3
 import threading
@@ -295,8 +305,11 @@ CREATE INDEX IF NOT EXISTS ix_logs_name_id ON logs(name, id);
 
 # one table per queue; JSON queues carry a json_valid CHECK, raw lists do not
 _JSON_QUEUE_TABLES = [
-    "queue_control_write", "queue_systemq", "queue_systemo",
-    "queue_displayq", "queue_autotune",
+    "queue_control_write",
+    "queue_systemq",
+    "queue_systemo",
+    "queue_displayq",
+    "queue_autotune",
 ]
 _RAW_LIST_TABLES = ["list_warnings", "list_users_connected"]
 
@@ -310,10 +323,7 @@ def _queue_ddl():
             "value TEXT NOT NULL CHECK(json_valid(value)));"
         )
     for t in _RAW_LIST_TABLES:
-        ddl.append(
-            f"CREATE TABLE IF NOT EXISTS {t} ("
-            "id INTEGER PRIMARY KEY AUTOINCREMENT, value TEXT NOT NULL);"
-        )
+        ddl.append(f"CREATE TABLE IF NOT EXISTS {t} (id INTEGER PRIMARY KEY AUTOINCREMENT, value TEXT NOT NULL);")
     return "\n".join(ddl)
 
 
@@ -417,11 +427,11 @@ git commit -m "feat(datastore): connection, PRAGMAs, schema, transactions"
 ```python
 # append to tests/test_datastore.py
 def test_blob_roundtrip_and_missing(ds):
-    assert ds.get_blob("k") is None            # missing -> None (matches Valkey)
+    assert ds.get_blob("k") is None  # missing -> None (matches Valkey)
     ds.set_blob("k", '{"a": 1}')
     assert ds.get_blob("k") == '{"a": 1}'
     assert ds.exists_blob("k") is True
-    ds.set_blob("k", '{"a": 2}')               # overwrite
+    ds.set_blob("k", '{"a": 2}')  # overwrite
     assert ds.get_blob("k") == '{"a": 2}'
     ds.delete_blob("k")
     assert ds.get_blob("k") is None
@@ -443,9 +453,9 @@ def get_blob(key):
 
 
 def set_blob(key, value_str):
-    execute_write("INSERT INTO kv(key,value) VALUES(?,?) "
-                  "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                  (key, value_str))
+    execute_write(
+        "INSERT INTO kv(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value_str)
+    )
 
 
 def delete_blob(key):
@@ -511,8 +521,8 @@ def test_fifo_roundtrip(ds):
     q.push(["a", 1])
     q.push({"b": 2})
     assert q.length() == 2
-    assert q.list() == [["a", 1], {"b": 2}]   # non-destructive peek, FIFO
-    assert q.pop() == ["a", 1]                 # head first
+    assert q.list() == [["a", 1], {"b": 2}]  # non-destructive peek, FIFO
+    assert q.pop() == ["a", 1]  # head first
     assert q.pop() == {"b": 2}
     assert q.length() == 0
 
@@ -542,14 +552,19 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'common.sqlite_queue'`
 """List-backed queues on SQLite, one table per queue. API-compatible with the
 old ValkeyQueue (push/pop/length/list/flush). Plus SqliteMembershipList for the
 users:connected remove-by-value case."""
+
 import json
 
 from common import datastore
 
 _ALLOWED_TABLES = {
-    "queue_control_write", "queue_systemq", "queue_systemo",
-    "queue_displayq", "queue_autotune",
-    "list_warnings", "list_users_connected",
+    "queue_control_write",
+    "queue_systemq",
+    "queue_systemo",
+    "queue_displayq",
+    "queue_autotune",
+    "list_warnings",
+    "list_users_connected",
 }
 
 
@@ -571,29 +586,25 @@ class SqliteQueue:
         return value if self.raw else json.loads(value)
 
     def push(self, data):
-        datastore.execute_write(
-            f"INSERT INTO {self.table}(value) VALUES(?)", (self._encode(data),))
+        datastore.execute_write(f"INSERT INTO {self.table}(value) VALUES(?)", (self._encode(data),))
 
     def pop(self):
         with datastore.transaction() as conn:
-            row = conn.execute(
-                f"SELECT id, value FROM {self.table} ORDER BY id LIMIT 1").fetchone()
+            row = conn.execute(f"SELECT id, value FROM {self.table} ORDER BY id LIMIT 1").fetchone()
             if row is None:
                 return None
             conn.execute(f"DELETE FROM {self.table} WHERE id=?", (row[0],))
             return self._decode(row[1])
 
     def length(self):
-        return datastore.connection().execute(
-            f"SELECT COUNT(*) FROM {self.table}").fetchone()[0]
+        return datastore.connection().execute(f"SELECT COUNT(*) FROM {self.table}").fetchone()[0]
 
     def list(self, start=0, end=-1):
-        rows = datastore.connection().execute(
-            f"SELECT value FROM {self.table} ORDER BY id").fetchall()
+        rows = datastore.connection().execute(f"SELECT value FROM {self.table} ORDER BY id").fetchall()
         values = [self._decode(r[0]) for r in rows]
         if end == -1:
             return values[start:]
-        return values[start:end + 1]
+        return values[start : end + 1]
 
     def flush(self):
         datastore.execute_write(f"DELETE FROM {self.table}")
@@ -636,9 +647,9 @@ def test_membership_add_remove(ds):
     m = SqliteMembershipList("list_users_connected")
     m.add("sidA")
     m.add("sidB")
-    m.add("sidA")                       # duplicate allowed (matches rpush)
+    m.add("sidA")  # duplicate allowed (matches rpush)
     assert sorted(m.list()) == ["sidA", "sidA", "sidB"]
-    m.remove("sidA")                    # removes ALL "sidA" (lrem count=0)
+    m.remove("sidA")  # removes ALL "sidA" (lrem count=0)
     assert m.list() == ["sidB"]
     m.flush()
     assert m.list() == []
@@ -667,8 +678,7 @@ class SqliteMembershipList:
         datastore.execute_write(f"DELETE FROM {self.table} WHERE value=?", (value,))
 
     def list(self):
-        rows = datastore.connection().execute(
-            f"SELECT value FROM {self.table} ORDER BY id").fetchall()
+        rows = datastore.connection().execute(f"SELECT value FROM {self.table} ORDER BY id").fetchall()
         return [r[0] for r in rows]
 
     def flush(self):
@@ -712,12 +722,13 @@ import logging
 
 def test_log_handler_and_read(ds):
     from common.sqlite_log_handler import SqliteLogHandler
+
     logger = logging.getLogger("t_events")
     logger.setLevel(logging.INFO)
     logger.addHandler(SqliteLogHandler("events"))
     logger.info("first")
     logger.info("second")
-    assert ds.read_log("events", num=1) == ["second"]      # newest-first, limited
+    assert ds.read_log("events", num=1) == ["second"]  # newest-first, limited
     assert ds.read_log("events") == ["second", "first"]
     ds.clear_log("events")
     assert ds.read_log("events") == []
@@ -749,7 +760,8 @@ class SqliteLogHandler(logging.Handler):
         try:
             datastore.execute_write(
                 "INSERT INTO logs(name, ts, message) VALUES(?,?,?)",
-                (self.name, int(time.time() * 1000), self.format(record)))
+                (self.name, int(time.time() * 1000), self.format(record)),
+            )
         except Exception:  # never let logging crash the caller
             self.handleError(record)
 ```
@@ -841,9 +853,9 @@ def test_control_merge_matches_oracle(ds):
     exp = _oracle("control_merge")
     c.write_control({"mode": "Stop", "nested": {"a": 1, "b": 2}}, c.WriteKind.OVERWRITE, origin="test")
     c.write_control({"nested": {"b": 9, "c": 3}}, c.WriteKind.MERGE, origin="webapp")
-    assert c.read_control() == exp["before_execute"]      # MERGE deferred
+    assert c.read_control() == exp["before_execute"]  # MERGE deferred
     c.execute_control_writes()
-    assert c.read_control() == exp["after_execute"]       # deep-merge, origin stripped
+    assert c.read_control() == exp["after_execute"]  # deep-merge, origin stripped
 
 
 def test_errors_and_current_status_roundtrip(ds):
@@ -871,7 +883,7 @@ Rewrite each accessor body:
 ```python
 def read_control(flush=False):
     if flush:
-        return _flush_control()          # Task 12
+        return _flush_control()  # Task 12
     raw = datastore.get_blob("control:general")
     return json.loads(raw) if raw is not None else default_control()
 
@@ -961,6 +973,7 @@ blueprints call them directly — but at runtime they must now read SQLite. So:
 ```python
 def read_settings(filename="settings.json", init=False, retry_count=0):
     return read_settings_valkey()
+
 
 def read_pellet_db(filename="pelletdb.json"):
     return read_pellets_valkey()
@@ -1194,7 +1207,7 @@ def test_history_cap_matches_oracle(ds):
     for _ in range(5):
         c.write_history(SAMPLE, maxsizelines=3)
     items = c.read_history()
-    assert len(items) == exp["len"] == 3        # capped
+    assert len(items) == exp["len"] == 3  # capped
     # each reconstructed row carries the expected dict keys
     assert set(items[0]) == {"T", "P", "F", "PSP", "NT", "AUX"}
     assert items[0]["P"] == {"Grill": 225}
@@ -1223,22 +1236,26 @@ def write_history(in_data, maxsizelines=28800, ext_data=False):
         conn.execute(
             "INSERT INTO history(ts,psp,primary_temps,food_temps,aux_temps,"
             "notify_targets,ext_data) VALUES(?,?,?,?,?,?,?)",
-            (ts, in_data["primary_setpoint"],
-             json.dumps(in_data["probe_history"]["primary"]),
-             json.dumps(in_data["probe_history"]["food"]),
-             json.dumps(in_data["probe_history"]["aux"]),
-             json.dumps(in_data["notify_targets"]), exd))
+            (
+                ts,
+                in_data["primary_setpoint"],
+                json.dumps(in_data["probe_history"]["primary"]),
+                json.dumps(in_data["probe_history"]["food"]),
+                json.dumps(in_data["probe_history"]["aux"]),
+                json.dumps(in_data["notify_targets"]),
+                exd,
+            ),
+        )
         count = conn.execute("SELECT COUNT(*) FROM history").fetchone()[0]
         if count > maxsizelines:
             conn.execute(
-                "DELETE FROM history WHERE id IN "
-                "(SELECT id FROM history ORDER BY id LIMIT ?)", (count - maxsizelines,))
+                "DELETE FROM history WHERE id IN (SELECT id FROM history ORDER BY id LIMIT ?)", (count - maxsizelines,)
+            )
 
 
 def _history_row_to_dict(row):
     ts, psp, p, f, aux, nt, exd = row
-    d = {"T": ts, "P": json.loads(p), "F": json.loads(f),
-         "PSP": psp, "NT": json.loads(nt), "AUX": json.loads(aux)}
+    d = {"T": ts, "P": json.loads(p), "F": json.loads(f), "PSP": psp, "NT": json.loads(nt), "AUX": json.loads(aux)}
     if exd is not None:
         d["EXD"] = json.loads(exd)
     return d
@@ -1250,8 +1267,7 @@ def read_history(num_items=0, flushhistory=False):
         read_current(zero_out=True)
         write_metrics(flush=True)
         return []
-    sql = ("SELECT ts,psp,primary_temps,food_temps,aux_temps,notify_targets,"
-           "ext_data FROM history ORDER BY id")
+    sql = "SELECT ts,psp,primary_temps,food_temps,aux_temps,notify_targets,ext_data FROM history ORDER BY id"
     rows = datastore.connection().execute(sql).fetchall()
     if num_items > 0:
         rows = rows[-num_items:]
@@ -1312,16 +1328,18 @@ def _oracle(name):
 
 def test_replace_last_matches_oracle(ds):
     exp = _oracle("metrics_replace_last")
-    m = c.default_metrics(); m["mode"] = "Startup"
+    m = c.default_metrics()
+    m["mode"] = "Startup"
     c.write_metrics(m, new_metric=True)
-    m2 = c.default_metrics(); m2["mode"] = "Hold"
+    m2 = c.default_metrics()
+    m2["mode"] = "Hold"
     c.write_metrics(m2, new_metric=False)
     assert c.read_metrics()["mode"] == exp["last"]["mode"] == "Hold"
     assert len(c.read_metrics(all=True)) == exp["all_len"] == 1
 
 
 def test_new_metric_without_existing_does_not_crash(ds):
-    c.write_metrics(new_metric=True)          # regression: no metrics yet
+    c.write_metrics(new_metric=True)  # regression: no metrics yet
     assert "starttime" in c.read_metrics()
 ```
 
@@ -1393,15 +1411,17 @@ git commit -m "feat(common): metrics blob with replace-last on SQLite"
 # append to tests/test_common_blobs.py
 def test_flush_control_clears_only_control_not_history(ds):
     # seed history + a control blob + a queued write
-    c.write_history({"probe_history": {"primary": {"G": 1}, "food": {}, "aux": {}},
-                    "primary_setpoint": 1, "notify_targets": {}})
+    c.write_history(
+        {"probe_history": {"primary": {"G": 1}, "food": {}, "aux": {}}, "primary_setpoint": 1, "notify_targets": {}}
+    )
     c.write_control({"mode": "Hold"}, c.WriteKind.OVERWRITE, origin="t")
     c.write_control({"x": 1}, c.WriteKind.MERGE, origin="t")
     control = c.read_control(flush=True)
-    assert control == c.default_control()                    # reseeded default
+    assert control == c.default_control()  # reseeded default
     from common.sqlite_queue import SqliteQueue
+
     assert SqliteQueue("queue_control_write").length() == 0  # queue cleared
-    assert len(c.read_history()) == 1                        # history untouched
+    assert len(c.read_history()) == 1  # history untouched
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -1427,6 +1447,7 @@ block with:
 
 ```python
 from common.sqlite_log_handler import SqliteLogHandler
+
 sqlite_handler = SqliteLogHandler(name)
 sqlite_handler.setFormatter(formatter)
 sqlite_handler.addFilter(ratelimit)
@@ -1465,9 +1486,11 @@ def store_wizard_install_info(wizard_install_info):
 
 
 def get_wizard_install_status():
-    return (_read_json_key_or_none("wizard:percent"),
-            _read_json_key_or_none("wizard:status"),
-            _read_json_key_or_none("wizard:output"))
+    return (
+        _read_json_key_or_none("wizard:percent"),
+        _read_json_key_or_none("wizard:status"),
+        _read_json_key_or_none("wizard:output"),
+    )
 
 
 def set_wizard_install_status(percent, status, output):
@@ -1477,9 +1500,11 @@ def set_wizard_install_status(percent, status, output):
 
 
 def get_updater_install_status():
-    return (_read_json_key_or_none("updater:percent"),
-            _read_json_key_or_none("updater:status"),
-            _read_json_key_or_none("updater:output"))
+    return (
+        _read_json_key_or_none("updater:percent"),
+        _read_json_key_or_none("updater:status"),
+        _read_json_key_or_none("updater:output"),
+    )
 
 
 def set_updater_install_status(percent, status, output):
@@ -1562,6 +1587,7 @@ def fresh(tmp_path, monkeypatch):
 
 def test_first_boot_imports_settings(fresh, monkeypatch):
     from common import common as c
+
     monkeypatch.setattr(c, "read_settings_file", lambda *a, **k: {"globals": {"units": "F"}})
     monkeypatch.setattr(c, "read_pellet_db_file", lambda *a, **k: {"current": {"hopper_level": 100}})
     datastore.init()
@@ -1571,11 +1597,12 @@ def test_first_boot_imports_settings(fresh, monkeypatch):
 
 def test_first_boot_idempotent(fresh, monkeypatch):
     from common import common as c
+
     monkeypatch.setattr(c, "read_settings_file", lambda *a, **k: {"v": 1})
     monkeypatch.setattr(c, "read_pellet_db_file", lambda *a, **k: {"v": 1})
     datastore.init()
     datastore.set_blob("settings:general", json.dumps({"v": 999}))  # simulate runtime edit
-    datastore.init()                                                # must NOT re-import
+    datastore.init()  # must NOT re-import
     assert json.loads(datastore.get_blob("settings:general"))["v"] == 999
 ```
 
@@ -1592,15 +1619,14 @@ def _first_boot_import():
     import json
 
     from common import common as c  # deferred to avoid import cycle
+
     with transaction() as conn:
         if conn.execute("SELECT 1 FROM kv WHERE key='settings:general'").fetchone() is None:
-            settings = c.read_settings_file()      # the FILE reader, not SQLite
-            conn.execute("INSERT INTO kv(key,value) VALUES('settings:general',?)",
-                         (json.dumps(settings),))
+            settings = c.read_settings_file()  # the FILE reader, not SQLite
+            conn.execute("INSERT INTO kv(key,value) VALUES('settings:general',?)", (json.dumps(settings),))
         if conn.execute("SELECT 1 FROM kv WHERE key='pellets:general'").fetchone() is None:
-            pelletdb = c.read_pellet_db_file()     # the FILE reader, not SQLite
-            conn.execute("INSERT INTO kv(key,value) VALUES('pellets:general',?)",
-                         (json.dumps(pelletdb),))
+            pelletdb = c.read_pellet_db_file()  # the FILE reader, not SQLite
+            conn.execute("INSERT INTO kv(key,value) VALUES('pellets:general',?)", (json.dumps(pelletdb),))
 ```
 
 Note the `read_settings_file`/`read_pellet_db_file` names introduced in Task 7 —
@@ -1639,13 +1665,17 @@ git commit -m "feat(datastore): idempotent first-boot JSON import"
 ```python
 # append to tests/test_startup_migration.py
 def test_export_import_roundtrip(fresh):
-    datastore.init_schema_only() if hasattr(datastore, "init_schema_only") else datastore.connection().executescript(datastore.SCHEMA + datastore._queue_ddl())
+    datastore.init_schema_only() if hasattr(datastore, "init_schema_only") else datastore.connection().executescript(
+        datastore.SCHEMA + datastore._queue_ddl()
+    )
     datastore.set_blob("settings:general", json.dumps({"globals": {"units": "C"}}))
     p = str(fresh / "out.json")
     datastore.export_config("settings:general", p)
     assert json.load(open(p))["globals"]["units"] == "C"
     # edit the file, re-import
-    d = json.load(open(p)); d["globals"]["units"] = "F"; json.dump(d, open(p, "w"))
+    d = json.load(open(p))
+    d["globals"]["units"] = "F"
+    json.dump(d, open(p, "w"))
     datastore.import_config("settings:general", p)
     assert json.loads(datastore.get_blob("settings:general"))["globals"]["units"] == "F"
 
@@ -1690,6 +1720,7 @@ def import_config(key, path):
 #!/usr/bin/env python3
 import sys
 from common import datastore
+
 datastore.export_config("settings:general", sys.argv[1] if len(sys.argv) > 1 else "settings.json")
 print("exported settings:general")
 ```
@@ -1734,12 +1765,16 @@ git commit -m "feat(scripts): settings/pelletdb export+import; shared with migra
 # in tests/test_in_memory_store.py add:
 def test_in_memory_history_cap():
     from controller.runtime.store import InMemoryStore
+
     s = InMemoryStore()
-    sample = {"probe_history": {"primary": {"G": 1}, "food": {}, "aux": {}},
-              "primary_setpoint": 1, "notify_targets": {}}
+    sample = {
+        "probe_history": {"primary": {"G": 1}, "food": {}, "aux": {}},
+        "primary_setpoint": 1,
+        "notify_targets": {},
+    }
     for _ in range(5):
         s.write_history(sample, maxsizelines=3)
-    assert len(s.read_history()) == 3       # was unbounded; must now cap
+    assert len(s.read_history()) == 3  # was unbounded; must now cap
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -1770,9 +1805,11 @@ Expected: FAIL with `assert 5 == 3` (cap not yet implemented in the fake).
 @pytest.fixture
 def store(tmp_path):
     from common import datastore
+
     datastore._reset_for_tests(str(tmp_path / "t.db"))
     datastore.init()
     from controller.runtime.store import SqliteStore
+
     yield SqliteStore()
     datastore._reset_for_tests(None)
 ```
@@ -1820,6 +1857,7 @@ def _producer(db, table, n):
     os.environ["PIFIRE_DB_PATH"] = db
     datastore._reset_for_tests(db)
     from common.sqlite_queue import SqliteQueue
+
     q = SqliteQueue(table)
     for i in range(n):
         q.push({"i": i})
@@ -1837,13 +1875,14 @@ def db(tmp_path):
 
 def test_concurrent_producers_no_loss(db):
     from common.sqlite_queue import SqliteQueue
+
     ctx = mp.get_context("spawn")
     procs = [ctx.Process(target=_producer, args=(db, "queue_systemq", 200)) for _ in range(4)]
     for p in procs:
         p.start()
     for p in procs:
         p.join()
-    assert SqliteQueue("queue_systemq").length() == 800   # no lost/dup under contention
+    assert SqliteQueue("queue_systemq").length() == 800  # no lost/dup under contention
 
 
 def test_cross_process_visibility(db):
@@ -1857,8 +1896,9 @@ def test_cross_process_visibility(db):
         out.put(datastore.get_blob("control:status"))
 
     p = ctx.Process(target=reader, args=(db, q))
-    p.start(); p.join()
-    assert q.get() == '{"mode":"Hold"}'   # committed write visible in another process
+    p.start()
+    p.join()
+    assert q.get() == '{"mode":"Hold"}'  # committed write visible in another process
 ```
 
 - [ ] **Step 2: Run to verify it fails, then passes**
@@ -1900,7 +1940,7 @@ def _write_then_kill(db):
     datastore._reset_for_tests(db)
     datastore.init()
     datastore.set_blob("settings:general", '{"committed": true}')
-    os._exit(9)   # hard kill AFTER commit, before clean close
+    os._exit(9)  # hard kill AFTER commit, before clean close
 
 
 @pytest.fixture
@@ -1914,7 +1954,8 @@ def db(tmp_path):
 def test_committed_survives_hard_kill(db):
     ctx = mp.get_context("spawn")
     p = ctx.Process(target=_write_then_kill, args=(db,))
-    p.start(); p.join()
+    p.start()
+    p.join()
     assert p.exitcode == 9
     datastore._reset_for_tests(db)
     datastore.init()
@@ -1962,10 +2003,12 @@ def client(tmp_path, monkeypatch):
     datastore._reset_for_tests(str(tmp_path / "t.db"))
     datastore.init()
     from common import common as c
+
     c.write_settings_valkey(c.default_settings())
     c.write_pellets_valkey(c.default_pellets())
     c.write_status(c.read_status(init=True))
-    from common.app import create_app          # adapt to the real factory name
+    from common.app import create_app  # adapt to the real factory name
+
     app = create_app()
     app.config.update(TESTING=True)
     with app.test_client() as cl:
@@ -1974,12 +2017,13 @@ def client(tmp_path, monkeypatch):
 
 
 def test_dashboard_route_reads_sqlite(client):
-    resp = client.get("/")                       # adapt to a real read route
+    resp = client.get("/")  # adapt to a real read route
     assert resp.status_code == 200
 
 
 def test_no_valkey_import_at_runtime():
     import sys
+
     # exercised app must not have pulled in the valkey client
     assert "valkey" not in sys.modules
 ```
@@ -2018,10 +2062,26 @@ import subprocess
 
 def test_no_valkey_references_in_source():
     hits = subprocess.run(
-        ["grep", "-rIl", "-e", "import valkey", "-e", "cmdsts",
-         "-e", "ValkeyQueue", "-e", "ValkeyHandler",
-         "--include=*.py", "common", "controller", "blueprints", "control.py"],
-        capture_output=True, text=True).stdout.strip()
+        [
+            "grep",
+            "-rIl",
+            "-e",
+            "import valkey",
+            "-e",
+            "cmdsts",
+            "-e",
+            "ValkeyQueue",
+            "-e",
+            "ValkeyHandler",
+            "--include=*.py",
+            "common",
+            "controller",
+            "blueprints",
+            "control.py",
+        ],
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
     assert hits == "", f"stale Valkey references in: {hits}"
 ```
 

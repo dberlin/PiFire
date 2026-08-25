@@ -44,24 +44,24 @@ from controller.mpc_net import NetPolicy, net_path_for
 
 
 def test_net_path_for_fan_off_returns_base():
-    assert net_path_for('./controller/mpc_policy_net.npz', False) == './controller/mpc_policy_net.npz'
+    assert net_path_for("./controller/mpc_policy_net.npz", False) == "./controller/mpc_policy_net.npz"
 
 
 def test_net_path_for_fan_on_inserts_suffix():
-    assert net_path_for('./controller/mpc_policy_net.npz', True) == './controller/mpc_policy_net_fan.npz'
+    assert net_path_for("./controller/mpc_policy_net.npz", True) == "./controller/mpc_policy_net_fan.npz"
 
 
 def test_net_path_for_handles_dotted_dirs():
     # dots in the directory must not confuse the extension split
-    assert net_path_for('/opt/pi.fire/models/net.npz', True) == '/opt/pi.fire/models/net_fan.npz'
+    assert net_path_for("/opt/pi.fire/models/net.npz", True) == "/opt/pi.fire/models/net_fan.npz"
 
 
 def test_legacy_artifact_defaults_to_fan_off():
     # the shipped artifact predates the flag; it must load and read as fan-off (0)
     p = NetPolicy.load(ART)
-    assert p.calib['enable_fan_input'] == 0
-    assert p.matches_config({**_DEFAULTS, 'enable_fan_input': False})
-    assert not p.matches_config({**_DEFAULTS, 'enable_fan_input': True})
+    assert p.calib["enable_fan_input"] == 0
+    assert p.matches_config({**_DEFAULTS, "enable_fan_input": False})
+    assert not p.matches_config({**_DEFAULTS, "enable_fan_input": True})
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -81,7 +81,7 @@ import numpy as np
 Add `'enable_fan_input'` to `_CALIB_INTS` (currently `('n_delay', 'n_horizon')`):
 
 ```python
-_CALIB_INTS = ('n_delay', 'n_horizon', 'enable_fan_input')
+_CALIB_INTS = ("n_delay", "n_horizon", "enable_fan_input")
 ```
 
 In `NetPolicy.load`, replace the ints line so a missing key defaults to 0 (legacy = fan-off). Current line:
@@ -105,7 +105,7 @@ def net_path_for(base_path, enable_fan):
     if not enable_fan:
         return base_path
     root, ext = os.path.splitext(base_path)
-    return f'{root}_fan{ext}'
+    return f"{root}_fan{ext}"
 ```
 
 `matches_config` already iterates `_CALIB_INTS` and rejects any key whose `int(cfg[k])` differs — so adding the key to the tuple wires up the fan-mode check with no further change.
@@ -141,18 +141,17 @@ Add to `tests/test_mpc_controller.py`:
 ```python
 from controller.mpc import Controller, _DEFAULTS
 
-_CYCLE = {'u_min': 0.1, 'u_max': 0.9, 'HoldCycleTime': 25}
+_CYCLE = {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25}
 
 
 def test_fan_on_falls_back_to_nlp_when_fan_artifact_missing(tmp_path):
     # point at a non-existent base path so neither mode has an artifact
-    cfg = {**_DEFAULTS, 'policy': 'net', 'enable_fan_input': True,
-           'policy_net_path': str(tmp_path / 'nope.npz')}
-    c = Controller(cfg, 'C', dict(_CYCLE))
+    cfg = {**_DEFAULTS, "policy": "net", "enable_fan_input": True, "policy_net_path": str(tmp_path / "nope.npz")}
+    c = Controller(cfg, "C", dict(_CYCLE))
     assert c._net is None  # cleanly fell back to the NLP policy
     c.set_target(150.0)
     out = c.update(150.0)  # must not raise
-    assert out['fan']['duty'] is not None  # fan-on -> allocator returns a duty
+    assert out["fan"]["duty"] is not None  # fan-on -> allocator returns a duty
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -165,24 +164,24 @@ Expected: FAIL — before the change the loader looks at `policy_net_path` (the 
 Replace the path lookup at the top of `_load_net_policy`. Current:
 
 ```python
-        from controller.mpc_net import NetPolicy
+from controller.mpc_net import NetPolicy
 
-        path = cfg.get('policy_net_path')
-        if not path or not os.path.exists(path):
-            print(f'[mpc] policy=net but artifact not found ({path}); using NLP')
-            return None
+path = cfg.get("policy_net_path")
+if not path or not os.path.exists(path):
+    print(f"[mpc] policy=net but artifact not found ({path}); using NLP")
+    return None
 ```
 
 becomes:
 
 ```python
-        from controller.mpc_net import NetPolicy, net_path_for
+from controller.mpc_net import NetPolicy, net_path_for
 
-        base = cfg.get('policy_net_path')
-        path = net_path_for(base, bool(cfg.get('enable_fan_input'))) if base else base
-        if not path or not os.path.exists(path):
-            print(f'[mpc] policy=net but artifact not found ({path}); using NLP')
-            return None
+base = cfg.get("policy_net_path")
+path = net_path_for(base, bool(cfg.get("enable_fan_input"))) if base else base
+if not path or not os.path.exists(path):
+    print(f"[mpc] policy=net but artifact not found ({path}); using NLP")
+    return None
 ```
 
 The rest of the method (load, `matches_config`, return) is unchanged — `matches_config` now also enforces the fan-mode flag from Task 1.
@@ -228,7 +227,7 @@ In `docs/superpowers/experiments/sample_mpc.py`, `_episode_span(arg)` unpacks `e
 and the Controller construction from `Controller(dict(_DEFAULTS), 'C', dict(CYCLE))` to:
 
 ```python
-    c = Controller({**_DEFAULTS, 'enable_fan_input': bool(enable_fan)}, 'C', dict(CYCLE))
+c = Controller({**_DEFAULTS, "enable_fan_input": bool(enable_fan)}, "C", dict(CYCLE))
 ```
 
 (The rest of `_episode_span` already reads `cfg['enable_fan_input']` via `c.cfg` when calling `allocate`, so the fan now tracks the mode.)
@@ -236,11 +235,19 @@ and the Controller construction from `Controller(dict(_DEFAULTS), 'C', dict(CYCL
 In `sample_span`, add `enable_fan=False` to the signature and to each arg tuple:
 
 ```python
-def sample_span(episodes=150, workers=None, seed=0, minutes=120, dither=8.0,
-                sp_lo=100.0, sp_hi=290.0, out=OUT_SPAN, enable_fan=False):
+def sample_span(
+    episodes=150,
+    workers=None,
+    seed=0,
+    minutes=120,
+    dither=8.0,
+    sp_lo=100.0,
+    sp_hi=290.0,
+    out=OUT_SPAN,
+    enable_fan=False,
+):
     workers = workers or max(1, (os.cpu_count() or 2) - 2)
-    args = [(seed * 100000 + e, minutes, dither, sp_lo, sp_hi, bool(enable_fan))
-            for e in range(episodes)]
+    args = [(seed * 100000 + e, minutes, dither, sp_lo, sp_hi, bool(enable_fan)) for e in range(episodes)]
 ```
 
 Add `enable_fan` to the saved metadata so the dataset is self-describing — change the `np.savez_compressed(out, ...)` call to include `enable_fan=np.int64(bool(enable_fan))`, and add `fan={enable_fan}` to the printed summary.
@@ -250,8 +257,8 @@ Add `enable_fan` to the saved metadata so the dataset is self-describing — cha
 In `__main__`, add the argument and pass it through. After the existing `ap.add_argument('--sp-hi', ...)` line add:
 
 ```python
-    ap.add_argument('--enable-fan', action='store_true', help='span: sample with the MPC driving the fan')
-    ap.add_argument('--out', default=None, help='override output .npz path')
+ap.add_argument("--enable-fan", action="store_true", help="span: sample with the MPC driving the fan")
+ap.add_argument("--out", default=None, help="override output .npz path")
 ```
 
 Change the `else:` (span) branch to:
@@ -297,50 +304,53 @@ def main(data_path, out, enable_fan):
     net, stats = build_span_net(data_path=data_path)
     xm, xs, rm, rs = stats
     layers = [m for m in net.net if isinstance(m, torch.nn.Linear)]
-    blob = {'n_layers': len(layers)}
+    blob = {"n_layers": len(layers)}
     for i, lin in enumerate(layers):
-        blob[f'W{i}'] = lin.weight.detach().numpy().T.astype(np.float32)
-        blob[f'b{i}'] = lin.bias.detach().numpy().astype(np.float32)
-    blob['x_mean'] = xm.numpy().astype(np.float32)
-    blob['x_std'] = xs.numpy().astype(np.float32)
-    blob['r_mean'] = np.float32(rm)
-    blob['r_std'] = np.float32(rs)
+        blob[f"W{i}"] = lin.weight.detach().numpy().T.astype(np.float32)
+        blob[f"b{i}"] = lin.bias.detach().numpy().astype(np.float32)
+    blob["x_mean"] = xm.numpy().astype(np.float32)
+    blob["x_std"] = xs.numpy().astype(np.float32)
+    blob["r_mean"] = np.float32(rm)
+    blob["r_std"] = np.float32(rs)
     from controller.mpc_net import _CALIB_FLOATS, _CALIB_INTS
+
     for k in _CALIB_FLOATS:
         blob[k] = np.float32(_DEFAULTS[k])
     for k in _CALIB_INTS:
         # enable_fan_input reflects the mode this artifact was trained for,
         # not the _DEFAULTS value (always False)
-        val = bool(enable_fan) if k == 'enable_fan_input' else _DEFAULTS[k]
+        val = bool(enable_fan) if k == "enable_fan_input" else _DEFAULTS[k]
         blob[k] = np.int64(val)
     z = np.load(data_path)
-    blob['sp_lo'] = np.float32(z['sp_lo'])
-    blob['sp_hi'] = np.float32(z['sp_hi'])
+    blob["sp_lo"] = np.float32(z["sp_lo"])
+    blob["sp_hi"] = np.float32(z["sp_hi"])
     rng = np.random.default_rng(0)
-    idx = rng.choice(len(z['u0']), size=64, replace=False)
-    X0 = z['X0'][idx]
-    UP = z['u_prev'].flatten()[idx]
-    TS = z['t_set'].flatten()[idx]
+    idx = rng.choice(len(z["u0"]), size=64, replace=False)
+    X0 = z["X0"][idx]
+    UP = z["u_prev"].flatten()[idx]
+    TS = z["t_set"].flatten()[idx]
     Xin = np.column_stack([X0, UP, TS])
     with torch.no_grad():
         inp = (torch.tensor(Xin, dtype=torch.float32) - xm) / xs
         resid = net(inp).numpy().flatten() * rs + rm
-    Qref = np.clip(Q_ss(X0[:, DIDX], TS) + resid, _DEFAULTS['Q_min'], _DEFAULTS['Q_max'])
-    blob['ref_state'] = X0.astype(np.float32)
-    blob['ref_uprev'] = UP.astype(np.float32)
-    blob['ref_set'] = TS.astype(np.float32)
-    blob['ref_Q'] = Qref.astype(np.float32)
+    Qref = np.clip(Q_ss(X0[:, DIDX], TS) + resid, _DEFAULTS["Q_min"], _DEFAULTS["Q_max"])
+    blob["ref_state"] = X0.astype(np.float32)
+    blob["ref_uprev"] = UP.astype(np.float32)
+    blob["ref_set"] = TS.astype(np.float32)
+    blob["ref_Q"] = Qref.astype(np.float32)
     np.savez_compressed(out, **blob)
     sz = os.path.getsize(out) / 1024
-    print(f'exported {out} ({sz:.0f} KB): {len(layers)} layers, fan={bool(enable_fan)}, '
-          f'span [{blob["sp_lo"]:.0f},{blob["sp_hi"]:.0f}]C')
+    print(
+        f"exported {out} ({sz:.0f} KB): {len(layers)} layers, fan={bool(enable_fan)}, "
+        f"span [{blob['sp_lo']:.0f},{blob['sp_hi']:.0f}]C"
+    )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument('--data', default='./docs/superpowers/experiments/_ampc_data/pifire_span.npz')
-    ap.add_argument('--out', default='./controller/mpc_policy_net.npz')
-    ap.add_argument('--enable-fan', action='store_true')
+    ap.add_argument("--data", default="./docs/superpowers/experiments/_ampc_data/pifire_span.npz")
+    ap.add_argument("--out", default="./controller/mpc_policy_net.npz")
+    ap.add_argument("--enable-fan", action="store_true")
     a = ap.parse_args()
     main(a.data, a.out, a.enable_fan)
 ```
@@ -462,31 +472,31 @@ Add to `tests/test_mpc_net_loop.py` (mirror the existing net-loop harness; gate 
 import os
 from controller.mpc_net import net_path_for
 
-_FAN_ART = net_path_for(
-    os.path.join(os.path.dirname(__file__), '..', 'controller', 'mpc_policy_net.npz'), True)
+_FAN_ART = net_path_for(os.path.join(os.path.dirname(__file__), "..", "controller", "mpc_policy_net.npz"), True)
 
 
-@pytest.mark.skipif(not os.path.exists(_FAN_ART), reason='fan-on net artifact not exported')
+@pytest.mark.skipif(not os.path.exists(_FAN_ART), reason="fan-on net artifact not exported")
 def test_fan_on_net_is_offset_free():
     # net policy + enable_fan_input=True should hold offset-free, matching the
     # regime it was trained on (fan-on closed-loop states).
-    cfg = {**_DEFAULTS, 'control_period': 25.0, 'policy': 'net', 'enable_fan_input': True}
-    c = Controller(cfg, 'C', dict(CYCLE))
-    assert c._net is not None and c._net.calib['enable_fan_input'] == 1
+    cfg = {**_DEFAULTS, "control_period": 25.0, "policy": "net", "enable_fan_input": True}
+    c = Controller(cfg, "C", dict(CYCLE))
+    assert c._net is not None and c._net.calib["enable_fan_input"] == 1
     c.set_target(190.0)
     plant = GrillSim(seed=0)
     ts, temps = [], []
     for w in range(int(75 * 60 / 25)):
         out = c.update(plant.measured())
-        ratio = float(np.clip(out['cycle_ratio'], CYCLE['u_min'], CYCLE['u_max']))
-        fan = out['fan']['duty'] if out['fan']['duty'] is not None else 100.0
+        ratio = float(np.clip(out["cycle_ratio"], CYCLE["u_min"], CYCLE["u_max"]))
+        fan = out["fan"]["duty"] if out["fan"]["duty"] is not None else 100.0
         on = int(round(ratio * 25))
         for s in range(25):
             plant.step(auger_on=(s < on), fan_frac=fan / 100.0)
-            ts.append(w * 25 + s); temps.append(plant.true_Tc)
+            ts.append(w * 25 + s)
+            temps.append(plant.true_Tc)
     ts, temps = np.array(ts), np.array(temps)
     err = temps[ts >= 1800] - 190.0
-    assert abs(np.mean(err)) <= 0.5   # offset-free (fan-on net; prior mismatch was ~0.4-0.9)
+    assert abs(np.mean(err)) <= 0.5  # offset-free (fan-on net; prior mismatch was ~0.4-0.9)
     assert np.sqrt(np.mean(err**2)) <= 2.0
 ```
 
@@ -533,41 +543,42 @@ git commit -F <msgfile>   # "test(mpc): closed-loop offset-free check for fan-on
 
 ```python
 import sys
-sys.path.insert(0, 'tools')
+
+sys.path.insert(0, "tools")
 import regenerate_mpc_net as rg
 
 
 def test_export_cmd_fan_on_uses_fan_paths_and_flag():
-    cmd = rg.export_cmd('py', True)
-    assert '--enable-fan' in cmd
-    assert any(a.endswith('pifire_span_fan.npz') for a in cmd)
-    assert any(a.endswith('mpc_policy_net_fan.npz') for a in cmd)
+    cmd = rg.export_cmd("py", True)
+    assert "--enable-fan" in cmd
+    assert any(a.endswith("pifire_span_fan.npz") for a in cmd)
+    assert any(a.endswith("mpc_policy_net_fan.npz") for a in cmd)
 
 
 def test_export_cmd_fan_off_uses_base_paths_no_flag():
-    cmd = rg.export_cmd('py', False)
-    assert '--enable-fan' not in cmd
-    assert any(a.endswith('pifire_span.npz') and not a.endswith('_fan.npz') for a in cmd)
-    assert any(a.endswith('mpc_policy_net.npz') and not a.endswith('_fan.npz') for a in cmd)
+    cmd = rg.export_cmd("py", False)
+    assert "--enable-fan" not in cmd
+    assert any(a.endswith("pifire_span.npz") and not a.endswith("_fan.npz") for a in cmd)
+    assert any(a.endswith("mpc_policy_net.npz") and not a.endswith("_fan.npz") for a in cmd)
 
 
 def test_sample_cmd_carries_episodes_and_fan_flag():
-    on = rg.sample_cmd('py', True, 500, None)
-    assert '--enable-fan' in on and '500' in on and '--mode' in on and 'span' in on
-    off = rg.sample_cmd('py', False, 300, 8)
-    assert '--enable-fan' not in off and '300' in off and '8' in off
+    on = rg.sample_cmd("py", True, 500, None)
+    assert "--enable-fan" in on and "500" in on and "--mode" in on and "span" in on
+    off = rg.sample_cmd("py", False, 300, 8)
+    assert "--enable-fan" not in off and "300" in off and "8" in off
 
 
 def test_plan_commands_both_orders_sample_before_export_per_mode():
     cmds = rg.plan_commands([False, True], episodes=500, workers=None, skip_sample=False)
     # 4 commands: sample-off, export-off, sample-on, export-on
     assert len(cmds) == 4
-    assert 'sample_mpc.py' in ' '.join(cmds[0]) and 'export_span_net.py' in ' '.join(cmds[1])
+    assert "sample_mpc.py" in " ".join(cmds[0]) and "export_span_net.py" in " ".join(cmds[1])
 
 
 def test_plan_commands_skip_sample_omits_sampling():
     cmds = rg.plan_commands([True], episodes=500, workers=None, skip_sample=True)
-    assert len(cmds) == 1 and 'export_span_net.py' in ' '.join(cmds[0])
+    assert len(cmds) == 1 and "export_span_net.py" in " ".join(cmds[0])
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**

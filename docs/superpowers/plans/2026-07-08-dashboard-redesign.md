@@ -80,21 +80,21 @@ Add to `tests/test_control_mode_base.py` (reuses `_make_ctx`, `_RecordingMode`, 
 def test_status_publishes_duty_fields():
     ctx = _make_ctx()
     real_now = ctx.clock.now
-    calls = {'n': 0}
+    calls = {"n": 0}
 
     def _now():
-        calls['n'] += 1
-        return real_now() if calls['n'] == 1 else real_now() + 0.6
+        calls["n"] += 1
+        return real_now() if calls["n"] == 1 else real_now() + 0.6
 
     ctx.clock.now = _now
     mode = _RecordingMode(ctx, WorkCycleState())
     mode.run()
     status = ctx.store.read_status()
-    assert 'cycle_ratio' in status
-    assert 'fan_duty' in status
+    assert "cycle_ratio" in status
+    assert "fan_duty" in status
     # Default state: no auger ratio set, DC fan disabled, fan output off.
-    assert status['cycle_ratio'] == 0.0
-    assert status['fan_duty'] == 0
+    assert status["cycle_ratio"] == 0.0
+    assert status["fan_duty"] == 0
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -107,11 +107,11 @@ Expected: FAIL with `KeyError: 'cycle_ratio'` (or assertion on missing key).
 In `controller/runtime/modes/base.py`, immediately after the `status_data['outpins']` build loop (right after the `for item in self.settings['platform']['outputs']:` block completes, before `status_data.update(self.status_fragment())`):
 
 ```python
-            status_data['cycle_ratio'] = round(self.state.cycle.ratio, 2)
-            if self.settings['platform'].get('dc_fan'):
-                status_data['fan_duty'] = int(control.get('duty_cycle', 0) or 0)
-            else:
-                status_data['fan_duty'] = 100 if status_data['outpins'].get('fan') else 0
+status_data["cycle_ratio"] = round(self.state.cycle.ratio, 2)
+if self.settings["platform"].get("dc_fan"):
+    status_data["fan_duty"] = int(control.get("duty_cycle", 0) or 0)
+else:
+    status_data["fan_duty"] = 100 if status_data["outpins"].get("fan") else 0
 ```
 
 In `common/common.py`, inside the `read_status(init=True)` dict (after `'outpins': {...},`), add:
@@ -154,15 +154,16 @@ Add to `tests/test_dsi_1280x720t_manifest.py`:
 ```python
 def test_accent_theme_option_present():
     import json, os
-    base = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-    with open(os.path.join(base, 'wizard', 'wizard_manifest.json')) as f:
+
+    base = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    with open(os.path.join(base, "wizard", "wizard_manifest.json")) as f:
         manifest = json.load(f)
-    opts = manifest['modules']['display']['dsi_1280x720t']['config']
-    names = [o['option_name'] for o in opts]
-    assert 'accent_theme' in names
-    accent = next(o for o in opts if o['option_name'] == 'accent_theme')
-    assert accent['default'] == 'Ember'
-    assert set(accent['list_values']) == {'Ember', 'Ice', 'Crimson'}
+    opts = manifest["modules"]["display"]["dsi_1280x720t"]["config"]
+    names = [o["option_name"] for o in opts]
+    assert "accent_theme" in names
+    accent = next(o for o in opts if o["option_name"] == "accent_theme")
+    assert accent["default"] == "Ember"
+    assert set(accent["list_values"]) == {"Ember", "Ice", "Crimson"}
 ```
 
 Add the analogous `test_accent_theme_option_present` to `tests/test_qtquick_manifest.py` (using key `qtquick_dsi_1280x720t`).
@@ -225,17 +226,23 @@ git commit -m "feat(display): add accent_theme display setting (Ember/Ice/Crimso
 # tests/test_fonts_present.py
 import os
 
-BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 FONTS = [
-    'Barlow-Regular.ttf', 'Barlow-Medium.ttf', 'Barlow-SemiBold.ttf', 'Barlow-Bold.ttf',
-    'BarlowSemiCondensed-Medium.ttf', 'BarlowSemiCondensed-SemiBold.ttf',
-    'BarlowSemiCondensed-Bold.ttf', 'BarlowSemiCondensed-ExtraBold.ttf',
+    "Barlow-Regular.ttf",
+    "Barlow-Medium.ttf",
+    "Barlow-SemiBold.ttf",
+    "Barlow-Bold.ttf",
+    "BarlowSemiCondensed-Medium.ttf",
+    "BarlowSemiCondensed-SemiBold.ttf",
+    "BarlowSemiCondensed-Bold.ttf",
+    "BarlowSemiCondensed-ExtraBold.ttf",
 ]
+
 
 def test_barlow_fonts_bundled():
     for name in FONTS:
-        p = os.path.join(BASE, 'static', 'font', name)
-        assert os.path.exists(p), f'missing {name}'
+        p = os.path.join(BASE, "static", "font", name)
+        assert os.path.exists(p), f"missing {name}"
         assert os.path.getsize(p) > 1000
 ```
 
@@ -295,8 +302,9 @@ git commit -m "chore(display): bundle Barlow + Barlow Semi Condensed fonts (OFL)
 import os
 from PIL import Image
 
-BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-PATH = os.path.join(BASE, 'static', 'img', 'display', 'background_ember_1280x720.png')
+BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+PATH = os.path.join(BASE, "static", "img", "display", "background_ember_1280x720.png")
+
 
 def test_ember_background_dimensions():
     assert os.path.exists(PATH)
@@ -314,6 +322,7 @@ Expected: FAIL (missing file).
 ```python
 # tools/generate_ember_background.py
 """Render the ember radial-gradient dashboard background (1280x720)."""
+
 import os
 from PIL import Image
 
@@ -321,7 +330,7 @@ W, H = 1280, 720
 # radial-gradient(120% 90% at 50% 118%, #241a12 0%, #16110d 42%, #0d0b09 100%)
 CX, CY = 0.50 * W, 1.18 * H
 RX, RY = 1.20 * W, 0.90 * H
-STOPS = [(0.00, (0x24, 0x1a, 0x12)), (0.42, (0x16, 0x11, 0x0d)), (1.00, (0x0d, 0x0b, 0x09))]
+STOPS = [(0.00, (0x24, 0x1A, 0x12)), (0.42, (0x16, 0x11, 0x0D)), (1.00, (0x0D, 0x0B, 0x09))]
 
 
 def _lerp(a, b, t):
@@ -339,19 +348,19 @@ def _sample(frac):
 
 
 def main():
-    img = Image.new('RGB', (W, H))
+    img = Image.new("RGB", (W, H))
     px = img.load()
     for y in range(H):
         for x in range(W):
             d = (((x - CX) / RX) ** 2 + ((y - CY) / RY) ** 2) ** 0.5
             px[x, y] = _sample(min(d, 1.0))
-    base = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-    out = os.path.join(base, 'static', 'img', 'display', 'background_ember_1280x720.png')
+    base = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    out = os.path.join(base, "static", "img", "display", "background_ember_1280x720.png")
     img.save(out)
-    print(f'Wrote {out}')
+    print(f"Wrote {out}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
 ```
 
@@ -390,9 +399,8 @@ Add to `tests/test_qtbackend.py`:
 
 ```python
 def test_poll_exposes_duty_cycles():
-    in_data = {'P': {'Grill': 225}, 'F': {}, 'AUX': {}, 'PSP': 250, 'NT': {}}
-    status = {'mode': 'Hold', 'units': 'F', 'outpins': {'fan': True},
-              'cycle_ratio': 0.35, 'fan_duty': 100}
+    in_data = {"P": {"Grill": 225}, "F": {}, "AUX": {}, "PSP": 250, "NT": {}}
+    status = {"mode": "Hold", "units": "F", "outpins": {"fan": True}, "cycle_ratio": 0.35, "fan_duty": 100}
     b = make_backend(in_data, status)
     b.poll()
     assert b.augerDuty == 35
@@ -401,25 +409,24 @@ def test_poll_exposes_duty_cycles():
 
 def test_food_probe_count_reflects_config():
     # PROBE_INFO has one food probe.
-    b = make_backend({'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}}, {'mode': 'Stop', 'units': 'F', 'outpins': {}})
+    b = make_backend({"P": {}, "F": {}, "AUX": {}, "PSP": 0, "NT": {}}, {"mode": "Stop", "units": "F", "outpins": {}})
     assert b.foodProbeCount == 1
-    none = PiFireBackend(lambda: (None, None), lambda c, d: None,
-                         {'primary': {'name': 'Grill'}, 'food': [], 'aux': []})
+    none = PiFireBackend(lambda: (None, None), lambda c, d: None, {"primary": {"name": "Grill"}, "food": [], "aux": []})
     assert none.foodProbeCount == 0
 
 
 def test_cook_elapsed_text_counts_up_else_zero():
-    status = {'mode': 'Smoke', 'units': 'F', 'outpins': {}, 'startup_timestamp': 1000.0}
-    b = make_backend({'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}}, status)
+    status = {"mode": "Smoke", "units": "F", "outpins": {}, "startup_timestamp": 1000.0}
+    b = make_backend({"P": {}, "F": {}, "AUX": {}, "PSP": 0, "NT": {}}, status)
     b._now = lambda: 1000.0 + 125  # 2:05 elapsed
     b.poll()
-    assert b.cookElapsedText == '02:05'
+    assert b.cookElapsedText == "02:05"
     b._fetch_fn = lambda: (
-        {'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}},
-        {'mode': 'Stop', 'units': 'F', 'outpins': {}, 'startup_timestamp': 0},
+        {"P": {}, "F": {}, "AUX": {}, "PSP": 0, "NT": {}},
+        {"mode": "Stop", "units": "F", "outpins": {}, "startup_timestamp": 0},
     )
     b.poll()
-    assert b.cookElapsedText == '00:00'
+    assert b.cookElapsedText == "00:00"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -432,17 +439,17 @@ Expected: FAIL (`AttributeError: augerDuty`).
 In `display/qtbackend.py` `__init__`, add near the other status fields (the food count is derived once from `probe_info`, which is fixed at construction):
 
 ```python
-        self._auger_duty = 0
-        self._fan_duty = 0
-        self._food_count = len(self._probe_info.get('food', []))
-        self._cook_elapsed_text = '00:00'
+self._auger_duty = 0
+self._fan_duty = 0
+self._food_count = len(self._probe_info.get("food", []))
+self._cook_elapsed_text = "00:00"
 ```
 
 In `poll()`, after the existing `_set('_s_plus', ...)` line:
 
 ```python
-        self._set('_auger_duty', int(round((status.get('cycle_ratio', 0) or 0) * 100)), self.statusChanged)
-        self._set('_fan_duty', int(status.get('fan_duty', 0) or 0), self.statusChanged)
+self._set("_auger_duty", int(round((status.get("cycle_ratio", 0) or 0) * 100)), self.statusChanged)
+self._set("_fan_duty", int(status.get("fan_duty", 0) or 0), self.statusChanged)
 ```
 
 In `poll()`, after the existing `self._update_timer_text(status, now)` call, add the elapsed update:
@@ -454,35 +461,38 @@ In `poll()`, after the existing `self._update_timer_text(status, now)` call, add
 Add the helper method (near `_update_timer_text`):
 
 ```python
-    def _update_cook_elapsed(self, status, now):
-        ts = status.get('startup_timestamp', 0) or 0
-        if ts and status.get('mode', 'Stop') not in ('Stop', 'Monitor'):
-            secs = max(int(now - ts), 0)
-            h, m, s = secs // 3600, (secs % 3600) // 60, secs % 60
-            text = (f'{h}:' if h else '') + f'{m:02d}:{s:02d}'
-        else:
-            text = '00:00'
-        self._set('_cook_elapsed_text', text, self.timerChanged)
+def _update_cook_elapsed(self, status, now):
+    ts = status.get("startup_timestamp", 0) or 0
+    if ts and status.get("mode", "Stop") not in ("Stop", "Monitor"):
+        secs = max(int(now - ts), 0)
+        h, m, s = secs // 3600, (secs % 3600) // 60, secs % 60
+        text = (f"{h}:" if h else "") + f"{m:02d}:{s:02d}"
+    else:
+        text = "00:00"
+    self._set("_cook_elapsed_text", text, self.timerChanged)
 ```
 
 Add the properties near `pMode`:
 
 ```python
-    @Property(int, notify=statusChanged)
-    def augerDuty(self):
-        return self._auger_duty
+@Property(int, notify=statusChanged)
+def augerDuty(self):
+    return self._auger_duty
 
-    @Property(int, notify=statusChanged)
-    def fanDuty(self):
-        return self._fan_duty
 
-    @Property(int, constant=True)
-    def foodProbeCount(self):
-        return self._food_count
+@Property(int, notify=statusChanged)
+def fanDuty(self):
+    return self._fan_duty
 
-    @Property(str, notify=timerChanged)
-    def cookElapsedText(self):
-        return self._cook_elapsed_text
+
+@Property(int, constant=True)
+def foodProbeCount(self):
+    return self._food_count
+
+
+@Property(str, notify=timerChanged)
+def cookElapsedText(self):
+    return self._cook_elapsed_text
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -515,29 +525,29 @@ Add to `tests/test_qtbackend.py`:
 
 ```python
 def test_accent_theme_updates_live_and_throttles():
-    state = {'accent': 'Ember'}
+    state = {"accent": "Ember"}
     b = PiFireBackend(
-        lambda: ({'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}}, {'mode': 'Stop', 'units': 'F', 'outpins': {}}),
+        lambda: ({"P": {}, "F": {}, "AUX": {}, "PSP": 0, "NT": {}}, {"mode": "Stop", "units": "F", "outpins": {}}),
         lambda c, d: None,
         PROBE_INFO,
-        accent_fn=lambda: state['accent'],
+        accent_fn=lambda: state["accent"],
     )
-    clock = {'t': 1000.0}
-    b._now = lambda: clock['t']
+    clock = {"t": 1000.0}
+    b._now = lambda: clock["t"]
     events = []
     b.accentThemeChanged.connect(lambda: events.append(b.accentTheme))
     b.poll()
-    assert b.accentTheme == 'Ember'
+    assert b.accentTheme == "Ember"
     # Change within 1s window: not yet re-read.
-    state['accent'] = 'Ice'
-    clock['t'] = 1000.5
+    state["accent"] = "Ice"
+    clock["t"] = 1000.5
     b.poll()
-    assert b.accentTheme == 'Ember'
+    assert b.accentTheme == "Ember"
     # After >1s: picked up + signal fired.
-    clock['t'] = 1002.0
+    clock["t"] = 1002.0
     b.poll()
-    assert b.accentTheme == 'Ice'
-    assert 'Ice' in events
+    assert b.accentTheme == "Ice"
+    assert "Ice" in events
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -556,17 +566,17 @@ In `display/qtbackend.py`, add the signal beside the others:
 Change the constructor signature to `def __init__(self, fetch_fn, command_fn, probe_info, accent_fn=None, parent=None):` and add in the body:
 
 ```python
-        self._accent_fn = accent_fn
-        self._accent_theme = 'Ember'
-        self._last_accent_check = 0.0
+self._accent_fn = accent_fn
+self._accent_theme = "Ember"
+self._last_accent_check = 0.0
 ```
 
 In `poll()`, after `self._update_idle(mode, now)` (reuse the `now` already computed at `now = self._now()`):
 
 ```python
-        if self._accent_fn is not None and (now - self._last_accent_check) >= 1.0:
-            self._last_accent_check = now
-            self._set('_accent_theme', self._accent_fn() or 'Ember', self.accentThemeChanged)
+if self._accent_fn is not None and (now - self._last_accent_check) >= 1.0:
+    self._last_accent_check = now
+    self._set("_accent_theme", self._accent_fn() or "Ember", self.accentThemeChanged)
 ```
 
 Add the property:
@@ -588,15 +598,15 @@ def build_backend(config):
     def _accent_fn():
         try:
             s = read_settings_valkey()
-            module = s['modules']['display']
-            return s['display']['config'][module].get('accent_theme', 'Ember')
+            module = s["modules"]["display"]
+            return s["display"]["config"][module].get("accent_theme", "Ember")
         except Exception:
-            return 'Ember'
+            return "Ember"
 
-    dispatcher = Display.for_dispatch(config, config.get('units', 'F'))
-    backend = PiFireBackend(_fetch, dispatcher._dispatch_command, config.get('probe_info', {}), accent_fn=_accent_fn)
-    backend._accent_theme = config.get('accent_theme', 'Ember')
-    backend._ip_address = config.get('ip_address', '') or backend.ipAddress
+    dispatcher = Display.for_dispatch(config, config.get("units", "F"))
+    backend = PiFireBackend(_fetch, dispatcher._dispatch_command, config.get("probe_info", {}), accent_fn=_accent_fn)
+    backend._accent_theme = config.get("accent_theme", "Ember")
+    backend._ip_address = config.get("ip_address", "") or backend.ipAddress
     return backend
 ```
 
@@ -635,14 +645,15 @@ def test_theme_exposes_accent_tokens(qml_engine):
     from PySide6.QtQml import QQmlComponent
     from PySide6.QtCore import QUrl
     import os
-    qml_dir = os.path.join(os.path.dirname(__file__), '..', 'display', 'qml')
-    comp = QQmlComponent(qml_engine, QUrl.fromLocalFile(os.path.join(qml_dir, 'Theme.qml')))
+
+    qml_dir = os.path.join(os.path.dirname(__file__), "..", "display", "qml")
+    comp = QQmlComponent(qml_engine, QUrl.fromLocalFile(os.path.join(qml_dir, "Theme.qml")))
     theme = comp.create()
     assert theme is not None, comp.errorString()
-    theme.setProperty('accent', 'Ember')
-    assert theme.property('accentColor') is not None
-    theme.setProperty('accent', 'Ice')
-    assert theme.property('accentColor') is not None
+    theme.setProperty("accent", "Ember")
+    assert theme.property("accentColor") is not None
+    theme.setProperty("accent", "Ice")
+    assert theme.property("accentColor") is not None
 ```
 
 If `tests/test_qml_load.py` has no `qml_engine` fixture, add one that sets `QT_QPA_PLATFORM=offscreen` and yields a `QQmlEngine` with `addImportPath(display/qml)` — mirror `tests/test_qtquick_display.py`'s engine construction.
@@ -934,14 +945,16 @@ hamburger button (three bars) with `TapHandler { onTapped: header.menuRequested(
 # tests/test_flexobject_accent.py
 from display.flexobject import resolve_accent
 
+
 def test_resolve_accent_ember_default():
-    a = resolve_accent('Ember')
-    assert a['accent'][:3] == (255, 138, 43)   # #ff8a2b
-    assert resolve_accent('nonsense')['accent'] == a['accent']
+    a = resolve_accent("Ember")
+    assert a["accent"][:3] == (255, 138, 43)  # #ff8a2b
+    assert resolve_accent("nonsense")["accent"] == a["accent"]
+
 
 def test_resolve_accent_ice_crimson():
-    assert resolve_accent('Ice')['accent'][:3] == (60, 199, 208)     # #3cc7d0
-    assert resolve_accent('Crimson')['accent'][:3] == (255, 106, 90) # #ff6a5a
+    assert resolve_accent("Ice")["accent"][:3] == (60, 199, 208)  # #3cc7d0
+    assert resolve_accent("Crimson")["accent"][:3] == (255, 106, 90)  # #ff6a5a
 ```
 
 - [ ] **Step 2: Run** → FAIL (`ImportError: resolve_accent`).
@@ -949,19 +962,31 @@ def test_resolve_accent_ice_crimson():
 
 ```python
 def _hex(h):
-    h = h.lstrip('#')
+    h = h.lstrip("#")
     return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16), 255)
 
 
 _ACCENTS = {
-    'Ember':   {'accent': _hex('ff8a2b'), 'glow': _hex('ff7a1a'), 'arc': [_hex('ff5e1a')[:3], _hex('ff8a2b')[:3], _hex('ffc24b')[:3]]},
-    'Ice':     {'accent': _hex('3cc7d0'), 'glow': _hex('2ec5d3'), 'arc': [_hex('1f9fb8')[:3], _hex('35c7d0')[:3], _hex('7ef0d2')[:3]]},
-    'Crimson': {'accent': _hex('ff6a5a'), 'glow': _hex('ff5a4d'), 'arc': [_hex('e11d48')[:3], _hex('ff5a4d')[:3], _hex('ff9f43')[:3]]},
+    "Ember": {
+        "accent": _hex("ff8a2b"),
+        "glow": _hex("ff7a1a"),
+        "arc": [_hex("ff5e1a")[:3], _hex("ff8a2b")[:3], _hex("ffc24b")[:3]],
+    },
+    "Ice": {
+        "accent": _hex("3cc7d0"),
+        "glow": _hex("2ec5d3"),
+        "arc": [_hex("1f9fb8")[:3], _hex("35c7d0")[:3], _hex("7ef0d2")[:3]],
+    },
+    "Crimson": {
+        "accent": _hex("ff6a5a"),
+        "glow": _hex("ff5a4d"),
+        "arc": [_hex("e11d48")[:3], _hex("ff5a4d")[:3], _hex("ff9f43")[:3]],
+    },
 }
 
 
 def resolve_accent(name):
-    return _ACCENTS.get(name, _ACCENTS['Ember'])
+    return _ACCENTS.get(name, _ACCENTS["Ember"])
 ```
 
 Reserve the new type names in `FlexObject_TypeMap` (values are the class names created in the next tasks — add the map entries now, classes follow; if the plan is executed strictly in order, add each map entry in its class's task instead to keep each task import-clean). For a scaffold-first approach, create minimal `FlexObject` subclasses that render an empty card, then flesh out per task.
@@ -1052,9 +1077,9 @@ Each: **Steps** = write failing render/behaviour test → run FAIL → implement
 - [ ] **Step 3: Implement** — In `tools/generate_dsi_layout.py`, add `_dashboard_1280x720()` returning the bespoke `profile_1.dash` list (absolute 1280×720 coordinates transcribed from the design: header `[0,0,1280,58]`; left column x≈18 w≈298 with a label + 5 probe cards; center gauge card + cook-time bar with an adjacent fixed `lid_alert` slot + button row; right column x≈962 w≈300 with system card, two duty pills, hopper). Then in `build`, after the scale pass:
 
 ```python
-    if (width, height) == (1280, 720):
-        data['profile_1']['dash'] = _dashboard_1280x720()
-        data['metadata']['dash_background'] = './static/img/display/background_ember_1280x720.png'
+if (width, height) == (1280, 720):
+    data["profile_1"]["dash"] = _dashboard_1280x720()
+    data["metadata"]["dash_background"] = "./static/img/display/background_ember_1280x720.png"
 ```
 
 Run `python tools/generate_dsi_layout.py` to regenerate `display/dsi_1280x720t.json`. Confirm `git diff --stat` shows **only** `dsi_1280x720t.json` changed (not `dsi_1024x768t.json`).

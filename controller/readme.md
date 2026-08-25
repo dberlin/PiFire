@@ -14,58 +14,55 @@ The below example is an 'empty' controller, with the basic structure required fo
 ```python
 #!/usr/bin/env python3
 
-'''
+"""
 *****************************************
  PiFire Controller Class Object
 *****************************************
 
- Description: Class object for the controller.  
- 
-*****************************************
-'''
+ Description: Class object for the controller.
 
-'''
+*****************************************
+"""
+
+"""
 Imported Libraries
-'''
+"""
 import time
 
-'''
+"""
 Class Definition
-'''
+"""
+
 
 class Controller:
-	def __init__(self, config, units, cycle_data):
-		self.config = config
-		self.units = units
-		self.cycle_data = cycle_data 
+    def __init__(self, config, units, cycle_data):
+        self.config = config
+        self.units = units
+        self.cycle_data = cycle_data
 
-	def update(self, current):
-		'''
-		Input:
-	        current :: Current temperature
-	  Output:
-          cycle_ratio(u) :: Raw Cycle Ratio
-	  '''
-		return 0.0
+    def update(self, current):
+        """
+              Input:
+              current :: Current temperature
+        Output:
+               cycle_ratio(u) :: Raw Cycle Ratio
+        """
+        return 0.0
 
-	def set_target(self, set_point):
-		'''
-		Input:
-	    set_point :: Temperature Target
-	  '''
-		self.set_point = set_point
-		self.last_update = time.time()
-	
-	def get_config(self):
-		return self.config
+    def set_target(self, set_point):
+        """
+            Input:
+        set_point :: Temperature Target
+        """
+        self.set_point = set_point
+        self.last_update = time.time()
 
-	def supported_functions(self):
-		function_list = [
-			'update', 
-	        'set_target', 
-	        'get_config'
-        ]
-		return function_list
+    def get_config(self):
+        return self.config
+
+    def supported_functions(self):
+        function_list = ["update", "set_target", "get_config"]
+        return function_list
 ```
 
 During the HOLD cycle, PiFire will call the 'update' function of the controller with the current temperature every N number of seconds where N is the cycle time.  The controller will do some calculations and provide the cycle ratio out.  This is the amount of time the Auger should be ON, in the cycle N.  For example, if the cycle time is 10s, and the cycle ratio is 0.5, then the Auger should be ON for 5s in the next cycle.    

@@ -413,7 +413,7 @@ def parse_i2c_bus(data):
         if name == "bus_num":
             try:
                 return KernelBusNumber(bus_num=int(value))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 raise I2CBusConfigError(f"A kernel bus_num must be a number, got {value!r}.") from None
         text = str(value).strip()
         if not text:
@@ -1065,11 +1065,12 @@ def _migrate_i2c_buses(settings):
 Then append this block at the end of `upgrade_settings`, before `return settings`:
 
 ```python
-    """ Check if upgrading from previous to v1.11 or from v1.11.0 build 71 """
-    if (prev_ver[0] == 1 and prev_ver[1] == 11 and settings["versions"].get("build", 0) <= 71) or (
-        prev_ver[0] == 1 and prev_ver[1] < 11
-    ):
-        _migrate_i2c_buses(settings)
+"""Check if upgrading from previous to v1.11 or from v1.11.0 build 71"""
+
+if (prev_ver[0] == 1 and prev_ver[1] == 11 and settings["versions"].get("build", 0) <= 71) or (
+    prev_ver[0] == 1 and prev_ver[1] < 11
+):
+    _migrate_i2c_buses(settings)
 ```
 
 - [ ] **Step 5: Run the migration tests**
@@ -1386,9 +1387,9 @@ def wizard_bus_kinds(wizardInstallInfo, wizardData):
     kinds = set()
     for module, info in (wizardInstallInfo.get("modules") or {}).items():
         module_settings = info.get("settings") or {}
-        deps = ((wizardData.get("modules") or {}).get(module) or {}).get(
-            info.get("profile_selected", [""])[0], {}
-        ).get("settings_dependencies") or {}
+        deps = ((wizardData.get("modules") or {}).get(module) or {}).get(info.get("profile_selected", [""])[0], {}).get(
+            "settings_dependencies"
+        ) or {}
         for name, dep in deps.items():
             if dep.get("type") == "i2c_bus" and module_settings.get(name):
                 kinds.add(parse_i2c_bus(module_settings[name]).kind)
@@ -1483,27 +1484,21 @@ Expected: FAIL — the endpoint matches `"extended"` and returns two groups.
 In `wizard_scan`, change `if kind == "extended":` to `if kind == "kernel":` and make the group list three entries:
 
 ```python
-            adapters = discover_extended_i2c_buses()
-            groups = [
-                {
-                    "title": "By Bus Number",
-                    "items": [
-                        {"value": str(a["bus_num"]), "label": f"{a['name']} (bus {a['bus_num']})"} for a in adapters
-                    ],
-                },
-                {
-                    "title": "By Adapter Name",
-                    "items": [{"value": a["name"], "label": f"{a['name']} (bus {a['bus_num']})"} for a in adapters],
-                },
-                {
-                    "title": "By Serial",
-                    "items": [
-                        {"value": a["serial"], "label": f"{a['name']} [{a['serial']}]"}
-                        for a in adapters
-                        if a.get("serial")
-                    ],
-                },
-            ]
+adapters = discover_extended_i2c_buses()
+groups = [
+    {
+        "title": "By Bus Number",
+        "items": [{"value": str(a["bus_num"]), "label": f"{a['name']} (bus {a['bus_num']})"} for a in adapters],
+    },
+    {
+        "title": "By Adapter Name",
+        "items": [{"value": a["name"], "label": f"{a['name']} (bus {a['bus_num']})"} for a in adapters],
+    },
+    {
+        "title": "By Serial",
+        "items": [{"value": a["serial"], "label": f"{a['name']} [{a['serial']}]"} for a in adapters if a.get("serial")],
+    },
+]
 ```
 
 Update the docstring's discovery-shape note to say the kernel kind yields three groups, one per way a `KernelBus` can be addressed.

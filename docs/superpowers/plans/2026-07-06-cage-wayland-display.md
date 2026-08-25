@@ -43,58 +43,58 @@ import display_launch
 
 
 def test_bare_for_spi_display():
-	settings = {'modules': {'display': 'st7789_240x320'}}
-	argv, env_updates = display_launch.build_launch_argv(settings, {})
-	assert argv == [sys.executable, 'display_process.py']
-	assert env_updates == {}
+    settings = {"modules": {"display": "st7789_240x320"}}
+    argv, env_updates = display_launch.build_launch_argv(settings, {})
+    assert argv == [sys.executable, "display_process.py"]
+    assert env_updates == {}
 
 
 def test_bare_for_none_display():
-	settings = {'modules': {'display': 'none'}}
-	argv, env_updates = display_launch.build_launch_argv(settings, {})
-	assert argv == [sys.executable, 'display_process.py']
-	assert env_updates == {}
+    settings = {"modules": {"display": "none"}}
+    argv, env_updates = display_launch.build_launch_argv(settings, {})
+    assert argv == [sys.executable, "display_process.py"]
+    assert env_updates == {}
 
 
 def test_bare_for_pygame_display():
-	settings = {'modules': {'display': 'dsi_800x480t'}}
-	argv, env_updates = display_launch.build_launch_argv(settings, {})
-	assert argv == [sys.executable, 'display_process.py']
-	assert env_updates == {}
+    settings = {"modules": {"display": "dsi_800x480t"}}
+    argv, env_updates = display_launch.build_launch_argv(settings, {})
+    assert argv == [sys.executable, "display_process.py"]
+    assert env_updates == {}
 
 
 def test_cage_for_qtquick_flex():
-	settings = {'modules': {'display': 'qtquick_flex'}}
-	argv, env_updates = display_launch.build_launch_argv(settings, {'XDG_RUNTIME_DIR': '/run/user/1000'})
-	assert argv == ['cage', '-s', '--', sys.executable, 'display_process.py']
-	assert env_updates['QT_QPA_PLATFORM'] == 'wayland'
-	assert env_updates['XDG_RUNTIME_DIR'] == '/run/user/1000'
+    settings = {"modules": {"display": "qtquick_flex"}}
+    argv, env_updates = display_launch.build_launch_argv(settings, {"XDG_RUNTIME_DIR": "/run/user/1000"})
+    assert argv == ["cage", "-s", "--", sys.executable, "display_process.py"]
+    assert env_updates["QT_QPA_PLATFORM"] == "wayland"
+    assert env_updates["XDG_RUNTIME_DIR"] == "/run/user/1000"
 
 
 def test_cage_for_qtquick_dsi():
-	settings = {'modules': {'display': 'qtquick_dsi_1280x720t'}}
-	argv, _env = display_launch.build_launch_argv(settings, {})
-	assert argv == ['cage', '-s', '--', sys.executable, 'display_process.py']
+    settings = {"modules": {"display": "qtquick_dsi_1280x720t"}}
+    argv, _env = display_launch.build_launch_argv(settings, {})
+    assert argv == ["cage", "-s", "--", sys.executable, "display_process.py"]
 
 
 def test_xdg_runtime_dir_preserved_when_set():
-	settings = {'modules': {'display': 'qtquick_flex'}}
-	_argv, env_updates = display_launch.build_launch_argv(settings, {'XDG_RUNTIME_DIR': '/custom/run'})
-	assert env_updates['XDG_RUNTIME_DIR'] == '/custom/run'
+    settings = {"modules": {"display": "qtquick_flex"}}
+    _argv, env_updates = display_launch.build_launch_argv(settings, {"XDG_RUNTIME_DIR": "/custom/run"})
+    assert env_updates["XDG_RUNTIME_DIR"] == "/custom/run"
 
 
 def test_xdg_runtime_dir_defaults_to_run_user_uid(monkeypatch):
-	monkeypatch.setattr(display_launch.os, 'getuid', lambda: 0)
-	settings = {'modules': {'display': 'qtquick_flex'}}
-	_argv, env_updates = display_launch.build_launch_argv(settings, {})
-	assert env_updates['XDG_RUNTIME_DIR'] == '/run/user/0'
+    monkeypatch.setattr(display_launch.os, "getuid", lambda: 0)
+    settings = {"modules": {"display": "qtquick_flex"}}
+    _argv, env_updates = display_launch.build_launch_argv(settings, {})
+    assert env_updates["XDG_RUNTIME_DIR"] == "/run/user/0"
 
 
 def test_build_launch_argv_does_not_mutate_env():
-	settings = {'modules': {'display': 'qtquick_flex'}}
-	env = {'XDG_RUNTIME_DIR': '/run/user/1000'}
-	display_launch.build_launch_argv(settings, env)
-	assert env == {'XDG_RUNTIME_DIR': '/run/user/1000'}
+    settings = {"modules": {"display": "qtquick_flex"}}
+    env = {"XDG_RUNTIME_DIR": "/run/user/1000"}
+    display_launch.build_launch_argv(settings, env)
+    assert env == {"XDG_RUNTIME_DIR": "/run/user/1000"}
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -131,46 +131,46 @@ from common import read_settings
 
 
 def build_launch_argv(settings, env):
-	"""Return (argv, env_updates) for launching the display process.
+    """Return (argv, env_updates) for launching the display process.
 
-	:param settings: settings dict (uses settings['modules']['display'])
-	:param env: current environment mapping; read-only, never mutated
-	:return: (argv, env_updates). argv is the exec argv list; env_updates is a
-		dict of environment variables to set before exec (empty on the bare
-		path).
-	"""
-	child = [sys.executable, 'display_process.py']
-	display_name = settings['modules']['display']
-	if not display_name.startswith('qtquick_'):
-		return child, {}
+    :param settings: settings dict (uses settings['modules']['display'])
+    :param env: current environment mapping; read-only, never mutated
+    :return: (argv, env_updates). argv is the exec argv list; env_updates is a
+            dict of environment variables to set before exec (empty on the bare
+            path).
+    """
+    child = [sys.executable, "display_process.py"]
+    display_name = settings["modules"]["display"]
+    if not display_name.startswith("qtquick_"):
+        return child, {}
 
-	runtime_dir = env.get('XDG_RUNTIME_DIR') or f'/run/user/{os.getuid()}'
-	env_updates = {'QT_QPA_PLATFORM': 'wayland', 'XDG_RUNTIME_DIR': runtime_dir}
-	return ['cage', '-s', '--', *child], env_updates
+    runtime_dir = env.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    env_updates = {"QT_QPA_PLATFORM": "wayland", "XDG_RUNTIME_DIR": runtime_dir}
+    return ["cage", "-s", "--", *child], env_updates
 
 
 def _ensure_runtime_dir(path):
-	"""Create XDG_RUNTIME_DIR 0700 if it does not already exist."""
-	os.makedirs(path, mode=0o700, exist_ok=True)
-	os.chmod(path, 0o700)
+    """Create XDG_RUNTIME_DIR 0700 if it does not already exist."""
+    os.makedirs(path, mode=0o700, exist_ok=True)
+    os.chmod(path, 0o700)
 
 
 def main():
-	settings = read_settings()
-	argv, env_updates = build_launch_argv(settings, os.environ)
-	if 'XDG_RUNTIME_DIR' in env_updates:
-		_ensure_runtime_dir(env_updates['XDG_RUNTIME_DIR'])
-	os.environ.update(env_updates)
-	try:
-		os.execvp(argv[0], argv)
-	except OSError:
-		logging.basicConfig()
-		logging.getLogger('display_launch').exception('Failed to exec: %s', ' '.join(argv))
-		sys.exit(1)
+    settings = read_settings()
+    argv, env_updates = build_launch_argv(settings, os.environ)
+    if "XDG_RUNTIME_DIR" in env_updates:
+        _ensure_runtime_dir(env_updates["XDG_RUNTIME_DIR"])
+    os.environ.update(env_updates)
+    try:
+        os.execvp(argv[0], argv)
+    except OSError:
+        logging.basicConfig()
+        logging.getLogger("display_launch").exception("Failed to exec: %s", " ".join(argv))
+        sys.exit(1)
 
 
-if __name__ == '__main__':
-	main()
+if __name__ == "__main__":
+    main()
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**

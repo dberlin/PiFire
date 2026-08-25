@@ -16,10 +16,11 @@ large `common/i2c_bus.py` into their own focused modules: `common/ft232h.py` and
 `grillplat/ft232h_relay.py` drives its relays through Blinka:
 
 ```python
-os.environ['BLINKA_FT232H'] = url
+os.environ["BLINKA_FT232H"] = url
 import board
 import digitalio
-pin = getattr(board, 'C0')          # AttributeError on a Pi host
+
+pin = getattr(board, "C0")  # AttributeError on a Pi host
 ```
 
 Blinka's `board` module is a **process-global singleton**: the first `import

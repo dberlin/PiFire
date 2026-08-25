@@ -50,72 +50,72 @@ from unittest import mock
 
 
 class FakePin:
-	"""Records the last value/direction written by digitalio."""
+    """Records the last value/direction written by digitalio."""
 
-	def __init__(self):
-		self.value = None
-		self.direction = None
-		self.deinit_called = False
+    def __init__(self):
+        self.value = None
+        self.direction = None
+        self.deinit_called = False
 
-	def deinit(self):
-		self.deinit_called = True
+    def deinit(self):
+        self.deinit_called = True
 
 
 class FakeDirection:
-	OUTPUT = 'OUTPUT'
-	INPUT = 'INPUT'
+    OUTPUT = "OUTPUT"
+    INPUT = "INPUT"
 
 
 class FakeDigitalIO:
-	"""Stand-in for Blinka's digitalio module."""
+    """Stand-in for Blinka's digitalio module."""
 
-	Direction = FakeDirection
+    Direction = FakeDirection
 
-	def __init__(self):
-		self.pins = {}
+    def __init__(self):
+        self.pins = {}
 
-	def DigitalInOut(self, pin):
-		created = FakePin()
-		self.pins[pin] = created
-		return created
+    def DigitalInOut(self, pin):
+        created = FakePin()
+        self.pins[pin] = created
+        return created
 
 
 class FakeBoard:
-	"""Stand-in for Blinka's board module: C0-C7, D0-D7, SCL, SDA as sentinels."""
+    """Stand-in for Blinka's board module: C0-C7, D0-D7, SCL, SDA as sentinels."""
 
-	def __init__(self):
-		for bank in ('C', 'D'):
-			for index in range(8):
-				setattr(self, f'{bank}{index}', f'{bank}{index}')
-		self.SCL = 'SCL'
-		self.SDA = 'SDA'
+    def __init__(self):
+        for bank in ("C", "D"):
+            for index in range(8):
+                setattr(self, f"{bank}{index}", f"{bank}{index}")
+        self.SCL = "SCL"
+        self.SDA = "SDA"
 
 
 @contextlib.contextmanager
 def make_ft232h_platform(config):
-	"""Build a GrillPlatform with FT232H/EMC/I2C hardware faked.
+    """Build a GrillPlatform with FT232H/EMC/I2C hardware faked.
 
-	Yields (platform, harness); harness carries the fakes/mocks for assertions.
-	"""
-	import grillplat.ft232h_relay as mod
+    Yields (platform, harness); harness carries the fakes/mocks for assertions.
+    """
+    import grillplat.ft232h_relay as mod
 
-	fake_board = FakeBoard()
-	fake_dio = FakeDigitalIO()
-	with (
-		mock.patch.object(mod, '_load_ft232h', return_value=(fake_board, fake_dio)),
-		mock.patch.object(mod, 'EMC2101_LUT') as emc2101_cls,
-		mock.patch.object(mod, 'EMC2301') as emc2301_cls,
-		mock.patch.object(mod, 'busio') as busio_mod,
-	):
-		platform = mod.GrillPlatform(config)
-		harness = types.SimpleNamespace(
-			board=fake_board,
-			dio=fake_dio,
-			emc2101_cls=emc2101_cls,
-			emc2301_cls=emc2301_cls,
-			busio=busio_mod,
-		)
-		yield platform, harness
+    fake_board = FakeBoard()
+    fake_dio = FakeDigitalIO()
+    with (
+        mock.patch.object(mod, "_load_ft232h", return_value=(fake_board, fake_dio)),
+        mock.patch.object(mod, "EMC2101_LUT") as emc2101_cls,
+        mock.patch.object(mod, "EMC2301") as emc2301_cls,
+        mock.patch.object(mod, "busio") as busio_mod,
+    ):
+        platform = mod.GrillPlatform(config)
+        harness = types.SimpleNamespace(
+            board=fake_board,
+            dio=fake_dio,
+            emc2101_cls=emc2101_cls,
+            emc2301_cls=emc2301_cls,
+            busio=busio_mod,
+        )
+        yield platform, harness
 ```
 
 - [ ] **Step 2: Write the failing outputs test**
@@ -127,109 +127,110 @@ from tests.ft232h_helpers import make_ft232h_platform
 
 
 def _relay_config(**overrides):
-	config = {
-		'outputs': {'power': 'C0', 'igniter': 'C1', 'auger': 'C2', 'fan': 'C3'},
-		'fan_controller': {'chip': 'none'},
-		'triggerlevel': 'LOW',
-		'frequency': 25000,
-	}
-	config.update(overrides)
-	return config
+    config = {
+        "outputs": {"power": "C0", "igniter": "C1", "auger": "C2", "fan": "C3"},
+        "fan_controller": {"chip": "none"},
+        "triggerlevel": "LOW",
+        "frequency": 25000,
+    }
+    config.update(overrides)
+    return config
 
 
 def test_relay_only_init_opens_no_i2c_or_emc():
-	with make_ft232h_platform(_relay_config()) as (plat, harness):
-		assert plat.pwm_fan is False
-		assert plat.emc is None
-		harness.busio.I2C.assert_not_called()
-		harness.emc2101_cls.assert_not_called()
-		harness.emc2301_cls.assert_not_called()
-		# Four output pins created and de-asserted (active-low -> value True).
-		assert set(plat.relays) == {'power', 'igniter', 'auger', 'fan'}
-		assert plat.relays['power']._dio.value is True
+    with make_ft232h_platform(_relay_config()) as (plat, harness):
+        assert plat.pwm_fan is False
+        assert plat.emc is None
+        harness.busio.I2C.assert_not_called()
+        harness.emc2101_cls.assert_not_called()
+        harness.emc2301_cls.assert_not_called()
+        # Four output pins created and de-asserted (active-low -> value True).
+        assert set(plat.relays) == {"power", "igniter", "auger", "fan"}
+        assert plat.relays["power"]._dio.value is True
 
 
 def test_output_methods_toggle_mapped_active_low_pins():
-	with make_ft232h_platform(_relay_config()) as (plat, harness):
-		plat.auger_on()
-		# 'auger' maps to C2; active-low asserted -> value False.
-		assert harness.dio.pins['C2'].value is False
-		assert plat._output_state['auger'] is True
-		plat.auger_off()
-		assert harness.dio.pins['C2'].value is True
-		assert plat._output_state['auger'] is False
+    with make_ft232h_platform(_relay_config()) as (plat, harness):
+        plat.auger_on()
+        # 'auger' maps to C2; active-low asserted -> value False.
+        assert harness.dio.pins["C2"].value is False
+        assert plat._output_state["auger"] is True
+        plat.auger_off()
+        assert harness.dio.pins["C2"].value is True
+        assert plat._output_state["auger"] is False
 
 
 def test_power_and_igniter_use_mapped_pins():
-	with make_ft232h_platform(_relay_config()) as (plat, harness):
-		plat.power_on()
-		plat.igniter_on()
-		assert harness.dio.pins['C0'].value is False  # power -> C0
-		assert harness.dio.pins['C1'].value is False  # igniter -> C1
+    with make_ft232h_platform(_relay_config()) as (plat, harness):
+        plat.power_on()
+        plat.igniter_on()
+        assert harness.dio.pins["C0"].value is False  # power -> C0
+        assert harness.dio.pins["C1"].value is False  # igniter -> C1
 
 
 def test_active_high_trigger_level_not_inverted():
-	with make_ft232h_platform(_relay_config(triggerlevel='HIGH')) as (plat, harness):
-		# De-asserted at init -> value False for active-high.
-		assert harness.dio.pins['C0'].value is False
-		plat.power_on()
-		assert harness.dio.pins['C0'].value is True
+    with make_ft232h_platform(_relay_config(triggerlevel="HIGH")) as (plat, harness):
+        # De-asserted at init -> value False for active-high.
+        assert harness.dio.pins["C0"].value is False
+        plat.power_on()
+        assert harness.dio.pins["C0"].value is True
 
 
 def test_custom_pin_mapping_is_honored():
-	with make_ft232h_platform(
-		_relay_config(outputs={'power': 'D4', 'igniter': 'D5', 'auger': 'D6', 'fan': 'D7'})
-	) as (plat, harness):
-		plat.auger_on()
-		assert harness.dio.pins['D6'].value is False
+    with make_ft232h_platform(_relay_config(outputs={"power": "D4", "igniter": "D5", "auger": "D6", "fan": "D7"})) as (
+        plat,
+        harness,
+    ):
+        plat.auger_on()
+        assert harness.dio.pins["D6"].value is False
 
 
 def test_unknown_pin_name_raises_value_error():
-	import pytest
+    import pytest
 
-	with pytest.raises(ValueError):
-		with make_ft232h_platform(_relay_config(outputs={'power': 'Z9', 'igniter': 'C1', 'auger': 'C2', 'fan': 'C3'})):
-			pass
+    with pytest.raises(ValueError):
+        with make_ft232h_platform(_relay_config(outputs={"power": "Z9", "igniter": "C1", "auger": "C2", "fan": "C3"})):
+            pass
 
 
 def test_relay_only_fan_on_off_and_toggle():
-	with make_ft232h_platform(_relay_config()) as (plat, harness):
-		plat.fan_on()
-		assert harness.dio.pins['C3'].value is False  # fan -> C3 asserted
-		assert plat._output_state['fan'] is True
-		plat.fan_toggle()
-		assert plat._output_state['fan'] is False
-		assert harness.dio.pins['C3'].value is True
+    with make_ft232h_platform(_relay_config()) as (plat, harness):
+        plat.fan_on()
+        assert harness.dio.pins["C3"].value is False  # fan -> C3 asserted
+        assert plat._output_state["fan"] is True
+        plat.fan_toggle()
+        assert plat._output_state["fan"] is False
+        assert harness.dio.pins["C3"].value is True
 
 
 def test_relay_only_set_duty_cycle_and_frequency_are_noops():
-	with make_ft232h_platform(_relay_config()) as (plat, harness):
-		# Must not raise and must not create an EMC.
-		plat.set_duty_cycle(50)
-		plat.set_pwm_frequency(20000)
-		assert plat.emc is None
+    with make_ft232h_platform(_relay_config()) as (plat, harness):
+        # Must not raise and must not create an EMC.
+        plat.set_duty_cycle(50)
+        plat.set_pwm_frequency(20000)
+        assert plat.emc is None
 
 
 def test_get_output_status_relay_mode_has_no_pwm_keys():
-	with make_ft232h_platform(_relay_config()) as (plat, harness):
-		plat.auger_on()
-		status = plat.get_output_status()
-		assert status == {'auger': True, 'igniter': False, 'power': False, 'fan': False}
+    with make_ft232h_platform(_relay_config()) as (plat, harness):
+        plat.auger_on()
+        status = plat.get_output_status()
+        assert status == {"auger": True, "igniter": False, "power": False, "fan": False}
 
 
 def test_get_input_status_is_false():
-	with make_ft232h_platform(_relay_config()) as (plat, harness):
-		assert plat.get_input_status() is False
+    with make_ft232h_platform(_relay_config()) as (plat, harness):
+        assert plat.get_input_status() is False
 
 
 def test_cleanup_deasserts_and_closes_pins():
-	with make_ft232h_platform(_relay_config()) as (plat, harness):
-		plat.power_on()
-		plat.cleanup()
-		# All relays de-asserted (active-low -> True) and closed.
-		for pin in ('C0', 'C1', 'C2', 'C3'):
-			assert harness.dio.pins[pin].value is True
-			assert harness.dio.pins[pin].deinit_called is True
+    with make_ft232h_platform(_relay_config()) as (plat, harness):
+        plat.power_on()
+        plat.cleanup()
+        # All relays de-asserted (active-low -> True) and closed.
+        for pin in ("C0", "C1", "C2", "C3"):
+            assert harness.dio.pins[pin].value is True
+            assert harness.dio.pins[pin].deinit_called is True
 ```
 
 Note: `plat.relays['power']._dio` and `harness.dio.pins['C0']` are the same `FakePin`; tests use whichever reads clearest.
@@ -275,250 +276,250 @@ from grillplat.emc2301 import EMC2301
 
 # Default FT232H pin name per PiFire output.  The C-bank keeps the I2C pins
 # (D0=SCL, D1/D2=SDA) free for the EMC fan controller.
-_DEFAULT_OUTPUTS = {'power': 'C0', 'igniter': 'C1', 'auger': 'C2', 'fan': 'C3'}
+_DEFAULT_OUTPUTS = {"power": "C0", "igniter": "C1", "auger": "C2", "fan": "C3"}
 
 
-def _load_ft232h(url='1'):
-	"""Enable Blinka's FT232H backend and import board + digitalio.
+def _load_ft232h(url="1"):
+    """Enable Blinka's FT232H backend and import board + digitalio.
 
-	Isolated so importing this module never opens USB hardware, and so tests can
-	patch it to inject fakes.  `url` is assigned to BLINKA_FT232H before importing
-	board: '1' selects the first FT232H; a pyftdi URL selects a specific device.
-	"""
-	os.environ['BLINKA_FT232H'] = str(url)
-	import board
-	import digitalio
+    Isolated so importing this module never opens USB hardware, and so tests can
+    patch it to inject fakes.  `url` is assigned to BLINKA_FT232H before importing
+    board: '1' selects the first FT232H; a pyftdi URL selects a specific device.
+    """
+    os.environ["BLINKA_FT232H"] = str(url)
+    import board
+    import digitalio
 
-	return board, digitalio
+    return board, digitalio
 
 
 class _Relay:
-	"""One relay-board input driven by an FT232H GPIO pin.
+    """One relay-board input driven by an FT232H GPIO pin.
 
-	digitalio has no active_high parameter, so trigger polarity is applied
-	explicitly: an active-LOW board asserts the relay by driving the pin low.
-	"""
+    digitalio has no active_high parameter, so trigger polarity is applied
+    explicitly: an active-LOW board asserts the relay by driving the pin low.
+    """
 
-	def __init__(self, dio, active_high):
-		self._dio = dio
-		self._active_high = active_high
-		self._state = False
-		self.off()
+    def __init__(self, dio, active_high):
+        self._dio = dio
+        self._active_high = active_high
+        self._state = False
+        self.off()
 
-	def on(self):
-		self._dio.value = self._active_high
-		self._state = True
+    def on(self):
+        self._dio.value = self._active_high
+        self._state = True
 
-	def off(self):
-		self._dio.value = not self._active_high
-		self._state = False
+    def off(self):
+        self._dio.value = not self._active_high
+        self._state = False
 
-	@property
-	def is_active(self):
-		return self._state
+    @property
+    def is_active(self):
+        return self._state
 
-	def close(self):
-		self._dio.deinit()
+    def close(self):
+        self._dio.deinit()
 
 
 class GrillPlatform:
-	def __init__(self, config):
-		self.logger = create_logger('control')
-		self.config = config
+    def __init__(self, config):
+        self.logger = create_logger("control")
+        self.config = config
 
-		outputs = config.get('outputs', {}) or {}
-		self.pin_map = {name: str(outputs.get(name, default)) for name, default in _DEFAULT_OUTPUTS.items()}
+        outputs = config.get("outputs", {}) or {}
+        self.pin_map = {name: str(outputs.get(name, default)) for name, default in _DEFAULT_OUTPUTS.items()}
 
-		ft232h_cfg = config.get('ft232h', {}) or {}
-		self.url = ft232h_cfg.get('url', '1')
+        ft232h_cfg = config.get("ft232h", {}) or {}
+        self.url = ft232h_cfg.get("url", "1")
 
-		fan_cfg = config.get('fan_controller', {}) or {}
-		self.chip = str(fan_cfg.get('chip', 'none')).lower()
-		self.pwm_fan = self.chip in ('emc2101', 'emc2301')
+        fan_cfg = config.get("fan_controller", {}) or {}
+        self.chip = str(fan_cfg.get("chip", "none")).lower()
+        self.pwm_fan = self.chip in ("emc2101", "emc2301")
 
-		address = fan_cfg.get('address')
-		if address is None:
-			address = 0x2F if self.chip == 'emc2301' else 0x4C
-		elif isinstance(address, str):
-			address = int(address, 16)
-		self.emc_address = address
+        address = fan_cfg.get("address")
+        if address is None:
+            address = 0x2F if self.chip == "emc2301" else 0x4C
+        elif isinstance(address, str):
+            address = int(address, 16)
+        self.emc_address = address
 
-		self.frequency = config.get('frequency', 25000)
-		self.standalone = config.get('standalone', True)
+        self.frequency = config.get("frequency", 25000)
+        self.standalone = config.get("standalone", True)
 
-		active_high = config.get('triggerlevel', 'LOW') == 'HIGH'
+        active_high = config.get("triggerlevel", "LOW") == "HIGH"
 
-		# Cached commanded output state (avoids reading hardware per poll).
-		self._output_state = {'auger': False, 'fan': False, 'igniter': False, 'power': False}
-		self._fan_speed_percent = 0
+        # Cached commanded output state (avoids reading hardware per poll).
+        self._output_state = {"auger": False, "fan": False, "igniter": False, "power": False}
+        self._fan_speed_percent = 0
 
-		# Fan ramp control (EMC mode).
-		self._ramp_thread = None
-		self._ramp_stop = threading.Event()
+        # Fan ramp control (EMC mode).
+        self._ramp_thread = None
+        self._ramp_stop = threading.Event()
 
-		# Open the FT232H and create one output pin per PiFire output.
-		board, digitalio = _load_ft232h(self.url)
-		self.relays = {}
-		for name, pin_name in self.pin_map.items():
-			try:
-				pin = getattr(board, pin_name)
-			except AttributeError:
-				raise ValueError(f'Unknown FT232H pin {pin_name!r} for output {name!r}')
-			dio = digitalio.DigitalInOut(pin)
-			dio.direction = digitalio.Direction.OUTPUT
-			self.relays[name] = _Relay(dio, active_high)
+        # Open the FT232H and create one output pin per PiFire output.
+        board, digitalio = _load_ft232h(self.url)
+        self.relays = {}
+        for name, pin_name in self.pin_map.items():
+            try:
+                pin = getattr(board, pin_name)
+            except AttributeError:
+                raise ValueError(f"Unknown FT232H pin {pin_name!r} for output {name!r}")
+            dio = digitalio.DigitalInOut(pin)
+            dio.direction = digitalio.Direction.OUTPUT
+            self.relays[name] = _Relay(dio, active_high)
 
-		# Open the fan controller if PWM fan mode is selected (Task 2).
-		self.emc = None
-		if self.pwm_fan:
-			self._init_fan_controller(board)
+        # Open the fan controller if PWM fan mode is selected (Task 2).
+        self.emc = None
+        if self.pwm_fan:
+            self._init_fan_controller(board)
 
-	def _init_fan_controller(self, board):
-		# Implemented in Task 2.
-		pass
+    def _init_fan_controller(self, board):
+        # Implemented in Task 2.
+        pass
 
-	# MARK: Output control
-	def _set_output(self, name, state):
-		relay = self.relays[name]
-		if state:
-			relay.on()
-		else:
-			relay.off()
-		self._output_state[name] = state
+    # MARK: Output control
+    def _set_output(self, name, state):
+        relay = self.relays[name]
+        if state:
+            relay.on()
+        else:
+            relay.off()
+        self._output_state[name] = state
 
-	def auger_on(self):
-		self.logger.debug('auger_on: Turning on auger')
-		self._set_output('auger', True)
+    def auger_on(self):
+        self.logger.debug("auger_on: Turning on auger")
+        self._set_output("auger", True)
 
-	def auger_off(self):
-		self.logger.debug('auger_off: Turning off auger')
-		self._set_output('auger', False)
+    def auger_off(self):
+        self.logger.debug("auger_off: Turning off auger")
+        self._set_output("auger", False)
 
-	def igniter_on(self):
-		self.logger.debug('igniter_on: Turning on igniter')
-		self._set_output('igniter', True)
+    def igniter_on(self):
+        self.logger.debug("igniter_on: Turning on igniter")
+        self._set_output("igniter", True)
 
-	def igniter_off(self):
-		self.logger.debug('igniter_off: Turning off igniter')
-		self._set_output('igniter', False)
+    def igniter_off(self):
+        self.logger.debug("igniter_off: Turning off igniter")
+        self._set_output("igniter", False)
 
-	def power_on(self):
-		self.logger.debug('power_on: Powering on grill platform')
-		self._set_output('power', True)
+    def power_on(self):
+        self.logger.debug("power_on: Powering on grill platform")
+        self._set_output("power", True)
 
-	def power_off(self):
-		self.logger.debug('power_off: Powering off grill platform')
-		self._set_output('power', False)
+    def power_off(self):
+        self.logger.debug("power_off: Powering off grill platform")
+        self._set_output("power", False)
 
-	def get_input_status(self):
-		# No selector/shutdown inputs on this platform.
-		return False
+    def get_input_status(self):
+        # No selector/shutdown inputs on this platform.
+        return False
 
-	# MARK: Fan / PWM control
-	def fan_on(self, fan_speed_percent=100):
-		self.logger.debug('fan_on: Enabling fan power, speed ' + str(fan_speed_percent))
-		self._set_output('fan', True)
-		if self.pwm_fan:
-			self._stop_ramp()
-			self.set_duty_cycle(fan_speed_percent)
+    # MARK: Fan / PWM control
+    def fan_on(self, fan_speed_percent=100):
+        self.logger.debug("fan_on: Enabling fan power, speed " + str(fan_speed_percent))
+        self._set_output("fan", True)
+        if self.pwm_fan:
+            self._stop_ramp()
+            self.set_duty_cycle(fan_speed_percent)
 
-	def fan_off(self):
-		self.logger.debug('fan_off: Stopping fan and removing power')
-		if self.pwm_fan:
-			self._stop_ramp()
-			self.emc.manual_fan_speed = 0
-			self._fan_speed_percent = 0
-		self._set_output('fan', False)
+    def fan_off(self):
+        self.logger.debug("fan_off: Stopping fan and removing power")
+        if self.pwm_fan:
+            self._stop_ramp()
+            self.emc.manual_fan_speed = 0
+            self._fan_speed_percent = 0
+        self._set_output("fan", False)
 
-	def fan_toggle(self):
-		if self._output_state['fan']:
-			self.fan_off()
-		else:
-			self.fan_on()
+    def fan_toggle(self):
+        if self._output_state["fan"]:
+            self.fan_off()
+        else:
+            self.fan_on()
 
-	def set_duty_cycle(self, fan_speed_percent, override_ramping=True):
-		if not self.pwm_fan:
-			return
-		if override_ramping:
-			self._stop_ramp()
-		fan_speed_percent = max(0, min(100, fan_speed_percent))
-		self.emc.manual_fan_speed = fan_speed_percent
-		self._fan_speed_percent = fan_speed_percent
+    def set_duty_cycle(self, fan_speed_percent, override_ramping=True):
+        if not self.pwm_fan:
+            return
+        if override_ramping:
+            self._stop_ramp()
+        fan_speed_percent = max(0, min(100, fan_speed_percent))
+        self.emc.manual_fan_speed = fan_speed_percent
+        self._fan_speed_percent = fan_speed_percent
 
-	def set_pwm_frequency(self, frequency=25000):
-		# Record the requested value so control.py's "re-apply if changed"
-		# comparison settles even in relay-only mode.
-		self.frequency = frequency
-		if not self.pwm_fan:
-			return
-		try:
-			if self.chip == 'emc2301':
-				self.emc.pwm_frequency = frequency
-			else:
-				pwm_f = max(1, min(31, round(360000 / (2 * frequency))))
-				self.emc.set_pwm_clock(use_preset=False, use_slow=False)
-				self.emc.pwm_frequency_divisor = 1
-				self.emc.pwm_frequency = pwm_f
-		except (ValueError, OSError, AttributeError) as exc:
-			self.logger.warning('set_pwm_frequency: controller rejected frequency: ' + str(exc))
+    def set_pwm_frequency(self, frequency=25000):
+        # Record the requested value so control.py's "re-apply if changed"
+        # comparison settles even in relay-only mode.
+        self.frequency = frequency
+        if not self.pwm_fan:
+            return
+        try:
+            if self.chip == "emc2301":
+                self.emc.pwm_frequency = frequency
+            else:
+                pwm_f = max(1, min(31, round(360000 / (2 * frequency))))
+                self.emc.set_pwm_clock(use_preset=False, use_slow=False)
+                self.emc.pwm_frequency_divisor = 1
+                self.emc.pwm_frequency = pwm_f
+        except (ValueError, OSError, AttributeError) as exc:
+            self.logger.warning("set_pwm_frequency: controller rejected frequency: " + str(exc))
 
-	def _stop_ramp(self):
-		if self._ramp_thread is not None:
-			self._ramp_stop.set()
-			if self._ramp_thread is not threading.current_thread():
-				self._ramp_thread.join(timeout=5)
-			self._ramp_thread = None
+    def _stop_ramp(self):
+        if self._ramp_thread is not None:
+            self._ramp_stop.set()
+            if self._ramp_thread is not threading.current_thread():
+                self._ramp_thread.join(timeout=5)
+            self._ramp_thread = None
 
-	def pwm_fan_ramp(self, on_time=5, min_duty_cycle=20, max_duty_cycle=100):
-		self._set_output('fan', True)
-		if not self.pwm_fan:
-			return
-		self._start_ramp(on_time, min_duty_cycle, max_duty_cycle)
+    def pwm_fan_ramp(self, on_time=5, min_duty_cycle=20, max_duty_cycle=100):
+        self._set_output("fan", True)
+        if not self.pwm_fan:
+            return
+        self._start_ramp(on_time, min_duty_cycle, max_duty_cycle)
 
-	def _start_ramp(self, on_time, min_duty_cycle, max_duty_cycle):
-		self._stop_ramp()
-		self._ramp_stop = threading.Event()
-		self._ramp_thread = threading.Thread(
-			target=self._ramp_device, args=(on_time, min_duty_cycle, max_duty_cycle), daemon=True
-		)
-		self._ramp_thread.start()
+    def _start_ramp(self, on_time, min_duty_cycle, max_duty_cycle):
+        self._stop_ramp()
+        self._ramp_stop = threading.Event()
+        self._ramp_thread = threading.Thread(
+            target=self._ramp_device, args=(on_time, min_duty_cycle, max_duty_cycle), daemon=True
+        )
+        self._ramp_thread.start()
 
-	def _ramp_device(self, on_time, min_duty_cycle, max_duty_cycle, fps=25):
-		steps = max(int(fps * on_time), 1)
-		for i in range(steps):
-			fraction = i / steps
-			percent = min_duty_cycle + (max_duty_cycle - min_duty_cycle) * fraction
-			self.set_duty_cycle(round(percent, 2), override_ramping=False)
-			if self._ramp_stop.wait(1.0 / fps):
-				break
-		self.set_duty_cycle(max_duty_cycle, override_ramping=False)
+    def _ramp_device(self, on_time, min_duty_cycle, max_duty_cycle, fps=25):
+        steps = max(int(fps * on_time), 1)
+        for i in range(steps):
+            fraction = i / steps
+            percent = min_duty_cycle + (max_duty_cycle - min_duty_cycle) * fraction
+            self.set_duty_cycle(round(percent, 2), override_ramping=False)
+            if self._ramp_stop.wait(1.0 / fps):
+                break
+        self.set_duty_cycle(max_duty_cycle, override_ramping=False)
 
-	# MARK: Lifecycle
-	def cleanup(self):
-		self.logger.debug('cleanup: Shutting down outputs')
-		self._stop_ramp()
-		if self.pwm_fan and self.emc is not None:
-			try:
-				self.emc.manual_fan_speed = 0
-			except Exception:
-				pass
-		for relay in self.relays.values():
-			try:
-				relay.off()
-			finally:
-				relay.close()
+    # MARK: Lifecycle
+    def cleanup(self):
+        self.logger.debug("cleanup: Shutting down outputs")
+        self._stop_ramp()
+        if self.pwm_fan and self.emc is not None:
+            try:
+                self.emc.manual_fan_speed = 0
+            except Exception:
+                pass
+        for relay in self.relays.values():
+            try:
+                relay.off()
+            finally:
+                relay.close()
 
-	def get_output_status(self):
-		self.current = {
-			'auger': self._output_state['auger'],
-			'igniter': self._output_state['igniter'],
-			'power': self._output_state['power'],
-			'fan': self._output_state['fan'],
-		}
-		if self.pwm_fan:
-			self.current['pwm'] = self._fan_speed_percent
-			self.current['frequency'] = self.frequency
-		return self.current
+    def get_output_status(self):
+        self.current = {
+            "auger": self._output_state["auger"],
+            "igniter": self._output_state["igniter"],
+            "power": self._output_state["power"],
+            "fan": self._output_state["fan"],
+        }
+        if self.pwm_fan:
+            self.current["pwm"] = self._fan_speed_percent
+            self.current["frequency"] = self.frequency
+        return self.current
 ```
 
 - [ ] **Step 5: Run tests to verify they pass**
@@ -556,84 +557,84 @@ Create `tests/test_ft232h_fan.py`:
 from tests.ft232h_helpers import make_ft232h_platform
 
 
-def _emc_config(chip='emc2101', **overrides):
-	config = {
-		'outputs': {'power': 'C0', 'igniter': 'C1', 'auger': 'C2', 'fan': 'C3'},
-		'fan_controller': {'chip': chip},
-		'triggerlevel': 'LOW',
-		'frequency': 25000,
-	}
-	config.update(overrides)
-	return config
+def _emc_config(chip="emc2101", **overrides):
+    config = {
+        "outputs": {"power": "C0", "igniter": "C1", "auger": "C2", "fan": "C3"},
+        "fan_controller": {"chip": chip},
+        "triggerlevel": "LOW",
+        "frequency": 25000,
+    }
+    config.update(overrides)
+    return config
 
 
 def test_emc2101_init_opens_i2c_and_controller():
-	with make_ft232h_platform(_emc_config('emc2101')) as (plat, harness):
-		assert plat.pwm_fan is True
-		harness.busio.I2C.assert_called_once_with(harness.board.SCL, harness.board.SDA)
-		harness.emc2101_cls.assert_called_once()
-		harness.emc2301_cls.assert_not_called()
-		assert plat.emc is harness.emc2101_cls.return_value
-		# Fan curve disabled so PiFire drives speed directly, and speed starts 0.
-		assert plat.emc.lut_enabled is False
-		assert plat.emc.manual_fan_speed == 0
+    with make_ft232h_platform(_emc_config("emc2101")) as (plat, harness):
+        assert plat.pwm_fan is True
+        harness.busio.I2C.assert_called_once_with(harness.board.SCL, harness.board.SDA)
+        harness.emc2101_cls.assert_called_once()
+        harness.emc2301_cls.assert_not_called()
+        assert plat.emc is harness.emc2101_cls.return_value
+        # Fan curve disabled so PiFire drives speed directly, and speed starts 0.
+        assert plat.emc.lut_enabled is False
+        assert plat.emc.manual_fan_speed == 0
 
 
 def test_emc2301_init_uses_emc2301_at_default_address():
-	with make_ft232h_platform(_emc_config('emc2301')) as (plat, harness):
-		harness.emc2301_cls.assert_called_once()
-		# Default EMC2301 address is 0x2F.
-		assert harness.emc2301_cls.call_args.kwargs.get('address') == 0x2F
+    with make_ft232h_platform(_emc_config("emc2301")) as (plat, harness):
+        harness.emc2301_cls.assert_called_once()
+        # Default EMC2301 address is 0x2F.
+        assert harness.emc2301_cls.call_args.kwargs.get("address") == 0x2F
 
 
 def test_fan_on_sets_relay_and_speed():
-	with make_ft232h_platform(_emc_config('emc2101')) as (plat, harness):
-		plat.fan_on(80)
-		assert harness.dio.pins['C3'].value is False  # fan relay asserted (active-low)
-		assert plat._output_state['fan'] is True
-		assert plat.emc.manual_fan_speed == 80
-		assert plat._fan_speed_percent == 80
+    with make_ft232h_platform(_emc_config("emc2101")) as (plat, harness):
+        plat.fan_on(80)
+        assert harness.dio.pins["C3"].value is False  # fan relay asserted (active-low)
+        assert plat._output_state["fan"] is True
+        assert plat.emc.manual_fan_speed == 80
+        assert plat._fan_speed_percent == 80
 
 
 def test_fan_off_zeroes_speed_and_deasserts_relay():
-	with make_ft232h_platform(_emc_config('emc2101')) as (plat, harness):
-		plat.fan_on(80)
-		plat.fan_off()
-		assert plat.emc.manual_fan_speed == 0
-		assert plat._output_state['fan'] is False
-		assert harness.dio.pins['C3'].value is True
+    with make_ft232h_platform(_emc_config("emc2101")) as (plat, harness):
+        plat.fan_on(80)
+        plat.fan_off()
+        assert plat.emc.manual_fan_speed == 0
+        assert plat._output_state["fan"] is False
+        assert harness.dio.pins["C3"].value is True
 
 
 def test_set_duty_cycle_clamps_to_0_100():
-	with make_ft232h_platform(_emc_config('emc2101')) as (plat, harness):
-		plat.set_duty_cycle(150)
-		assert plat.emc.manual_fan_speed == 100
-		plat.set_duty_cycle(-20)
-		assert plat.emc.manual_fan_speed == 0
+    with make_ft232h_platform(_emc_config("emc2101")) as (plat, harness):
+        plat.set_duty_cycle(150)
+        assert plat.emc.manual_fan_speed == 100
+        plat.set_duty_cycle(-20)
+        assert plat.emc.manual_fan_speed == 0
 
 
 def test_ramp_device_ends_at_max_duty_cycle():
-	with make_ft232h_platform(_emc_config('emc2101')) as (plat, harness):
-		# Pre-set the stop event so the loop body runs once then exits without sleeping.
-		plat._ramp_stop.set()
-		plat._ramp_device(on_time=1, min_duty_cycle=20, max_duty_cycle=90, fps=25)
-		assert plat.emc.manual_fan_speed == 90
+    with make_ft232h_platform(_emc_config("emc2101")) as (plat, harness):
+        # Pre-set the stop event so the loop body runs once then exits without sleeping.
+        plat._ramp_stop.set()
+        plat._ramp_device(on_time=1, min_duty_cycle=20, max_duty_cycle=90, fps=25)
+        assert plat.emc.manual_fan_speed == 90
 
 
 def test_get_output_status_emc_mode_reports_pwm_and_frequency():
-	with make_ft232h_platform(_emc_config('emc2101')) as (plat, harness):
-		plat.fan_on(60)
-		status = plat.get_output_status()
-		assert status['fan'] is True
-		assert status['pwm'] == 60
-		assert status['frequency'] == plat.frequency
+    with make_ft232h_platform(_emc_config("emc2101")) as (plat, harness):
+        plat.fan_on(60)
+        status = plat.get_output_status()
+        assert status["fan"] is True
+        assert status["pwm"] == 60
+        assert status["frequency"] == plat.frequency
 
 
 def test_cleanup_zeroes_emc_speed():
-	with make_ft232h_platform(_emc_config('emc2101')) as (plat, harness):
-		plat.fan_on(50)
-		plat.cleanup()
-		assert plat.emc.manual_fan_speed == 0
+    with make_ft232h_platform(_emc_config("emc2101")) as (plat, harness):
+        plat.fan_on(50)
+        plat.cleanup()
+        assert plat.emc.manual_fan_speed == 0
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -646,18 +647,18 @@ Expected: FAIL — e.g. `test_emc2101_init_opens_i2c_and_controller` fails becau
 In `grillplat/ft232h_relay.py`, replace the placeholder `_init_fan_controller` with:
 
 ```python
-	def _init_fan_controller(self, board):
-		# EMC fan controller on the FT232H's own I2C bus (D0=SCL, D1/D2=SDA).
-		i2c = busio.I2C(board.SCL, board.SDA)
-		if self.chip == 'emc2301':
-			self.emc = EMC2301(i2c, address=self.emc_address)
-		else:
-			self.emc = EMC2101_LUT(i2c)
-			# Drive the fan from PiFire's control logic, not the chip's LUT curve.
-			self.emc.lut_enabled = False
-		self.emc.manual_fan_speed = 0
-		# Apply the PWM frequency now so the chip is correct immediately.
-		self.set_pwm_frequency(self.frequency)
+def _init_fan_controller(self, board):
+    # EMC fan controller on the FT232H's own I2C bus (D0=SCL, D1/D2=SDA).
+    i2c = busio.I2C(board.SCL, board.SDA)
+    if self.chip == "emc2301":
+        self.emc = EMC2301(i2c, address=self.emc_address)
+    else:
+        self.emc = EMC2101_LUT(i2c)
+        # Drive the fan from PiFire's control logic, not the chip's LUT curve.
+        self.emc.lut_enabled = False
+    self.emc.manual_fan_speed = 0
+    # Apply the PWM frequency now so the chip is correct immediately.
+    self.set_pwm_frequency(self.frequency)
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -699,38 +700,38 @@ from tests.ft232h_helpers import make_ft232h_platform
 
 
 def _config():
-	return {
-		'outputs': {'power': 'C0', 'igniter': 'C1', 'auger': 'C2', 'fan': 'C3'},
-		'fan_controller': {'chip': 'none'},
-		'triggerlevel': 'LOW',
-	}
+    return {
+        "outputs": {"power": "C0", "igniter": "C1", "auger": "C2", "fan": "C3"},
+        "fan_controller": {"chip": "none"},
+        "triggerlevel": "LOW",
+    }
 
 
 def test_supported_commands_lists_expected():
-	with make_ft232h_platform(_config()) as (plat, harness):
-		result = plat.supported_commands([])
-		assert result['result'] == 'OK'
-		cmds = result['data']['supported_cmds']
-		assert 'check_alive' in cmds
-		assert 'hardware_info' in cmds
+    with make_ft232h_platform(_config()) as (plat, harness):
+        result = plat.supported_commands([])
+        assert result["result"] == "OK"
+        cmds = result["data"]["supported_cmds"]
+        assert "check_alive" in cmds
+        assert "hardware_info" in cmds
 
 
 def test_check_alive_ok():
-	with make_ft232h_platform(_config()) as (plat, harness):
-		assert plat.check_alive([])['result'] == 'OK'
+    with make_ft232h_platform(_config()) as (plat, harness):
+        assert plat.check_alive([])["result"] == "OK"
 
 
 def test_check_throttled_reports_not_throttled():
-	with make_ft232h_platform(_config()) as (plat, harness):
-		data = plat.check_throttled([])['data']
-		assert data['cpu_under_voltage'] is False
-		assert data['cpu_throttled'] is False
+    with make_ft232h_platform(_config()) as (plat, harness):
+        data = plat.check_throttled([])["data"]
+        assert data["cpu_under_voltage"] is False
+        assert data["cpu_throttled"] is False
 
 
 def test_check_cpu_temp_returns_float():
-	with make_ft232h_platform(_config()) as (plat, harness):
-		result = plat.check_cpu_temp([])
-		assert isinstance(result['data']['cpu_temp'], float)
+    with make_ft232h_platform(_config()) as (plat, harness):
+        result = plat.check_cpu_temp([])
+        assert isinstance(result["data"]["cpu_temp"], float)
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -843,8 +844,8 @@ from common.common import default_settings
 
 
 def test_platform_defaults_include_ft232h_block():
-	platform = default_settings()['platform']
-	assert platform['ft232h'] == {'url': '1'}
+    platform = default_settings()["platform"]
+    assert platform["ft232h"] == {"url": "1"}
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -921,60 +922,60 @@ import json
 from wizard import select_grillplat_module
 
 
-def _settings(system_type, chip='none'):
-	return {
-		'modules': {'grillplat': 'prototype'},
-		'platform': {
-			'system_type': system_type,
-			'dc_fan': False,
-			'fan_controller': {'chip': chip},
-		},
-	}
+def _settings(system_type, chip="none"):
+    return {
+        "modules": {"grillplat": "prototype"},
+        "platform": {
+            "system_type": system_type,
+            "dc_fan": False,
+            "fan_controller": {"chip": chip},
+        },
+    }
 
 
 def test_manifest_registers_ft232h_relay():
-	with open('wizard/wizard_manifest.json') as handle:
-		manifest = json.load(handle)
-	entry = manifest['modules']['grillplatform']['ft232h_relay']
-	assert entry['friendly_name'] == 'FT232H IO-Triggered Relay'
-	assert entry['filename'] == 'ft232h_relay'
-	assert 'pyftdi' in entry['py_dependencies']
-	# Output pin dropdowns expose C0-C7 and D4-D7 only.
-	pin_options = set(entry['settings_dependencies']['output_power']['options'])
-	assert pin_options == {f'C{i}' for i in range(8)} | {f'D{i}' for i in range(4, 8)}
-	# Fan mode option maps to fan_controller.chip and includes 'none'.
-	fan_mode = entry['settings_dependencies']['fan_mode']
-	assert fan_mode['settings'] == ['platform', 'fan_controller', 'chip']
-	assert set(fan_mode['options']) == {'none', 'emc2101', 'emc2301'}
+    with open("wizard/wizard_manifest.json") as handle:
+        manifest = json.load(handle)
+    entry = manifest["modules"]["grillplatform"]["ft232h_relay"]
+    assert entry["friendly_name"] == "FT232H IO-Triggered Relay"
+    assert entry["filename"] == "ft232h_relay"
+    assert "pyftdi" in entry["py_dependencies"]
+    # Output pin dropdowns expose C0-C7 and D4-D7 only.
+    pin_options = set(entry["settings_dependencies"]["output_power"]["options"])
+    assert pin_options == {f"C{i}" for i in range(8)} | {f"D{i}" for i in range(4, 8)}
+    # Fan mode option maps to fan_controller.chip and includes 'none'.
+    fan_mode = entry["settings_dependencies"]["fan_mode"]
+    assert fan_mode["settings"] == ["platform", "fan_controller", "chip"]
+    assert set(fan_mode["options"]) == {"none", "emc2101", "emc2301"}
 
 
 def test_ft232h_relay_selection_relay_mode_leaves_dc_fan_false():
-	settings = _settings('ft232h_relay', chip='none')
-	select_grillplat_module(settings)
-	assert settings['modules']['grillplat'] == 'ft232h_relay'
-	assert settings['platform']['dc_fan'] is False
+    settings = _settings("ft232h_relay", chip="none")
+    select_grillplat_module(settings)
+    assert settings["modules"]["grillplat"] == "ft232h_relay"
+    assert settings["platform"]["dc_fan"] is False
 
 
 def test_ft232h_relay_selection_emc_mode_sets_dc_fan_true():
-	settings = _settings('ft232h_relay', chip='emc2101')
-	select_grillplat_module(settings)
-	assert settings['modules']['grillplat'] == 'ft232h_relay'
-	assert settings['platform']['dc_fan'] is True
+    settings = _settings("ft232h_relay", chip="emc2101")
+    select_grillplat_module(settings)
+    assert settings["modules"]["grillplat"] == "ft232h_relay"
+    assert settings["platform"]["dc_fan"] is True
 
 
 def test_existing_platforms_still_map():
-	settings = _settings('x86_numato')
-	select_grillplat_module(settings)
-	assert settings['modules']['grillplat'] == 'x86_numato'
-	assert settings['platform']['dc_fan'] is True
+    settings = _settings("x86_numato")
+    select_grillplat_module(settings)
+    assert settings["modules"]["grillplat"] == "x86_numato"
+    assert settings["platform"]["dc_fan"] is True
 
-	settings = _settings('raspberry_pi_all')
-	select_grillplat_module(settings)
-	assert settings['modules']['grillplat'] == 'raspberry_pi_all'
+    settings = _settings("raspberry_pi_all")
+    select_grillplat_module(settings)
+    assert settings["modules"]["grillplat"] == "raspberry_pi_all"
 
-	settings = _settings('something_unknown')
-	select_grillplat_module(settings)
-	assert settings['modules']['grillplat'] == 'prototype'
+    settings = _settings("something_unknown")
+    select_grillplat_module(settings)
+    assert settings["modules"]["grillplat"] == "prototype"
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -1095,41 +1096,43 @@ In `wizard.py`, add a module-level function (place it above the install function
 
 ```python
 def select_grillplat_module(settings):
-	"""Map platform.system_type to the grillplat module and set dc_fan.
+    """Map platform.system_type to the grillplat module and set dc_fan.
 
-	dc_fan gates all PWM behavior in the control loop, so it is set per platform:
-	always True for x86_numato, and for ft232h_relay only when a PWM fan
-	controller (EMC2101/EMC2301) is selected.
-	"""
-	system_type = settings['platform']['system_type']
-	settings['modules']['grillplat'] = 'prototype'
-	if system_type == 'raspberry_pi_all':
-		settings['modules']['grillplat'] = 'raspberry_pi_all'
-	elif system_type == 'x86_numato':
-		settings['modules']['grillplat'] = 'x86_numato'
-		settings['platform']['dc_fan'] = True
-	elif system_type == 'ft232h_relay':
-		settings['modules']['grillplat'] = 'ft232h_relay'
-		settings['platform']['dc_fan'] = settings['platform']['fan_controller']['chip'] in ('emc2101', 'emc2301')
+    dc_fan gates all PWM behavior in the control loop, so it is set per platform:
+    always True for x86_numato, and for ft232h_relay only when a PWM fan
+    controller (EMC2101/EMC2301) is selected.
+    """
+    system_type = settings["platform"]["system_type"]
+    settings["modules"]["grillplat"] = "prototype"
+    if system_type == "raspberry_pi_all":
+        settings["modules"]["grillplat"] = "raspberry_pi_all"
+    elif system_type == "x86_numato":
+        settings["modules"]["grillplat"] = "x86_numato"
+        settings["platform"]["dc_fan"] = True
+    elif system_type == "ft232h_relay":
+        settings["modules"]["grillplat"] = "ft232h_relay"
+        settings["platform"]["dc_fan"] = settings["platform"]["fan_controller"]["chip"] in ("emc2101", "emc2301")
 ```
 
 Then replace the existing inline block (currently `wizard.py:183-190`):
 
 ```python
-	""" Set the grillplatform module per the system_type """
-	settings['modules']['grillplat'] = 'prototype'
-	if settings['platform']['system_type'] == 'raspberry_pi_all':
-		settings['modules']['grillplat'] = 'raspberry_pi_all'
-	elif settings['platform']['system_type'] == 'x86_numato':
-		settings['modules']['grillplat'] = 'x86_numato'
-		settings['platform']['dc_fan'] = True
+"""Set the grillplatform module per the system_type"""
+
+settings["modules"]["grillplat"] = "prototype"
+if settings["platform"]["system_type"] == "raspberry_pi_all":
+    settings["modules"]["grillplat"] = "raspberry_pi_all"
+elif settings["platform"]["system_type"] == "x86_numato":
+    settings["modules"]["grillplat"] = "x86_numato"
+    settings["platform"]["dc_fan"] = True
 ```
 
 with a call to the helper:
 
 ```python
-	""" Set the grillplatform module per the system_type """
-	select_grillplat_module(settings)
+"""Set the grillplatform module per the system_type"""
+
+select_grillplat_module(settings)
 ```
 
 - [ ] **Step 5: Run tests to verify they pass**

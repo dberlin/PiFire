@@ -124,9 +124,7 @@ def test_check_reports_commits_behind(ds, client, monkeypatch):
 def test_check_maps_a_failed_fetch_to_an_error_envelope(ds, client, monkeypatch):
     import blueprints.api_update.routes as ur
 
-    monkeypatch.setattr(
-        ur, "get_available_updates", lambda: {"success": False, "message": "ERROR Getting Remote"}
-    )
+    monkeypatch.setattr(ur, "get_available_updates", lambda: {"success": False, "message": "ERROR Getting Remote"})
     resp = client.get("/api/update/check")
     assert resp.status_code == 502
     assert resp.get_json()["result"] == "Error"
@@ -348,7 +346,9 @@ def test_change_branch_validates_against_the_branch_list(ds, client, monkeypatch
     ok = client.post("/api/update/branch", data=json.dumps({"target": "dev"}), content_type="application/json")
     assert ok.status_code == 200
     assert fired == ["python updater.py -b dev &"]
-    bad = client.post("/api/update/branch", data=json.dumps({"target": "evil; rm -rf"}), content_type="application/json")
+    bad = client.post(
+        "/api/update/branch", data=json.dumps({"target": "evil; rm -rf"}), content_type="application/json"
+    )
     assert bad.status_code == 400
     assert fired == ["python updater.py -b dev &"]  # rejected target never fired
 

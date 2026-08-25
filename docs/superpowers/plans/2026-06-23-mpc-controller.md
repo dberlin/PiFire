@@ -50,25 +50,27 @@ Create `tests/test_mpc_deps.py`:
 
 ```python
 def test_do_mpc_and_casadi_import():
-    import do_mpc            # noqa: F401
-    import casadi            # noqa: F401
+    import do_mpc  # noqa: F401
+    import casadi  # noqa: F401
 
 
 def test_do_mpc_solves_trivial_mpc():
     import numpy as np
     import do_mpc
-    m = do_mpc.model.Model('continuous')
-    x = m.set_variable('_x', 'x')
-    u = m.set_variable('_u', 'u')
-    m.set_rhs('x', -x + u)
+
+    m = do_mpc.model.Model("continuous")
+    x = m.set_variable("_x", "x")
+    u = m.set_variable("_u", "u")
+    m.set_rhs("x", -x + u)
     m.setup()
     mpc = do_mpc.controller.MPC(m)
-    mpc.set_param(n_horizon=10, t_step=1.0, store_full_solution=False,
-                  nlpsol_opts={'ipopt.print_level': 0, 'print_time': 0})
+    mpc.set_param(
+        n_horizon=10, t_step=1.0, store_full_solution=False, nlpsol_opts={"ipopt.print_level": 0, "print_time": 0}
+    )
     mpc.set_objective(mterm=x**2, lterm=x**2)
     mpc.set_rterm(u=1e-2)
-    mpc.bounds['lower', '_u', 'u'] = -1
-    mpc.bounds['upper', '_u', 'u'] = 1
+    mpc.bounds["lower", "_u", "u"] = -1
+    mpc.bounds["upper", "_u", "u"] = 1
     mpc.setup()
     mpc.x0 = np.array([[1.0]])
     mpc.set_initial_guess()
@@ -121,8 +123,7 @@ Create `tests/test_mpc_allocator.py`:
 import pytest
 from controller.mpc_allocator import allocate
 
-CFG = dict(Q_min=5.0, Q_max=100.0, u_min=0.1, u_max=0.9,
-           fan_min_pct=40.0, fan_max_pct=100.0, enable_fan=True)
+CFG = dict(Q_min=5.0, Q_max=100.0, u_min=0.1, u_max=0.9, fan_min_pct=40.0, fan_max_pct=100.0, enable_fan=True)
 
 
 def test_min_fire_maps_to_lower_bounds():
@@ -141,8 +142,8 @@ def test_monotonic_and_clamped():
     a_lo, _ = allocate(-50, **CFG)
     a_hi, _ = allocate(999, **CFG)
     a_mid, _ = allocate(52.5, **CFG)
-    assert a_lo == pytest.approx(0.1)      # below Q_min clamps
-    assert a_hi == pytest.approx(0.9)      # above Q_max clamps
+    assert a_lo == pytest.approx(0.1)  # below Q_min clamps
+    assert a_hi == pytest.approx(0.9)  # above Q_max clamps
     assert 0.1 < a_mid < 0.9
     assert allocate(40, **CFG)[0] < allocate(60, **CFG)[0]  # monotonic
 
@@ -156,7 +157,8 @@ def test_air_tracks_fuel_constant_afr():
 
 
 def test_fan_disabled_returns_none():
-    cfg = dict(CFG); cfg['enable_fan'] = False
+    cfg = dict(CFG)
+    cfg["enable_fan"] = False
     a, f = allocate(60, **cfg)
     assert f is None
     assert 0.1 < a < 0.9
@@ -174,7 +176,7 @@ Create `controller/mpc_allocator.py`:
 ```python
 #!/usr/bin/env python3
 
-'''
+"""
 *****************************************
  PiFire MPC Combustion Allocator
 *****************************************
@@ -185,20 +187,20 @@ Create `controller/mpc_allocator.py`:
  range, which keeps combustion sensible by construction.
 
 *****************************************
-'''
+"""
 
 
 def allocate(Q, *, Q_min, Q_max, u_min, u_max, fan_min_pct, fan_max_pct, enable_fan):
-	'''
-	:param Q: firing-rate / heat-release demand
-	:returns: (auger_duty, fan_duty_pct or None)
-	'''
-	span = (Q_max - Q_min) if Q_max > Q_min else 1.0
-	frac = (Q - Q_min) / span
-	frac = max(0.0, min(1.0, frac))                 # clamp to [0, 1]
-	auger = u_min + frac * (u_max - u_min)
-	fan = fan_min_pct + frac * (fan_max_pct - fan_min_pct) if enable_fan else None
-	return auger, fan
+    """
+    :param Q: firing-rate / heat-release demand
+    :returns: (auger_duty, fan_duty_pct or None)
+    """
+    span = (Q_max - Q_min) if Q_max > Q_min else 1.0
+    frac = (Q - Q_min) / span
+    frac = max(0.0, min(1.0, frac))  # clamp to [0, 1]
+    auger = u_min + frac * (u_max - u_min)
+    fan = fan_min_pct + frac * (fan_max_pct - fan_min_pct) if enable_fan else None
+    return auger, fan
 ```
 
 - [ ] **Step 4: Run to verify it passes**
@@ -240,16 +242,15 @@ PARAMS = dict(C_f=60.0, C_c=306.0, h_fc=2.0, h_amb=0.55, T_amb=20.0)
 
 def test_model_builds():
     m = build_do_mpc_model(**PARAMS)
-    assert set(m.x.keys()) >= {'T_f', 'T_c', 'd'}
-    assert 'Q' in m.u.keys()
+    assert set(m.x.keys()) >= {"T_f", "T_c", "d"}
+    assert "Q" in m.u.keys()
 
 
 def test_kf_offset_free_under_constant_disturbance():
     # Feed a measurement that is persistently biased above what the model
     # predicts for zero d; the estimated d must converge so the predicted
     # chamber temp matches the measurement (offset-free).
-    kf = GreyBoxKF(t_step=25.0, q_temp=1e-2, q_dist=0.5, r_meas=0.04,
-                   x0=(100.0, 100.0, 0.0), **PARAMS)
+    kf = GreyBoxKF(t_step=25.0, q_temp=1e-2, q_dist=0.5, r_meas=0.04, x0=(100.0, 100.0, 0.0), **PARAMS)
     y = 100.0
     for _ in range(200):
         x = kf.update(Q_applied=49.5, y_measured=y)  # ~steady Q for 100C
@@ -260,8 +261,7 @@ def test_kf_offset_free_under_constant_disturbance():
 
 
 def test_kf_tracks_measured_temperature():
-    kf = GreyBoxKF(t_step=25.0, q_temp=1e-2, q_dist=0.5, r_meas=0.04,
-                   x0=(20.0, 20.0, 0.0), **PARAMS)
+    kf = GreyBoxKF(t_step=25.0, q_temp=1e-2, q_dist=0.5, r_meas=0.04, x0=(20.0, 20.0, 0.0), **PARAMS)
     x = None
     for _ in range(100):
         x = kf.update(Q_applied=49.5, y_measured=110.0)
@@ -280,7 +280,7 @@ Create `controller/mpc_model.py`:
 ```python
 #!/usr/bin/env python3
 
-'''
+"""
 *****************************************
  PiFire MPC Grey-box Thermal Model + Estimator
 *****************************************
@@ -292,7 +292,7 @@ Create `controller/mpc_model.py`:
  estimator.
 
 *****************************************
-'''
+"""
 
 import numpy as np
 from scipy.linalg import expm
@@ -300,61 +300,64 @@ import do_mpc
 
 
 def build_do_mpc_model(*, C_f, C_c, h_fc, h_amb, T_amb):
-	model = do_mpc.model.Model('continuous')
-	T_f = model.set_variable('_x', 'T_f')
-	T_c = model.set_variable('_x', 'T_c')
-	d = model.set_variable('_x', 'd')
-	Q = model.set_variable('_u', 'Q')
-	model.set_variable('_tvp', 'T_set')
-	model.set_rhs('T_f', (Q - h_fc * (T_f - T_c)) / C_f)
-	model.set_rhs('T_c', (h_fc * (T_f - T_c) - h_amb * (T_c - T_amb) + d) / C_c)
-	model.set_rhs('d', d * 0)
-	model.setup()
-	return model
+    model = do_mpc.model.Model("continuous")
+    T_f = model.set_variable("_x", "T_f")
+    T_c = model.set_variable("_x", "T_c")
+    d = model.set_variable("_x", "d")
+    Q = model.set_variable("_u", "Q")
+    model.set_variable("_tvp", "T_set")
+    model.set_rhs("T_f", (Q - h_fc * (T_f - T_c)) / C_f)
+    model.set_rhs("T_c", (h_fc * (T_f - T_c) - h_amb * (T_c - T_amb) + d) / C_c)
+    model.set_rhs("d", d * 0)
+    model.setup()
+    return model
 
 
 class GreyBoxKF:
-	'''
-	Kalman filter over the augmented linear model x = [T_f, T_c, d], input Q.
-	The constant ambient term enters as an affine input (held at 1).
-	'''
+    """
+    Kalman filter over the augmented linear model x = [T_f, T_c, d], input Q.
+    The constant ambient term enters as an affine input (held at 1).
+    """
 
-	def __init__(self, *, C_f, C_c, h_fc, h_amb, T_amb, t_step,
-	             q_temp, q_dist, r_meas, x0=(20.0, 20.0, 0.0)):
-		Ac = np.array([
-			[-h_fc / C_f,  h_fc / C_f,          0.0],
-			[ h_fc / C_c, -(h_fc + h_amb) / C_c, 1.0 / C_c],
-			[ 0.0,         0.0,                  0.0],
-		])
-		# columns: [Q input, affine constant=1]
-		Baug = np.array([
-			[1.0 / C_f, 0.0],
-			[0.0,       h_amb * T_amb / C_c],
-			[0.0,       0.0],
-		])
-		M = np.zeros((5, 5))
-		M[:3, :3] = Ac
-		M[:3, 3:] = Baug
-		Md = expm(M * t_step)
-		self.Ad = Md[:3, :3]
-		self.Bd = Md[:3, 3:4]      # for Q
-		self.bd = Md[:3, 4:5]      # affine (constant input = 1)
-		self.H = np.array([[0.0, 1.0, 0.0]])
-		self.Qkf = np.diag([q_temp, q_temp, q_dist])
-		self.Rkf = np.array([[r_meas]])
-		self.x = np.array(x0, dtype=float)
-		self.P = np.eye(3) * 5.0
+    def __init__(self, *, C_f, C_c, h_fc, h_amb, T_amb, t_step, q_temp, q_dist, r_meas, x0=(20.0, 20.0, 0.0)):
+        Ac = np.array(
+            [
+                [-h_fc / C_f, h_fc / C_f, 0.0],
+                [h_fc / C_c, -(h_fc + h_amb) / C_c, 1.0 / C_c],
+                [0.0, 0.0, 0.0],
+            ]
+        )
+        # columns: [Q input, affine constant=1]
+        Baug = np.array(
+            [
+                [1.0 / C_f, 0.0],
+                [0.0, h_amb * T_amb / C_c],
+                [0.0, 0.0],
+            ]
+        )
+        M = np.zeros((5, 5))
+        M[:3, :3] = Ac
+        M[:3, 3:] = Baug
+        Md = expm(M * t_step)
+        self.Ad = Md[:3, :3]
+        self.Bd = Md[:3, 3:4]  # for Q
+        self.bd = Md[:3, 4:5]  # affine (constant input = 1)
+        self.H = np.array([[0.0, 1.0, 0.0]])
+        self.Qkf = np.diag([q_temp, q_temp, q_dist])
+        self.Rkf = np.array([[r_meas]])
+        self.x = np.array(x0, dtype=float)
+        self.P = np.eye(3) * 5.0
 
-	def update(self, Q_applied, y_measured):
-		# predict
-		self.x = self.Ad @ self.x + self.Bd.flatten() * Q_applied + self.bd.flatten()
-		self.P = self.Ad @ self.P @ self.Ad.T + self.Qkf
-		# update
-		S = self.H @ self.P @ self.H.T + self.Rkf
-		K = (self.P @ self.H.T) / S
-		self.x = self.x + K.flatten() * (y_measured - (self.H @ self.x)[0])
-		self.P = (np.eye(3) - K @ self.H) @ self.P
-		return self.x
+    def update(self, Q_applied, y_measured):
+        # predict
+        self.x = self.Ad @ self.x + self.Bd.flatten() * Q_applied + self.bd.flatten()
+        self.P = self.Ad @ self.P @ self.Ad.T + self.Qkf
+        # update
+        S = self.H @ self.P @ self.H.T + self.Rkf
+        K = (self.P @ self.H.T) / S
+        self.x = self.x + K.flatten() * (y_measured - (self.H @ self.x)[0])
+        self.P = (np.eye(3) - K @ self.H) @ self.P
+        return self.x
 ```
 
 - [ ] **Step 4: Run to verify it passes**
@@ -395,16 +398,30 @@ import numpy as np
 from controller.mpc import Controller
 
 CONFIG = dict(
-    n_horizon=20, t_step=25.0, control_period=1.0, Q_w=1.0, R_dQ=0.02,
-    Q_min=5.0, Q_max=100.0, C_f=60.0, C_c=306.0, h_fc=2.0, h_amb=0.55,
-    T_amb=20.0, fan_min_pct=40.0, fan_max_pct=100.0, enable_fan_input=True,
-    est_q_temp=1e-2, est_q_dist=0.5, est_r_meas=0.04,
+    n_horizon=20,
+    t_step=25.0,
+    control_period=1.0,
+    Q_w=1.0,
+    R_dQ=0.02,
+    Q_min=5.0,
+    Q_max=100.0,
+    C_f=60.0,
+    C_c=306.0,
+    h_fc=2.0,
+    h_amb=0.55,
+    T_amb=20.0,
+    fan_min_pct=40.0,
+    fan_max_pct=100.0,
+    enable_fan_input=True,
+    est_q_temp=1e-2,
+    est_q_dist=0.5,
+    est_r_meas=0.04,
 )
-CYCLE = {'u_min': 0.1, 'u_max': 0.9, 'HoldCycleTime': 25}
+CYCLE = {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25}
 
 
 def _make():
-    c = Controller(dict(CONFIG), 'C', dict(CYCLE))
+    c = Controller(dict(CONFIG), "C", dict(CYCLE))
     c.set_target(110.0)
     return c
 
@@ -413,19 +430,19 @@ def test_update_returns_dict_contract():
     c = _make()
     out = c.update(100.0)
     assert isinstance(out, dict)
-    assert 0.1 <= out['cycle_ratio'] <= 0.9
-    assert 'fan' in out and 'duty' in out['fan']
-    assert 40.0 <= out['fan']['duty'] <= 100.0
+    assert 0.1 <= out["cycle_ratio"] <= 0.9
+    assert "fan" in out and "duty" in out["fan"]
+    assert 40.0 <= out["fan"]["duty"] <= 100.0
 
 
 def test_below_setpoint_demands_more_than_at_setpoint():
     # settle the estimator at each measured temperature before comparing
     c = _make()
     for _ in range(5):
-        cold = c.update(80.0)['cycle_ratio']
+        cold = c.update(80.0)["cycle_ratio"]
     c2 = _make()
     for _ in range(5):
-        hot = c2.update(140.0)['cycle_ratio']
+        hot = c2.update(140.0)["cycle_ratio"]
     assert cold > hot  # colder than target -> more auger
 
 
@@ -434,19 +451,19 @@ def test_control_period_advertised():
 
 
 def test_fahrenheit_setpoint_converted():
-    c = Controller(dict(CONFIG), 'F', dict(CYCLE))
-    c.set_target(230.0)            # 230 F = 110 C
+    c = Controller(dict(CONFIG), "F", dict(CYCLE))
+    c.set_target(230.0)  # 230 F = 110 C
     assert abs(c._set_point_c - 110.0) < 0.6
 
 
 def test_warm_solve_under_budget():
     c = _make()
-    c.update(100.0)               # cold
+    c.update(100.0)  # cold
     t0 = time.perf_counter()
     for _ in range(20):
         c.update(100.0)
     avg_ms = (time.perf_counter() - t0) / 20 * 1e3
-    assert avg_ms < 200.0         # >=1 Hz with wide margin (x86 ~8 ms)
+    assert avg_ms < 200.0  # >=1 Hz with wide margin (x86 ~8 ms)
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -461,7 +478,7 @@ Create `controller/mpc.py`:
 ```python
 #!/usr/bin/env python3
 
-'''
+"""
 *****************************************
  PiFire MPC Controller (cascade: firing-rate + combustion allocator)
 *****************************************
@@ -474,7 +491,7 @@ Create `controller/mpc.py`:
  Operates internally in Celsius.
 
 *****************************************
-'''
+"""
 
 import numpy as np
 import do_mpc
@@ -484,96 +501,124 @@ from controller.mpc_model import build_do_mpc_model, GreyBoxKF
 from controller.mpc_allocator import allocate
 
 _DEFAULTS = dict(
-	n_horizon=20, t_step=25.0, control_period=1.0, Q_w=1.0, R_dQ=0.02,
-	Q_min=5.0, Q_max=100.0, C_f=60.0, C_c=306.0, h_fc=2.0, h_amb=0.55,
-	T_amb=20.0, fan_min_pct=40.0, fan_max_pct=100.0, enable_fan_input=False,
-	est_q_temp=1e-2, est_q_dist=0.5, est_r_meas=0.04,
+    n_horizon=20,
+    t_step=25.0,
+    control_period=1.0,
+    Q_w=1.0,
+    R_dQ=0.02,
+    Q_min=5.0,
+    Q_max=100.0,
+    C_f=60.0,
+    C_c=306.0,
+    h_fc=2.0,
+    h_amb=0.55,
+    T_amb=20.0,
+    fan_min_pct=40.0,
+    fan_max_pct=100.0,
+    enable_fan_input=False,
+    est_q_temp=1e-2,
+    est_q_dist=0.5,
+    est_r_meas=0.04,
 )
 
 
 def _to_c(value, units):
-	return (value - 32.0) * 5.0 / 9.0 if units == 'F' else value
+    return (value - 32.0) * 5.0 / 9.0 if units == "F" else value
 
 
 class Controller(ControllerBase):
-	def __init__(self, config, units, cycle_data):
-		super().__init__(config, units, cycle_data)
-		self.function_list.append('get_control_period')
+    def __init__(self, config, units, cycle_data):
+        super().__init__(config, units, cycle_data)
+        self.function_list.append("get_control_period")
 
-		cfg = dict(_DEFAULTS)
-		cfg.update(config or {})
-		self.cfg = cfg
-		self.u_min = cycle_data.get('u_min', 0.1)
-		self.u_max = cycle_data.get('u_max', 0.9)
+        cfg = dict(_DEFAULTS)
+        cfg.update(config or {})
+        self.cfg = cfg
+        self.u_min = cycle_data.get("u_min", 0.1)
+        self.u_max = cycle_data.get("u_max", 0.9)
 
-		self._set_point_c = 0.0
-		self._last_Q = cfg['Q_min']
+        self._set_point_c = 0.0
+        self._last_Q = cfg["Q_min"]
 
-		# grey-box do-mpc model
-		self.model = build_do_mpc_model(
-			C_f=cfg['C_f'], C_c=cfg['C_c'], h_fc=cfg['h_fc'],
-			h_amb=cfg['h_amb'], T_amb=cfg['T_amb'])
+        # grey-box do-mpc model
+        self.model = build_do_mpc_model(
+            C_f=cfg["C_f"], C_c=cfg["C_c"], h_fc=cfg["h_fc"], h_amb=cfg["h_amb"], T_amb=cfg["T_amb"]
+        )
 
-		# MPC controller
-		self.mpc = do_mpc.controller.MPC(self.model)
-		self.mpc.set_param(
-			n_horizon=int(cfg['n_horizon']), t_step=float(cfg['t_step']),
-			store_full_solution=False,
-			nlpsol_opts={'ipopt.print_level': 0, 'print_time': 0,
-			             'ipopt.sb': 'yes'})
-		T_c = self.model.x['T_c']
-		T_set = self.model.tvp['T_set']
-		self.mpc.set_objective(mterm=cfg['Q_w'] * (T_c - T_set) ** 2,
-		                       lterm=cfg['Q_w'] * (T_c - T_set) ** 2)
-		self.mpc.set_rterm(Q=cfg['R_dQ'])
-		self.mpc.bounds['lower', '_u', 'Q'] = cfg['Q_min']
-		self.mpc.bounds['upper', '_u', 'Q'] = cfg['Q_max']
+        # MPC controller
+        self.mpc = do_mpc.controller.MPC(self.model)
+        self.mpc.set_param(
+            n_horizon=int(cfg["n_horizon"]),
+            t_step=float(cfg["t_step"]),
+            store_full_solution=False,
+            nlpsol_opts={"ipopt.print_level": 0, "print_time": 0, "ipopt.sb": "yes"},
+        )
+        T_c = self.model.x["T_c"]
+        T_set = self.model.tvp["T_set"]
+        self.mpc.set_objective(mterm=cfg["Q_w"] * (T_c - T_set) ** 2, lterm=cfg["Q_w"] * (T_c - T_set) ** 2)
+        self.mpc.set_rterm(Q=cfg["R_dQ"])
+        self.mpc.bounds["lower", "_u", "Q"] = cfg["Q_min"]
+        self.mpc.bounds["upper", "_u", "Q"] = cfg["Q_max"]
 
-		tvp_template = self.mpc.get_tvp_template()
-		def tvp_fun(t_now):
-			for k in range(int(cfg['n_horizon']) + 1):
-				tvp_template['_tvp', k, 'T_set'] = self._set_point_c
-			return tvp_template
-		self.mpc.set_tvp_fun(tvp_fun)
-		self.mpc.setup()
+        tvp_template = self.mpc.get_tvp_template()
 
-		# estimator
-		self.kf = GreyBoxKF(
-			C_f=cfg['C_f'], C_c=cfg['C_c'], h_fc=cfg['h_fc'], h_amb=cfg['h_amb'],
-			T_amb=cfg['T_amb'], t_step=float(cfg['t_step']),
-			q_temp=cfg['est_q_temp'], q_dist=cfg['est_q_dist'],
-			r_meas=cfg['est_r_meas'], x0=(cfg['T_amb'], cfg['T_amb'], 0.0))
+        def tvp_fun(t_now):
+            for k in range(int(cfg["n_horizon"]) + 1):
+                tvp_template["_tvp", k, "T_set"] = self._set_point_c
+            return tvp_template
 
-		self.mpc.x0 = np.array([[cfg['T_amb']], [cfg['T_amb']], [0.0]])
-		self.mpc.set_initial_guess()
+        self.mpc.set_tvp_fun(tvp_fun)
+        self.mpc.setup()
 
-	def set_target(self, set_point):
-		self.set_point = set_point
-		self._set_point_c = _to_c(set_point, self.units)
-		self._last_Q = self.cfg['Q_min']
+        # estimator
+        self.kf = GreyBoxKF(
+            C_f=cfg["C_f"],
+            C_c=cfg["C_c"],
+            h_fc=cfg["h_fc"],
+            h_amb=cfg["h_amb"],
+            T_amb=cfg["T_amb"],
+            t_step=float(cfg["t_step"]),
+            q_temp=cfg["est_q_temp"],
+            q_dist=cfg["est_q_dist"],
+            r_meas=cfg["est_r_meas"],
+            x0=(cfg["T_amb"], cfg["T_amb"], 0.0),
+        )
 
-	def get_control_period(self):
-		return float(self.cfg['control_period'])
+        self.mpc.x0 = np.array([[cfg["T_amb"]], [cfg["T_amb"]], [0.0]])
+        self.mpc.set_initial_guess()
 
-	def update(self, current):
-		y = _to_c(current, self.units)
-		# 1) estimate states from the measurement
-		x_hat = self.kf.update(self._last_Q, y)
-		# 2) optimize firing rate Q. The box constraints bound Q; on any solver
-		#    error we hold the previous move so the control loop never breaks.
-		try:
-			Q = float(np.asarray(self.mpc.make_step(x_hat.reshape(-1, 1))).flatten()[0])
-		except Exception:
-			Q = self._last_Q
-		Q = float(np.clip(Q, self.cfg['Q_min'], self.cfg['Q_max']))
-		self._last_Q = Q
-		# 3) allocate Q -> actuators
-		auger, fan_duty = allocate(
-			Q, Q_min=self.cfg['Q_min'], Q_max=self.cfg['Q_max'],
-			u_min=self.u_min, u_max=self.u_max,
-			fan_min_pct=self.cfg['fan_min_pct'], fan_max_pct=self.cfg['fan_max_pct'],
-			enable_fan=bool(self.cfg['enable_fan_input']))
-		return {'cycle_ratio': auger, 'fan': {'duty': fan_duty}}
+    def set_target(self, set_point):
+        self.set_point = set_point
+        self._set_point_c = _to_c(set_point, self.units)
+        self._last_Q = self.cfg["Q_min"]
+
+    def get_control_period(self):
+        return float(self.cfg["control_period"])
+
+    def update(self, current):
+        y = _to_c(current, self.units)
+        # 1) estimate states from the measurement
+        x_hat = self.kf.update(self._last_Q, y)
+        # 2) optimize firing rate Q. The box constraints bound Q; on any solver
+        #    error we hold the previous move so the control loop never breaks.
+        try:
+            Q = float(np.asarray(self.mpc.make_step(x_hat.reshape(-1, 1))).flatten()[0])
+        except Exception:
+            Q = self._last_Q
+        Q = float(np.clip(Q, self.cfg["Q_min"], self.cfg["Q_max"]))
+        self._last_Q = Q
+        # 3) allocate Q -> actuators
+        auger, fan_duty = allocate(
+            Q,
+            Q_min=self.cfg["Q_min"],
+            Q_max=self.cfg["Q_max"],
+            u_min=self.u_min,
+            u_max=self.u_max,
+            fan_min_pct=self.cfg["fan_min_pct"],
+            fan_max_pct=self.cfg["fan_max_pct"],
+            enable_fan=bool(self.cfg["enable_fan_input"]),
+        )
+        return {"cycle_ratio": auger, "fan": {"duty": fan_duty}}
 ```
 
 Note on the solver-success check: do-mpc records solver stats in `self.mpc.data`. The guarded `try/except` plus the `_last_Q` fallback guarantees `update()` always returns a bounded command even if the stats field is absent or the solve raises.
@@ -612,36 +657,52 @@ from controller.mpc import Controller
 from controller.grill_sim import GrillSim
 
 CONFIG = dict(
-    n_horizon=20, t_step=25.0, control_period=1.0, Q_w=1.0, R_dQ=0.02,
-    Q_min=5.0, Q_max=100.0, C_f=60.0, C_c=306.0, h_fc=2.0, h_amb=0.55,
-    T_amb=20.0, fan_min_pct=40.0, fan_max_pct=100.0, enable_fan_input=True,
-    est_q_temp=1e-2, est_q_dist=0.5, est_r_meas=0.04,
+    n_horizon=20,
+    t_step=25.0,
+    control_period=1.0,
+    Q_w=1.0,
+    R_dQ=0.02,
+    Q_min=5.0,
+    Q_max=100.0,
+    C_f=60.0,
+    C_c=306.0,
+    h_fc=2.0,
+    h_amb=0.55,
+    T_amb=20.0,
+    fan_min_pct=40.0,
+    fan_max_pct=100.0,
+    enable_fan_input=True,
+    est_q_temp=1e-2,
+    est_q_dist=0.5,
+    est_r_meas=0.04,
 )
-CYCLE = {'u_min': 0.1, 'u_max': 0.9, 'HoldCycleTime': 25}
+CYCLE = {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25}
 
 
 def test_closed_loop_holds_one_degree_band():
-    c = Controller(dict(CONFIG), 'C', dict(CYCLE))
+    c = Controller(dict(CONFIG), "C", dict(CYCLE))
     c.set_target(110.0)
     sim = GrillSim(seed=0)
     ts, temps = [], []
-    for k in range(288):                       # 2 h at 25 s
+    for k in range(288):  # 2 h at 25 s
         t = k * 25.0
         y = sim.measured()
         out = c.update(y)
         # map cycle_ratio back to a firing rate so the plant sees the allocation
-        sim.step_from_allocation(out['cycle_ratio'], out['fan']['duty'])
-        ts.append(t); temps.append(sim.true_Tc)
-    ts = np.array(ts); temps = np.array(temps)
+        sim.step_from_allocation(out["cycle_ratio"], out["fan"]["duty"])
+        ts.append(t)
+        temps.append(sim.true_Tc)
+    ts = np.array(ts)
+    temps = np.array(temps)
     # steady window: settled hold, excluding warmup and the lid event
     sm = (ts >= 1500) & (ts < 2900)
     err = temps[sm] - 110.0
-    assert np.max(np.abs(err)) <= 1.0          # the +-1.0 C gate
+    assert np.max(np.abs(err)) <= 1.0  # the +-1.0 C gate
     assert np.mean(np.abs(err) <= 1.0) >= 0.95
 
 
 def test_lid_open_recovers():
-    c = Controller(dict(CONFIG), 'C', dict(CYCLE))
+    c = Controller(dict(CONFIG), "C", dict(CYCLE))
     c.set_target(110.0)
     sim = GrillSim(seed=0)
     dipped = False
@@ -649,7 +710,7 @@ def test_lid_open_recovers():
     for k in range(288):
         y = sim.measured()
         out = c.update(y)
-        sim.step_from_allocation(out['cycle_ratio'], out['fan']['duty'])
+        sim.step_from_allocation(out["cycle_ratio"], out["fan"]["duty"])
         t = k * 25.0
         if 3000 <= t < 3200 and sim.true_Tc < 105.0:
             dipped = True
@@ -670,7 +731,7 @@ Create `controller/grill_sim.py` (port of the validated spike plant; the control
 ```python
 #!/usr/bin/env python3
 
-'''
+"""
 *****************************************
  PiFire MPC Grill Simulator (test-only)
 *****************************************
@@ -682,7 +743,7 @@ Create `controller/grill_sim.py` (port of the validated spike plant; the control
  tautological. Built on do-mpc's simulator.
 
 *****************************************
-'''
+"""
 
 import numpy as np
 import do_mpc
@@ -700,52 +761,57 @@ AFR_OPT, AFR_SIGMA = 1.0, 0.28
 
 
 class GrillSim:
-	def __init__(self, *, seed=0):
-		self.rng = np.random.default_rng(seed)
-		self.t = 0.0
-		self.afr = AFR_OPT
-		m = do_mpc.model.Model('continuous')
-		T_f = m.set_variable('_x', 'T_f')
-		T_c = m.set_variable('_x', 'T_c')
-		Qh = m.set_variable('_u', 'Qh')
-		T_amb = m.set_variable('_tvp', 'T_amb')
-		lid = m.set_variable('_tvp', 'lid')
-		m.set_rhs('T_f', (Qh - h_fc_t * (T_f - T_c)) / C_f_t)
-		m.set_rhs('T_c', (h_fc_t * (T_f - T_c) - h_amb_t * lid * (T_c - T_amb)) / C_c_t)
-		m.setup()
-		self.sim = do_mpc.simulator.Simulator(m)
-		self.sim.set_param(t_step=Ts)
-		tvp_t = self.sim.get_tvp_template()
-		def tvp_fun(t_now):
-			tvp_t['T_amb'] = 18.0 - 8.0 * (t_now / 7200.0)            # drift
-			tvp_t['lid'] = 4.0 if 3000.0 <= t_now < 3090.0 else 1.0   # lid open
-			return tvp_t
-		self.sim.set_tvp_fun(tvp_fun)
-		self.sim.setup()
-		self.sim.x0 = np.array([[20.0], [20.0]])
-		self.sim.set_initial_guess()
+    def __init__(self, *, seed=0):
+        self.rng = np.random.default_rng(seed)
+        self.t = 0.0
+        self.afr = AFR_OPT
+        m = do_mpc.model.Model("continuous")
+        T_f = m.set_variable("_x", "T_f")
+        T_c = m.set_variable("_x", "T_c")
+        Qh = m.set_variable("_u", "Qh")
+        T_amb = m.set_variable("_tvp", "T_amb")
+        lid = m.set_variable("_tvp", "lid")
+        m.set_rhs("T_f", (Qh - h_fc_t * (T_f - T_c)) / C_f_t)
+        m.set_rhs("T_c", (h_fc_t * (T_f - T_c) - h_amb_t * lid * (T_c - T_amb)) / C_c_t)
+        m.setup()
+        self.sim = do_mpc.simulator.Simulator(m)
+        self.sim.set_param(t_step=Ts)
+        tvp_t = self.sim.get_tvp_template()
 
-	@property
-	def true_Tc(self):
-		return float(self.sim.x0['T_c'])
+        def tvp_fun(t_now):
+            tvp_t["T_amb"] = 18.0 - 8.0 * (t_now / 7200.0)  # drift
+            tvp_t["lid"] = 4.0 if 3000.0 <= t_now < 3090.0 else 1.0  # lid open
+            return tvp_t
 
-	def measured(self):
-		return self.true_Tc + float(self.rng.normal(0, 0.2))
+        self.sim.set_tvp_fun(tvp_fun)
+        self.sim.setup()
+        self.sim.x0 = np.array([[20.0], [20.0]])
+        self.sim.set_initial_guess()
 
-	def step_from_allocation(self, auger, fan_duty_pct):
-		fuel = max(auger, 1e-6)
-		air_frac = ((fan_duty_pct - FAN_MIN) / (FAN_MAX - FAN_MIN)
-		            if fan_duty_pct is not None else (fuel - U_MIN) / (U_MAX - U_MIN))
-		fuel_frac = (fuel - U_MIN) / (U_MAX - U_MIN)
-		# normalized air/fuel ratio; matched allocation drives air_frac==fuel_frac
-		# so afr ~ AFR_OPT (1.0) and combustion stays efficient.
-		afr = (air_frac + 1e-6) / (fuel_frac + 1e-6)
-		self.afr = afr
-		eff = np.exp(-((afr - AFR_OPT) ** 2) / (2 * AFR_SIGMA ** 2))
-		Qh = FUEL_TO_HEAT * fuel * eff
-		self.sim.make_step(np.array([[Qh]]))
-		self.t += Ts
-		return self.true_Tc
+    @property
+    def true_Tc(self):
+        return float(self.sim.x0["T_c"])
+
+    def measured(self):
+        return self.true_Tc + float(self.rng.normal(0, 0.2))
+
+    def step_from_allocation(self, auger, fan_duty_pct):
+        fuel = max(auger, 1e-6)
+        air_frac = (
+            (fan_duty_pct - FAN_MIN) / (FAN_MAX - FAN_MIN)
+            if fan_duty_pct is not None
+            else (fuel - U_MIN) / (U_MAX - U_MIN)
+        )
+        fuel_frac = (fuel - U_MIN) / (U_MAX - U_MIN)
+        # normalized air/fuel ratio; matched allocation drives air_frac==fuel_frac
+        # so afr ~ AFR_OPT (1.0) and combustion stays efficient.
+        afr = (air_frac + 1e-6) / (fuel_frac + 1e-6)
+        self.afr = afr
+        eff = np.exp(-((afr - AFR_OPT) ** 2) / (2 * AFR_SIGMA**2))
+        Qh = FUEL_TO_HEAT * fuel * eff
+        self.sim.make_step(np.array([[Qh]]))
+        self.t += Ts
+        return self.true_Tc
 ```
 
 Note: the AFR computation compares the fan and auger *fractions* over their respective ranges; the allocator drives both fractions equal, so `afr ≈ 1.0` (sensible), and `eff ≈ 1.0`. This reproduces the spike's behavior where the cascade keeps combustion on the high-efficiency curve.
@@ -795,7 +861,8 @@ import importlib
 
 def test_base_default_control_period_is_none():
     from controller.base import ControllerBase
-    cb = ControllerBase({}, 'C', {})
+
+    cb = ControllerBase({}, "C", {})
     assert cb.get_control_period() is None
 
 
@@ -803,15 +870,15 @@ def test_normalize_handles_float_and_dict():
     # NOTE: import the helper from controller.base, NOT from control --
     # importing control hangs (it runs an unguarded while True: loop).
     from controller.base import normalize_controller_output
+
     # legacy float
     ratio, fan = normalize_controller_output(0.42)
     assert ratio == 0.42 and fan is None
     # mpc dict
-    ratio, fan = normalize_controller_output(
-        {'cycle_ratio': 0.3, 'fan': {'duty': 80.0}})
-    assert ratio == 0.3 and fan == {'duty': 80.0}
+    ratio, fan = normalize_controller_output({"cycle_ratio": 0.3, "fan": {"duty": 80.0}})
+    assert ratio == 0.3 and fan == {"duty": 80.0}
     # dict without fan
-    ratio, fan = normalize_controller_output({'cycle_ratio': 0.5})
+    ratio, fan = normalize_controller_output({"cycle_ratio": 0.5})
     assert ratio == 0.5 and fan is None
 ```
 
@@ -825,13 +892,13 @@ Expected: FAIL — `AttributeError: module 'control' has no attribute 'normalize
 In `controller/base.py`, add to `ControllerBase` (after `supported_functions`):
 
 ```python
-	def get_control_period(self):
-		'''
-		Desired re-solve / actuation period in seconds. Return None to use the
-		mode's CycleTime (legacy behavior). Controllers that run faster than the
-		auger cycle (e.g. MPC) return a fixed period such as 1.0.
-		'''
-		return None
+def get_control_period(self):
+    """
+    Desired re-solve / actuation period in seconds. Return None to use the
+    mode's CycleTime (legacy behavior). Controllers that run faster than the
+    auger cycle (e.g. MPC) return a fixed period such as 1.0.
+    """
+    return None
 ```
 
 - [ ] **Step 4: Add the normalize helper to `controller/base.py`**
@@ -842,20 +909,20 @@ safe to import from tests and from `control.py`:
 
 ```python
 def normalize_controller_output(output):
-	'''
-	Normalize a controller's update() return into (cycle_ratio, fan).
+    """
+    Normalize a controller's update() return into (cycle_ratio, fan).
 
-	Legacy controllers return a float cycle ratio; the MPC controller returns
-	{'cycle_ratio': float, 'fan': {'duty': pct or None}}. fan is returned only
-	when a duty is present.
-	'''
-	if isinstance(output, dict):
-		ratio = float(output.get('cycle_ratio', 0.0))
-		fan = output.get('fan')
-		if isinstance(fan, dict) and fan.get('duty') is not None:
-			return ratio, fan
-		return ratio, None
-	return float(output), None
+    Legacy controllers return a float cycle ratio; the MPC controller returns
+    {'cycle_ratio': float, 'fan': {'duty': pct or None}}. fan is returned only
+    when a duty is present.
+    """
+    if isinstance(output, dict):
+        ratio = float(output.get("cycle_ratio", 0.0))
+        fan = output.get("fan")
+        if isinstance(fan, dict) and fan.get("duty") is not None:
+            return ratio, fan
+        return ratio, None
+    return float(output), None
 ```
 
 - [ ] **Step 5: Wire the dispatch into the Hold work-cycle**
@@ -870,25 +937,25 @@ from controller.base import normalize_controller_output
 Then replace the Hold update block (currently around lines 709-712):
 
 ```python
-				if (now - controllerCycleStart) > CycleTime:
-					pid_output = controllerCore.update(ptemp)
-					controllerCycleStart = now
-					CycleRatio = RawCycleRatio = settings['cycle_data']['u_min'] if LidOpenDetect else pid_output
+if (now - controllerCycleStart) > CycleTime:
+    pid_output = controllerCore.update(ptemp)
+    controllerCycleStart = now
+    CycleRatio = RawCycleRatio = settings["cycle_data"]["u_min"] if LidOpenDetect else pid_output
 ```
 
 with:
 
 ```python
-				controller_interval = controllerCore.get_control_period() or CycleTime
-				if (now - controllerCycleStart) > controller_interval:
-					raw_output = controllerCore.update(ptemp)
-					pid_output, fan_cmd = normalize_controller_output(raw_output)
-					controllerCycleStart = now
-					CycleRatio = RawCycleRatio = settings['cycle_data']['u_min'] if LidOpenDetect else pid_output
-					# Controllers that command the fan directly (MPC) apply duty
-					# here, only when a PWM/DC fan is present.
-					if fan_cmd is not None and settings['platform']['dc_fan'] and control['pwm_control']:
-						grill_platform.set_duty_cycle(fan_cmd['duty'])
+controller_interval = controllerCore.get_control_period() or CycleTime
+if (now - controllerCycleStart) > controller_interval:
+    raw_output = controllerCore.update(ptemp)
+    pid_output, fan_cmd = normalize_controller_output(raw_output)
+    controllerCycleStart = now
+    CycleRatio = RawCycleRatio = settings["cycle_data"]["u_min"] if LidOpenDetect else pid_output
+    # Controllers that command the fan directly (MPC) apply duty
+    # here, only when a PWM/DC fan is present.
+    if fan_cmd is not None and settings["platform"]["dc_fan"] and control["pwm_control"]:
+        grill_platform.set_duty_cycle(fan_cmd["duty"])
 ```
 
 `pid_output` remains a float, so the existing `CycleRatio`/`u_min`/`u_max` clamping (lines ~714-726) and FanPid logic (lines ~936-940) are unchanged.
@@ -930,33 +997,34 @@ Create `tests/test_mpc_manifest.py`:
 import json
 import os
 
-BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 
 def _meta():
-    with open(os.path.join(BASE, 'controller', 'controllers.json')) as f:
-        return json.load(f)['metadata']
+    with open(os.path.join(BASE, "controller", "controllers.json")) as f:
+        return json.load(f)["metadata"]
 
 
 def test_mpc_entry_present():
-    e = _meta()['mpc']
-    assert e['module_name'] == 'mpc'
-    names = {o['option_name'] for o in e['config']}
+    e = _meta()["mpc"]
+    assert e["module_name"] == "mpc"
+    names = {o["option_name"] for o in e["config"]}
     # a representative subset of the required options
-    assert {'n_horizon', 'control_period', 'C_c', 'h_amb', 'Q_max',
-            'enable_fan_input', 'est_r_meas'} <= names
+    assert {"n_horizon", "control_period", "C_c", "h_amb", "Q_max", "enable_fan_input", "est_r_meas"} <= names
 
 
 def test_default_controller_config_includes_mpc():
-    cwd = os.getcwd(); os.chdir(BASE)
+    cwd = os.getcwd()
+    os.chdir(BASE)
     try:
         from common.common import _default_controller_config
+
         cfg = _default_controller_config()
     finally:
         os.chdir(cwd)
-    assert 'mpc' in cfg
-    assert cfg['mpc']['control_period'] == 1.0
-    assert cfg['mpc']['enable_fan_input'] is False
+    assert "mpc" in cfg
+    assert cfg["mpc"]["control_period"] == 1.0
+    assert cfg["mpc"]["enable_fan_input"] is False
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -1053,7 +1121,7 @@ def test_simulate_chamber_runs():
     Q = np.full_like(t, 49.5)
     temp = simulate_chamber(t, Q, T_amb=20.0, **TRUE, T0=20.0)
     assert temp.shape == t.shape
-    assert temp[-1] > temp[0]                 # heats up
+    assert temp[-1] > temp[0]  # heats up
 
 
 def test_fit_recovers_params_on_synthetic_data():
@@ -1061,11 +1129,10 @@ def test_fit_recovers_params_on_synthetic_data():
     # excitation: step Q up then down so dynamics are identifiable
     Q = np.where(t < 3000, 60.0, 35.0)
     temp = simulate_chamber(t, Q, T_amb=20.0, **TRUE, T0=20.0)
-    fitted = fit_params(t, temp, Q, T_amb=20.0,
-                        init=dict(C_f=60.0, C_c=306.0, h_fc=2.0, h_amb=0.55))
+    fitted = fit_params(t, temp, Q, T_amb=20.0, init=dict(C_f=60.0, C_c=306.0, h_fc=2.0, h_amb=0.55))
     # steady-state gain h_amb and chamber capacity should recover closely
-    assert abs(fitted['h_amb'] - TRUE['h_amb']) < 0.1
-    assert abs(fitted['C_c'] - TRUE['C_c']) / TRUE['C_c'] < 0.25
+    assert abs(fitted["h_amb"] - TRUE["h_amb"]) < 0.1
+    assert abs(fitted["C_c"] - TRUE["C_c"]) / TRUE["C_c"] < 0.25
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -1080,7 +1147,7 @@ Create `controller/update_mpc.py`:
 ```python
 #!/usr/bin/env python3
 
-'''
+"""
 *****************************************
  PiFire MPC Offline Calibration Utility
 *****************************************
@@ -1094,7 +1161,7 @@ Create `controller/update_mpc.py`:
 
  Usage: python -m controller.update_mpc history.csv
 *****************************************
-'''
+"""
 
 import argparse
 import numpy as np
@@ -1102,59 +1169,64 @@ from scipy.optimize import least_squares
 
 
 def simulate_chamber(t, Q, *, C_f, C_c, h_fc, h_amb, T_amb, T0):
-	'''Forward-simulate chamber temperature for the grey-box model (Euler).
+    """Forward-simulate chamber temperature for the grey-box model (Euler).
 
-	out[i] is the chamber temperature AT time t[i] (so out[0] == T0); each step
-	advances the state from t[i] to t[i+1] using the input Q[i]. This alignment
-	matters when fitting real logs, where the measured series starts at T0.
-	'''
-	t = np.asarray(t, dtype=float)
-	Q = np.asarray(Q, dtype=float)
-	Tf = T0
-	Tc = T0
-	out = np.empty_like(t)
-	for i in range(len(t)):
-		out[i] = Tc                      # record state at t[i] (out[0] == T0)
-		if i < len(t) - 1:
-			dt = t[i + 1] - t[i]
-			dTf = (Q[i] - h_fc * (Tf - Tc)) / C_f
-			dTc = (h_fc * (Tf - Tc) - h_amb * (Tc - T_amb)) / C_c
-			Tf += dTf * dt
-			Tc += dTc * dt
-	return out
+    out[i] is the chamber temperature AT time t[i] (so out[0] == T0); each step
+    advances the state from t[i] to t[i+1] using the input Q[i]. This alignment
+    matters when fitting real logs, where the measured series starts at T0.
+    """
+    t = np.asarray(t, dtype=float)
+    Q = np.asarray(Q, dtype=float)
+    Tf = T0
+    Tc = T0
+    out = np.empty_like(t)
+    for i in range(len(t)):
+        out[i] = Tc  # record state at t[i] (out[0] == T0)
+        if i < len(t) - 1:
+            dt = t[i + 1] - t[i]
+            dTf = (Q[i] - h_fc * (Tf - Tc)) / C_f
+            dTc = (h_fc * (Tf - Tc) - h_amb * (Tc - T_amb)) / C_c
+            Tf += dTf * dt
+            Tc += dTc * dt
+    return out
 
 
 def fit_params(t, temp, Q, *, T_amb, init):
-	temp = np.asarray(temp, dtype=float)
-	keys = ['C_f', 'C_c', 'h_fc', 'h_amb']
-	x0 = np.array([init[k] for k in keys], dtype=float)
+    temp = np.asarray(temp, dtype=float)
+    keys = ["C_f", "C_c", "h_fc", "h_amb"]
+    x0 = np.array([init[k] for k in keys], dtype=float)
 
-	def residual(x):
-		params = dict(zip(keys, np.abs(x)))     # keep params positive
-		sim = simulate_chamber(t, Q, T_amb=T_amb, T0=float(temp[0]), **params)
-		return sim - temp
+    def residual(x):
+        params = dict(zip(keys, np.abs(x)))  # keep params positive
+        sim = simulate_chamber(t, Q, T_amb=T_amb, T0=float(temp[0]), **params)
+        return sim - temp
 
-	res = least_squares(residual, x0, method='trf', max_nfev=2000)
-	return dict(zip(keys, np.abs(res.x)))
+    res = least_squares(residual, x0, method="trf", max_nfev=2000)
+    return dict(zip(keys, np.abs(res.x)))
 
 
 def main():
-	ap = argparse.ArgumentParser()
-	ap.add_argument('csv')
-	ap.add_argument('--t-amb', type=float, default=20.0)
-	args = ap.parse_args()
-	import pandas as pd
-	df = pd.read_csv(args.csv)
-	fitted = fit_params(df['time_s'].values, df['temp_c'].values, df['Q'].values,
-	                    T_amb=args.t_amb,
-	                    init=dict(C_f=60.0, C_c=306.0, h_fc=2.0, h_amb=0.55))
-	print('Fitted grey-box params:')
-	for k, v in fitted.items():
-		print(f'  {k}: {v:.4f}')
+    ap = argparse.ArgumentParser()
+    ap.add_argument("csv")
+    ap.add_argument("--t-amb", type=float, default=20.0)
+    args = ap.parse_args()
+    import pandas as pd
+
+    df = pd.read_csv(args.csv)
+    fitted = fit_params(
+        df["time_s"].values,
+        df["temp_c"].values,
+        df["Q"].values,
+        T_amb=args.t_amb,
+        init=dict(C_f=60.0, C_c=306.0, h_fc=2.0, h_amb=0.55),
+    )
+    print("Fitted grey-box params:")
+    for k, v in fitted.items():
+        print(f"  {k}: {v:.4f}")
 
 
-if __name__ == '__main__':
-	main()
+if __name__ == "__main__":
+    main()
 ```
 
 - [ ] **Step 4: Run to verify it passes**

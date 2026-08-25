@@ -136,11 +136,13 @@ args. All other senders are patched to no-ops so nothing hits the network.
            },
        }
 
+
    def _base_control():
        return {
            "safety": {"startuptemp": 100},
            "recipe": {"step_data": {"message": "Flip the brisket. "}},
        }
+
 
    def _base_pelletdb():
        return {"current": {"hopper_level": 42}}
@@ -151,8 +153,8 @@ args. All other senders are patched to no-ops so nothing hits the network.
    ```python
    import notify.notifications as N
 
-   def _capture(monkeypatch, event, label="Probe", target=0,
-                settings=None, control=None, pelletdb=None):
+
+   def _capture(monkeypatch, event, label="Probe", target=0, settings=None, control=None, pelletdb=None):
        settings = settings or _base_settings()
        control = control or _base_control()
        pelletdb = pelletdb or _base_pelletdb()
@@ -160,16 +162,23 @@ args. All other senders are patched to no-ops so nothing hits the network.
        monkeypatch.setattr(N, "read_settings", lambda *a, **k: settings)
        monkeypatch.setattr(N, "read_control", lambda *a, **k: control)
        monkeypatch.setattr(N, "read_pellet_db", lambda *a, **k: pelletdb)
+
        def fake_onesignal(s, title, body, channel):
            rec["title"], rec["body"], rec["channel"] = title, body, channel
+
        def fake_ifttt(s, ev, query_args):
            rec["query_args"] = query_args
+
        monkeypatch.setattr(N, "_send_onesignal_notification", fake_onesignal)
        monkeypatch.setattr(N, "_send_ifttt_notification", fake_ifttt)
        # silence every other sender
-       for name in ("_send_apprise_notifications", "_send_pushbullet_notification",
-                    "_send_pushover_notification", "_send_mqtt_notification",
-                    "_send_wled_notification"):
+       for name in (
+           "_send_apprise_notifications",
+           "_send_pushbullet_notification",
+           "_send_pushover_notification",
+           "_send_mqtt_notification",
+           "_send_wled_notification",
+       ):
            monkeypatch.setattr(N, name, lambda *a, **k: None)
        N.send_notifications(event, label=label, target=target)
        return rec
@@ -270,10 +279,12 @@ EVENTS: dict[str, Callable[[dict], tuple[str, str, str, dict]]]
        body = f"{ctx['label']} target of {ctx['target']}{ctx['unit']} achieved at {ctx['time']} on {ctx['day']}"
        return title, body, "pifire_temp_alerts", {"value1": True}
 
+
    def _evt_probe_limit(ctx):
        title = f"{ctx['label']} Limit Reached"
        body = f"{ctx['label']} limit of {ctx['target']}{ctx['unit']} exceeded at {ctx['time']} on {ctx['day']}"
        return title, body, "pifire_temp_alerts", {"value1": True}
+
 
    def _evt_timer_expired(ctx):
        return (
@@ -283,41 +294,53 @@ EVENTS: dict[str, Callable[[dict], tuple[str, str, str, dict]]]
            {"value1": "Your timer has expired."},
        )
 
+
    def _evt_pellet_low(ctx):
        pelletdb = read_pellet_db()
        body = f"Your pellet level is currently at {pelletdb['current']['hopper_level']}%"
        return "Low Pellet Level", body, "pifire_pellet_alerts", {"value1": body}
 
+
    def _evt_grill_error_01(ctx):
        maxtemp = ctx["settings"]["safety"]["maxtemp"]
        body = (
            "Grill exceeded maximum temperature limit of "  # typo fix: "exceded" -> "exceeded" (deliberate, see Task 1 note)
-           + str(maxtemp) + ctx["unit"] + "! Shutting down. " + str(ctx["now"])
+           + str(maxtemp)
+           + ctx["unit"]
+           + "! Shutting down. "
+           + str(ctx["now"])
        )
        return "Grill Error!", body, "pifire_error_alerts", {"value1": str(maxtemp)}
+
 
    def _evt_grill_error_02(ctx):
        startuptemp = ctx["control"]["safety"]["startuptemp"]
        body = (
            "Grill temperature dropped below minimum startup temperature of "
-           + str(startuptemp) + ctx["unit"]
-           + "! Shutting down to prevent firepot overload. " + str(ctx["now"])
+           + str(startuptemp)
+           + ctx["unit"]
+           + "! Shutting down to prevent firepot overload. "
+           + str(ctx["now"])
        )
        return "Grill Error!", body, "pifire_error_alerts", {"value1": str(startuptemp)}
+
 
    def _evt_grill_error_03(ctx):
        startuptemp = ctx["control"]["safety"]["startuptemp"]
        body = (
            "Grill temperature dropped below minimum startup temperature of "
-           + str(startuptemp) + ctx["unit"]
+           + str(startuptemp)
+           + ctx["unit"]
            + "! Starting a re-ignite attempt, per user settings."
        )
        return "Grill Error!", body, "pifire_error_alerts", {"value1": str(startuptemp)}
+
 
    def _evt_recipe_step(ctx):
        message = ctx["control"]["recipe"]["step_data"]["message"]
        body = message + str(ctx["now"])
        return "Recipe Message", body, "pifire_recipe_message", {"value1": message}
+
 
    def _evt_test_notify(ctx):
        return (
@@ -327,6 +350,7 @@ EVENTS: dict[str, Callable[[dict], tuple[str, str, str, dict]]]
            {"value1": "This is a test notification from PiFire."},
        )
 
+
    def _evt_control_stopped(ctx):
        return (
            "Control Process Stopped!",
@@ -335,6 +359,7 @@ EVENTS: dict[str, Callable[[dict], tuple[str, str, str, dict]]]
            "pifire_error_alerts",
            {"value1": "Control Process Stopped"},
        )
+
 
    EVENTS = {
        "Probe_Temp_Achieved": _evt_probe_achieved,
@@ -371,8 +396,8 @@ EVENTS: dict[str, Callable[[dict], tuple[str, str, str, dict]]]
        """... (keep docstring) ..."""
        settings = read_settings()
        control = read_control()
-       eventLogger = _event_logger(settings)          # Task 3 introduces this; until then inline the
-                                                       # existing create_logger call unchanged.
+       eventLogger = _event_logger(settings)  # Task 3 introduces this; until then inline the
+       # existing create_logger call unchanged.
        ctx = _event_context(settings, control, label, target)
 
        builder = EVENTS.get(notify_event)
@@ -513,6 +538,7 @@ def _send_apprise_url(settings, urls, title_message, body_message, service_name)
            for user in settings["notify_services"]["pushover"]["UserKeys"].split(",")
        ]
        _send_apprise_url(settings, urls, title_message, body_message, "Pushover")
+
 
    def _send_pushbullet_notification(settings, title_message, body_message):
        api_key = settings["notify_services"]["pushbullet"]["APIKey"]

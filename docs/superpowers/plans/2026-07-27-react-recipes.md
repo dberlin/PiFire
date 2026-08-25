@@ -226,7 +226,7 @@ entry `{"id", "filename": "{id}.{type}", "type"}`.
 ```python
 _KINDS = {
     "cookfiles": ("HISTORY_FOLDER", ".pifire"),
-    "recipes":   ("RECIPE_FOLDER",  ".pfrecipe"),
+    "recipes": ("RECIPE_FOLDER", ".pfrecipe"),
 }
 ```
 
@@ -311,12 +311,15 @@ The only entry point today is a **Socket.IO event** —
 
 ```python
 write_control(
-    control_delta(set_values={
-        "updated": True,
-        "mode": Mode.RECIPE,
-        "recipe": {"filename": recipe_folder + filename},
-    }),
-    WriteKind.DELTA, origin="app-socketio",
+    control_delta(
+        set_values={
+            "updated": True,
+            "mode": Mode.RECIPE,
+            "recipe": {"filename": recipe_folder + filename},
+        }
+    ),
+    WriteKind.DELTA,
+    origin="app-socketio",
 )
 ```
 
@@ -956,11 +959,13 @@ def recipe_run():
     if control.get("mode") != Mode.STOP:
         return error("not_stopped", 409, mode=control.get("mode"))
     write_control(
-        control_delta(set_values={
-            "updated": True,
-            "mode": Mode.RECIPE,
-            "recipe": {"filename": path, "start_step": 0, "step": 0},
-        }),
+        control_delta(
+            set_values={
+                "updated": True,
+                "mode": Mode.RECIPE,
+                "recipe": {"filename": path, "start_step": 0, "step": 0},
+            }
+        ),
         WriteKind.DELTA,
         origin="api-files",
     )
@@ -1440,16 +1445,24 @@ not cascade orphans every instruction that referenced it. Mirror
 ```python
 def test_renaming_an_ingredient_rewrites_every_instruction_that_used_it(client, folders):
     name = write_recipe(
-        folders[1], "Brisket",
+        folders[1],
+        "Brisket",
         ingredients=[{"name": "Sugar", "quantity": "1c", "assets": []}],
         instructions=[
             {"text": "Rub", "ingredients": ["Sugar"], "assets": [], "step": 0},
             {"text": "Rest", "ingredients": [], "assets": [], "step": 1},
         ],
     )
-    client.post("/api/files/recipes/ingredients", json={
-        "file": name, "action": "update", "index": 0, "name": "Brown Sugar", "quantity": "1c",
-    })
+    client.post(
+        "/api/files/recipes/ingredients",
+        json={
+            "file": name,
+            "action": "update",
+            "index": 0,
+            "name": "Brown Sugar",
+            "quantity": "1c",
+        },
+    )
     detail = client.get(f"/api/files/recipes/detail?file={name}").get_json()
     assert detail["recipe"]["instructions"][0]["ingredients"] == ["Brown Sugar"]
     assert detail["recipe"]["instructions"][1]["ingredients"] == []

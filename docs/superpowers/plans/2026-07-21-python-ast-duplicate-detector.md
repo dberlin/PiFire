@@ -93,7 +93,9 @@ class DuplicateDetectorTests(unittest.TestCase):
             root = Path(temporary)
             for name, prefix in (("first.py", "a"), ("second.py", "b")):
                 (root / name).write_text(
-                    "def work():\n" + "\n".join(f"    {line}" for line in assignments(prefix, count=3).splitlines()) + "\n",
+                    "def work():\n"
+                    + "\n".join(f"    {line}" for line in assignments(prefix, count=3).splitlines())
+                    + "\n",
                     encoding="utf-8",
                 )
 
@@ -203,7 +205,19 @@ def canonical(node: ast.AST) -> tuple[object, ...]:
         if isinstance(value, ast.AST):
             values.append((field, canonical(value)))
         elif isinstance(value, list):
-            values.append((field, tuple(canonical(item) if isinstance(item, ast.AST) else "<identifier>" if isinstance(item, str) else item for item in value)))
+            values.append(
+                (
+                    field,
+                    tuple(
+                        canonical(item)
+                        if isinstance(item, ast.AST)
+                        else "<identifier>"
+                        if isinstance(item, str)
+                        else item
+                        for item in value
+                    ),
+                )
+            )
         elif isinstance(value, str):
             values.append((field, "<identifier>"))
         else:
@@ -225,9 +239,7 @@ def find_duplicates(root: Path, min_statements: int) -> tuple[dict[tuple[object,
                 for start in range(len(statements) - size + 1):
                     sequence = statements[start : start + size]
                     fingerprint = tuple(canonical(statement) for statement in sequence)
-                    groups[fingerprint].append(
-                        Location(path, sequence[0].lineno, sequence[-1].end_lineno, size)
-                    )
+                    groups[fingerprint].append(Location(path, sequence[0].lineno, sequence[-1].end_lineno, size))
     return {fingerprint: locations for fingerprint, locations in groups.items() if len(locations) > 1}, diagnostics
 
 
@@ -249,7 +261,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not groups:
         print("No duplicates found.")
         return 0
-    ordered_groups = sorted(groups.values(), key=lambda locations: (-locations[0].statement_count, [(str(item.path), item.start_line) for item in locations]))
+    ordered_groups = sorted(
+        groups.values(),
+        key=lambda locations: (
+            -locations[0].statement_count,
+            [(str(item.path), item.start_line) for item in locations],
+        ),
+    )
     for locations in ordered_groups:
         count = locations[0].statement_count
         locations = sorted(locations, key=lambda item: (str(item.path), item.start_line, item.end_line))
@@ -300,85 +318,87 @@ Expected: only the plan belongs to the PiFire repository; the standalone utility
 Append these methods to `DuplicateDetectorTests` in `/home/dannyb/sources/test_dupes.py`:
 
 ```python
-    def test_matches_inverted_if_statements_with_swapped_branches(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            direct = "\n".join(
-                f"if flag{index}:\n    left{index} = {index}\nelse:\n    right{index} = {index + 10}"
-                for index in range(10)
+def test_matches_inverted_if_statements_with_swapped_branches(self) -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        direct = "\n".join(
+            f"if flag{index}:\n    left{index} = {index}\nelse:\n    right{index} = {index + 10}" for index in range(10)
+        )
+        inverted = "\n".join(
+            f"if not other{index}:\n    swap_right{index} = {index + 100}\nelse:\n    swap_left{index} = {index + 200}"
+            for index in range(10)
+        )
+        (root / "direct.py").write_text(direct + "\n", encoding="utf-8")
+        (root / "inverted.py").write_text(inverted + "\n", encoding="utf-8")
+
+        result = self.run_detector(root)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Duplicate: 10 statements (2 occurrences)", result.stdout)
+        self.assertIn("direct.py:1-40", result.stdout)
+        self.assertIn("inverted.py:1-40", result.stdout)
+
+
+def test_matches_safe_reversed_equality_tests(self) -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        direct = "\n".join(
+            f"if value{index} == {index}:\n    yes{index} = {index}\nelse:\n    no{index} = {index + 10}"
+            for index in range(10)
+        )
+        reversed_test = "\n".join(
+            f"if {index + 100} == other{index}:\n    branch_yes{index} = {index + 200}\nelse:\n    branch_no{index} = {index + 300}"
+            for index in range(10)
+        )
+        (root / "direct.py").write_text(direct + "\n", encoding="utf-8")
+        (root / "reversed.py").write_text(reversed_test + "\n", encoding="utf-8")
+
+        result = self.run_detector(root)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Duplicate: 10 statements (2 occurrences)", result.stdout)
+        self.assertIn("direct.py:1-40", result.stdout)
+        self.assertIn("reversed.py:1-40", result.stdout)
+
+
+def test_matches_safe_reordered_boolean_tests(self) -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        direct = "\n".join(
+            f"if flag{index} and True:\n    yes{index} = {index}\nelse:\n    no{index} = {index + 10}"
+            for index in range(10)
+        )
+        reordered = "\n".join(
+            f"if True and other{index}:\n    branch_yes{index} = {index + 100}\nelse:\n    branch_no{index} = {index + 200}"
+            for index in range(10)
+        )
+        (root / "direct.py").write_text(direct + "\n", encoding="utf-8")
+        (root / "reordered.py").write_text(reordered + "\n", encoding="utf-8")
+
+        result = self.run_detector(root)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Duplicate: 10 statements (2 occurrences)", result.stdout)
+        self.assertIn("direct.py:1-40", result.stdout)
+        self.assertIn("reordered.py:1-40", result.stdout)
+
+
+def test_skips_malformed_python_and_reports_the_file(self) -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        (root / "broken.py").write_text("def broken(:\n", encoding="utf-8")
+        for name, prefix in (("first.py", "a"), ("second.py", "b")):
+            (root / name).write_text(
+                "def work():\n" + "\n".join(f"    {line}" for line in assignments(prefix).splitlines()) + "\n",
+                encoding="utf-8",
             )
-            inverted = "\n".join(
-                f"if not other{index}:\n    swap_right{index} = {index + 100}\nelse:\n    swap_left{index} = {index + 200}"
-                for index in range(10)
-            )
-            (root / "direct.py").write_text(direct + "\n", encoding="utf-8")
-            (root / "inverted.py").write_text(inverted + "\n", encoding="utf-8")
 
-            result = self.run_detector(root)
+        result = self.run_detector(root)
 
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("Duplicate: 10 statements (2 occurrences)", result.stdout)
-            self.assertIn("direct.py:1-40", result.stdout)
-            self.assertIn("inverted.py:1-40", result.stdout)
-
-    def test_matches_safe_reversed_equality_tests(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            direct = "\n".join(
-                f"if value{index} == {index}:\n    yes{index} = {index}\nelse:\n    no{index} = {index + 10}"
-                for index in range(10)
-            )
-            reversed_test = "\n".join(
-                f"if {index + 100} == other{index}:\n    branch_yes{index} = {index + 200}\nelse:\n    branch_no{index} = {index + 300}"
-                for index in range(10)
-            )
-            (root / "direct.py").write_text(direct + "\n", encoding="utf-8")
-            (root / "reversed.py").write_text(reversed_test + "\n", encoding="utf-8")
-
-            result = self.run_detector(root)
-
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("Duplicate: 10 statements (2 occurrences)", result.stdout)
-            self.assertIn("direct.py:1-40", result.stdout)
-            self.assertIn("reversed.py:1-40", result.stdout)
-
-    def test_matches_safe_reordered_boolean_tests(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            direct = "\n".join(
-                f"if flag{index} and True:\n    yes{index} = {index}\nelse:\n    no{index} = {index + 10}"
-                for index in range(10)
-            )
-            reordered = "\n".join(
-                f"if True and other{index}:\n    branch_yes{index} = {index + 100}\nelse:\n    branch_no{index} = {index + 200}"
-                for index in range(10)
-            )
-            (root / "direct.py").write_text(direct + "\n", encoding="utf-8")
-            (root / "reordered.py").write_text(reordered + "\n", encoding="utf-8")
-
-            result = self.run_detector(root)
-
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("Duplicate: 10 statements (2 occurrences)", result.stdout)
-            self.assertIn("direct.py:1-40", result.stdout)
-            self.assertIn("reordered.py:1-40", result.stdout)
-
-    def test_skips_malformed_python_and_reports_the_file(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            (root / "broken.py").write_text("def broken(:\n", encoding="utf-8")
-            for name, prefix in (("first.py", "a"), ("second.py", "b")):
-                (root / name).write_text(
-                    "def work():\n" + "\n".join(f"    {line}" for line in assignments(prefix).splitlines()) + "\n",
-                    encoding="utf-8",
-                )
-
-            result = self.run_detector(root)
-
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("Skipping", result.stderr)
-            self.assertIn("broken.py", result.stderr)
-            self.assertIn("Duplicate: 10 statements (2 occurrences)", result.stdout)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Skipping", result.stderr)
+        self.assertIn("broken.py", result.stderr)
+        self.assertIn("Duplicate: 10 statements (2 occurrences)", result.stdout)
 ```
 
 - [ ] **Step 2: Run the new tests to verify they fail for the expected missing behavior**

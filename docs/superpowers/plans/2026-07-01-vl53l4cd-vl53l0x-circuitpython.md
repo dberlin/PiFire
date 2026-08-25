@@ -48,138 +48,136 @@ import pytest
 
 
 class FakeSensorMixin:
-	"""Mixed in ahead of ToFHopperLevel in test subclasses so the shared
-	thread/percent-calc/bus-resolution logic can be exercised without a real
-	sensor. `reading_mm` is the fixed distance every read returns; `read_delay`
-	simulates a slow sensor to exercise the stuck-sensor re-init path."""
+    """Mixed in ahead of ToFHopperLevel in test subclasses so the shared
+    thread/percent-calc/bus-resolution logic can be exercised without a real
+    sensor. `reading_mm` is the fixed distance every read returns; `read_delay`
+    simulates a slow sensor to exercise the stuck-sensor re-init path."""
 
-	def __init__(self, *args, reading_mm=100, read_delay=0, **kwargs):
-		self.open_calls = 0
-		self.opened_with = None
-		self._reading_mm = reading_mm
-		self._read_delay = read_delay
-		super().__init__(*args, **kwargs)
+    def __init__(self, *args, reading_mm=100, read_delay=0, **kwargs):
+        self.open_calls = 0
+        self.opened_with = None
+        self._reading_mm = reading_mm
+        self._read_delay = read_delay
+        super().__init__(*args, **kwargs)
 
-	def _open_sensor(self, i2c, address):
-		self.open_calls += 1
-		self.opened_with = (i2c, address)
+    def _open_sensor(self, i2c, address):
+        self.open_calls += 1
+        self.opened_with = (i2c, address)
 
-	def _read_distance_mm(self):
-		if self._read_delay:
-			time.sleep(self._read_delay)
-		return self._reading_mm
+    def _read_distance_mm(self):
+        if self._read_delay:
+            time.sleep(self._read_delay)
+        return self._reading_mm
 
 
 @pytest.fixture
 def tof_mod():
-	import distance._tof_base as mod
+    import distance._tof_base as mod
 
-	with (
-		mock.patch.object(mod, 'busio'),
-		mock.patch.object(mod, 'board'),
-		mock.patch.object(mod, 'ExtendedI2C'),
-		mock.patch.object(mod, 'resolve_i2c_bus', return_value=7),
-	):
-		yield mod
+    with (
+        mock.patch.object(mod, "busio"),
+        mock.patch.object(mod, "board"),
+        mock.patch.object(mod, "ExtendedI2C"),
+        mock.patch.object(mod, "resolve_i2c_bus", return_value=7),
+    ):
+        yield mod
 
 
 def _make_hopper(tof_mod, dev_pins=None, reading_mm=100, empty=22, full=4, read_delay=0):
-	class TestHopperLevel(FakeSensorMixin, tof_mod.ToFHopperLevel):
-		pass
+    class TestHopperLevel(FakeSensorMixin, tof_mod.ToFHopperLevel):
+        pass
 
-	return TestHopperLevel(
-		dev_pins or {}, empty=empty, full=full, reading_mm=reading_mm, read_delay=read_delay
-	)
+    return TestHopperLevel(dev_pins or {}, empty=empty, full=full, reading_mm=reading_mm, read_delay=read_delay)
 
 
 def _stop(hopper):
-	hopper.sensor_thread_active = False
-	hopper.sensor_thread.join(timeout=2)
+    hopper.sensor_thread_active = False
+    hopper.sensor_thread.join(timeout=2)
 
 
 def test_invalid_empty_full_forces_defaults(tof_mod):
-	hopper = _make_hopper(tof_mod, empty=4, full=22)
-	try:
-		assert hopper.empty == 22
-		assert hopper.full == 4
-	finally:
-		_stop(hopper)
+    hopper = _make_hopper(tof_mod, empty=4, full=22)
+    try:
+        assert hopper.empty == 22
+        assert hopper.full == 4
+    finally:
+        _stop(hopper)
 
 
 def test_reading_at_or_below_full_is_100_percent(tof_mod):
-	hopper = _make_hopper(tof_mod, reading_mm=40, empty=22, full=4)  # 4.0cm == full
-	try:
-		assert hopper.get_level(override=True) == 100
-	finally:
-		_stop(hopper)
+    hopper = _make_hopper(tof_mod, reading_mm=40, empty=22, full=4)  # 4.0cm == full
+    try:
+        assert hopper.get_level(override=True) == 100
+    finally:
+        _stop(hopper)
 
 
 def test_reading_at_empty_is_0_percent(tof_mod):
-	hopper = _make_hopper(tof_mod, reading_mm=220, empty=22, full=4)  # 22.0cm == empty
-	try:
-		assert hopper.get_level(override=True) == 0
-	finally:
-		_stop(hopper)
+    hopper = _make_hopper(tof_mod, reading_mm=220, empty=22, full=4)  # 22.0cm == empty
+    try:
+        assert hopper.get_level(override=True) == 0
+    finally:
+        _stop(hopper)
 
 
 def test_reading_above_empty_is_0_percent(tof_mod):
-	hopper = _make_hopper(tof_mod, reading_mm=300, empty=22, full=4)  # 30.0cm > empty
-	try:
-		assert hopper.get_level(override=True) == 0
-	finally:
-		_stop(hopper)
+    hopper = _make_hopper(tof_mod, reading_mm=300, empty=22, full=4)  # 30.0cm > empty
+    try:
+        assert hopper.get_level(override=True) == 0
+    finally:
+        _stop(hopper)
 
 
 def test_reading_between_full_and_empty_is_interpolated(tof_mod):
-	hopper = _make_hopper(tof_mod, reading_mm=50, empty=22, full=4)  # 5.0cm
-	try:
-		assert hopper.get_level(override=True) == 94
-	finally:
-		_stop(hopper)
+    hopper = _make_hopper(tof_mod, reading_mm=50, empty=22, full=4)  # 5.0cm
+    try:
+        assert hopper.get_level(override=True) == 94
+    finally:
+        _stop(hopper)
 
 
 def test_slow_read_cycle_reinitializes_sensor(tof_mod):
-	hopper = _make_hopper(tof_mod, reading_mm=100, read_delay=0.2)  # 3 * 0.2s > 0.5s threshold
-	try:
-		hopper.get_level(override=True)
-		assert hopper.open_calls == 2
-	finally:
-		_stop(hopper)
+    hopper = _make_hopper(tof_mod, reading_mm=100, read_delay=0.2)  # 3 * 0.2s > 0.5s threshold
+    try:
+        hopper.get_level(override=True)
+        assert hopper.open_calls == 2
+    finally:
+        _stop(hopper)
 
 
 def test_basic_bus_uses_board_scl_sda(tof_mod):
-	hopper = _make_hopper(tof_mod, dev_pins={})
-	try:
-		tof_mod.busio.I2C.assert_called_with(tof_mod.board.SCL, tof_mod.board.SDA)
-		assert hopper.opened_with[0] is tof_mod.busio.I2C.return_value
-	finally:
-		_stop(hopper)
+    hopper = _make_hopper(tof_mod, dev_pins={})
+    try:
+        tof_mod.busio.I2C.assert_called_with(tof_mod.board.SCL, tof_mod.board.SDA)
+        assert hopper.opened_with[0] is tof_mod.busio.I2C.return_value
+    finally:
+        _stop(hopper)
 
 
 def test_extended_bus_resolves_and_uses_extended_i2c(tof_mod):
-	hopper = _make_hopper(tof_mod, dev_pins={'distance': {'i2c_bus_kind': 'extended', 'i2c_bus_num': '3'}})
-	try:
-		tof_mod.resolve_i2c_bus.assert_called_with('3')
-		tof_mod.ExtendedI2C.assert_called_with(7)
-		assert hopper.opened_with[0] is tof_mod.ExtendedI2C.return_value
-	finally:
-		_stop(hopper)
+    hopper = _make_hopper(tof_mod, dev_pins={"distance": {"i2c_bus_kind": "extended", "i2c_bus_num": "3"}})
+    try:
+        tof_mod.resolve_i2c_bus.assert_called_with("3")
+        tof_mod.ExtendedI2C.assert_called_with(7)
+        assert hopper.opened_with[0] is tof_mod.ExtendedI2C.return_value
+    finally:
+        _stop(hopper)
 
 
 def test_address_defaults_to_chip_default(tof_mod):
-	hopper = _make_hopper(tof_mod, dev_pins={})
-	try:
-		assert hopper.opened_with[1] == 0x29
-	finally:
-		_stop(hopper)
+    hopper = _make_hopper(tof_mod, dev_pins={})
+    try:
+        assert hopper.opened_with[1] == 0x29
+    finally:
+        _stop(hopper)
 
 
 def test_address_override_parses_hex_string(tof_mod):
-	hopper = _make_hopper(tof_mod, dev_pins={'distance': {'address': '0x2a'}})
-	try:
-		assert hopper.opened_with[1] == 0x2a
-	finally:
-		_stop(hopper)
+    hopper = _make_hopper(tof_mod, dev_pins={"distance": {"address": "0x2a"}})
+    try:
+        assert hopper.opened_with[1] == 0x2A
+    finally:
+        _stop(hopper)
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -215,140 +213,140 @@ from probes.base import resolve_i2c_bus
 
 
 class ToFHopperLevel:
-	default_address = 0x29
+    default_address = 0x29
 
-	def __init__(self, dev_pins, empty=22, full=4, debug=False):
-		self.logger = create_logger('events')
-		self.empty = empty  # Empty is greater than distance measured for empty
-		self.full = full  # Full is less than or equal to the minimum full distance.
-		self.debug = debug
-		self.distance_read = 100
+    def __init__(self, dev_pins, empty=22, full=4, debug=False):
+        self.logger = create_logger("events")
+        self.empty = empty  # Empty is greater than distance measured for empty
+        self.full = full  # Full is less than or equal to the minimum full distance.
+        self.debug = debug
+        self.distance_read = 100
 
-		self.event = threading.Event()
+        self.event = threading.Event()
 
-		if self.empty <= self.full:
-			event = 'ERROR: Invalid Hopper Level Configuration Empty Level <= Full Level (forcing defaults)'
-			self.logger.error(event)
-			# Set defaults that are valid
-			self.empty = 22
-			self.full = 4
+        if self.empty <= self.full:
+            event = "ERROR: Invalid Hopper Level Configuration Empty Level <= Full Level (forcing defaults)"
+            self.logger.error(event)
+            # Set defaults that are valid
+            self.empty = 22
+            self.full = 4
 
-		distance_pins = (dev_pins or {}).get('distance', {}) or {}
-		self.i2c_bus_kind = distance_pins.get('i2c_bus_kind', 'basic')
-		self.i2c_bus_num = distance_pins.get('i2c_bus_num', 'CP2112')
-		address = distance_pins.get('address')
-		if address is None:
-			self.address = self.default_address
-		elif isinstance(address, str):
-			self.address = int(address, 16)
-		else:
-			self.address = address
+        distance_pins = (dev_pins or {}).get("distance", {}) or {}
+        self.i2c_bus_kind = distance_pins.get("i2c_bus_kind", "basic")
+        self.i2c_bus_num = distance_pins.get("i2c_bus_num", "CP2112")
+        address = distance_pins.get("address")
+        if address is None:
+            self.address = self.default_address
+        elif isinstance(address, str):
+            self.address = int(address, 16)
+        else:
+            self.address = address
 
-		self.__start_sensor()
-		# Setup & Start Sensor Loop Thread
-		self.sensor_thread_active = True
-		self.sensor_thread_read_interval = 60  # Read sensor every 60 seconds
-		self.sensor_thread_override = True  # Allow override to do direct reads
-		self.sensor_thread = threading.Thread(target=self._sensing_loop)
-		self.sensor_thread.start()
+        self.__start_sensor()
+        # Setup & Start Sensor Loop Thread
+        self.sensor_thread_active = True
+        self.sensor_thread_read_interval = 60  # Read sensor every 60 seconds
+        self.sensor_thread_override = True  # Allow override to do direct reads
+        self.sensor_thread = threading.Thread(target=self._sensing_loop)
+        self.sensor_thread.start()
 
-	def _open_i2c_bus(self):
-		if self.i2c_bus_kind == 'extended':
-			return ExtendedI2C(resolve_i2c_bus(self.i2c_bus_num))
-		return busio.I2C(board.SCL, board.SDA)
+    def _open_i2c_bus(self):
+        if self.i2c_bus_kind == "extended":
+            return ExtendedI2C(resolve_i2c_bus(self.i2c_bus_num))
+        return busio.I2C(board.SCL, board.SDA)
 
-	def __start_sensor(self):
-		i2c = self._open_i2c_bus()
-		self._open_sensor(i2c, self.address)
+    def __start_sensor(self):
+        i2c = self._open_i2c_bus()
+        self._open_sensor(i2c, self.address)
 
-	def _open_sensor(self, i2c, address):
-		"""Construct the Adafruit driver instance at `address` on `i2c`, start
-		ranging if the chip requires it, and set self.tof. Subclasses must
-		implement this."""
-		raise NotImplementedError
+    def _open_sensor(self, i2c, address):
+        """Construct the Adafruit driver instance at `address` on `i2c`, start
+        ranging if the chip requires it, and set self.tof. Subclasses must
+        implement this."""
+        raise NotImplementedError
 
-	def _read_distance_mm(self):
-		"""Return a single distance reading in millimeters. Subclasses must
-		implement this."""
-		raise NotImplementedError
+    def _read_distance_mm(self):
+        """Return a single distance reading in millimeters. Subclasses must
+        implement this."""
+        raise NotImplementedError
 
-	def _close_sensor(self):
-		"""Stop ranging / release the sensor. Optional; no-op by default."""
-		pass
+    def _close_sensor(self):
+        """Stop ranging / release the sensor. Optional; no-op by default."""
+        pass
 
-	def _sensing_loop(self):
-		"""This loop should run in a thread so that it does not stall the main control process"""
-		sample_time = time.time()
-		while self.sensor_thread_active:
-			now = time.time()
-			if self.sensor_thread_override or (now > sample_time + self.sensor_thread_read_interval):
-				# Read the sensor multiple times and average the result
-				avg_dist = 0
-				start_time = time.time()
+    def _sensing_loop(self):
+        """This loop should run in a thread so that it does not stall the main control process"""
+        sample_time = time.time()
+        while self.sensor_thread_active:
+            now = time.time()
+            if self.sensor_thread_override or (now > sample_time + self.sensor_thread_read_interval):
+                # Read the sensor multiple times and average the result
+                avg_dist = 0
+                start_time = time.time()
 
-				for reading in range(3):
-					distance = self._read_distance_mm()
-					if distance > 0:
-						if avg_dist > 0:
-							avg_dist = (avg_dist + distance) / 2
-						else:
-							avg_dist = distance
+                for reading in range(3):
+                    distance = self._read_distance_mm()
+                    if distance > 0:
+                        if avg_dist > 0:
+                            avg_dist = (avg_dist + distance) / 2
+                        else:
+                            avg_dist = distance
 
-				# Convert mm to cm
-				avg_dist = avg_dist / 10
+                # Convert mm to cm
+                avg_dist = avg_dist / 10
 
-				if self.debug:
-					event = '* Average Distance Measured: ' + str(avg_dist) + 'cm'
-					self.logger.debug(event)
+                if self.debug:
+                    event = "* Average Distance Measured: " + str(avg_dist) + "cm"
+                    self.logger.debug(event)
 
-				# If Average Distance is less than the full distance, we are at 100%
-				if avg_dist <= self.full:
-					level = 100
-				# If Average Distance is less than the empty distance, calculate percentage
-				elif avg_dist <= self.empty:
-					capacity = self.empty - self.full
-					adjusted_ratio = (self.empty / capacity) * 100
-					level = adjusted_ratio * (1 - (avg_dist / self.empty))
-				# If Average Distance is higher than empty distance, report 0 level
-				else:
-					level = 0
+                # If Average Distance is less than the full distance, we are at 100%
+                if avg_dist <= self.full:
+                    level = 100
+                # If Average Distance is less than the empty distance, calculate percentage
+                elif avg_dist <= self.empty:
+                    capacity = self.empty - self.full
+                    adjusted_ratio = (self.empty / capacity) * 100
+                    level = adjusted_ratio * (1 - (avg_dist / self.empty))
+                # If Average Distance is higher than empty distance, report 0 level
+                else:
+                    level = 0
 
-				self.distance_read = int(level)
+                self.distance_read = int(level)
 
-				# If it took a long time to get sensor data, then the sensor might be having issues
-				if (time.time() - start_time) > 0.5:
-					self.__start_sensor()  # Attempt re-init of sensor
-					event = (
-						'Warning: The TOF sensor took longer than normal to get a reading.  Re-initializing the sensor.'
-					)
-					self.logger.info(event)
-				if self.sensor_thread_override:
-					self.event.set()
-					self.sensor_thread_override = False
-				sample_time = time.time()
-			time.sleep(1)
+                # If it took a long time to get sensor data, then the sensor might be having issues
+                if (time.time() - start_time) > 0.5:
+                    self.__start_sensor()  # Attempt re-init of sensor
+                    event = (
+                        "Warning: The TOF sensor took longer than normal to get a reading.  Re-initializing the sensor."
+                    )
+                    self.logger.info(event)
+                if self.sensor_thread_override:
+                    self.event.set()
+                    self.sensor_thread_override = False
+                sample_time = time.time()
+            time.sleep(1)
 
-	def set_level(self, level=100):
-		# Do nothing
-		return ()
+    def set_level(self, level=100):
+        # Do nothing
+        return ()
 
-	def update_distances(self, empty=22, full=4):
-		self.empty = empty
-		self.full = full
+    def update_distances(self, empty=22, full=4):
+        self.empty = empty
+        self.full = full
 
-	def get_distances(self):
-		levels = {}
-		levels['empty'] = self.empty
-		levels['full'] = self.full
-		return levels
+    def get_distances(self):
+        levels = {}
+        levels["empty"] = self.empty
+        levels["full"] = self.full
+        return levels
 
-	def get_level(self, override=False):
-		"""If override selected, force the sensor thread to update"""
-		if override:
-			self.sensor_thread_override = True
-			self.event.wait(3)  # Wait 3 seconds for sensor to update
-			self.event.clear()  # Clear event flag
-		return self.distance_read
+    def get_level(self, override=False):
+        """If override selected, force the sensor thread to update"""
+        if override:
+            self.sensor_thread_override = True
+            self.event.wait(3)  # Wait 3 seconds for sensor to update
+            self.event.clear()  # Clear event flag
+        return self.distance_read
 ```
 
 Note: unlike the original pimoroni-based `vl53l0x.py`, there is no manual `time.sleep(timing / 1000000)` between the 3 reads in `_sensing_loop`. The pimoroni library exposed an explicit `get_timing()` value the caller had to sleep for; the Adafruit drivers block internally until each reading completes, so no extra sleep is needed.
@@ -400,60 +398,60 @@ from unittest import mock
 
 
 def _make_hopper(tof_mod, vl_mod, dev_pins=None, range_value=100):
-	with mock.patch.object(vl_mod, 'VL53L0X') as VL53L0X:
-		VL53L0X.return_value.range = range_value
-		hopper = vl_mod.HopperLevel(dev_pins or {}, empty=22, full=4)
-	return hopper, VL53L0X
+    with mock.patch.object(vl_mod, "VL53L0X") as VL53L0X:
+        VL53L0X.return_value.range = range_value
+        hopper = vl_mod.HopperLevel(dev_pins or {}, empty=22, full=4)
+    return hopper, VL53L0X
 
 
 def _stop(hopper):
-	hopper.sensor_thread_active = False
-	hopper.sensor_thread.join(timeout=2)
+    hopper.sensor_thread_active = False
+    hopper.sensor_thread.join(timeout=2)
 
 
 def test_open_sensor_constructs_vl53l0x_at_resolved_address():
-	import distance._tof_base as tof_mod
-	import distance.vl53l0x as vl_mod
+    import distance._tof_base as tof_mod
+    import distance.vl53l0x as vl_mod
 
-	with (
-		mock.patch.object(tof_mod, 'busio'),
-		mock.patch.object(tof_mod, 'board'),
-	):
-		hopper, VL53L0X = _make_hopper(tof_mod, vl_mod)
-		try:
-			VL53L0X.assert_called_once_with(tof_mod.busio.I2C.return_value, address=0x29)
-		finally:
-			_stop(hopper)
+    with (
+        mock.patch.object(tof_mod, "busio"),
+        mock.patch.object(tof_mod, "board"),
+    ):
+        hopper, VL53L0X = _make_hopper(tof_mod, vl_mod)
+        try:
+            VL53L0X.assert_called_once_with(tof_mod.busio.I2C.return_value, address=0x29)
+        finally:
+            _stop(hopper)
 
 
 def test_open_sensor_uses_configured_address():
-	import distance._tof_base as tof_mod
-	import distance.vl53l0x as vl_mod
+    import distance._tof_base as tof_mod
+    import distance.vl53l0x as vl_mod
 
-	with (
-		mock.patch.object(tof_mod, 'busio'),
-		mock.patch.object(tof_mod, 'board'),
-	):
-		hopper, VL53L0X = _make_hopper(tof_mod, vl_mod, dev_pins={'distance': {'address': '0x2a'}})
-		try:
-			VL53L0X.assert_called_once_with(tof_mod.busio.I2C.return_value, address=0x2a)
-		finally:
-			_stop(hopper)
+    with (
+        mock.patch.object(tof_mod, "busio"),
+        mock.patch.object(tof_mod, "board"),
+    ):
+        hopper, VL53L0X = _make_hopper(tof_mod, vl_mod, dev_pins={"distance": {"address": "0x2a"}})
+        try:
+            VL53L0X.assert_called_once_with(tof_mod.busio.I2C.return_value, address=0x2A)
+        finally:
+            _stop(hopper)
 
 
 def test_read_distance_mm_returns_range_directly():
-	import distance._tof_base as tof_mod
-	import distance.vl53l0x as vl_mod
+    import distance._tof_base as tof_mod
+    import distance.vl53l0x as vl_mod
 
-	with (
-		mock.patch.object(tof_mod, 'busio'),
-		mock.patch.object(tof_mod, 'board'),
-	):
-		hopper, VL53L0X = _make_hopper(tof_mod, vl_mod, range_value=123)
-		try:
-			assert hopper._read_distance_mm() == 123
-		finally:
-			_stop(hopper)
+    with (
+        mock.patch.object(tof_mod, "busio"),
+        mock.patch.object(tof_mod, "board"),
+    ):
+        hopper, VL53L0X = _make_hopper(tof_mod, vl_mod, range_value=123)
+        try:
+            assert hopper._read_distance_mm() == 123
+        finally:
+            _stop(hopper)
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -483,13 +481,13 @@ from distance._tof_base import ToFHopperLevel
 
 
 class HopperLevel(ToFHopperLevel):
-	default_address = 0x29
+    default_address = 0x29
 
-	def _open_sensor(self, i2c, address):
-		self.tof = VL53L0X(i2c, address=address)
+    def _open_sensor(self, i2c, address):
+        self.tof = VL53L0X(i2c, address=address)
 
-	def _read_distance_mm(self):
-		return self.tof.range
+    def _read_distance_mm(self):
+        return self.tof.range
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -525,79 +523,79 @@ from unittest import mock
 
 
 def _make_hopper(tof_mod, vl_mod, dev_pins=None, distance_cm=10.0):
-	with mock.patch.object(vl_mod, 'VL53L4CD') as VL53L4CD:
-		VL53L4CD.return_value.data_ready = True
-		VL53L4CD.return_value.distance = distance_cm
-		hopper = vl_mod.HopperLevel(dev_pins or {}, empty=22, full=4)
-	return hopper, VL53L4CD
+    with mock.patch.object(vl_mod, "VL53L4CD") as VL53L4CD:
+        VL53L4CD.return_value.data_ready = True
+        VL53L4CD.return_value.distance = distance_cm
+        hopper = vl_mod.HopperLevel(dev_pins or {}, empty=22, full=4)
+    return hopper, VL53L4CD
 
 
 def _stop(hopper):
-	hopper.sensor_thread_active = False
-	hopper.sensor_thread.join(timeout=2)
+    hopper.sensor_thread_active = False
+    hopper.sensor_thread.join(timeout=2)
 
 
 def test_open_sensor_constructs_vl53l4cd_at_resolved_address_and_starts_ranging():
-	import distance._tof_base as tof_mod
-	import distance.vl53l4cd as vl_mod
+    import distance._tof_base as tof_mod
+    import distance.vl53l4cd as vl_mod
 
-	with (
-		mock.patch.object(tof_mod, 'busio'),
-		mock.patch.object(tof_mod, 'board'),
-	):
-		hopper, VL53L4CD = _make_hopper(tof_mod, vl_mod)
-		try:
-			VL53L4CD.assert_called_once_with(tof_mod.busio.I2C.return_value, address=0x29)
-			VL53L4CD.return_value.start_ranging.assert_called_once()
-		finally:
-			_stop(hopper)
+    with (
+        mock.patch.object(tof_mod, "busio"),
+        mock.patch.object(tof_mod, "board"),
+    ):
+        hopper, VL53L4CD = _make_hopper(tof_mod, vl_mod)
+        try:
+            VL53L4CD.assert_called_once_with(tof_mod.busio.I2C.return_value, address=0x29)
+            VL53L4CD.return_value.start_ranging.assert_called_once()
+        finally:
+            _stop(hopper)
 
 
 def test_open_sensor_uses_configured_address():
-	import distance._tof_base as tof_mod
-	import distance.vl53l4cd as vl_mod
+    import distance._tof_base as tof_mod
+    import distance.vl53l4cd as vl_mod
 
-	with (
-		mock.patch.object(tof_mod, 'busio'),
-		mock.patch.object(tof_mod, 'board'),
-	):
-		hopper, VL53L4CD = _make_hopper(tof_mod, vl_mod, dev_pins={'distance': {'address': '0x2a'}})
-		try:
-			VL53L4CD.assert_called_once_with(tof_mod.busio.I2C.return_value, address=0x2a)
-		finally:
-			_stop(hopper)
+    with (
+        mock.patch.object(tof_mod, "busio"),
+        mock.patch.object(tof_mod, "board"),
+    ):
+        hopper, VL53L4CD = _make_hopper(tof_mod, vl_mod, dev_pins={"distance": {"address": "0x2a"}})
+        try:
+            VL53L4CD.assert_called_once_with(tof_mod.busio.I2C.return_value, address=0x2A)
+        finally:
+            _stop(hopper)
 
 
 def test_read_distance_mm_converts_cm_to_mm_and_clears_interrupt():
-	import distance._tof_base as tof_mod
-	import distance.vl53l4cd as vl_mod
+    import distance._tof_base as tof_mod
+    import distance.vl53l4cd as vl_mod
 
-	with (
-		mock.patch.object(tof_mod, 'busio'),
-		mock.patch.object(tof_mod, 'board'),
-	):
-		hopper, VL53L4CD = _make_hopper(tof_mod, vl_mod, distance_cm=12.5)
-		try:
-			assert hopper._read_distance_mm() == 125.0
-			assert VL53L4CD.return_value.clear_interrupt.call_count >= 1
-		finally:
-			_stop(hopper)
+    with (
+        mock.patch.object(tof_mod, "busio"),
+        mock.patch.object(tof_mod, "board"),
+    ):
+        hopper, VL53L4CD = _make_hopper(tof_mod, vl_mod, distance_cm=12.5)
+        try:
+            assert hopper._read_distance_mm() == 125.0
+            assert VL53L4CD.return_value.clear_interrupt.call_count >= 1
+        finally:
+            _stop(hopper)
 
 
 def test_close_sensor_stops_ranging():
-	import distance._tof_base as tof_mod
-	import distance.vl53l4cd as vl_mod
+    import distance._tof_base as tof_mod
+    import distance.vl53l4cd as vl_mod
 
-	with (
-		mock.patch.object(tof_mod, 'busio'),
-		mock.patch.object(tof_mod, 'board'),
-	):
-		hopper, VL53L4CD = _make_hopper(tof_mod, vl_mod)
-		try:
-			hopper._close_sensor()
-			VL53L4CD.return_value.stop_ranging.assert_called_once()
-		finally:
-			_stop(hopper)
+    with (
+        mock.patch.object(tof_mod, "busio"),
+        mock.patch.object(tof_mod, "board"),
+    ):
+        hopper, VL53L4CD = _make_hopper(tof_mod, vl_mod)
+        try:
+            hopper._close_sensor()
+            VL53L4CD.return_value.stop_ranging.assert_called_once()
+        finally:
+            _stop(hopper)
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -627,21 +625,21 @@ from distance._tof_base import ToFHopperLevel
 
 
 class HopperLevel(ToFHopperLevel):
-	default_address = 0x29
+    default_address = 0x29
 
-	def _open_sensor(self, i2c, address):
-		self.tof = VL53L4CD(i2c, address=address)
-		self.tof.start_ranging()
+    def _open_sensor(self, i2c, address):
+        self.tof = VL53L4CD(i2c, address=address)
+        self.tof.start_ranging()
 
-	def _read_distance_mm(self):
-		while not self.tof.data_ready:
-			time.sleep(0.001)
-		distance_cm = self.tof.distance
-		self.tof.clear_interrupt()
-		return distance_cm * 10
+    def _read_distance_mm(self):
+        while not self.tof.data_ready:
+            time.sleep(0.001)
+        distance_cm = self.tof.distance
+        self.tof.clear_interrupt()
+        return distance_cm * 10
 
-	def _close_sensor(self):
-		self.tof.stop_ranging()
+    def _close_sensor(self):
+        self.tof.stop_ranging()
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -722,58 +720,58 @@ import os
 
 
 def _manifest():
-	path = os.path.join(os.path.dirname(__file__), '..', 'wizard', 'wizard_manifest.json')
-	with open(path) as handle:
-		return json.load(handle)
+    path = os.path.join(os.path.dirname(__file__), "..", "wizard", "wizard_manifest.json")
+    with open(path) as handle:
+        return json.load(handle)
 
 
 def test_vl53l0x_entry_uses_adafruit_circuitpython():
-	manifest = _manifest()
-	entry = manifest['modules']['distance']['vl53l0x']
-	assert entry['py_dependencies'] == ['adafruit-circuitpython-vl53l0x']
-	assert entry['apt_dependencies'] == []
+    manifest = _manifest()
+    entry = manifest["modules"]["distance"]["vl53l0x"]
+    assert entry["py_dependencies"] == ["adafruit-circuitpython-vl53l0x"]
+    assert entry["apt_dependencies"] == []
 
 
 def test_vl53l4cd_entry_present():
-	manifest = _manifest()
-	entry = manifest['modules']['distance']['vl53l4cd']
-	assert entry['filename'] == 'vl53l4cd'
-	assert entry['py_dependencies'] == ['adafruit-circuitpython-vl53l4cd']
-	assert entry['apt_dependencies'] == []
-	assert entry['image'] == 'vl53l4cd.png'
+    manifest = _manifest()
+    entry = manifest["modules"]["distance"]["vl53l4cd"]
+    assert entry["filename"] == "vl53l4cd"
+    assert entry["py_dependencies"] == ["adafruit-circuitpython-vl53l4cd"]
+    assert entry["apt_dependencies"] == []
+    assert entry["image"] == "vl53l4cd.png"
 
 
 def test_all_platforms_have_distance_i2c_fields():
-	manifest = _manifest()
-	platforms = manifest['modules']['grillplatform']
-	for name, entry in platforms.items():
-		deps = entry.get('settings_dependencies', {})
+    manifest = _manifest()
+    platforms = manifest["modules"]["grillplatform"]
+    for name, entry in platforms.items():
+        deps = entry.get("settings_dependencies", {})
 
-		assert 'device_distance_i2c_bus_kind' in deps, name
-		assert deps['device_distance_i2c_bus_kind']['settings'] == [
-			'platform',
-			'devices',
-			'distance',
-			'i2c_bus_kind',
-		]
-		assert set(deps['device_distance_i2c_bus_kind']['options']) == {'basic', 'extended'}
+        assert "device_distance_i2c_bus_kind" in deps, name
+        assert deps["device_distance_i2c_bus_kind"]["settings"] == [
+            "platform",
+            "devices",
+            "distance",
+            "i2c_bus_kind",
+        ]
+        assert set(deps["device_distance_i2c_bus_kind"]["options"]) == {"basic", "extended"}
 
-		assert 'device_distance_i2c_bus_num' in deps, name
-		assert deps['device_distance_i2c_bus_num']['settings'] == [
-			'platform',
-			'devices',
-			'distance',
-			'i2c_bus_num',
-		]
+        assert "device_distance_i2c_bus_num" in deps, name
+        assert deps["device_distance_i2c_bus_num"]["settings"] == [
+            "platform",
+            "devices",
+            "distance",
+            "i2c_bus_num",
+        ]
 
-		assert 'device_distance_address' in deps, name
-		assert deps['device_distance_address']['settings'] == [
-			'platform',
-			'devices',
-			'distance',
-			'address',
-		]
-		assert '0x29' in deps['device_distance_address']['options']
+        assert "device_distance_address" in deps, name
+        assert deps["device_distance_address"]["settings"] == [
+            "platform",
+            "devices",
+            "distance",
+            "address",
+        ]
+        assert "0x29" in deps["device_distance_address"]["options"]
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**

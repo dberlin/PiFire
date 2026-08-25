@@ -437,9 +437,7 @@ def _dataset():
     the gain, the loss and the deadtime."""
     t = np.arange(0.0, 6000.0, 5.0)
     Q = np.where(t < 3000.0, 100.0, 20.0)
-    temp = simulate_grey_box(
-        t, Q, T0=25.0, T_amb=T_AMB, sigma=SIGMA, n_delay=N_DELAY, **TRUTH
-    )
+    temp = simulate_grey_box(t, Q, T0=25.0, T_amb=T_AMB, sigma=SIGMA, n_delay=N_DELAY, **TRUTH)
     return t, Q, temp
 
 
@@ -449,9 +447,7 @@ def test_fit_recovers_the_generating_parameters():
     fitted = fit_params(t, temp, Q, T_amb=T_AMB, init=init, sigma=SIGMA, n_delay=N_DELAY)
     # C_c and K_Q are recovered as a ratio with h_amb, so compare the quantity
     # the controller's braking distance actually depends on: the time constant.
-    assert fitted["C_c"] / fitted["h_amb"] == pytest.approx(
-        TRUTH["C_c"] / TRUTH["h_amb"], rel=0.20
-    )
+    assert fitted["C_c"] / fitted["h_amb"] == pytest.approx(TRUTH["C_c"] / TRUTH["h_amb"], rel=0.20)
     assert fitted["theta"] == pytest.approx(TRUTH["theta"], rel=0.30)
 
 

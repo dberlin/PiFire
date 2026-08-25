@@ -29,7 +29,9 @@ six must remain user-selectable via `controller/controllers.json`.
 Controllers are loaded dynamically in `controller/runtime/runner.py:_build_core`:
 
 ```python
-module = importlib.import_module(f"controller.{controller_type}")   # controller_type == module_name from controllers.json
+module = importlib.import_module(
+    f"controller.{controller_type}"
+)  # controller_type == module_name from controllers.json
 core = module.Controller(settings["controller"]["config"][controller_type], units, cycle_data)
 ```
 
@@ -165,13 +167,20 @@ Per-variant default config (from `controllers.json`, used by the Task 1 test):
 
 ```python
 PID_CONFIGS = {
-    "pid":                     {"PB": 60.0,  "Ti": 180.0, "Td": 45.0, "center": 0.5},
-    "pid_clamping":            {"PB": 100.0, "Ti": 180.0, "Td": 45.0},
-    "pid_clamping_percent_pb": {"PB": 42.0,  "Ti": 180.0, "Td": 45.0},
-    "pid_ac":                  {"PB": 60.0,  "Ti": 180.0, "Td": 45.0, "stable_window": 12, "center_factor": 0.0010},
-    "pid_parallel":            {"Kp": 0.01,  "Ki": 0.000055, "Kd": 0.45, "Clamping": True},
-    "pid_sp":                  {"PB": 60.0,  "Ti": 180.0, "Td": 45.0, "stable_window": 12,
-                                "center_factor": 0.0010, "tau": 115, "theta": 65},
+    "pid": {"PB": 60.0, "Ti": 180.0, "Td": 45.0, "center": 0.5},
+    "pid_clamping": {"PB": 100.0, "Ti": 180.0, "Td": 45.0},
+    "pid_clamping_percent_pb": {"PB": 42.0, "Ti": 180.0, "Td": 45.0},
+    "pid_ac": {"PB": 60.0, "Ti": 180.0, "Td": 45.0, "stable_window": 12, "center_factor": 0.0010},
+    "pid_parallel": {"Kp": 0.01, "Ki": 0.000055, "Kd": 0.45, "Clamping": True},
+    "pid_sp": {
+        "PB": 60.0,
+        "Ti": 180.0,
+        "Td": 45.0,
+        "stable_window": 12,
+        "center_factor": 0.0010,
+        "tau": 115,
+        "theta": 65,
+    },
 }
 ```
 
@@ -213,13 +222,20 @@ import importlib
 import pytest
 
 PID_CONFIGS = {
-    "pid":                     {"PB": 60.0,  "Ti": 180.0, "Td": 45.0, "center": 0.5},
-    "pid_clamping":            {"PB": 100.0, "Ti": 180.0, "Td": 45.0},
-    "pid_clamping_percent_pb": {"PB": 42.0,  "Ti": 180.0, "Td": 45.0},
-    "pid_ac":                  {"PB": 60.0,  "Ti": 180.0, "Td": 45.0, "stable_window": 12, "center_factor": 0.0010},
-    "pid_parallel":            {"Kp": 0.01,  "Ki": 0.000055, "Kd": 0.45, "Clamping": True},
-    "pid_sp":                  {"PB": 60.0,  "Ti": 180.0, "Td": 45.0, "stable_window": 12,
-                                "center_factor": 0.0010, "tau": 115, "theta": 65},
+    "pid": {"PB": 60.0, "Ti": 180.0, "Td": 45.0, "center": 0.5},
+    "pid_clamping": {"PB": 100.0, "Ti": 180.0, "Td": 45.0},
+    "pid_clamping_percent_pb": {"PB": 42.0, "Ti": 180.0, "Td": 45.0},
+    "pid_ac": {"PB": 60.0, "Ti": 180.0, "Td": 45.0, "stable_window": 12, "center_factor": 0.0010},
+    "pid_parallel": {"Kp": 0.01, "Ki": 0.000055, "Kd": 0.45, "Clamping": True},
+    "pid_sp": {
+        "PB": 60.0,
+        "Ti": 180.0,
+        "Td": 45.0,
+        "stable_window": 12,
+        "center_factor": 0.0010,
+        "tau": 115,
+        "theta": 65,
+    },
 }
 
 CYCLE_DATA = {"HoldCycleTime": 20}
@@ -272,12 +288,34 @@ def test_pid_variant_update_series_is_stable(module_name, monkeypatch):
 
 ```python
 GOLDEN = {
-    "pid":                     [1.796296, 1.365741, 0.731481, 0.435185, 0.94213, 0.877315, 0.803241, 0.831944, 0.836111, 0.855093],
-    "pid_clamping":            [-0.175, -0.258333, -0.638889, -0.816667, -0.5125, -0.551389, -0.595833, -0.578611, -0.576111, -0.564722],
-    "pid_clamping_percent_pb": [-0.189394, -0.279582, -0.691438, -0.883838, -0.554654, -0.596741, -0.644841, -0.626203, -0.623497, -0.611171],
-    "pid_ac":                  [1.0, 0.956111, 0.210741, -0.15963, 0.310278, 0.245463, 0.171389, 0.200093, 0.204259, 0.223241],
-    "pid_parallel":            [-0.168, -0.252, -0.633, -0.811, -0.507, -0.546, -0.5905, -0.5733, -0.5708, -0.5594],
-    "pid_sp":                  [1.0, 0.665488, -0.370505, -0.740875, 0.164966, 0.095348, 0.01647, 0.098495, 0.128841, 0.174964],
+    "pid": [1.796296, 1.365741, 0.731481, 0.435185, 0.94213, 0.877315, 0.803241, 0.831944, 0.836111, 0.855093],
+    "pid_clamping": [
+        -0.175,
+        -0.258333,
+        -0.638889,
+        -0.816667,
+        -0.5125,
+        -0.551389,
+        -0.595833,
+        -0.578611,
+        -0.576111,
+        -0.564722,
+    ],
+    "pid_clamping_percent_pb": [
+        -0.189394,
+        -0.279582,
+        -0.691438,
+        -0.883838,
+        -0.554654,
+        -0.596741,
+        -0.644841,
+        -0.626203,
+        -0.623497,
+        -0.611171,
+    ],
+    "pid_ac": [1.0, 0.956111, 0.210741, -0.15963, 0.310278, 0.245463, 0.171389, 0.200093, 0.204259, 0.223241],
+    "pid_parallel": [-0.168, -0.252, -0.633, -0.811, -0.507, -0.546, -0.5905, -0.5733, -0.5708, -0.5594],
+    "pid_sp": [1.0, 0.665488, -0.370505, -0.740875, 0.164966, 0.095348, 0.01647, 0.098495, 0.128841, 0.174964],
 }
 ```
 
@@ -335,18 +373,31 @@ import importlib
 import pytest
 
 REMOVED = [
-    "set_config", "get_config", "set_cycle_data", "set_units",
-    "set_gains", "get_k", "supported_functions", "function_list",
+    "set_config",
+    "get_config",
+    "set_cycle_data",
+    "set_units",
+    "set_gains",
+    "get_k",
+    "supported_functions",
+    "function_list",
 ]
 
 CONFIGS = {
-    "pid":                     {"PB": 60.0, "Ti": 180.0, "Td": 45.0, "center": 0.5},
-    "pid_clamping":            {"PB": 100.0, "Ti": 180.0, "Td": 45.0},
+    "pid": {"PB": 60.0, "Ti": 180.0, "Td": 45.0, "center": 0.5},
+    "pid_clamping": {"PB": 100.0, "Ti": 180.0, "Td": 45.0},
     "pid_clamping_percent_pb": {"PB": 42.0, "Ti": 180.0, "Td": 45.0},
-    "pid_ac":                  {"PB": 60.0, "Ti": 180.0, "Td": 45.0, "stable_window": 12, "center_factor": 0.0010},
-    "pid_parallel":            {"Kp": 0.01, "Ki": 0.000055, "Kd": 0.45, "Clamping": True},
-    "pid_sp":                  {"PB": 60.0, "Ti": 180.0, "Td": 45.0, "stable_window": 12,
-                                "center_factor": 0.0010, "tau": 115, "theta": 65},
+    "pid_ac": {"PB": 60.0, "Ti": 180.0, "Td": 45.0, "stable_window": 12, "center_factor": 0.0010},
+    "pid_parallel": {"Kp": 0.01, "Ki": 0.000055, "Kd": 0.45, "Clamping": True},
+    "pid_sp": {
+        "PB": 60.0,
+        "Ti": 180.0,
+        "Td": 45.0,
+        "stable_window": 12,
+        "center_factor": 0.0010,
+        "tau": 115,
+        "theta": 65,
+    },
 }
 CYCLE_DATA = {"HoldCycleTime": 20}
 

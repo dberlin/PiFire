@@ -87,11 +87,30 @@ from controller.grill_sim import MAKGrillSim
 from controller.mpc import Controller
 
 CONFIG = dict(
-    n_horizon=24, t_step=25.0, control_period=5.0, Q_w=1.0, R_dQ=0.1,
-    Q_min=5.0, Q_max=100.0, C_f=9.0, C_c=320.0, h_fc=1.3, h_amb=0.5,
-    T_amb=20.0, theta=50.0, n_delay=4, K_Q=3.5, sigma=1.4e-9,
-    policy="nlp", estimator="ekf", est_q_temp=1e-2, est_q_dist=0.05,
-    est_r_meas=0.04, enable_fan_input=True, fan_min_pct=40.0, fan_max_pct=100.0,
+    n_horizon=24,
+    t_step=25.0,
+    control_period=5.0,
+    Q_w=1.0,
+    R_dQ=0.1,
+    Q_min=5.0,
+    Q_max=100.0,
+    C_f=9.0,
+    C_c=320.0,
+    h_fc=1.3,
+    h_amb=0.5,
+    T_amb=20.0,
+    theta=50.0,
+    n_delay=4,
+    K_Q=3.5,
+    sigma=1.4e-9,
+    policy="nlp",
+    estimator="ekf",
+    est_q_temp=1e-2,
+    est_q_dist=0.05,
+    est_r_meas=0.04,
+    enable_fan_input=True,
+    fan_min_pct=40.0,
+    fan_max_pct=100.0,
 )
 CYCLE = {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25}
 
@@ -395,10 +414,24 @@ from controller.applied_output import AppliedOutput, OutputSource
 from controller.mpc import _HISTORY_MAX, Controller
 
 CONFIG = dict(
-    n_horizon=20, t_step=25.0, control_period=1.0, Q_w=1.0, R_dQ=0.02,
-    Q_min=5.0, Q_max=100.0, C_f=60.0, C_c=306.0, h_fc=2.0, h_amb=0.55,
-    T_amb=20.0, enable_fan_input=True, fan_min_pct=40.0, fan_max_pct=100.0,
-    est_q_temp=1e-2, est_q_dist=0.5, est_r_meas=0.04,
+    n_horizon=20,
+    t_step=25.0,
+    control_period=1.0,
+    Q_w=1.0,
+    R_dQ=0.02,
+    Q_min=5.0,
+    Q_max=100.0,
+    C_f=60.0,
+    C_c=306.0,
+    h_fc=2.0,
+    h_amb=0.55,
+    T_amb=20.0,
+    enable_fan_input=True,
+    fan_min_pct=40.0,
+    fan_max_pct=100.0,
+    est_q_temp=1e-2,
+    est_q_dist=0.5,
+    est_r_meas=0.04,
 )
 CYCLE = {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25}
 
@@ -548,15 +581,13 @@ import pytest
 
 from controller.model_promotion import PROMOTION_BOUNDS, evaluate
 
-GOOD = dict(C_f=9.0, C_c=2520.0, h_fc=0.39, h_amb=0.224, T_amb=20.0,
-            theta=93.0, n_delay=4, K_Q=6.95, sigma=1.4e-9)
+GOOD = dict(C_f=9.0, C_c=2520.0, h_fc=0.39, h_amb=0.224, T_amb=20.0, theta=93.0, n_delay=4, K_Q=6.95, sigma=1.4e-9)
 INCUMBENT = dict(GOOD, C_c=2000.0, h_amb=0.30)  # tau 6667 vs candidate 11250
 HORIZON = dict(n_horizon=144, t_step=25.0)
 
 
 def _ev(candidate, incumbent=INCUMBENT, cand_rmse=2.0, inc_rmse=5.0, **kw):
-    return evaluate(candidate, incumbent, candidate_rmse=cand_rmse,
-                    incumbent_rmse=inc_rmse, **{**HORIZON, **kw})
+    return evaluate(candidate, incumbent, candidate_rmse=cand_rmse, incumbent_rmse=inc_rmse, **{**HORIZON, **kw})
 
 
 def test_a_better_fit_is_accepted():
@@ -587,9 +618,9 @@ def test_shrinking_tau_needs_more_evidence_than_raising_it():
     """The asymmetry is the safety argument. Believing the grill is more
     sluggish than it is makes the controller brake early and costs nothing;
     believing it is less sluggish is the 520 F incident."""
-    slower = dict(GOOD, C_c=4000.0, h_amb=0.224)   # tau up
-    faster = dict(GOOD, C_c=1000.0, h_amb=0.224)   # tau down
-    margin = dict(cand_rmse=4.9, inc_rmse=5.0)     # barely better
+    slower = dict(GOOD, C_c=4000.0, h_amb=0.224)  # tau up
+    faster = dict(GOOD, C_c=1000.0, h_amb=0.224)  # tau down
+    margin = dict(cand_rmse=4.9, inc_rmse=5.0)  # barely better
     assert _ev(slower, **margin).accepted is True
     assert _ev(faster, **margin).accepted is False
 
@@ -772,8 +803,7 @@ import pytest
 from controller.mpc import _DEFAULTS, Controller
 
 CYCLE = {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25}
-PARAMS = dict(C_f=9.0, C_c=2520.0, h_fc=0.39, h_amb=0.224, T_amb=20.0,
-              theta=93.0, n_delay=4, K_Q=6.95, sigma=1.4e-9)
+PARAMS = dict(C_f=9.0, C_c=2520.0, h_fc=0.39, h_amb=0.224, T_amb=20.0, theta=93.0, n_delay=4, K_Q=6.95, sigma=1.4e-9)
 
 
 def _c(**over):
@@ -811,31 +841,44 @@ def test_a_restored_revision_is_carried_forward_not_restarted():
     its counter falls behind, so a per-process counter would silently stop
     persisting after the first restart."""
     c = _c()
-    assert c.restore_model({"version": 1, "revision": 41, "params": dict(PARAMS),
-                            "rmse": 2.0, "samples": 100, "band_c": [40.0, 232.0]}) is True
+    assert (
+        c.restore_model(
+            {"version": 1, "revision": 41, "params": dict(PARAMS), "rmse": 2.0, "samples": 100, "band_c": [40.0, 232.0]}
+        )
+        is True
+    )
     c._adopt_model(dict(PARAMS, C_c=2600.0), rmse=1.9, samples=200, band_c=(40.0, 232.0))
     assert c.get_model_snapshot()["revision"] == 42
 
 
 def test_restore_applies_the_parameters_to_the_running_model():
     c = _c()
-    c.restore_model({"version": 1, "revision": 1, "params": dict(PARAMS),
-                     "rmse": 2.0, "samples": 100, "band_c": [40.0, 232.0]})
+    c.restore_model(
+        {"version": 1, "revision": 1, "params": dict(PARAMS), "rmse": 2.0, "samples": 100, "band_c": [40.0, 232.0]}
+    )
     assert c.cfg["C_c"] == pytest.approx(2520.0)
 
 
 def test_an_unphysical_snapshot_is_refused():
     c = _c()
     bad = dict(PARAMS, C_c=-1.0)
-    assert c.restore_model({"version": 1, "revision": 1, "params": bad,
-                            "rmse": 2.0, "samples": 100, "band_c": [40.0, 232.0]}) is False
+    assert (
+        c.restore_model(
+            {"version": 1, "revision": 1, "params": bad, "rmse": 2.0, "samples": 100, "band_c": [40.0, 232.0]}
+        )
+        is False
+    )
     assert c.cfg["C_c"] == pytest.approx(_DEFAULTS["C_c"])
 
 
 def test_a_snapshot_from_a_future_schema_is_refused():
     c = _c()
-    assert c.restore_model({"version": 99, "revision": 1, "params": dict(PARAMS),
-                            "rmse": 2.0, "samples": 100, "band_c": [40.0, 232.0]}) is False
+    assert (
+        c.restore_model(
+            {"version": 99, "revision": 1, "params": dict(PARAMS), "rmse": 2.0, "samples": 100, "band_c": [40.0, 232.0]}
+        )
+        is False
+    )
 
 
 def test_a_malformed_snapshot_is_refused_rather_than_raising():
@@ -861,62 +904,65 @@ In `controller/mpc.py`, add to `Controller.__init__`:
 Add the three methods (place them beside `get_status`):
 
 ```python
-    _MODEL_SCHEMA = 1
-    _MODEL_PARAM_KEYS = ("C_f", "C_c", "h_fc", "h_amb", "T_amb", "theta", "n_delay", "K_Q", "sigma")
+_MODEL_SCHEMA = 1
+_MODEL_PARAM_KEYS = ("C_f", "C_c", "h_fc", "h_amb", "T_amb", "theta", "n_delay", "K_Q", "sigma")
 
-    def _adopt_model(self, params, *, rmse, samples, band_c):
-        """Take `params` into the running config and bump the revision.
 
-        Rebuilding the NLP is the CALLER's business: adoption between cooks
-        needs no rebuild because the next Hold builds fresh, and adoption
-        during one is rate-limited elsewhere.
-        """
-        self.cfg.update({k: params[k] for k in self._MODEL_PARAM_KEYS if k in params})
-        self._model_revision += 1
-        self._model_meta = {
-            "rmse": float(rmse),
-            "samples": int(samples),
-            "band_c": [float(band_c[0]), float(band_c[1])],
-        }
+def _adopt_model(self, params, *, rmse, samples, band_c):
+    """Take `params` into the running config and bump the revision.
 
-    def get_model_snapshot(self):
-        if self._model_meta is None:
-            return None
-        return {
-            "version": self._MODEL_SCHEMA,
-            "revision": int(self._model_revision),
-            "params": {k: float(self.cfg[k]) for k in self._MODEL_PARAM_KEYS},
-            **self._model_meta,
-        }
+    Rebuilding the NLP is the CALLER's business: adoption between cooks
+    needs no rebuild because the next Hold builds fresh, and adoption
+    during one is rate-limited elsewhere.
+    """
+    self.cfg.update({k: params[k] for k in self._MODEL_PARAM_KEYS if k in params})
+    self._model_revision += 1
+    self._model_meta = {
+        "rmse": float(rmse),
+        "samples": int(samples),
+        "band_c": [float(band_c[0]), float(band_c[1])],
+    }
 
-    def restore_model(self, snapshot):
-        from controller.model_promotion import PROMOTION_BOUNDS
 
-        if not isinstance(snapshot, dict):
+def get_model_snapshot(self):
+    if self._model_meta is None:
+        return None
+    return {
+        "version": self._MODEL_SCHEMA,
+        "revision": int(self._model_revision),
+        "params": {k: float(self.cfg[k]) for k in self._MODEL_PARAM_KEYS},
+        **self._model_meta,
+    }
+
+
+def restore_model(self, snapshot):
+    from controller.model_promotion import PROMOTION_BOUNDS
+
+    if not isinstance(snapshot, dict):
+        return False
+    if snapshot.get("version") != self._MODEL_SCHEMA:
+        return False
+    params, revision = snapshot.get("params"), snapshot.get("revision")
+    if not isinstance(params, dict) or not isinstance(revision, int):
+        return False
+    for key, (lo, hi) in PROMOTION_BOUNDS.items():
+        value = params.get(key)
+        try:
+            value = float(value)
+        except TypeError, ValueError:
             return False
-        if snapshot.get("version") != self._MODEL_SCHEMA:
+        if not (lo <= value <= hi):
             return False
-        params, revision = snapshot.get("params"), snapshot.get("revision")
-        if not isinstance(params, dict) or not isinstance(revision, int):
-            return False
-        for key, (lo, hi) in PROMOTION_BOUNDS.items():
-            value = params.get(key)
-            try:
-                value = float(value)
-            except (TypeError, ValueError):
-                return False
-            if not (lo <= value <= hi):
-                return False
-        self.cfg.update({k: float(params[k]) for k in self._MODEL_PARAM_KEYS if k in params})
-        # Continue the persisted counter rather than starting a new one: the
-        # store rejects a revision that does not advance, permanently.
-        self._model_revision = revision
-        self._model_meta = {
-            "rmse": float(snapshot.get("rmse", float("inf"))),
-            "samples": int(snapshot.get("samples", 0)),
-            "band_c": [float(v) for v in snapshot.get("band_c", (0.0, 0.0))],
-        }
-        return True
+    self.cfg.update({k: float(params[k]) for k in self._MODEL_PARAM_KEYS if k in params})
+    # Continue the persisted counter rather than starting a new one: the
+    # store rejects a revision that does not advance, permanently.
+    self._model_revision = revision
+    self._model_meta = {
+        "rmse": float(snapshot.get("rmse", float("inf"))),
+        "samples": int(snapshot.get("samples", 0)),
+        "band_c": [float(v) for v in snapshot.get("band_c", (0.0, 0.0))],
+    }
+    return True
 ```
 
 - [ ] **Step 4: Run tests — expect PASS**
@@ -1099,49 +1145,52 @@ _REFIT_MIN_SAMPLES = 120
 Add the method:
 
 ```python
-    def refit_from_cook(self, history=None):
-        """Refit the thermal model from a finished cook and judge the result."""
-        import numpy as np
+def refit_from_cook(self, history=None):
+    """Refit the thermal model from a finished cook and judge the result."""
+    import numpy as np
 
-        from controller.model_promotion import evaluate
-        from controller.update_mpc import fit_params, fit_quality
+    from controller.model_promotion import evaluate
+    from controller.update_mpc import fit_params, fit_quality
 
-        rows = list(history if history is not None else self._history)
-        if len(rows) < _REFIT_MIN_SAMPLES:
-            return _Verdict(False, f"only {len(rows)} samples; need {_REFIT_MIN_SAMPLES}")
+    rows = list(history if history is not None else self._history)
+    if len(rows) < _REFIT_MIN_SAMPLES:
+        return _Verdict(False, f"only {len(rows)} samples; need {_REFIT_MIN_SAMPLES}")
 
-        step = max(1, len(rows) // _REFIT_MAX_SAMPLES)
-        rows = rows[::step]
-        t = np.array([r[0] for r in rows], dtype=float)
-        temp = np.array([r[1] for r in rows], dtype=float)
-        Q = np.array([r[2] for r in rows], dtype=float)
-        t = t - t[0]
+    step = max(1, len(rows) // _REFIT_MAX_SAMPLES)
+    rows = rows[::step]
+    t = np.array([r[0] for r in rows], dtype=float)
+    temp = np.array([r[1] for r in rows], dtype=float)
+    Q = np.array([r[2] for r in rows], dtype=float)
+    t = t - t[0]
 
-        T_amb = float(self.cfg["T_amb"])
-        init = {k: float(self.cfg[k]) for k in ("C_f", "C_c", "h_fc", "h_amb", "K_Q", "theta")}
-        try:
-            fitted = fit_params(t, temp, Q, T_amb=T_amb, init=init,
-                                sigma=float(self.cfg["sigma"]), n_delay=int(self.cfg["n_delay"]))
-            cand_rmse, _ = fit_quality(t, temp, Q, fitted, T_amb=T_amb)
-            incumbent = {k: float(self.cfg[k]) for k in self._MODEL_PARAM_KEYS}
-            inc_rmse, _ = fit_quality(t, temp, Q, incumbent, T_amb=T_amb)
-        except (ValueError, FloatingPointError) as e:
-            return _Verdict(False, f"fit failed: {e}")
-
-        verdict = evaluate(
-            fitted, incumbent,
-            candidate_rmse=cand_rmse, incumbent_rmse=inc_rmse,
-            n_horizon=int(self.cfg["n_horizon"]), t_step=float(self.cfg["t_step"]),
+    T_amb = float(self.cfg["T_amb"])
+    init = {k: float(self.cfg[k]) for k in ("C_f", "C_c", "h_fc", "h_amb", "K_Q", "theta")}
+    try:
+        fitted = fit_params(
+            t, temp, Q, T_amb=T_amb, init=init, sigma=float(self.cfg["sigma"]), n_delay=int(self.cfg["n_delay"])
         )
-        print(f"[mpc] refit: {verdict.reason} (candidate RMSE {cand_rmse:.2f} C, "
-              f"incumbent {inc_rmse:.2f} C)")
-        if verdict.horizon_needed:
-            print(f"[mpc] refit: this model wants n_horizon >= {verdict.horizon_needed} "
-                  f"at t_step {self.cfg['t_step']:.0f} s")
-        if verdict.accepted:
-            self._adopt_model(fitted, rmse=cand_rmse, samples=len(rows),
-                              band_c=(float(temp.min()), float(temp.max())))
-        return verdict
+        cand_rmse, _ = fit_quality(t, temp, Q, fitted, T_amb=T_amb)
+        incumbent = {k: float(self.cfg[k]) for k in self._MODEL_PARAM_KEYS}
+        inc_rmse, _ = fit_quality(t, temp, Q, incumbent, T_amb=T_amb)
+    except (ValueError, FloatingPointError) as e:
+        return _Verdict(False, f"fit failed: {e}")
+
+    verdict = evaluate(
+        fitted,
+        incumbent,
+        candidate_rmse=cand_rmse,
+        incumbent_rmse=inc_rmse,
+        n_horizon=int(self.cfg["n_horizon"]),
+        t_step=float(self.cfg["t_step"]),
+    )
+    print(f"[mpc] refit: {verdict.reason} (candidate RMSE {cand_rmse:.2f} C, incumbent {inc_rmse:.2f} C)")
+    if verdict.horizon_needed:
+        print(
+            f"[mpc] refit: this model wants n_horizon >= {verdict.horizon_needed} at t_step {self.cfg['t_step']:.0f} s"
+        )
+    if verdict.accepted:
+        self._adopt_model(fitted, rmse=cand_rmse, samples=len(rows), band_c=(float(temp.min()), float(temp.max())))
+    return verdict
 ```
 
 Import the `Verdict` dataclass at the top of the module as `_Verdict`:

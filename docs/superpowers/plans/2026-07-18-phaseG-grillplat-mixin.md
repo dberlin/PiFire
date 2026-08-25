@@ -111,8 +111,15 @@ def _bare():
 def test_supported_commands_lists_all_nine():
     cmds = _bare().supported_commands([])["data"]["supported_cmds"]
     for name in (
-        "check_throttled", "check_wifi_quality", "check_cpu_temp", "supported_commands",
-        "check_alive", "scan_bluetooth", "os_info", "network_info", "hardware_info",
+        "check_throttled",
+        "check_wifi_quality",
+        "check_cpu_temp",
+        "supported_commands",
+        "check_alive",
+        "scan_bluetooth",
+        "os_info",
+        "network_info",
+        "hardware_info",
     ):
         assert name in cmds
 
@@ -126,7 +133,9 @@ def test_check_throttled_stub_all_false():
 
 def test_check_alive_ok():
     assert _bare().check_alive([]) == {
-        "result": "OK", "message": "The control script is running.", "data": {},
+        "result": "OK",
+        "message": "The control script is running.",
+        "data": {},
     }
 
 
@@ -150,8 +159,7 @@ def test_scan_bluetooth_no_devices(monkeypatch):
 
     fake_scanner = mock.Mock()
     fake_scanner.discover = _no_devices
-    monkeypatch.setitem(__import__("sys").modules, "bleak",
-                        mock.Mock(BleakScanner=fake_scanner))
+    monkeypatch.setitem(__import__("sys").modules, "bleak", mock.Mock(BleakScanner=fake_scanner))
     data = _bare().scan_bluetooth([])
     assert data["result"] == "OK"
     assert data["data"]["bt_devices"] == []
@@ -159,10 +167,13 @@ def test_scan_bluetooth_no_devices(monkeypatch):
 
 # --- KEPT simulator overrides: these MUST stay prototype-specific ---
 
+
 def test_check_wifi_quality_is_fake_constant():
     # Prototype override returns fixed simulator values (NOT get_wifi_quality()).
     assert _bare().check_wifi_quality([])["data"] == {
-        "wifi_quality_value": 60, "wifi_quality_max": 70, "wifi_quality_percentage": 80,
+        "wifi_quality_value": 60,
+        "wifi_quality_max": 70,
+        "wifi_quality_percentage": 80,
     }
 
 
@@ -208,15 +219,24 @@ def _bare():
 def test_supported_commands_lists_all_nine():
     cmds = _bare().supported_commands([])["data"]["supported_cmds"]
     for name in (
-        "check_throttled", "check_wifi_quality", "check_cpu_temp", "supported_commands",
-        "check_alive", "scan_bluetooth", "os_info", "network_info", "hardware_info",
+        "check_throttled",
+        "check_wifi_quality",
+        "check_cpu_temp",
+        "supported_commands",
+        "check_alive",
+        "scan_bluetooth",
+        "os_info",
+        "network_info",
+        "hardware_info",
     ):
         assert name in cmds
 
 
 def test_check_alive_ok():
     assert _bare().check_alive([]) == {
-        "result": "OK", "message": "The control script is running.", "data": {},
+        "result": "OK",
+        "message": "The control script is running.",
+        "data": {},
     }
 
 
@@ -253,13 +273,12 @@ def test_scan_bluetooth_no_devices(monkeypatch):
 
 # --- KEPT Pi-specific overrides: MUST stay vcgencmd/proc-based (NOT the mixin) ---
 
+
 def test_check_throttled_parses_vcgencmd(monkeypatch):
     # Under-voltage bit (0x10000) set -> WARNING. Proves the vcgencmd override,
     # not the mixin's hardcoded-False stub, is in effect. subprocess mocked:
     # no real `sudo vcgencmd` runs.
-    monkeypatch.setattr(
-        rpi.subprocess, "check_output", lambda *a, **k: b"throttled=0x10000"
-    )
+    monkeypatch.setattr(rpi.subprocess, "check_output", lambda *a, **k: b"throttled=0x10000")
     data = _bare().check_throttled([])
     assert data["result"] == "OK"
     assert data["data"]["cpu_under_voltage"] is True
@@ -267,18 +286,14 @@ def test_check_throttled_parses_vcgencmd(monkeypatch):
 
 
 def test_check_throttled_clean(monkeypatch):
-    monkeypatch.setattr(
-        rpi.subprocess, "check_output", lambda *a, **k: b"throttled=0x0"
-    )
+    monkeypatch.setattr(rpi.subprocess, "check_output", lambda *a, **k: b"throttled=0x0")
     data = _bare().check_throttled([])
     assert data["data"] == {"cpu_under_voltage": False, "cpu_throttled": False}
 
 
 def test_check_cpu_temp_parses_vcgencmd(monkeypatch):
     # Proves the vcgencmd override (not the mixin's psutil variant) is in effect.
-    monkeypatch.setattr(
-        rpi.subprocess, "check_output", lambda *a, **k: b"temp=42.0'C\n"
-    )
+    monkeypatch.setattr(rpi.subprocess, "check_output", lambda *a, **k: b"temp=42.0'C\n")
     data = _bare().check_cpu_temp([])
     assert data["result"] == "OK"
     assert data["data"]["cpu_temp"] == 42.0

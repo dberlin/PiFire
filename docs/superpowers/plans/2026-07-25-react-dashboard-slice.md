@@ -221,7 +221,7 @@ def _check_control_status():
         error = "The control process did not respond to a request and may be stopped. ..."
         if error not in errors:
             errors.append(error)
-            write_errors(errors)          # PERSISTED
+            write_errors(errors)  # PERSISTED
 ```
 
 **Why it sticks.** `common/datastore_accessors.py:126-132` — `read_errors()` is a plain, **non-destructive** JSON blob read. Compare `warnings` on the very same payload (`:163-173`), which *is* a drain (`q.list(); q.flush()`) and therefore self-heals frame to frame. The only clearer is `flush_errors()` (`:135-151`), whose **single production caller is `control.py:107-109` at boot**. There is no HTTP route, no socket action and no API command anywhere that clears the errors list.

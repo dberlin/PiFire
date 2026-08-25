@@ -541,7 +541,9 @@ def replay(seed=0, duration_s=3 * 3600, lid_open_at=2 * 3600, lid_open_for=120, 
             next_solve = t + period
             # snapshot the policy inputs BEFORE update() mutates them
             raw = core.update(_c_to_f(plant.measured()))
-            triples.append((np.asarray(core._x_hat).reshape(-1).copy(), float(core._policy_u_prev), float(core._set_point_c)))
+            triples.append(
+                (np.asarray(core._x_hat).reshape(-1).copy(), float(core._policy_u_prev), float(core._set_point_c))
+            )
             q_nlp.append(float(core._last_Q))
             in_lid.append(lid)
             ratio = min(max(float(raw["cycle_ratio"]), core.u_min), core.u_max)
@@ -586,8 +588,10 @@ def main(argv=None):
     with open(args.out, "w") as f:
         json.dump(rows, f, indent=1, sort_keys=True)
     for r in rows:
-        print(f"seed {r['seed']}: rms_all={r['rms_all']:.3f} max_all={r['max_all']:.3f} "
-              f"rms_lid={r['rms_lid']} max_lid={r['max_lid']} (Q span {r['q_span']:.0f})")
+        print(
+            f"seed {r['seed']}: rms_all={r['rms_all']:.3f} max_all={r['max_all']:.3f} "
+            f"rms_lid={r['rms_lid']} max_lid={r['max_lid']} (Q span {r['q_span']:.0f})"
+        )
 
 
 if __name__ == "__main__":
@@ -935,41 +939,44 @@ Expected: FAIL — `AttributeError: 'ControllerBase' object has no attribute 'se
 In `controller/base.py`, after `wants_async` (the last method on `ControllerBase`), add:
 
 ```python
-    def set_output(self, applied):
-        """Report the duty that actually reached the auger.
+def set_output(self, applied):
+    """Report the duty that actually reached the auger.
 
-        `applied` is a controller.applied_output.AppliedOutput. Controllers that
-        model the plant use it so their model follows the grill rather than the
-        request. A report whose `controller_commanded` is False is NOT a report
-        to discard -- the grill really did run at that duty, so it belongs in
-        the command history. What it suppresses is *identification* across the
-        interval, so no estimator computes a temperature slope over time the
-        controller did not drive.
-        """
+    `applied` is a controller.applied_output.AppliedOutput. Controllers that
+    model the plant use it so their model follows the grill rather than the
+    request. A report whose `controller_commanded` is False is NOT a report
+    to discard -- the grill really did run at that duty, so it belongs in
+    the command history. What it suppresses is *identification* across the
+    interval, so no estimator computes a temperature slope over time the
+    controller did not drive.
+    """
 
-    def get_status(self):
-        """JSON-safe diagnostics for the MQTT payload.
 
-        Return None to publish the controller's __dict__, which is the legacy
-        behavior and correct for controllers whose attributes are all scalars.
-        """
-        return None
+def get_status(self):
+    """JSON-safe diagnostics for the MQTT payload.
 
-    def get_model_snapshot(self):
-        """A JSON-encodable record of learned plant parameters, or None.
+    Return None to publish the controller's __dict__, which is the legacy
+    behavior and correct for controllers whose attributes are all scalars.
+    """
+    return None
 
-        Must carry an integer `revision` that increases whenever the model
-        changes; the store uses it to skip writes that would learn nothing.
-        """
-        return None
 
-    def restore_model(self, snapshot):
-        """Adopt a persisted snapshot. True when it was adopted.
+def get_model_snapshot(self):
+    """A JSON-encodable record of learned plant parameters, or None.
 
-        The store validates that a snapshot is a bounded, JSON-safe record; the
-        controller validates that its numbers describe a possible grill.
-        """
-        return False
+    Must carry an integer `revision` that increases whenever the model
+    changes; the store uses it to skip writes that would learn nothing.
+    """
+    return None
+
+
+def restore_model(self, snapshot):
+    """Adopt a persisted snapshot. True when it was adopted.
+
+    The store validates that a snapshot is a bounded, JSON-safe record; the
+    controller validates that its numbers describe a possible grill.
+    """
+    return False
 ```
 
 - [ ] **Step 4: Run the tests**
@@ -1110,20 +1117,23 @@ In `controller/runtime/runner.py`, inside `class ControllerRunner(ABC)`, after `
 Replace `SyncControllerRunner.controller_state` (currently `return dict(self._core.__dict__)`) with:
 
 ```python
-    def set_output(self, applied):
-        self._core.set_output(applied)
+def set_output(self, applied):
+    self._core.set_output(applied)
 
-    def get_model_snapshot(self):
-        return self._core.get_model_snapshot()
 
-    def restore_model(self, snapshot):
-        return self._core.restore_model(snapshot)
+def get_model_snapshot(self):
+    return self._core.get_model_snapshot()
 
-    def controller_state(self):
-        status = self._core.get_status()
-        if status is None:
-            return dict(self._core.__dict__)
-        return status
+
+def restore_model(self, snapshot):
+    return self._core.restore_model(snapshot)
+
+
+def controller_state(self):
+    status = self._core.get_status()
+    if status is None:
+        return dict(self._core.__dict__)
+    return status
 ```
 
 - [ ] **Step 5: Run the runtime tests**
@@ -1401,26 +1411,28 @@ Note the ordering: core swap, then restore, then target, then applied outputs, t
 Beside `controller_state`, add:
 
 ```python
-    def set_output(self, applied):
-        with self._lock:
-            self._pending_outputs.append(applied)
+def set_output(self, applied):
+    with self._lock:
+        self._pending_outputs.append(applied)
 
-    def get_model_snapshot(self):
-        with self._lock:
-            return self._model_snapshot
 
-    def restore_model(self, snapshot):
-        """Queue a snapshot for the worker to adopt.
+def get_model_snapshot(self):
+    with self._lock:
+        return self._model_snapshot
 
-        True means accepted for restore, not adopted: the core is mutated only
-        on the worker thread, so the adoption result is not knowable here. It
-        surfaces in get_status().
-        """
-        if snapshot is None:
-            return False
-        with self._lock:
-            self._pending_restore = snapshot
-        return True
+
+def restore_model(self, snapshot):
+    """Queue a snapshot for the worker to adopt.
+
+    True means accepted for restore, not adopted: the core is mutated only
+    on the worker thread, so the adoption result is not knowable here. It
+    surfaces in get_status().
+    """
+    if snapshot is None:
+        return False
+    with self._lock:
+        self._pending_restore = snapshot
+    return True
 ```
 
 `controller_state()` needs no change — `_state_snapshot` now already holds `get_status()` output when there is any.
@@ -1477,7 +1489,11 @@ def test_on_manual_output_is_called_with_the_change_and_output(hold_mode_factory
     control["manual"]["output"] = True
     mode.settings["safety"]["allow_manual_changes"] = True
 
-    mode._apply_manual_overrides(control, now=100.0, current_output_status={"auger": False, "fan": False, "igniter": False, "power": False, "pwm": 100})
+    mode._apply_manual_overrides(
+        control,
+        now=100.0,
+        current_output_status={"auger": False, "fan": False, "igniter": False, "power": False, "pwm": 100},
+    )
 
     assert seen == [("auger", True)]
     # and the reset still happened afterwards
@@ -1491,7 +1507,11 @@ def test_on_manual_output_is_not_called_when_no_change_is_pending(hold_mode_fact
     control = mode.control
     control["manual"]["change"] = False
 
-    mode._apply_manual_overrides(control, now=100.0, current_output_status={"auger": False, "fan": False, "igniter": False, "power": False, "pwm": 100})
+    mode._apply_manual_overrides(
+        control,
+        now=100.0,
+        current_output_status={"auger": False, "fan": False, "igniter": False, "power": False, "pwm": 100},
+    )
 
     assert seen == []
 
@@ -1576,18 +1596,21 @@ In `tests/fakes/runner.py`, add to `__init__`:
 and add the three forwards beside `stop`:
 
 ```python
-    def set_output(self, applied):
-        self.applied.append(applied)
+def set_output(self, applied):
+    self.applied.append(applied)
 
-    def get_model_snapshot(self):
-        return self.snapshot
 
-    def restore_model(self, snapshot):
-        self.restored.append(snapshot)
-        return snapshot is not None
+def get_model_snapshot(self):
+    return self.snapshot
 
-    def controller_state(self):
-        return {"fake": True}
+
+def restore_model(self, snapshot):
+    self.restored.append(snapshot)
+    return snapshot is not None
+
+
+def controller_state(self):
+    return {"fake": True}
 ```
 
 Without these, every existing Hold golden test raises `AttributeError` the moment Hold starts reporting.
@@ -1628,9 +1651,7 @@ def hold_cycle(monkeypatch):
         settings["cycle_data"].update(cycle_data_extra or {})
         control_data = base_control(mode="Hold")
         control_data["primary_setpoint"] = 225
-        ctx, _grill, _notifier = make_ctx(
-            settings, control_data, base_pellet_db(), FakeProbes().script([225] * 200)
-        )
+        ctx, _grill, _notifier = make_ctx(settings, control_data, base_pellet_db(), FakeProbes().script([225] * 200))
         monkeypatch.setattr(controller_runtime_runner, "build_runner", lambda *a, **k: (runner, "Active"))
         mode = HoldMode(ctx, WorkCycleState())
         mode.settings = settings
@@ -2072,7 +2093,11 @@ def test_reads_are_fail_closed_on_a_bad_envelope(raw):
 
 def test_a_bad_member_does_not_poison_a_good_one():
     fake = _FakeStore(
-        {MODEL_STATE_KEY: json.dumps({"version": SCHEMA_VERSION, "models": {"pid_sp": FOPDT, "mpc": {"no": "revision"}}})}
+        {
+            MODEL_STATE_KEY: json.dumps(
+                {"version": SCHEMA_VERSION, "models": {"pid_sp": FOPDT, "mpc": {"no": "revision"}}}
+            )
+        }
     )
     store = ControllerModelStore(reader=fake.read, writer=fake.write)
     assert store.load("pid_sp") == FOPDT
@@ -2590,9 +2615,7 @@ def test_the_net_sees_the_applied_input_clamped_to_its_trained_span(mpc_controll
     if mpc_controller._net is None:
         pytest.skip("net policy not loaded")
     seen = []
-    monkeypatch.setattr(
-        mpc_controller._net, "firing_rate", lambda x, u_prev, sp: (seen.append(u_prev), 50.0)[1]
-    )
+    monkeypatch.setattr(mpc_controller._net, "firing_rate", lambda x, u_prev, sp: (seen.append(u_prev), 50.0)[1])
     mpc_controller.set_target(225.0)
     mpc_controller.set_output(AppliedOutput(0.0, OutputSource.LID_OPEN, 1.0))
     mpc_controller.update(200.0)

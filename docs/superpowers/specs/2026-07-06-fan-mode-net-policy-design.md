@@ -58,7 +58,7 @@ def net_path_for(base_path, enable_fan):
     if not enable_fan:
         return base_path
     root, ext = os.path.splitext(base_path)
-    return f'{root}_fan{ext}'
+    return f"{root}_fan{ext}"
 ```
 
 No settings.json / wizard schema change; the existing fan-off file stays valid.

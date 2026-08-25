@@ -630,21 +630,19 @@ class TestAdafruitADS:
 Then move each test method in, adding the three parametrize arguments to its signature and threading them through `_load`. For example, the first one becomes:
 
 ```python
-    def test_read_all_ports_maps_known_adc_voltage_to_temperature(
-        self, monkeypatch, module_name, chip_module, chip_class
-    ):
-        # 1.5V -> AnalogIn.voltage -> math.floor(1.5*1000) = 1500mV, matching
-        # the reference case computed in test_base.py.
-        probe = self._load(monkeypatch, module_name, chip_module, chip_class, {0: 1.5, 1: 1.5, 2: 1.5})
-        probe_info = _probe_info([("ADC0", "Probe1", "Primary"), ("ADC1", "Probe2", "Food"), ("ADC2", "Probe3", "Aux")])
-        obj = probe.ReadProbes(probe_info, _device_info(), "F")
+def test_read_all_ports_maps_known_adc_voltage_to_temperature(self, monkeypatch, module_name, chip_module, chip_class):
+    # 1.5V -> AnalogIn.voltage -> math.floor(1.5*1000) = 1500mV, matching
+    # the reference case computed in test_base.py.
+    probe = self._load(monkeypatch, module_name, chip_module, chip_class, {0: 1.5, 1: 1.5, 2: 1.5})
+    probe_info = _probe_info([("ADC0", "Probe1", "Primary"), ("ADC1", "Probe2", "Food"), ("ADC2", "Probe3", "Aux")])
+    obj = probe.ReadProbes(probe_info, _device_info(), "F")
 
-        result = obj.read_all_ports(obj.output_data)
+    result = obj.read_all_ports(obj.output_data)
 
-        assert result["primary"]["Probe1"] == pytest.approx(EXPECTED_TEMP_F, abs=1e-6)
-        assert result["tr"]["Probe1"] == EXPECTED_TR
-        assert result["food"]["Probe2"] == pytest.approx(EXPECTED_TEMP_F, abs=1e-6)
-        assert result["aux"]["Probe3"] == pytest.approx(EXPECTED_TEMP_F, abs=1e-6)
+    assert result["primary"]["Probe1"] == pytest.approx(EXPECTED_TEMP_F, abs=1e-6)
+    assert result["tr"]["Probe1"] == EXPECTED_TR
+    assert result["food"]["Probe2"] == pytest.approx(EXPECTED_TEMP_F, abs=1e-6)
+    assert result["aux"]["Probe3"] == pytest.approx(EXPECTED_TEMP_F, abs=1e-6)
 ```
 
 Carry over the remaining methods the same way: `test_read_voltage_error_returns_zero`, `test_adsdevice_opens_bus_via_factory`, `test_init_device_defaults`, `test_init_device_failure_logs_and_reraises`. Copy each body verbatim from the ADS1115 class.
@@ -1405,10 +1403,20 @@ def test_publish_topic_and_payload(patched_client, topic_suffix, payload):
 @pytest.mark.parametrize(
     ("group", "reading", "key", "expected"),
     [
-        ("pid", {"u_max": 0.5}, "u_max", {"unit_of_measurement": "%", "value_template": "{{ value_json.u_max | round(2)}}"}),
+        (
+            "pid",
+            {"u_max": 0.5},
+            "u_max",
+            {"unit_of_measurement": "%", "value_template": "{{ value_json.u_max | round(2)}}"},
+        ),
         ("system", {"cpu_temp": 45.2}, "cpu_temp", {"device_class": "temperature", "unit_of_measurement": "°C"}),
         # Uses the global units setting, which the handler fixture pins to F.
-        ("control", {"primary_setpoint": 225}, "primary_setpoint", {"device_class": "temperature", "unit_of_measurement": "°F"}),
+        (
+            "control",
+            {"primary_setpoint": 225},
+            "primary_setpoint",
+            {"device_class": "temperature", "unit_of_measurement": "°F"},
+        ),
     ],
 )
 def test_autodiscover_fields(patched_client, group, reading, key, expected):
@@ -1900,11 +1908,7 @@ ALLOWLIST: set[tuple[str, str]] = {
 
 def test_no_duplicate_test_bodies():
     groups = find_duplicate_test_bodies(ROOT)
-    offenders = [
-        group
-        for group in groups
-        if not all((path, name) in ALLOWLIST for path, _line, name in group.members)
-    ]
+    offenders = [group for group in groups if not all((path, name) in ALLOWLIST for path, _line, name in group.members)]
 
     assert offenders == [], "\n".join(
         f"{group.line_count} identical lines:\n"
@@ -1950,11 +1954,7 @@ class DuplicateGroup:
 
 
 def _is_docstring(node: ast.stmt) -> bool:
-    return (
-        isinstance(node, ast.Expr)
-        and isinstance(node.value, ast.Constant)
-        and isinstance(node.value.value, str)
-    )
+    return isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
 
 
 def _digest(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:

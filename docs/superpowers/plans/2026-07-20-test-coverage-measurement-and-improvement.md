@@ -110,23 +110,40 @@ import json, sys
 
 # Risk weights: safety/control/hardware-command code first, then web, then rendering, then pure helpers.
 RISK = [
-    ("controller/", 5), ("common/api_commands", 5), ("grillplat/", 5),
-    ("notify/", 4), ("common/", 3), ("blueprints/", 3), ("probes/", 3),
-    ("file_mgmt/", 3), ("display/", 2),
+    ("controller/", 5),
+    ("common/api_commands", 5),
+    ("grillplat/", 5),
+    ("notify/", 4),
+    ("common/", 3),
+    ("blueprints/", 3),
+    ("probes/", 3),
+    ("file_mgmt/", 3),
+    ("display/", 2),
 ]
+
+
 def weight(path):
     for prefix, w in RISK:
         if prefix in path:
             return w
     return 1
 
+
 data = json.load(open(sys.argv[1] if len(sys.argv) > 1 else "coverage.json"))
 rows = []
 for path, f in data["files"].items():
     s = f["summary"]
     missing = s.get("missing_lines", 0) + s.get("missing_branches", 0)
-    rows.append((weight(path) * missing, weight(path), path, s["percent_covered"],
-                 s.get("missing_lines", 0), s.get("missing_branches", 0)))
+    rows.append(
+        (
+            weight(path) * missing,
+            weight(path),
+            path,
+            s["percent_covered"],
+            s.get("missing_lines", 0),
+            s.get("missing_branches", 0),
+        )
+    )
 rows.sort(reverse=True)
 print("| Rank | File | Risk | Line% | Missing lines | Missing branches | Score |")
 print("|---|---|---|---|---|---|---|")
@@ -176,20 +193,25 @@ Target a real behavior, not a line count. Example — `_resize_image` downsizes 
 from PIL import Image
 import io, os, tempfile
 
+
 def _png(w, h):
     p = os.path.join(tempfile.mkdtemp(prefix="cov-"), "a.png")
     Image.new("RGB", (w, h), "red").save(p)
     return p
 
+
 def test_resize_image_downsizes_when_larger_than_max():
     from file_mgmt.media import _resize_image  # adjust to the real signature from Step 1
+
     path = _png(2000, 1500)
     _resize_image(os.path.dirname(path), "a", "png", max_size=(800, 600))
     with Image.open(path) as im:
         assert im.width <= 800 and im.height <= 600
 
+
 def test_resize_image_leaves_small_image_untouched():
     from file_mgmt.media import _resize_image
+
     path = _png(400, 300)
     _resize_image(os.path.dirname(path), "a", "png", max_size=(800, 600))
     with Image.open(path) as im:

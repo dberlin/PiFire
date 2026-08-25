@@ -87,6 +87,7 @@ class MpcStep:
     allocation: AllocationResult
     baseline_allocation: AllocationResult
 
+
 class MpcCore:
     def set_target(self, set_point: float) -> None: ...
     def set_output(self, applied: AppliedOutput) -> None: ...
@@ -139,7 +140,9 @@ Describe: `refactor(mpc): extract numerical control core`.
 class OwnedMpcPair:
     core: MpcCore
     descriptor: GreyControlPairDescriptor
+
     def close(self) -> None: ...
+
 
 class MpcPairFactory:
     def build(self, configuration, *, authorized: bool) -> OwnedMpcPair: ...

@@ -2133,7 +2133,7 @@ def _migrate_pellets_to_v2(pelletdb: dict) -> bool:
         raw = profile.get("rating")
         try:
             rating = int(raw)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             rating = 1
         rating = max(1, min(5, rating))
         if rating != raw:
@@ -2149,7 +2149,7 @@ def _migrate_pellets_to_v2(pelletdb: dict) -> bool:
         for key in sorted(log):
             try:
                 stamp = int(datetime.strptime(key, "%Y-%m-%d %H:%M:%S").timestamp() * 1000)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 write_log(f"pelletdb: dropped log entry with unreadable timestamp '{key}'")
                 continue
             while str(stamp) in migrated:
@@ -2375,7 +2375,7 @@ def _validated_rating(action_data):
     """The rating as an int in 1..5, or None if the request did not carry one."""
     try:
         rating = int(action_data["rating"])
-    except (KeyError, TypeError, ValueError):
+    except KeyError, TypeError, ValueError:
         return None
     return rating if 1 <= rating <= 5 else None
 ```

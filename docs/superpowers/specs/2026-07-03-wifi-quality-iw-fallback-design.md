@@ -46,13 +46,13 @@ importable as `from common import get_wifi_quality`.
   - On success builds the existing return shape:
     ```python
     {
-      'result': 'OK',
-      'message': 'Successfully obtained wifi quality data.',
-      'data': {
-        'wifi_quality_value': value,
-        'wifi_quality_max': maximum,
-        'wifi_quality_percentage': round(value / maximum * 100, 2),
-      },
+        "result": "OK",
+        "message": "Successfully obtained wifi quality data.",
+        "data": {
+            "wifi_quality_value": value,
+            "wifi_quality_max": maximum,
+            "wifi_quality_percentage": round(value / maximum * 100, 2),
+        },
     }
     ```
   - On total failure returns the unchanged

@@ -329,24 +329,22 @@ In `blueprints/api_tuner/routes.py`, add `flush_autotune` to the
 control write:
 
 ```python
-    if body["open"]:
-        refusal = require_tunable()
-        if refusal:
-            return refusal
-        control = read_control()
-        moved = control.get("mode") == Mode.STOP
-        values = {"tuning_mode": True}
-        if moved:
-            values.update({"mode": Mode.MONITOR, "updated": True})
-        set_control(**values)
-        #  Start every tuning session from an empty autotune store. Flask
-        #  flushed on the first auto-status poll -- the moment it enabled tuning
-        #  mode -- which is this call now. Manual tuning never reads this queue,
-        #  so the flush is a no-op there.
-        flush_autotune()
-        return jsonify(
-            api_response("OK", None, {"open": True, "mode": Mode.MONITOR, "restored": moved})
-        ), 200
+if body["open"]:
+    refusal = require_tunable()
+    if refusal:
+        return refusal
+    control = read_control()
+    moved = control.get("mode") == Mode.STOP
+    values = {"tuning_mode": True}
+    if moved:
+        values.update({"mode": Mode.MONITOR, "updated": True})
+    set_control(**values)
+    #  Start every tuning session from an empty autotune store. Flask
+    #  flushed on the first auto-status poll -- the moment it enabled tuning
+    #  mode -- which is this call now. Manual tuning never reads this queue,
+    #  so the flush is a no-op there.
+    flush_autotune()
+    return jsonify(api_response("OK", None, {"open": True, "mode": Mode.MONITOR, "restored": moved})), 200
 ```
 
 - [ ] **Step 5: Run the tests**
@@ -448,9 +446,7 @@ def test_auto_status_reports_null_for_a_probe_that_is_not_reporting(ds, client):
     seed_tr({"Grill": 41000})
     seed_current({"P": {}, "F": {}, "AUX": {}})
 
-    data = client.post(
-        "/api/tuner/auto-status", json={"probe": "Grill", "reference": "Missing"}
-    ).get_json()["data"]
+    data = client.post("/api/tuner/auto-status", json={"probe": "Grill", "reference": "Missing"}).get_json()["data"]
     assert data["current_tr"] == 41000
     assert data["current_temp"] is None
     assert read_autotune() == [], "a sample was recorded from a missing reference"
@@ -462,9 +458,7 @@ def test_auto_status_finds_the_reference_in_F_and_AUX_too(ds, client):
     flush_autotune()
     seed_tr({"Grill": 41000})
     seed_current({"P": {}, "F": {"Food1": 160}, "AUX": {}})
-    data = client.post(
-        "/api/tuner/auto-status", json={"probe": "Grill", "reference": "Food1"}
-    ).get_json()["data"]
+    data = client.post("/api/tuner/auto-status", json={"probe": "Grill", "reference": "Food1"}).get_json()["data"]
     assert data["current_temp"] == 160
 
 
@@ -481,9 +475,7 @@ def test_auto_status_becomes_ready_once_the_spread_is_wide_enough(ds, client):
     for i in range(12):
         write_autotune({"ref_T": 100 + i * 13, "probe_Tr": 40000 - i * 3000})
 
-    data = client.post(
-        "/api/tuner/auto-status", json={"probe": "Grill", "reference": "Ref"}
-    ).get_json()["data"]
+    data = client.post("/api/tuner/auto-status", json={"probe": "Grill", "reference": "Ref"}).get_json()["data"]
     assert data["ready"] is True
     assert data["high_temp"] > data["low_temp"]
     assert data["high_temp"] - data["low_temp"] >= 50

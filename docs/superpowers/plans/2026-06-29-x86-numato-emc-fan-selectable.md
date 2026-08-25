@@ -45,93 +45,93 @@ import pytest
 
 
 class FakeI2C:
-	"""In-memory stand-in for an Adafruit I2CDevice: stores a register map and
-	honors the context-manager + write / write_then_readinto protocol the driver
-	uses."""
+    """In-memory stand-in for an Adafruit I2CDevice: stores a register map and
+    honors the context-manager + write / write_then_readinto protocol the driver
+    uses."""
 
-	def __init__(self):
-		self.registers = {}
+    def __init__(self):
+        self.registers = {}
 
-	def __enter__(self):
-		return self
+    def __enter__(self):
+        return self
 
-	def __exit__(self, *exc):
-		return False
+    def __exit__(self, *exc):
+        return False
 
-	def write(self, data):
-		# Register writes are two bytes: [register, value].
-		if len(data) == 2:
-			self.registers[data[0]] = data[1]
+    def write(self, data):
+        # Register writes are two bytes: [register, value].
+        if len(data) == 2:
+            self.registers[data[0]] = data[1]
 
-	def write_then_readinto(self, out_buf, in_buf):
-		in_buf[0] = self.registers.get(out_buf[0], 0)
+    def write_then_readinto(self, out_buf, in_buf):
+        in_buf[0] = self.registers.get(out_buf[0], 0)
 
 
 def _build_emc(seed=None):
-	"""Construct an EMC2301 with a FakeI2C, optionally pre-seeding registers
-	before __init__ runs. Returns (emc, fake)."""
-	import grillplat.emc2301 as mod
+    """Construct an EMC2301 with a FakeI2C, optionally pre-seeding registers
+    before __init__ runs. Returns (emc, fake)."""
+    import grillplat.emc2301 as mod
 
-	fake = FakeI2C()
-	if seed:
-		fake.registers.update(seed)
-	with mock.patch.object(mod, 'I2CDevice', return_value=fake):
-		emc = mod.EMC2301(object(), address=0x2F)
-	return emc, fake
+    fake = FakeI2C()
+    if seed:
+        fake.registers.update(seed)
+    with mock.patch.object(mod, "I2CDevice", return_value=fake):
+        emc = mod.EMC2301(object(), address=0x2F)
+    return emc, fake
 
 
 def test_init_disables_timeout_and_continuous_watchdog():
-	_, fake = _build_emc()
-	# DIS_TO (bit6) set, WD_EN (bit5) clear.
-	assert fake.registers[0x20] & 0x40 == 0x40
-	assert fake.registers[0x20] & 0x20 == 0x00
+    _, fake = _build_emc()
+    # DIS_TO (bit6) set, WD_EN (bit5) clear.
+    assert fake.registers[0x20] & 0x40 == 0x40
+    assert fake.registers[0x20] & 0x20 == 0x00
 
 
 def test_init_preserves_other_config_bits():
-	# 0xAA has unrelated bits set; init must keep them, set DIS_TO, clear WD_EN.
-	_, fake = _build_emc(seed={0x20: 0xAA})
-	assert fake.registers[0x20] == 0xCA
+    # 0xAA has unrelated bits set; init must keep them, set DIS_TO, clear WD_EN.
+    _, fake = _build_emc(seed={0x20: 0xAA})
+    assert fake.registers[0x20] == 0xCA
 
 
 def test_init_sets_26khz_base_divide_one_and_fan_off():
-	_, fake = _build_emc()
-	assert fake.registers[0x2D] == 0x00  # 26 kHz base
-	assert fake.registers[0x31] == 0x01  # divide by 1
-	assert fake.registers[0x30] == 0x00  # fan stopped
+    _, fake = _build_emc()
+    assert fake.registers[0x2D] == 0x00  # 26 kHz base
+    assert fake.registers[0x31] == 0x01  # divide by 1
+    assert fake.registers[0x30] == 0x00  # fan stopped
 
 
 def test_manual_fan_speed_sets_fan_register():
-	emc, fake = _build_emc()
-	emc.manual_fan_speed = 100
-	assert fake.registers[0x30] == 255
-	emc.manual_fan_speed = 20
-	assert fake.registers[0x30] == 51
-	emc.manual_fan_speed = 0
-	assert fake.registers[0x30] == 0
+    emc, fake = _build_emc()
+    emc.manual_fan_speed = 100
+    assert fake.registers[0x30] == 255
+    emc.manual_fan_speed = 20
+    assert fake.registers[0x30] == 51
+    emc.manual_fan_speed = 0
+    assert fake.registers[0x30] == 0
 
 
 def test_manual_fan_speed_reads_back_percent():
-	emc, fake = _build_emc()
-	fake.registers[0x30] = 255
-	assert emc.manual_fan_speed == 100.0
-	fake.registers[0x30] = 51
-	assert emc.manual_fan_speed == 20.0
+    emc, fake = _build_emc()
+    fake.registers[0x30] = 255
+    assert emc.manual_fan_speed == 100.0
+    fake.registers[0x30] = 51
+    assert emc.manual_fan_speed == 20.0
 
 
 def test_manual_fan_speed_out_of_range_raises():
-	emc, _ = _build_emc()
-	with pytest.raises(ValueError):
-		emc.manual_fan_speed = 150
-	with pytest.raises(ValueError):
-		emc.manual_fan_speed = -1
+    emc, _ = _build_emc()
+    with pytest.raises(ValueError):
+        emc.manual_fan_speed = 150
+    with pytest.raises(ValueError):
+        emc.manual_fan_speed = -1
 
 
 def test_pwm_frequency_maps_to_nearest_base():
-	emc, fake = _build_emc()
-	emc.pwm_frequency = 25000  # nearest selectable base is 26 kHz
-	assert fake.registers[0x2D] == 0x00
-	assert fake.registers[0x31] == 0x01
-	assert emc.pwm_frequency == 26000.0
+    emc, fake = _build_emc()
+    emc.pwm_frequency = 25000  # nearest selectable base is 26 kHz
+    assert fake.registers[0x2D] == 0x00
+    assert fake.registers[0x31] == 0x01
+    assert emc.pwm_frequency == 26000.0
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -178,53 +178,53 @@ _MAX_DUTY = 0xFF
 
 
 class EMC2301:
-	def __init__(self, i2c_bus, address=_DEFAULT_ADDRESS):
-		self.i2c_device = I2CDevice(i2c_bus, address)
-		# Disable the SMBus timeout (DIS_TO=1) and keep the watchdog out of
-		# continuous mode (WD_EN=0) so the fan is never force-ramped to full
-		# speed during quiet periods; preserve the other config bits.
-		config = self._read_register(_REG_CONFIG)
-		config |= _CONFIG_DIS_TO
-		config &= ~_CONFIG_WD_EN
-		self._write_register(_REG_CONFIG, config)
-		# Known 26 kHz output: 26 kHz base, divide by 1. Fan stopped.
-		self._write_register(_REG_PWM_BASE_FREQ, _BASE_FREQS[26000])
-		self._write_register(_REG_PWM_DIVIDE, 0x01)
-		self._write_register(_REG_FAN_SETTING, 0x00)
+    def __init__(self, i2c_bus, address=_DEFAULT_ADDRESS):
+        self.i2c_device = I2CDevice(i2c_bus, address)
+        # Disable the SMBus timeout (DIS_TO=1) and keep the watchdog out of
+        # continuous mode (WD_EN=0) so the fan is never force-ramped to full
+        # speed during quiet periods; preserve the other config bits.
+        config = self._read_register(_REG_CONFIG)
+        config |= _CONFIG_DIS_TO
+        config &= ~_CONFIG_WD_EN
+        self._write_register(_REG_CONFIG, config)
+        # Known 26 kHz output: 26 kHz base, divide by 1. Fan stopped.
+        self._write_register(_REG_PWM_BASE_FREQ, _BASE_FREQS[26000])
+        self._write_register(_REG_PWM_DIVIDE, 0x01)
+        self._write_register(_REG_FAN_SETTING, 0x00)
 
-	def _read_register(self, register):
-		result = bytearray(1)
-		with self.i2c_device as i2c:
-			i2c.write_then_readinto(bytes([register]), result)
-		return result[0]
+    def _read_register(self, register):
+        result = bytearray(1)
+        with self.i2c_device as i2c:
+            i2c.write_then_readinto(bytes([register]), result)
+        return result[0]
 
-	def _write_register(self, register, value):
-		with self.i2c_device as i2c:
-			i2c.write(bytes([register, value & 0xFF]))
+    def _write_register(self, register, value):
+        with self.i2c_device as i2c:
+            i2c.write(bytes([register, value & 0xFF]))
 
-	@property
-	def manual_fan_speed(self):
-		raw = self._read_register(_REG_FAN_SETTING)
-		return (raw / _MAX_DUTY) * 100.0
+    @property
+    def manual_fan_speed(self):
+        raw = self._read_register(_REG_FAN_SETTING)
+        return (raw / _MAX_DUTY) * 100.0
 
-	@manual_fan_speed.setter
-	def manual_fan_speed(self, percent):
-		if not 0 <= percent <= 100:
-			raise ValueError('manual_fan_speed must be from 0-100')
-		self._write_register(_REG_FAN_SETTING, round((percent / 100.0) * _MAX_DUTY))
+    @manual_fan_speed.setter
+    def manual_fan_speed(self, percent):
+        if not 0 <= percent <= 100:
+            raise ValueError("manual_fan_speed must be from 0-100")
+        self._write_register(_REG_FAN_SETTING, round((percent / 100.0) * _MAX_DUTY))
 
-	@property
-	def pwm_frequency(self):
-		base_value = self._read_register(_REG_PWM_BASE_FREQ) & 0x03
-		divide = self._read_register(_REG_PWM_DIVIDE) or 1
-		base_hz = _BASE_VALUE_TO_HZ.get(base_value, 26000)
-		return base_hz / divide
+    @property
+    def pwm_frequency(self):
+        base_value = self._read_register(_REG_PWM_BASE_FREQ) & 0x03
+        divide = self._read_register(_REG_PWM_DIVIDE) or 1
+        base_hz = _BASE_VALUE_TO_HZ.get(base_value, 26000)
+        return base_hz / divide
 
-	@pwm_frequency.setter
-	def pwm_frequency(self, hz):
-		nearest = min(_BASE_FREQS, key=lambda base: abs(base - hz))
-		self._write_register(_REG_PWM_BASE_FREQ, _BASE_FREQS[nearest])
-		self._write_register(_REG_PWM_DIVIDE, 0x01)
+    @pwm_frequency.setter
+    def pwm_frequency(self, hz):
+        nearest = min(_BASE_FREQS, key=lambda base: abs(base - hz))
+        self._write_register(_REG_PWM_BASE_FREQ, _BASE_FREQS[nearest])
+        self._write_register(_REG_PWM_DIVIDE, 0x01)
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -279,16 +279,16 @@ In `tests/test_x86_manifest.py`, also update the entry key and filename assertio
 
 ```python
 def test_x86_platform_entry_present():
-	manifest = _manifest()
-	entry = manifest['modules']['grillplatform']['x86_numato']
-	assert entry['filename'] == 'x86_numato'
-	assert 'adafruit-circuitpython-emc2101' in entry['py_dependencies']
+    manifest = _manifest()
+    entry = manifest["modules"]["grillplatform"]["x86_numato"]
+    assert entry["filename"] == "x86_numato"
+    assert "adafruit-circuitpython-emc2101" in entry["py_dependencies"]
 ```
 
 And in `test_x86_platform_settings_dependencies`, change the lookup key:
 
 ```python
-	deps = manifest['modules']['grillplatform']['x86_numato']['settings_dependencies']
+deps = manifest["modules"]["grillplatform"]["x86_numato"]["settings_dependencies"]
 ```
 
 - [ ] **Step 3: Update wizard.py**
@@ -355,44 +355,44 @@ import pytest
 
 
 def _build(chip):
-	"""Build the platform with hardware mocked. chip=None means no
-	fan_controller config at all, exercising the default."""
-	import grillplat.x86_numato as mod
+    """Build the platform with hardware mocked. chip=None means no
+    fan_controller config at all, exercising the default."""
+    import grillplat.x86_numato as mod
 
-	with (
-		mock.patch.object(mod, 'NumatoUSBRelay'),
-		mock.patch.object(mod, 'EMC2101_LUT') as emc2101_lut,
-		mock.patch.object(mod, 'EMC2301') as emc2301,
-		mock.patch.object(mod, 'ExtendedI2C'),
-		mock.patch.object(mod, 'busio'),
-		mock.patch.object(mod, 'board'),
-		mock.patch.object(mod, 'find_i2c_bus', return_value=7),
-	):
-		config = {} if chip is None else {'fan_controller': {'chip': chip}}
-		platform = mod.GrillPlatform(config)
-		return platform, emc2101_lut, emc2301
+    with (
+        mock.patch.object(mod, "NumatoUSBRelay"),
+        mock.patch.object(mod, "EMC2101_LUT") as emc2101_lut,
+        mock.patch.object(mod, "EMC2301") as emc2301,
+        mock.patch.object(mod, "ExtendedI2C"),
+        mock.patch.object(mod, "busio"),
+        mock.patch.object(mod, "board"),
+        mock.patch.object(mod, "find_i2c_bus", return_value=7),
+    ):
+        config = {} if chip is None else {"fan_controller": {"chip": chip}}
+        platform = mod.GrillPlatform(config)
+        return platform, emc2101_lut, emc2301
 
 
 def test_emc2101_is_default_chip():
-	# No fan_controller config -> EMC2101 by default.
-	platform, emc2101_lut, emc2301 = _build(None)
-	emc2101_lut.assert_called_once()
-	emc2301.assert_not_called()
-	assert platform.chip == 'emc2101'
+    # No fan_controller config -> EMC2101 by default.
+    platform, emc2101_lut, emc2301 = _build(None)
+    emc2101_lut.assert_called_once()
+    emc2301.assert_not_called()
+    assert platform.chip == "emc2101"
 
 
 def test_emc2301_selected_with_default_address():
-	platform, emc2101_lut, emc2301 = _build('emc2301')
-	emc2301.assert_called_once()
-	# Default EMC2301 address is 0x2F when none configured.
-	assert emc2301.call_args.kwargs['address'] == 0x2F
-	emc2101_lut.assert_not_called()
-	assert platform.chip == 'emc2301'
+    platform, emc2101_lut, emc2301 = _build("emc2301")
+    emc2301.assert_called_once()
+    # Default EMC2301 address is 0x2F when none configured.
+    assert emc2301.call_args.kwargs["address"] == 0x2F
+    emc2101_lut.assert_not_called()
+    assert platform.chip == "emc2301"
 
 
 def test_emc2101_default_address_is_0x4c():
-	platform, _, _ = _build('emc2101')
-	assert platform.emc_address == 0x4C
+    platform, _, _ = _build("emc2101")
+    assert platform.emc_address == 0x4C
 ```
 
 Update the six existing x86 test files: change every `mock.patch.object(mod, 'EMC2101')` to `mock.patch.object(mod, 'EMC2101_LUT')`, and add `mock.patch.object(mod, 'EMC2301')` to each `with` block so the symbol exists. In `tests/test_x86_outputs.py` rename the captured `emc_cls = ...` accordingly:
@@ -408,20 +408,20 @@ In `tests/test_x86_bus_discovery.py`, the `_build_platform` helper must wrap con
 
 ```python
 def _build_platform(fan_cfg):
-	import grillplat.x86_numato as mod
+    import grillplat.x86_numato as mod
 
-	with (
-		mock.patch.object(mod, 'NumatoUSBRelay'),
-		mock.patch.object(mod, 'EMC2101_LUT'),
-		mock.patch.object(mod, 'EMC2301'),
-		mock.patch.object(mod, 'ExtendedI2C') as extended_i2c,
-		mock.patch.object(mod, 'busio') as busio,
-		mock.patch.object(mod, 'board') as board,
-		mock.patch.object(mod, 'find_i2c_bus', return_value=7) as find_bus,
-	):
-		config = {} if fan_cfg is None else {'fan_controller': fan_cfg}
-		platform = mod.GrillPlatform(config)
-		return platform, extended_i2c, busio, board, find_bus
+    with (
+        mock.patch.object(mod, "NumatoUSBRelay"),
+        mock.patch.object(mod, "EMC2101_LUT"),
+        mock.patch.object(mod, "EMC2301"),
+        mock.patch.object(mod, "ExtendedI2C") as extended_i2c,
+        mock.patch.object(mod, "busio") as busio,
+        mock.patch.object(mod, "board") as board,
+        mock.patch.object(mod, "find_i2c_bus", return_value=7) as find_bus,
+    ):
+        config = {} if fan_cfg is None else {"fan_controller": fan_cfg}
+        platform = mod.GrillPlatform(config)
+        return platform, extended_i2c, busio, board, find_bus
 ```
 
 (The five bus-selection test bodies in that file already pass their dicts through `_build_platform`; they now describe the `fan_controller` group. The `find_i2c_bus` unit tests at the bottom are unaffected.)
@@ -450,62 +450,62 @@ from grillplat.emc2301 import EMC2301
 Replace the block that currently reads the `emc2101` config and opens the chip (from `emc_cfg = config.get('emc2101', {}) or {}` through `self.emc = EMC2101(i2c)`) with:
 
 ```python
-		fan_cfg = config.get('fan_controller', {}) or {}
-		self.chip = str(fan_cfg.get('chip', 'emc2101')).lower()
+fan_cfg = config.get("fan_controller", {}) or {}
+self.chip = str(fan_cfg.get("chip", "emc2101")).lower()
 
-		# I2C bus selection, matching the probe drivers' basic/extended scheme:
-		#   'basic'    -> the board's integrated I2C bus (board.SCL/SDA)
-		#   'extended' -> a numbered /dev/i2c-N bus, or a USB-to-I2C bridge
-		#                 (e.g. a CP2112) discovered by adapter-name match.
-		if 'i2c_bus_kind' in fan_cfg:
-			self.i2c_bus_kind = fan_cfg['i2c_bus_kind']
-		elif 'i2c_bus_match' in fan_cfg:
-			# Legacy config (pre basic/extended): the controller lived on a
-			# CP2112 bridge, so honor it as an extended bus.
-			self.i2c_bus_kind = 'extended'
-		else:
-			self.i2c_bus_kind = 'basic'
-		self.i2c_bus_num = fan_cfg.get('i2c_bus_num', fan_cfg.get('i2c_bus_match', 'CP2112'))
+# I2C bus selection, matching the probe drivers' basic/extended scheme:
+#   'basic'    -> the board's integrated I2C bus (board.SCL/SDA)
+#   'extended' -> a numbered /dev/i2c-N bus, or a USB-to-I2C bridge
+#                 (e.g. a CP2112) discovered by adapter-name match.
+if "i2c_bus_kind" in fan_cfg:
+    self.i2c_bus_kind = fan_cfg["i2c_bus_kind"]
+elif "i2c_bus_match" in fan_cfg:
+    # Legacy config (pre basic/extended): the controller lived on a
+    # CP2112 bridge, so honor it as an extended bus.
+    self.i2c_bus_kind = "extended"
+else:
+    self.i2c_bus_kind = "basic"
+self.i2c_bus_num = fan_cfg.get("i2c_bus_num", fan_cfg.get("i2c_bus_match", "CP2112"))
 
-		# Address defaults per chip when unset.
-		address = fan_cfg.get('address')
-		if address is None:
-			address = 0x2F if self.chip == 'emc2301' else 0x4C
-		elif isinstance(address, str):
-			address = int(address, 16)
-		self.emc_address = address
+# Address defaults per chip when unset.
+address = fan_cfg.get("address")
+if address is None:
+    address = 0x2F if self.chip == "emc2301" else 0x4C
+elif isinstance(address, str):
+    address = int(address, 16)
+self.emc_address = address
 
-		self.frequency = config.get('frequency', 100)
-		self.standalone = config.get('standalone', True)
+self.frequency = config.get("frequency", 100)
+self.standalone = config.get("standalone", True)
 
-		# Cached commanded output state (avoids a serial round-trip per poll).
-		self._output_state = {'auger': False, 'fan': False, 'igniter': False, 'power': False}
-		self._fan_speed_percent = 0
+# Cached commanded output state (avoids a serial round-trip per poll).
+self._output_state = {"auger": False, "fan": False, "igniter": False, "power": False}
+self._fan_speed_percent = 0
 
-		# Fan ramp control.
-		self._ramp_thread = None
-		self._ramp_stop = threading.Event()
+# Fan ramp control.
+self._ramp_thread = None
+self._ramp_stop = threading.Event()
 
-		# Open the relay board.
-		self.relay = NumatoUSBRelay(self.device, baudrate=self.baudrate)
+# Open the relay board.
+self.relay = NumatoUSBRelay(self.device, baudrate=self.baudrate)
 
-		# Open the fan controller on the configured I2C bus.
-		if self.i2c_bus_kind == 'extended':
-			i2c = ExtendedI2C(resolve_i2c_bus(self.i2c_bus_num))
-		else:
-			i2c = busio.I2C(board.SCL, board.SDA)
+# Open the fan controller on the configured I2C bus.
+if self.i2c_bus_kind == "extended":
+    i2c = ExtendedI2C(resolve_i2c_bus(self.i2c_bus_num))
+else:
+    i2c = busio.I2C(board.SCL, board.SDA)
 
-		if self.chip == 'emc2301':
-			self.emc = EMC2301(i2c, address=self.emc_address)
-		else:
-			self.emc = EMC2101_LUT(i2c)
-			# Drive the fan directly from PiFire's control logic, not the
-			# chip's internal lookup-table fan curve.
-			self.emc.lut_enabled = False
+if self.chip == "emc2301":
+    self.emc = EMC2301(i2c, address=self.emc_address)
+else:
+    self.emc = EMC2101_LUT(i2c)
+    # Drive the fan directly from PiFire's control logic, not the
+    # chip's internal lookup-table fan curve.
+    self.emc.lut_enabled = False
 
-		# Start in a known state: all relays off, fan stopped.
-		self.relay.reset()
-		self.emc.manual_fan_speed = 0
+# Start in a known state: all relays off, fan stopped.
+self.relay.reset()
+self.emc.manual_fan_speed = 0
 ```
 
 (Note: `self.device` / `self.baudrate` are still set by the unchanged `numato` block above this; leave that block as-is. `self.frequency` keeps the `100` fallback here — Task 4 changes it to `25000` and applies it to the chip.)
@@ -545,57 +545,57 @@ In `tests/test_x86_fan.py`, replace `test_set_pwm_frequency_stored_and_reported`
 ```python
 @pytest.fixture
 def platform():
-	import grillplat.x86_numato as mod
+    import grillplat.x86_numato as mod
 
-	with (
-		mock.patch.object(mod, 'NumatoUSBRelay'),
-		mock.patch.object(mod, 'EMC2101_LUT'),
-		mock.patch.object(mod, 'EMC2301'),
-		mock.patch.object(mod, 'ExtendedI2C'),
-		mock.patch.object(mod, 'busio'),
-		mock.patch.object(mod, 'board'),
-		mock.patch.object(mod, 'find_i2c_bus', return_value=7),
-	):
-		config = {'outputs': {'power': 0, 'igniter': 1, 'auger': 2, 'fan': 3}}
-		yield mod.GrillPlatform(config)
+    with (
+        mock.patch.object(mod, "NumatoUSBRelay"),
+        mock.patch.object(mod, "EMC2101_LUT"),
+        mock.patch.object(mod, "EMC2301"),
+        mock.patch.object(mod, "ExtendedI2C"),
+        mock.patch.object(mod, "busio"),
+        mock.patch.object(mod, "board"),
+        mock.patch.object(mod, "find_i2c_bus", return_value=7),
+    ):
+        config = {"outputs": {"power": 0, "igniter": 1, "auger": 2, "fan": 3}}
+        yield mod.GrillPlatform(config)
 
 
 def test_frequency_defaults_to_25000(platform):
-	assert platform.frequency == 25000
-	assert platform.get_output_status()['frequency'] == 25000
+    assert platform.frequency == 25000
+    assert platform.get_output_status()["frequency"] == 25000
 
 
 def test_init_configures_emc2101_for_25khz(platform):
-	# EMC2101_LUT is configured for ~25 kHz at init: 360 kHz preset clock,
-	# PWM_F = 7, divisor 1.
-	platform.emc.set_pwm_clock.assert_called_with(use_preset=False, use_slow=False)
-	assert platform.emc.pwm_frequency == 7
-	assert platform.emc.pwm_frequency_divisor == 1
+    # EMC2101_LUT is configured for ~25 kHz at init: 360 kHz preset clock,
+    # PWM_F = 7, divisor 1.
+    platform.emc.set_pwm_clock.assert_called_with(use_preset=False, use_slow=False)
+    assert platform.emc.pwm_frequency == 7
+    assert platform.emc.pwm_frequency_divisor == 1
 
 
 def test_set_pwm_frequency_reports_requested_value(platform):
-	platform.set_pwm_frequency(26000)
-	assert platform.frequency == 26000
-	assert platform.get_output_status()['frequency'] == 26000
-	# 26 kHz still maps to PWM_F = 7 on the EMC2101.
-	assert platform.emc.pwm_frequency == 7
+    platform.set_pwm_frequency(26000)
+    assert platform.frequency == 26000
+    assert platform.get_output_status()["frequency"] == 26000
+    # 26 kHz still maps to PWM_F = 7 on the EMC2101.
+    assert platform.emc.pwm_frequency == 7
 
 
 def test_set_pwm_frequency_on_emc2301_passes_hz():
-	import grillplat.x86_numato as mod
+    import grillplat.x86_numato as mod
 
-	with (
-		mock.patch.object(mod, 'NumatoUSBRelay'),
-		mock.patch.object(mod, 'EMC2101_LUT'),
-		mock.patch.object(mod, 'EMC2301'),
-		mock.patch.object(mod, 'ExtendedI2C'),
-		mock.patch.object(mod, 'busio'),
-		mock.patch.object(mod, 'board'),
-		mock.patch.object(mod, 'find_i2c_bus', return_value=7),
-	):
-		platform = mod.GrillPlatform({'fan_controller': {'chip': 'emc2301'}})
-	# EMC2301 takes a frequency in Hz directly.
-	assert platform.emc.pwm_frequency == 25000
+    with (
+        mock.patch.object(mod, "NumatoUSBRelay"),
+        mock.patch.object(mod, "EMC2101_LUT"),
+        mock.patch.object(mod, "EMC2301"),
+        mock.patch.object(mod, "ExtendedI2C"),
+        mock.patch.object(mod, "busio"),
+        mock.patch.object(mod, "board"),
+        mock.patch.object(mod, "find_i2c_bus", return_value=7),
+    ):
+        platform = mod.GrillPlatform({"fan_controller": {"chip": "emc2301"}})
+    # EMC2301 takes a frequency in Hz directly.
+    assert platform.emc.pwm_frequency == 25000
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -608,7 +608,7 @@ Expected: FAIL — `test_frequency_defaults_to_25000` (still 100) and the init-c
 In `grillplat/x86_numato.py`, change the fallback:
 
 ```python
-		self.frequency = config.get('frequency', 25000)
+self.frequency = config.get("frequency", 25000)
 ```
 
 And immediately after the `self.emc.manual_fan_speed = 0` line at the end of `__init__`, add:
@@ -624,24 +624,24 @@ And immediately after the `self.emc.manual_fan_speed = 0` line at the end of `__
 Replace the existing `set_pwm_frequency` method with:
 
 ```python
-	def set_pwm_frequency(self, frequency=25000):
-		self.logger.debug('set_pwm_frequency: Setting PWM frequency to ' + str(frequency))
-		# Report the requested value so control.py's "re-apply if changed"
-		# comparison settles even though each chip rounds to its own grid.
-		self.frequency = frequency
-		try:
-			if self.chip == 'emc2301':
-				# The EMC2301 driver takes a frequency in Hz.
-				self.emc.pwm_frequency = frequency
-			else:
-				# EMC2101: f = 360 kHz / (2 * PWM_F); PWM_F also sets duty
-				# resolution (2 * PWM_F steps). Use the 360 kHz preset clock.
-				pwm_f = max(1, min(31, round(360000 / (2 * frequency))))
-				self.emc.set_pwm_clock(use_preset=False, use_slow=False)
-				self.emc.pwm_frequency_divisor = 1
-				self.emc.pwm_frequency = pwm_f
-		except (ValueError, OSError, AttributeError) as exc:
-			self.logger.warning('set_pwm_frequency: controller rejected frequency: ' + str(exc))
+def set_pwm_frequency(self, frequency=25000):
+    self.logger.debug("set_pwm_frequency: Setting PWM frequency to " + str(frequency))
+    # Report the requested value so control.py's "re-apply if changed"
+    # comparison settles even though each chip rounds to its own grid.
+    self.frequency = frequency
+    try:
+        if self.chip == "emc2301":
+            # The EMC2301 driver takes a frequency in Hz.
+            self.emc.pwm_frequency = frequency
+        else:
+            # EMC2101: f = 360 kHz / (2 * PWM_F); PWM_F also sets duty
+            # resolution (2 * PWM_F steps). Use the 360 kHz preset clock.
+            pwm_f = max(1, min(31, round(360000 / (2 * frequency))))
+            self.emc.set_pwm_clock(use_preset=False, use_slow=False)
+            self.emc.pwm_frequency_divisor = 1
+            self.emc.pwm_frequency = pwm_f
+    except (ValueError, OSError, AttributeError) as exc:
+        self.logger.warning("set_pwm_frequency: controller rejected frequency: " + str(exc))
 ```
 
 - [ ] **Step 5: Run tests to verify they pass**
@@ -681,29 +681,29 @@ import os
 
 
 def _manifest():
-	path = os.path.join(os.path.dirname(__file__), '..', 'wizard', 'wizard_manifest.json')
-	with open(path) as handle:
-		return json.load(handle)
+    path = os.path.join(os.path.dirname(__file__), "..", "wizard", "wizard_manifest.json")
+    with open(path) as handle:
+        return json.load(handle)
 
 
 def test_x86_platform_entry_present():
-	manifest = _manifest()
-	entry = manifest['modules']['grillplatform']['x86_numato']
-	assert entry['filename'] == 'x86_numato'
-	assert 'adafruit-circuitpython-emc2101' in entry['py_dependencies']
+    manifest = _manifest()
+    entry = manifest["modules"]["grillplatform"]["x86_numato"]
+    assert entry["filename"] == "x86_numato"
+    assert "adafruit-circuitpython-emc2101" in entry["py_dependencies"]
 
 
 def test_x86_platform_settings_dependencies():
-	manifest = _manifest()
-	deps = manifest['modules']['grillplatform']['x86_numato']['settings_dependencies']
-	# Chip selector plus the selectable basic/extended I2C bus and address.
-	assert set(deps['fan_controller_chip']['options']) == {'emc2101', 'emc2301'}
-	assert deps['fan_controller_chip']['settings'] == ['platform', 'fan_controller', 'chip']
-	assert deps['i2c_bus_kind']['settings'] == ['platform', 'fan_controller', 'i2c_bus_kind']
-	assert deps['i2c_bus_num']['settings'] == ['platform', 'fan_controller', 'i2c_bus_num']
-	assert deps['fan_controller_address']['settings'] == ['platform', 'fan_controller', 'address']
-	assert '0x2f' in deps['fan_controller_address']['options']
-	assert set(deps['i2c_bus_kind']['options']) == {'basic', 'extended'}
+    manifest = _manifest()
+    deps = manifest["modules"]["grillplatform"]["x86_numato"]["settings_dependencies"]
+    # Chip selector plus the selectable basic/extended I2C bus and address.
+    assert set(deps["fan_controller_chip"]["options"]) == {"emc2101", "emc2301"}
+    assert deps["fan_controller_chip"]["settings"] == ["platform", "fan_controller", "chip"]
+    assert deps["i2c_bus_kind"]["settings"] == ["platform", "fan_controller", "i2c_bus_kind"]
+    assert deps["i2c_bus_num"]["settings"] == ["platform", "fan_controller", "i2c_bus_num"]
+    assert deps["fan_controller_address"]["settings"] == ["platform", "fan_controller", "address"]
+    assert "0x2f" in deps["fan_controller_address"]["options"]
+    assert set(deps["i2c_bus_kind"]["options"]) == {"basic", "extended"}
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**

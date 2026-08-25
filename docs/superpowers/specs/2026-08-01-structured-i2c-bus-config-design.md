@@ -38,9 +38,11 @@ string, and `resolve_i2c_bus(spec)` demultiplexes the single `i2c_bus_num`
 string three further ways by sniffing its contents:
 
 ```python
-if spec.lower().startswith("serial:"):  return find_i2c_bus_by_serial(...)
-if spec.isdigit():                      return int(spec)
-return find_i2c_bus(match=spec)          # adapter name, e.g. "CP2112"
+if spec.lower().startswith("serial:"):
+    return find_i2c_bus_by_serial(...)
+if spec.isdigit():
+    return int(spec)
+return find_i2c_bus(match=spec)  # adapter name, e.g. "CP2112"
 ```
 
 ### Why the current shape keeps producing bugs
@@ -136,8 +138,7 @@ other member forbids the `adapter` key.
 
 ```python
 I2CBusConfig = Annotated[
-    Union[_BasicBus, _KernelBusNumber, _KernelAdapterName,
-          _KernelSerialMatch, _FT232HBus, _MCP2221Bus],
+    Union[_BasicBus, _KernelBusNumber, _KernelAdapterName, _KernelSerialMatch, _FT232HBus, _MCP2221Bus],
     Field(union_mode="left_to_right"),
 ]
 ```

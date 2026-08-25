@@ -810,9 +810,7 @@ def test_settings_migration_targets_live_modules_only():
     # Each assignment looks like: ...["module"] = "bt_meater_exp"
     targets = re.findall(r'\["module"\]\s*=\s*"(bt_meater[a-z_]*)"', src)
     assert targets, "migration assignments not found -- did the block move?"
-    assert "bt_meater" not in targets, (
-        f"migration still assigns the deleted module name 'bt_meater': {targets}"
-    )
+    assert "bt_meater" not in targets, f"migration still assigns the deleted module name 'bt_meater': {targets}"
     assert set(targets) == {"bt_meater_exp"}, targets
 ```
 

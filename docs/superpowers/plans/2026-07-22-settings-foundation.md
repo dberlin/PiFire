@@ -156,7 +156,8 @@ def test_settings_update_persists_delta_and_sets_flag(client):
 
 
 def test_settings_update_empty_flags_sets_none(client):
-    ctrl = read_control(); ctrl["settings_update"] = False
+    ctrl = read_control()
+    ctrl["settings_update"] = False
     write_control(ctrl, WriteKind.OVERWRITE, origin="test")
     body = {"settings": {"globals": {"grill_name": "Smokey"}}, "flags": []}
     resp = client.post("/api/settings_update", data=json.dumps(body), content_type="application/json")

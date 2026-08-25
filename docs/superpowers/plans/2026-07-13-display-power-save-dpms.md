@@ -39,28 +39,28 @@ from common.common import default_settings, display_sleep_timeout
 
 
 def test_default_settings_has_sleep_timeout():
-    assert default_settings()['display']['sleep_timeout'] == 300
+    assert default_settings()["display"]["sleep_timeout"] == 300
 
 
 def test_accessor_reads_value():
-    assert display_sleep_timeout({'display': {'sleep_timeout': 45}}) == 45
+    assert display_sleep_timeout({"display": {"sleep_timeout": 45}}) == 45
 
 
 def test_accessor_zero_means_never():
-    assert display_sleep_timeout({'display': {'sleep_timeout': 0}}) == 0
+    assert display_sleep_timeout({"display": {"sleep_timeout": 0}}) == 0
 
 
 def test_accessor_missing_defaults_to_300():
-    assert display_sleep_timeout({'display': {}}) == 300
+    assert display_sleep_timeout({"display": {}}) == 300
     assert display_sleep_timeout({}) == 300
 
 
 def test_accessor_negative_clamps_to_zero():
-    assert display_sleep_timeout({'display': {'sleep_timeout': -5}}) == 0
+    assert display_sleep_timeout({"display": {"sleep_timeout": -5}}) == 0
 
 
 def test_accessor_non_numeric_defaults_to_300():
-    assert display_sleep_timeout({'display': {'sleep_timeout': 'x'}}) == 300
+    assert display_sleep_timeout({"display": {"sleep_timeout": "x"}}) == 300
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -73,8 +73,8 @@ Expected: FAIL — `ImportError: cannot import name 'display_sleep_timeout'` (an
 In `common/common.py`, change the display default block (currently at ~L217):
 
 ```python
-	settings['display'] = {'selected': 'none', 'sleep_timeout': 300}
-	settings['display']['config'] = _default_display_config()
+settings["display"] = {"selected": "none", "sleep_timeout": 300}
+settings["display"]["config"] = _default_display_config()
 ```
 
 - [ ] **Step 4: Add the accessor**
@@ -83,13 +83,13 @@ Add this function at module level in `common/common.py` (place it near the other
 
 ```python
 def display_sleep_timeout(settings):
-	"""Idle seconds before the display sleeps; 0 = never. Defaults to 300 on
-	missing/invalid values. Negative values clamp to 0."""
-	try:
-		value = int(settings['display']['sleep_timeout'])
-	except (KeyError, TypeError, ValueError):
-		return 300
-	return value if value > 0 else 0
+    """Idle seconds before the display sleeps; 0 = never. Defaults to 300 on
+    missing/invalid values. Negative values clamp to 0."""
+    try:
+        value = int(settings["display"]["sleep_timeout"])
+    except KeyError, TypeError, ValueError:
+        return 300
+    return value if value > 0 else 0
 ```
 
 - [ ] **Step 5: Run test to verify it passes**
@@ -133,69 +133,64 @@ import subprocess
 
 from display.screen_power import ScreenPowerController
 
-WLR_SAMPLE = (
-	'DP-1 "Dell Inc. DELL 24"\n'
-	'  Enabled: yes\n'
-	'  Modes:\n'
-	'    1280x720 px, 60.000000 Hz\n'
-)
+WLR_SAMPLE = 'DP-1 "Dell Inc. DELL 24"\n  Enabled: yes\n  Modes:\n    1280x720 px, 60.000000 Hz\n'
 
 
 class FakeRun:
-	def __init__(self, stdout='', raises=None):
-		self.stdout_text = stdout
-		self.raises = raises
-		self.calls = []
+    def __init__(self, stdout="", raises=None):
+        self.stdout_text = stdout
+        self.raises = raises
+        self.calls = []
 
-	def __call__(self, args, **kwargs):
-		self.calls.append(args)
-		if self.raises:
-			raise self.raises
-		return subprocess.CompletedProcess(args, 0, stdout=self.stdout_text, stderr='')
+    def __call__(self, args, **kwargs):
+        self.calls.append(args)
+        if self.raises:
+            raise self.raises
+        return subprocess.CompletedProcess(args, 0, stdout=self.stdout_text, stderr="")
 
 
 def test_resolve_output_parses_name():
-	run = FakeRun(stdout=WLR_SAMPLE)
-	c = ScreenPowerController('wayland', run=run)
-	assert c.resolve_output() == 'DP-1'
-	assert run.calls[0] == ['wlr-randr']
+    run = FakeRun(stdout=WLR_SAMPLE)
+    c = ScreenPowerController("wayland", run=run)
+    assert c.resolve_output() == "DP-1"
+    assert run.calls[0] == ["wlr-randr"]
 
 
 def test_resolve_output_caches():
-	run = FakeRun(stdout=WLR_SAMPLE)
-	c = ScreenPowerController('wayland', run=run)
-	c.resolve_output()
-	c.resolve_output()
-	assert sum(1 for a in run.calls if a == ['wlr-randr']) == 1
+    run = FakeRun(stdout=WLR_SAMPLE)
+    c = ScreenPowerController("wayland", run=run)
+    c.resolve_output()
+    c.resolve_output()
+    assert sum(1 for a in run.calls if a == ["wlr-randr"]) == 1
 
 
 def test_set_output_power_off_argv():
-	run = FakeRun(stdout=WLR_SAMPLE)
-	c = ScreenPowerController('wayland', run=run)
-	c.set_output_power(False)
-	assert ['wlr-randr', '--output', 'DP-1', '--off'] in run.calls
+    run = FakeRun(stdout=WLR_SAMPLE)
+    c = ScreenPowerController("wayland", run=run)
+    c.set_output_power(False)
+    assert ["wlr-randr", "--output", "DP-1", "--off"] in run.calls
 
 
 def test_set_output_power_on_argv():
-	run = FakeRun(stdout=WLR_SAMPLE)
-	c = ScreenPowerController('wayland', run=run)
-	c.set_output_power(True)
-	assert ['wlr-randr', '--output', 'DP-1', '--on'] in run.calls
+    run = FakeRun(stdout=WLR_SAMPLE)
+    c = ScreenPowerController("wayland", run=run)
+    c.set_output_power(True)
+    assert ["wlr-randr", "--output", "DP-1", "--on"] in run.calls
 
 
 def test_missing_binary_is_safe():
-	run = FakeRun(raises=FileNotFoundError())
-	c = ScreenPowerController('wayland', run=run)
-	assert c.resolve_output() is None
-	c.set_output_power(False)  # must not raise
+    run = FakeRun(raises=FileNotFoundError())
+    c = ScreenPowerController("wayland", run=run)
+    assert c.resolve_output() is None
+    c.set_output_power(False)  # must not raise
 
 
 def test_non_wayland_is_noop():
-	run = FakeRun(stdout=WLR_SAMPLE)
-	c = ScreenPowerController('sdl', run=run)
-	assert c.resolve_output() is None
-	c.set_output_power(False)
-	assert run.calls == []
+    run = FakeRun(stdout=WLR_SAMPLE)
+    c = ScreenPowerController("sdl", run=run)
+    assert c.resolve_output() is None
+    c.set_output_power(False)
+    assert run.calls == []
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -217,51 +212,51 @@ safe no-ops so callers can construct and drive a controller unconditionally.
 import logging
 import subprocess
 
-log = logging.getLogger('screen_power')
+log = logging.getLogger("screen_power")
 
 
 class ScreenPowerController:
-	def __init__(self, display_kind, run=subprocess.run):
-		self._kind = display_kind
-		self._run = run
-		self._output = None
+    def __init__(self, display_kind, run=subprocess.run):
+        self._kind = display_kind
+        self._run = run
+        self._output = None
 
-	def resolve_output(self):
-		"""Return the compositor output name (cached), or None if unavailable."""
-		if self._kind != 'wayland':
-			return None
-		if self._output:
-			return self._output
-		try:
-			proc = self._run(['wlr-randr'], capture_output=True, text=True, timeout=5)
-		except (OSError, subprocess.SubprocessError):
-			log.exception('wlr-randr failed to run')
-			return None
-		self._output = self._parse_output_name(proc.stdout)
-		return self._output
+    def resolve_output(self):
+        """Return the compositor output name (cached), or None if unavailable."""
+        if self._kind != "wayland":
+            return None
+        if self._output:
+            return self._output
+        try:
+            proc = self._run(["wlr-randr"], capture_output=True, text=True, timeout=5)
+        except OSError, subprocess.SubprocessError:
+            log.exception("wlr-randr failed to run")
+            return None
+        self._output = self._parse_output_name(proc.stdout)
+        return self._output
 
-	@staticmethod
-	def _parse_output_name(text):
-		# wlr-randr prints each head starting at column 0: `DP-1 "..."`;
-		# indented lines are that head's properties. Take the first head.
-		for line in text.splitlines():
-			if line and not line[0].isspace():
-				return line.split()[0]
-		return None
+    @staticmethod
+    def _parse_output_name(text):
+        # wlr-randr prints each head starting at column 0: `DP-1 "..."`;
+        # indented lines are that head's properties. Take the first head.
+        for line in text.splitlines():
+            if line and not line[0].isspace():
+                return line.split()[0]
+        return None
 
-	def set_output_power(self, on):
-		"""Power the output on (True) or off (False). No-op if not wayland or
-		no output could be resolved. Never raises into the caller."""
-		if self._kind != 'wayland':
-			return
-		name = self.resolve_output()
-		if not name:
-			return
-		flag = '--on' if on else '--off'
-		try:
-			self._run(['wlr-randr', '--output', name, flag], capture_output=True, text=True, timeout=5)
-		except (OSError, subprocess.SubprocessError):
-			log.exception('wlr-randr power toggle failed')
+    def set_output_power(self, on):
+        """Power the output on (True) or off (False). No-op if not wayland or
+        no output could be resolved. Never raises into the caller."""
+        if self._kind != "wayland":
+            return
+        name = self.resolve_output()
+        if not name:
+            return
+        flag = "--on" if on else "--off"
+        try:
+            self._run(["wlr-randr", "--output", name, flag], capture_output=True, text=True, timeout=5)
+        except OSError, subprocess.SubprocessError:
+            log.exception("wlr-randr power toggle failed")
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -301,44 +296,44 @@ EOF
 
 ```python
 def test_timeout_seeded_from_timeout_fn():
-	b = PiFireBackend(
-		lambda: ({'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}}, {'mode': 'Stop', 'units': 'F', 'outpins': {}}),
-		lambda c, d: None,
-		{'primary': {'name': 'Grill'}, 'food': [], 'aux': []},
-		timeout_fn=lambda: 42,
-	)
-	assert b.TIMEOUT == 42
+    b = PiFireBackend(
+        lambda: ({"P": {}, "F": {}, "AUX": {}, "PSP": 0, "NT": {}}, {"mode": "Stop", "units": "F", "outpins": {}}),
+        lambda c, d: None,
+        {"primary": {"name": "Grill"}, "food": [], "aux": []},
+        timeout_fn=lambda: 42,
+    )
+    assert b.TIMEOUT == 42
 
 
 def test_zero_timeout_never_sleeps():
-	clock = {'t': 1000.0}
-	b = PiFireBackend(
-		lambda: ({'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}}, {'mode': 'Stop', 'units': 'F', 'outpins': {}}),
-		lambda c, d: None,
-		{'primary': {'name': 'Grill'}, 'food': [], 'aux': []},
-		timeout_fn=lambda: 0,
-	)
-	b._now = lambda: clock['t']
-	b._last_interaction = clock['t']
-	clock['t'] = 999999.0
-	b.poll()
-	assert b.asleep is False
+    clock = {"t": 1000.0}
+    b = PiFireBackend(
+        lambda: ({"P": {}, "F": {}, "AUX": {}, "PSP": 0, "NT": {}}, {"mode": "Stop", "units": "F", "outpins": {}}),
+        lambda c, d: None,
+        {"primary": {"name": "Grill"}, "food": [], "aux": []},
+        timeout_fn=lambda: 0,
+    )
+    b._now = lambda: clock["t"]
+    b._last_interaction = clock["t"]
+    clock["t"] = 999999.0
+    b.poll()
+    assert b.asleep is False
 
 
 def test_timeout_live_reread():
-	clock = {'t': 1000.0}
-	state = {'timeout': 30}
-	b = PiFireBackend(
-		lambda: ({'P': {}, 'F': {}, 'AUX': {}, 'PSP': 0, 'NT': {}}, {'mode': 'Stop', 'units': 'F', 'outpins': {}}),
-		lambda c, d: None,
-		{'primary': {'name': 'Grill'}, 'food': [], 'aux': []},
-		timeout_fn=lambda: state['timeout'],
-	)
-	b._now = lambda: clock['t']
-	state['timeout'] = 5
-	clock['t'] = 1002.0  # >1s since last settings check -> re-read
-	b.poll()
-	assert b.TIMEOUT == 5
+    clock = {"t": 1000.0}
+    state = {"timeout": 30}
+    b = PiFireBackend(
+        lambda: ({"P": {}, "F": {}, "AUX": {}, "PSP": 0, "NT": {}}, {"mode": "Stop", "units": "F", "outpins": {}}),
+        lambda c, d: None,
+        {"primary": {"name": "Grill"}, "food": [], "aux": []},
+        timeout_fn=lambda: state["timeout"],
+    )
+    b._now = lambda: clock["t"]
+    state["timeout"] = 5
+    clock["t"] = 1002.0  # >1s since last settings check -> re-read
+    b.poll()
+    assert b.TIMEOUT == 5
 ```
 
 - [ ] **Step 2: Fix the existing `test_sleep_wake_state_machine`**
@@ -388,12 +383,12 @@ Change the idle-state defaults block (~L123-126) so `TIMEOUT` defaults to 300 an
 Replace the accent recheck block (~L170-172) with a combined settings recheck:
 
 ```python
-		if (now - self._last_settings_check) >= 1.0:
-			self._last_settings_check = now
-			if self._accent_fn is not None:
-				self._set('_accent_theme', self._accent_fn() or 'Ember', self.accentThemeChanged)
-			if self._timeout_fn is not None:
-				self.TIMEOUT = self._timeout_fn()
+if (now - self._last_settings_check) >= 1.0:
+    self._last_settings_check = now
+    if self._accent_fn is not None:
+        self._set("_accent_theme", self._accent_fn() or "Ember", self.accentThemeChanged)
+    if self._timeout_fn is not None:
+        self.TIMEOUT = self._timeout_fn()
 ```
 
 - [ ] **Step 6: Make `_update_idle` honor 0 = never**
@@ -401,14 +396,14 @@ Replace the accent recheck block (~L170-172) with a combined settings recheck:
 Change `_update_idle` (~L206-212):
 
 ```python
-	def _update_idle(self, mode, now):
-		# The screen never sleeps during an active cook; in Stop it sleeps after
-		# TIMEOUT seconds of no interaction (TIMEOUT <= 0 disables sleeping).
-		# Leaving Stop auto-wakes.
-		if mode != 'Stop':
-			self._set('_asleep', False, self.asleepChanged)
-		elif self.TIMEOUT > 0 and now - self._last_interaction > self.TIMEOUT:
-			self._set('_asleep', True, self.asleepChanged)
+def _update_idle(self, mode, now):
+    # The screen never sleeps during an active cook; in Stop it sleeps after
+    # TIMEOUT seconds of no interaction (TIMEOUT <= 0 disables sleeping).
+    # Leaving Stop auto-wakes.
+    if mode != "Stop":
+        self._set("_asleep", False, self.asleepChanged)
+    elif self.TIMEOUT > 0 and now - self._last_interaction > self.TIMEOUT:
+        self._set("_asleep", True, self.asleepChanged)
 ```
 
 - [ ] **Step 7: Pass a `timeout_fn` from `build_backend`**
@@ -416,31 +411,34 @@ Change `_update_idle` (~L206-212):
 In `display/qtapp.py`, `build_backend`, extend the imports and add a timeout reader. Change the `from common import ...` line inside `build_backend` to include the accessor and add `_timeout_fn`:
 
 ```python
-	from common import read_settings_store
-	from common.common import display_sleep_timeout
+from common import read_settings_store
+from common.common import display_sleep_timeout
 
-	def _accent_fn():
-		try:
-			s = read_settings_store()
-			module = s['modules']['display']
-			return s['display']['config'][module].get('accent_theme', 'Ember')
-		except Exception:
-			return 'Ember'
 
-	def _timeout_fn():
-		try:
-			return display_sleep_timeout(read_settings_store())
-		except Exception:
-			return 300
+def _accent_fn():
+    try:
+        s = read_settings_store()
+        module = s["modules"]["display"]
+        return s["display"]["config"][module].get("accent_theme", "Ember")
+    except Exception:
+        return "Ember"
 
-	dispatcher = Display.for_dispatch(config, config.get('units', 'F'))
-	backend = PiFireBackend(
-		_fetch,
-		dispatcher._dispatch_command,
-		config.get('probe_info', {}),
-		accent_fn=_accent_fn,
-		timeout_fn=_timeout_fn,
-	)
+
+def _timeout_fn():
+    try:
+        return display_sleep_timeout(read_settings_store())
+    except Exception:
+        return 300
+
+
+dispatcher = Display.for_dispatch(config, config.get("units", "F"))
+backend = PiFireBackend(
+    _fetch,
+    dispatcher._dispatch_command,
+    config.get("probe_info", {}),
+    accent_fn=_accent_fn,
+    timeout_fn=_timeout_fn,
+)
 ```
 
 - [ ] **Step 8: Run tests to verify they pass**
@@ -484,45 +482,45 @@ from display.qtapp import bind_backend_power
 
 
 class FakeSignal:
-	def __init__(self):
-		self._cbs = []
+    def __init__(self):
+        self._cbs = []
 
-	def connect(self, cb):
-		self._cbs.append(cb)
+    def connect(self, cb):
+        self._cbs.append(cb)
 
-	def emit(self):
-		for cb in self._cbs:
-			cb()
+    def emit(self):
+        for cb in self._cbs:
+            cb()
 
 
 class FakeBackend:
-	def __init__(self):
-		self.asleep = False
-		self.asleepChanged = FakeSignal()
+    def __init__(self):
+        self.asleep = False
+        self.asleepChanged = FakeSignal()
 
 
 class FakeController:
-	def __init__(self):
-		self.calls = []
+    def __init__(self):
+        self.calls = []
 
-	def set_output_power(self, on):
-		self.calls.append(on)
+    def set_output_power(self, on):
+        self.calls.append(on)
 
 
 def test_applies_once_on_bind_awake():
-	b, c = FakeBackend(), FakeController()
-	bind_backend_power(b, c)
-	assert c.calls == [True]  # not asleep -> power on
+    b, c = FakeBackend(), FakeController()
+    bind_backend_power(b, c)
+    assert c.calls == [True]  # not asleep -> power on
 
 
 def test_sleep_then_wake_toggles_power():
-	b, c = FakeBackend(), FakeController()
-	bind_backend_power(b, c)
-	b.asleep = True
-	b.asleepChanged.emit()
-	b.asleep = False
-	b.asleepChanged.emit()
-	assert c.calls == [True, False, True]
+    b, c = FakeBackend(), FakeController()
+    bind_backend_power(b, c)
+    b.asleep = True
+    b.asleepChanged.emit()
+    b.asleep = False
+    b.asleepChanged.emit()
+    assert c.calls == [True, False, True]
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -536,15 +534,15 @@ In `display/qtapp.py`, add the helper at module level (near `_make_backlight`):
 
 ```python
 def bind_backend_power(backend, controller):
-	"""Drive the screen-power controller from the backend's asleep signal.
-	Applies once immediately and returns the apply callable."""
+    """Drive the screen-power controller from the backend's asleep signal.
+    Applies once immediately and returns the apply callable."""
 
-	def _apply():
-		controller.set_output_power(not backend.asleep)
+    def _apply():
+        controller.set_output_power(not backend.asleep)
 
-	backend.asleepChanged.connect(_apply)
-	_apply()
-	return _apply
+    backend.asleepChanged.connect(_apply)
+    _apply()
+    return _apply
 ```
 
 Add the import at the top of `display/qtapp.py`:
@@ -556,8 +554,8 @@ from display.screen_power import ScreenPowerController
 In `run_app`, right after the existing `backend.asleepChanged.connect(_apply_backlight)` / `_apply_backlight()` lines (~L113-114), add:
 
 ```python
-	screen_power = ScreenPowerController('wayland')
-	bind_backend_power(backend, screen_power)
+screen_power = ScreenPowerController("wayland")
+bind_backend_power(backend, screen_power)
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -596,8 +594,8 @@ EOF
 In `display/base_flex.py`, add `display_sleep_timeout` to the existing `from common import (...)` block (the one that already imports `read_settings` at ~L31):
 
 ```python
-	display_sleep_timeout,
-	read_settings,
+(display_sleep_timeout,)
+(read_settings,)
 ```
 
 - [ ] **Step 2: Seed `TIMEOUT` from settings**
@@ -646,19 +644,19 @@ EOF
 
 ```python
 def test_settings_display_post_sets_sleep_timeout():
-	from app import app as flask_app
+    from app import app as flask_app
 
-	client = flask_app.test_client()
-	client.post('/settings/display', data={'sleep_timeout': '123'})
-	assert read_settings()['display']['sleep_timeout'] == 123
+    client = flask_app.test_client()
+    client.post("/settings/display", data={"sleep_timeout": "123"})
+    assert read_settings()["display"]["sleep_timeout"] == 123
 
 
 def test_settings_display_post_clamps_negative():
-	from app import app as flask_app
+    from app import app as flask_app
 
-	client = flask_app.test_client()
-	client.post('/settings/display', data={'sleep_timeout': '-9'})
-	assert read_settings()['display']['sleep_timeout'] == 0
+    client = flask_app.test_client()
+    client.post("/settings/display", data={"sleep_timeout": "-9"})
+    assert read_settings()["display"]["sleep_timeout"] == 0
 ```
 
 `read_settings` is already imported at the top of `tests/test_webapp_sqlite.py`.
@@ -673,11 +671,11 @@ Expected: FAIL — no `display` action handler, so `sleep_timeout` is never writ
 In `blueprints/settings/routes.py`, immediately after the `dashboard_config` handler block (the one that ends ~L36, before the `probe_select` handler), insert:
 
 ```python
-	if request.method == 'POST' and action == 'display':
-		response = request.form
-		if is_not_blank(response, 'sleep_timeout'):
-			settings['display']['sleep_timeout'] = max(0, int(response['sleep_timeout']))
-		write_settings(settings)
+if request.method == "POST" and action == "display":
+    response = request.form
+    if is_not_blank(response, "sleep_timeout"):
+        settings["display"]["sleep_timeout"] = max(0, int(response["sleep_timeout"]))
+    write_settings(settings)
 ```
 
 (No early `return`: it falls through to the shared final `render_template(...)`, matching the `cycle` handler which writes then falls through.)

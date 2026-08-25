@@ -48,16 +48,17 @@ existing I2C-bus helpers. All SPI probes consume them; no probe touches the
 ### `resolve_mcp2210(serial=None)` — cached bridge factory
 
 ```python
-_MCP2210_CACHE = {}   # module-level: serial key -> MCP2210 instance
+_MCP2210_CACHE = {}  # module-level: serial key -> MCP2210 instance
+
 
 def resolve_mcp2210(serial=None):
-    '''
+    """
     Open (and cache) a single MCP2210 per serial and return the shared
     instance. The MCP2210 USB-HID handle can be opened only once, so every
     probe on the same bridge must share one instance; the cache guarantees
     that. serial=None/'' selects the first MCP2210 by VID/PID (0x04D8/0x00DE)
     and is cached under a fixed key.
-    '''
+    """
 ```
 
 - Key normalisation: `None` and `""` map to one canonical key (the
@@ -72,7 +73,7 @@ def resolve_mcp2210(serial=None):
 
 ```python
 def resolve_spi_bus(config, default_cs):
-    '''
+    """
     Build the (spi, chip_select) pair for an SPI probe from its config dict.
       spi_bus_kind 'basic'  -> board.SPI() + digitalio.DigitalInOut(board pin)
       spi_bus_kind 'mcp2210'-> shared MCP2210.spi + mcp.digital_inout(GP index)
@@ -80,7 +81,7 @@ def resolve_spi_bus(config, default_cs):
     `default_cs`), mcp2210_serial (default ''). Raises ValueError on an
     unknown spi_bus_kind. Returns objects ready to hand to an
     adafruit_bus_device / SPIDevice-based sensor constructor.
-    '''
+    """
 ```
 
 This helper owns:
@@ -115,10 +116,10 @@ accepting `Dn`) corrects this. This fix is in scope.
 
 ```python
 from probes.base import ProbeInterface, resolve_spi_bus
+
 ...
-spi, cs = resolve_spi_bus(self.device_info['config'], default_cs='D6')
-self.sensor = adafruit_max31865.MAX31865(
-    spi, cs, rtd_nominal=rtd_nominal, ref_resistor=ref_resistor, wires=wires)
+spi, cs = resolve_spi_bus(self.device_info["config"], default_cs="D6")
+self.sensor = adafruit_max31865.MAX31865(spi, cs, rtd_nominal=rtd_nominal, ref_resistor=ref_resistor, wires=wires)
 ```
 
 The probe no longer imports `board`/`digitalio` or owns `LOOKUP_TABLE`; it keeps

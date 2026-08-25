@@ -157,6 +157,7 @@ Move the shared Luma `_init_display_device`/`_display_clear`/`_display_canvas` i
   from display._luma_panel import LumaPanelMixin
   from display._encoder_input import EncoderInputMixin
 
+
   class Display(EncoderInputMixin, LumaPanelMixin, DisplayBase):
       _LUMA_PANEL_CLASS = ili9341
       _LUMA_USE_EXPLICIT_SPIDEV = True

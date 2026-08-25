@@ -111,18 +111,19 @@ A leaf module -- stdlib only, importing from neither `controller/*.py` nor
 ```python
 class OutputSource(Enum):
     """Why the auger is running at the duty it is running at."""
-    CONTROLLER      = "controller"        # the controller's request, possibly clamped to [u_min, u_max]
-    LID_OPEN        = "lid_open"          # lid-open safety pinned the auger
-    MANUAL_OVERRIDE = "manual_override"   # a human commanded the auger directly
-    FAN_ASSIST      = "fan_assist"        # auger held at u_min; the fan PID is controlling
-    SEED            = "seed"              # actuator state at setup/reconfigure, caused by no command
+
+    CONTROLLER = "controller"  # the controller's request, possibly clamped to [u_min, u_max]
+    LID_OPEN = "lid_open"  # lid-open safety pinned the auger
+    MANUAL_OVERRIDE = "manual_override"  # a human commanded the auger directly
+    FAN_ASSIST = "fan_assist"  # auger held at u_min; the fan PID is controlling
+    SEED = "seed"  # actuator state at setup/reconfigure, caused by no command
 
 
 @dataclass(frozen=True)
 class AppliedOutput:
-    ratio: float                    # duty that reached the auger, [0, 1]
+    ratio: float  # duty that reached the auger, [0, 1]
     source: OutputSource
-    timestamp: float                # when it was applied
+    timestamp: float  # when it was applied
     requested: float | None = None  # the controller's pre-clamp request, when there was one
 
     @property
@@ -162,9 +163,9 @@ Four capabilities on `ControllerBase`, all default-inert, joining the existing
 No `function_list`, no string reflection.
 
 ```python
-def set_output(self, applied): ...      # applied: AppliedOutput      -> None
-def get_status(self): ...               # -> dict | None  (None keeps the legacy __dict__ payload)
-def get_model_snapshot(self): ...       # -> dict | None
+def set_output(self, applied): ...  # applied: AppliedOutput      -> None
+def get_status(self): ...  # -> dict | None  (None keeps the legacy __dict__ payload)
+def get_model_snapshot(self): ...  # -> dict | None
 def restore_model(self, snapshot): ...  # -> bool
 ```
 
@@ -268,13 +269,13 @@ weighted squared residuals `resid_ew` shaped `(N,)`, regressors `phi` shaped
 is shared and broadcast. One accepted observation updates the whole bank:
 
 ```python
-Pphi  = np.einsum("nij,nj->ni", P, phi)
+Pphi = np.einsum("nij,nj->ni", P, phi)
 denom = LAM + np.einsum("ni,ni->n", phi, Pphi)
-gain  = Pphi / denom[:, None]
-err   = y - np.einsum("ni,ni->n", phi, Theta)
+gain = Pphi / denom[:, None]
+err = y - np.einsum("ni,ni->n", phi, Theta)
 Theta += gain * err[:, None]
-P      = (P - np.einsum("ni,nj->nij", gain, Pphi)) / LAM
-P      = 0.5 * (P + P.transpose(0, 2, 1))
+P = (P - np.einsum("ni,nj->nij", gain, Pphi)) / LAM
+P = 0.5 * (P + P.transpose(0, 2, 1))
 resid_ew = 0.02 * err**2 + 0.98 * resid_ew
 ```
 

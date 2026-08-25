@@ -102,9 +102,10 @@ def _load_ft232h():
     """Enable Blinka's FT232H backend and import board + digitalio.
     Isolated so importing this module never opens USB, and so tests can
     patch it to inject fakes."""
-    os.environ['BLINKA_FT232H'] = _ft232h_url  # '1' by default, or a pyftdi URL
+    os.environ["BLINKA_FT232H"] = _ft232h_url  # '1' by default, or a pyftdi URL
     import board
     import digitalio
+
     return board, digitalio
 ```
 
@@ -123,10 +124,10 @@ applied explicitly. A small internal helper owns one output pin:
 ```python
 class _Relay:
     def __init__(self, dio, active_high):
-        self._dio = dio                 # DigitalInOut, direction = OUTPUT
+        self._dio = dio  # DigitalInOut, direction = OUTPUT
         self._active_high = active_high
         self._state = False
-        self.off()                      # start de-asserted
+        self.off()  # start de-asserted
 
     def on(self):
         self._dio.value = self._active_high

@@ -1012,7 +1012,9 @@ def test_notify_set_field_merges_the_addressed_entry_only():
     control = _notify_control()
     apply_control_delta(
         control,
-        control_delta(ops=[{"op": "notify.set", "label": "Grill", "type": "probe", "fields": {"target": 203, "req": True}}]),
+        control_delta(
+            ops=[{"op": "notify.set", "label": "Grill", "type": "probe", "fields": {"target": 203, "req": True}}]
+        ),
     )
     assert _entry(control, "Grill", "probe")["target"] == 203
     assert _entry(control, "Grill", "probe")["req"] is True
@@ -1180,7 +1182,11 @@ def test_clear_zeroes_the_countdown_and_disarms_both_expiry_flags():
     apply_control_delta(control, control_delta(ops=[{"op": "timer.clear"}]))
     assert control["timer"] == {"start": 0, "paused": 0, "end": 0}
     assert _timer_entry(control) == {
-        "label": "Timer", "type": "timer", "req": False, "shutdown": False, "keep_warm": False
+        "label": "Timer",
+        "type": "timer",
+        "req": False,
+        "shutdown": False,
+        "keep_warm": False,
     }
 
 
@@ -1191,7 +1197,7 @@ def test_pause_on_a_running_timer_stamps_paused_from_the_requests_clock():
     assert _timer_entry(control)["req"] is False
 
 
-def test_pause_on_a_stopped_timer_clears(): 
+def test_pause_on_a_stopped_timer_clears():
     """_cmd_set_timer's start == 0 branch (common/api_commands.py:685-693)."""
     control = _stopped()
     control["timer"]["end"] = 5.0
@@ -1240,7 +1246,9 @@ def test_start_with_options_drops_and_logs_when_the_timer_became_paused(caplog):
         apply_control_delta(
             control,
             control_delta(
-                ops=[{"op": "timer.start_with_options", "at": NOW, "seconds": 600, "shutdown": True, "keep_warm": False}]
+                ops=[
+                    {"op": "timer.start_with_options", "at": NOW, "seconds": 600, "shutdown": True, "keep_warm": False}
+                ]
             ),
         )
     assert control["timer"] == {"start": 1000.0, "paused": 1500.0, "end": 2000.0}
@@ -1543,6 +1551,7 @@ def test_delta_envelope_parity_between_sqlite_and_in_memory(ds):
 def _cmd(*args, origin="test"):
     from unittest import mock
     from common import api_commands
+
     with mock.patch.object(api_commands, "write_log"), mock.patch.object(c.time, "time", return_value=NOW):
         return api_commands.process_command(action="set", arglist=list(args), origin=origin)
 
@@ -1592,32 +1601,34 @@ request-time `write_log` (see the logging decision below) and replaces its `writ
 kind, origin="app")` with a DELTA write:
 
 ```python
-    if arglist[1] == "start" and arglist[3] is not None:
-        _timer_start_with_options(data, control, arglist, index, now, kind)
-    elif arglist[1] == "start":
-        seconds = int(float(arglist[2])) if is_float(arglist[2]) else None
-        # The BRANCH is not decided here. `start` is also the unpause command and
-        # which one it is depends on control["timer"]["paused"] -- a value this
-        # read_control() cannot see the queue behind. The drain decides, against
-        # live state; the clock still comes from here, as `at`.
-        if control["timer"]["paused"] == 0:
-            write_log("Timer started.  Ends at: " + epoch_to_time(now + (seconds if seconds is not None else 60)))
-        else:
-            write_log("Timer unpaused.  Ends at: " + epoch_to_time((control["timer"]["end"] - control["timer"]["paused"]) + now))
-        write_control(
-            control_delta(ops=[{"op": "timer.start_or_resume", "at": now, "seconds": seconds}]),
-            WriteKind.DELTA,
-            origin="app",
+if arglist[1] == "start" and arglist[3] is not None:
+    _timer_start_with_options(data, control, arglist, index, now, kind)
+elif arglist[1] == "start":
+    seconds = int(float(arglist[2])) if is_float(arglist[2]) else None
+    # The BRANCH is not decided here. `start` is also the unpause command and
+    # which one it is depends on control["timer"]["paused"] -- a value this
+    # read_control() cannot see the queue behind. The drain decides, against
+    # live state; the clock still comes from here, as `at`.
+    if control["timer"]["paused"] == 0:
+        write_log("Timer started.  Ends at: " + epoch_to_time(now + (seconds if seconds is not None else 60)))
+    else:
+        write_log(
+            "Timer unpaused.  Ends at: " + epoch_to_time((control["timer"]["end"] - control["timer"]["paused"]) + now)
         )
-    elif arglist[1] == "pause":
-        if control["timer"]["start"] != 0:
-            write_log("Timer paused.")
-        else:
-            write_log("Timer cleared.")
-        write_control(control_delta(ops=[{"op": "timer.pause", "at": now}]), WriteKind.DELTA, origin="app")
-    elif arglist[1] == "stop":
-        write_log("Timer stopped.")
-        write_control(control_delta(ops=[{"op": "timer.clear"}]), WriteKind.DELTA, origin="app")
+    write_control(
+        control_delta(ops=[{"op": "timer.start_or_resume", "at": now, "seconds": seconds}]),
+        WriteKind.DELTA,
+        origin="app",
+    )
+elif arglist[1] == "pause":
+    if control["timer"]["start"] != 0:
+        write_log("Timer paused.")
+    else:
+        write_log("Timer cleared.")
+    write_control(control_delta(ops=[{"op": "timer.pause", "at": now}]), WriteKind.DELTA, origin="app")
+elif arglist[1] == "stop":
+    write_log("Timer stopped.")
+    write_control(control_delta(ops=[{"op": "timer.clear"}]), WriteKind.DELTA, origin="app")
 ```
 
 and in `_timer_start_with_options` (`:625-632`), after the three rejections:
@@ -2285,6 +2296,7 @@ def test_two_commands_in_one_cycle_match_the_same_two_one_cycle_apart(seeded, fi
     timer form's paused-timer rejection, common/api_commands.py:620-623) reads a
     stale blob, and no queue representation can fix a synchronous HTTP answer.
     """
+
     def _run(drain_between):
         write_control(default_control(), WriteKind.OVERWRITE, origin="prop")
         c.SqliteQueue("queue_control_write").flush()

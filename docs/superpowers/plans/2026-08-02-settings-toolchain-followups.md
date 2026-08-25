@@ -1158,9 +1158,7 @@ def test_a_bad_field_reports_its_own_path(client, ds):
     body = res.get_json()
 
     assert body["result"] == "error"
-    assert body["errors"] == [
-        {"path": "startup.duration", "message": body["errors"][0]["message"]}
-    ]
+    assert body["errors"] == [{"path": "startup.duration", "message": body["errors"][0]["message"]}]
     assert body["errors"][0]["path"] == "startup.duration"
     assert body["errors"][0]["message"]
 
@@ -1221,10 +1219,7 @@ In `common/settings_schema.py`, beside `_format_errors`:
 
 ```python
 def _error_pairs(errs: list[ErrorDetails]) -> list[dict]:
-    return [
-        {"path": ".".join(str(p) for p in err["loc"]), "message": err["msg"]}
-        for err in errs
-    ]
+    return [{"path": ".".join(str(p) for p in err["loc"]), "message": err["msg"]} for err in errs]
 
 
 def format_validation_pairs(exc: ValidationError) -> list[dict]:
@@ -1280,15 +1275,17 @@ In `blueprints/api/routes.py::_api_post_settings_update`, each `jsonify` gains
 the key. The Layer-1 branch:
 
 ```python
-    layer1_pairs = validate_partial_settings_pairs(delta)
-    if layer1_pairs:
-        message = "; ".join(f"{p['path']}: {p['message']}" for p in layer1_pairs)
-        return jsonify({
+layer1_pairs = validate_partial_settings_pairs(delta)
+if layer1_pairs:
+    message = "; ".join(f"{p['path']}: {p['message']}" for p in layer1_pairs)
+    return jsonify(
+        {
             "result": "error",
             "message": f"Settings update failed: {message}",
             "errors": layer1_pairs,
             "data": {},
-        }), 200
+        }
+    ), 200
 ```
 
 and the caught validation error:
@@ -1860,9 +1857,7 @@ def _validate_settings_in_store():
     try:
         settings_schema.validate_settings_tree(read_settings())
     except settings_schema.SettingsValidationError as exc:
-        write_log(
-            "Stored settings do not match this build's schema: " + "; ".join(exc.errors)
-        )
+        write_log("Stored settings do not match this build's schema: " + "; ".join(exc.errors))
 ```
 
 and add the call to `init()`:

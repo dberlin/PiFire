@@ -193,9 +193,7 @@ Use tiny fake probe devices whose `read_all_ports()` returns valid existing temp
 ```python
 def test_read_collects_health_by_logical_label_and_emits_state_transition():
     probes = _main_with_device_health(
-        {"Grill": ThermocoupleHealthReport.confirmed_hardware(
-            (ThermocoupleFault.OPEN,), now=5.0, status=0x10
-        )}
+        {"Grill": ThermocoupleHealthReport.confirmed_hardware((ThermocoupleFault.OPEN,), now=5.0, status=0x10)}
     )
     probes.read_probes()
     assert probes.get_thermocouple_health()["Grill"].confirmed
@@ -227,9 +225,7 @@ In `ProbeInterface`, return `{}` by default. In `get_device_info()`, copy `devic
 ```python
 health = self.get_thermocouple_health()
 if health:
-    status["thermocouple_health"] = {
-        label: report.as_dict() for label, report in health.items()
-    }
+    status["thermocouple_health"] = {label: report.as_dict() for label, report in health.items()}
 ```
 
 In `ProbesMain`, initialize `_thermocouple_health` and `_thermocouple_health_transitions`. At the end of each `read_probes()`, collect every device report, compare `(state, faults)` with the prior report (default prior state is unmonitored), append immutable transitions, and replace the current map. Return shallow copies/tuples from getters; `consume_...` drains atomically. Clear both containers before rebuilding devices in `_setup_probe_devices()`.
@@ -582,22 +578,26 @@ Run LSP references for `ControlMode.run`, `_on_safety_event`, and notification `
 Add table rows to `test_notifications_events.py`:
 
 ```python
-pytest.param(
-    "Thermocouple_Fault_Primary",
-    "Primary Thermocouple Fault!",
-    "Primary thermocouple fault detected. PiFire is shutting down because the control temperature is unavailable.",
-    True,
-    "pifire_error_alerts",
-    {"value1": "Primary thermocouple fault"},
-),
-pytest.param(
-    "Thermocouple_Fault_Secondary",
-    "Thermocouple Fault!",
-    "A food or auxiliary thermocouple fault was detected. The affected probe is unavailable; grill control continues.",
-    True,
-    "pifire_error_alerts",
-    {"value1": "Secondary thermocouple fault"},
-),
+(
+    pytest.param(
+        "Thermocouple_Fault_Primary",
+        "Primary Thermocouple Fault!",
+        "Primary thermocouple fault detected. PiFire is shutting down because the control temperature is unavailable.",
+        True,
+        "pifire_error_alerts",
+        {"value1": "Primary thermocouple fault"},
+    ),
+)
+(
+    pytest.param(
+        "Thermocouple_Fault_Secondary",
+        "Thermocouple Fault!",
+        "A food or auxiliary thermocouple fault was detected. The affected probe is unavailable; grill control continues.",
+        True,
+        "pifire_error_alerts",
+        {"value1": "Secondary thermocouple fault"},
+    ),
+)
 ```
 
 Follow the file's existing `now` suffix/exactness convention rather than changing its harness. Run the two node IDs through context-mode. Expected: unknown-event output because the builders/keys are absent.

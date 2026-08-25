@@ -70,6 +70,7 @@ class ControllerLearningDiagnostics:
     schema_version: int
     state: Mapping[str, JsonValue]
 
+
 class ControllerBase:
     def get_learning_diagnostics(self) -> ControllerLearningDiagnostics | None:
         return None

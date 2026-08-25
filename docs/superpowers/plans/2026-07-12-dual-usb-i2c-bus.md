@@ -57,45 +57,45 @@ Create `tests/test_i2c_bus.py`:
 import pytest
 
 from common.i2c_bus import (
-	I2CBusConfigError,
-	assert_clean_blinka_env,
-	resolve_i2c_bus,
-	validate_bus_kinds,
+    I2CBusConfigError,
+    assert_clean_blinka_env,
+    resolve_i2c_bus,
+    validate_bus_kinds,
 )
 
 
 def test_resolve_i2c_bus_numeric_returns_int():
-	assert resolve_i2c_bus('3') == 3
-	assert resolve_i2c_bus(3) == 3
+    assert resolve_i2c_bus("3") == 3
+    assert resolve_i2c_bus(3) == 3
 
 
 def test_validate_bus_kinds_allows_workable_combos():
-	# None of these raise.
-	validate_bus_kinds({'ft232h', 'mcp2221'})
-	validate_bus_kinds({'ft232h', 'extended'})
-	validate_bus_kinds({'mcp2221', 'extended'})
-	validate_bus_kinds({'basic', 'extended'})
-	validate_bus_kinds({'ft232h', 'mcp2221', 'extended'})
-	validate_bus_kinds({'', None, 'basic'})  # blanks ignored
+    # None of these raise.
+    validate_bus_kinds({"ft232h", "mcp2221"})
+    validate_bus_kinds({"ft232h", "extended"})
+    validate_bus_kinds({"mcp2221", "extended"})
+    validate_bus_kinds({"basic", "extended"})
+    validate_bus_kinds({"ft232h", "mcp2221", "extended"})
+    validate_bus_kinds({"", None, "basic"})  # blanks ignored
 
 
 def test_validate_bus_kinds_rejects_basic_plus_usb():
-	with pytest.raises(I2CBusConfigError):
-		validate_bus_kinds({'basic', 'ft232h'})
-	with pytest.raises(I2CBusConfigError):
-		validate_bus_kinds({'basic', 'mcp2221'})
+    with pytest.raises(I2CBusConfigError):
+        validate_bus_kinds({"basic", "ft232h"})
+    with pytest.raises(I2CBusConfigError):
+        validate_bus_kinds({"basic", "mcp2221"})
 
 
 def test_assert_clean_blinka_env_rejects_board_forcing_vars():
-	for var in ('BLINKA_FT232H', 'BLINKA_MCP2221', 'BLINKA_FORCEBOARD', 'BLINKA_FTX232H_0'):
-		with pytest.raises(I2CBusConfigError):
-			assert_clean_blinka_env({var: '1'})
+    for var in ("BLINKA_FT232H", "BLINKA_MCP2221", "BLINKA_FORCEBOARD", "BLINKA_FTX232H_0"):
+        with pytest.raises(I2CBusConfigError):
+            assert_clean_blinka_env({var: "1"})
 
 
 def test_assert_clean_blinka_env_allows_tuning_and_empty():
-	assert_clean_blinka_env({})
-	assert_clean_blinka_env({'BLINKA_MCP2221_HID_DELAY': '0.1', 'BLINKA_MCP2221_RESET_DELAY': '0.5'})
-	assert_clean_blinka_env({'PATH': '/usr/bin'})
+    assert_clean_blinka_env({})
+    assert_clean_blinka_env({"BLINKA_MCP2221_HID_DELAY": "0.1", "BLINKA_MCP2221_RESET_DELAY": "0.5"})
+    assert_clean_blinka_env({"PATH": "/usr/bin"})
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -134,108 +134,110 @@ import os
 import threading
 
 # USB-HID bus kinds that bypass Blinka's `board` singleton.
-USB_HID_KINDS = frozenset({'ft232h', 'mcp2221'})
+USB_HID_KINDS = frozenset({"ft232h", "mcp2221"})
 
 # Board/chip-forcing Blinka env vars. If any is set, `import board` is pinned to
 # that backend process-wide, which silently breaks `basic` and any later
 # `import board`. The MCP2221 entry is EXACT so the _HID_DELAY/_RESET_DELAY
 # tuning vars stay allowed.
-_FORBIDDEN_BLINKA_EXACT = frozenset({
-	'BLINKA_FT232H',
-	'BLINKA_FT2232H',
-	'BLINKA_FT4232H',
-	'BLINKA_MCP2221',
-	'BLINKA_U2IF',
-	'BLINKA_GREATFET',
-	'BLINKA_NOVA',
-	'BLINKA_SPIDRIVER',
-	'BLINKA_FORCECHIP',
-	'BLINKA_FORCEBOARD',
-})
-_FORBIDDEN_BLINKA_PREFIXES = ('BLINKA_FTX232H_',)
+_FORBIDDEN_BLINKA_EXACT = frozenset(
+    {
+        "BLINKA_FT232H",
+        "BLINKA_FT2232H",
+        "BLINKA_FT4232H",
+        "BLINKA_MCP2221",
+        "BLINKA_U2IF",
+        "BLINKA_GREATFET",
+        "BLINKA_NOVA",
+        "BLINKA_SPIDRIVER",
+        "BLINKA_FORCECHIP",
+        "BLINKA_FORCEBOARD",
+    }
+)
+_FORBIDDEN_BLINKA_PREFIXES = ("BLINKA_FTX232H_",)
 
 _UNSET = object()
 
 
 class I2CBusConfigError(ValueError):
-	"""Raised for an I2C bus configuration that cannot work on this host."""
+    """Raised for an I2C bus configuration that cannot work on this host."""
 
 
-def find_i2c_bus(match, devices_path='/sys/bus/i2c/devices'):
-	"""
-	Return the integer i2c bus number whose adapter name contains `match`
-	(case-insensitive), e.g. 'CP2112' for a USB-to-I2C bridge. Scans
-	`<devices_path>/i2c-*/name`. Raises RuntimeError if zero or more than one
-	adapter matches, so the caller fails clearly rather than guessing.
-	"""
-	match_lower = str(match).lower()
-	adapters = []  # (bus_num, name) for every i2c adapter present
-	for bus_dir in glob.glob(os.path.join(devices_path, 'i2c-*')):
-		try:
-			with open(os.path.join(bus_dir, 'name')) as handle:
-				name = handle.read().strip()
-		except OSError:
-			continue
-		try:
-			bus_num = int(os.path.basename(bus_dir).split('-')[-1])
-		except ValueError:
-			continue
-		adapters.append((bus_num, name))
+def find_i2c_bus(match, devices_path="/sys/bus/i2c/devices"):
+    """
+    Return the integer i2c bus number whose adapter name contains `match`
+    (case-insensitive), e.g. 'CP2112' for a USB-to-I2C bridge. Scans
+    `<devices_path>/i2c-*/name`. Raises RuntimeError if zero or more than one
+    adapter matches, so the caller fails clearly rather than guessing.
+    """
+    match_lower = str(match).lower()
+    adapters = []  # (bus_num, name) for every i2c adapter present
+    for bus_dir in glob.glob(os.path.join(devices_path, "i2c-*")):
+        try:
+            with open(os.path.join(bus_dir, "name")) as handle:
+                name = handle.read().strip()
+        except OSError:
+            continue
+        try:
+            bus_num = int(os.path.basename(bus_dir).split("-")[-1])
+        except ValueError:
+            continue
+        adapters.append((bus_num, name))
 
-	found = [num for num, name in adapters if match_lower in name.lower()]
-	if len(found) == 1:
-		return found[0]
-	# Include what IS present so a misconfigured match string is easy to fix.
-	available = ', '.join(f'i2c-{n} ({name!r})' for n, name in sorted(adapters)) or '(none)'
-	if not found:
-		raise RuntimeError(
-			f'No i2c adapter found matching {match!r} under {devices_path}. Available adapters: {available}'
-		)
-	raise RuntimeError(f'Multiple i2c adapters match {match!r}: {sorted(found)}. Available adapters: {available}')
+    found = [num for num, name in adapters if match_lower in name.lower()]
+    if len(found) == 1:
+        return found[0]
+    # Include what IS present so a misconfigured match string is easy to fix.
+    available = ", ".join(f"i2c-{n} ({name!r})" for n, name in sorted(adapters)) or "(none)"
+    if not found:
+        raise RuntimeError(
+            f"No i2c adapter found matching {match!r} under {devices_path}. Available adapters: {available}"
+        )
+    raise RuntimeError(f"Multiple i2c adapters match {match!r}: {sorted(found)}. Available adapters: {available}")
 
 
 def resolve_i2c_bus(bus):
-	"""
-	Resolve an extended-i2c-bus spec to a bus number. Accepts an int or numeric
-	string (e.g. 3 / '3' -> /dev/i2c-3, used directly) or an adapter-name match
-	string (e.g. 'CP2112' -> discovered via find_i2c_bus, robust against the
-	dynamic bus numbers USB-to-I2C bridges get).
-	"""
-	spec = str(bus).strip()
-	if spec.isdigit():
-		return int(spec)
-	return find_i2c_bus(spec)
+    """
+    Resolve an extended-i2c-bus spec to a bus number. Accepts an int or numeric
+    string (e.g. 3 / '3' -> /dev/i2c-3, used directly) or an adapter-name match
+    string (e.g. 'CP2112' -> discovered via find_i2c_bus, robust against the
+    dynamic bus numbers USB-to-I2C bridges get).
+    """
+    spec = str(bus).strip()
+    if spec.isdigit():
+        return int(spec)
+    return find_i2c_bus(spec)
 
 
 def validate_bus_kinds(kinds):
-	"""Raise I2CBusConfigError if the set of bus kinds cannot coexist in one
-	process. The only unworkable case is `basic` alongside a USB-HID kind:
-	Blinka's board backend is process-global."""
-	kinds = {str(k).lower() for k in kinds if k}
-	if 'basic' in kinds and (kinds & USB_HID_KINDS):
-		raise I2CBusConfigError(
-			"'basic' I2C can't share a process with a USB-HID bus (ft232h/mcp2221): "
-			"Blinka's board backend is process-global. Use 'extended' for the onboard "
-			'bus (a Pi onboard I2C is reachable as extended bus 1).'
-		)
+    """Raise I2CBusConfigError if the set of bus kinds cannot coexist in one
+    process. The only unworkable case is `basic` alongside a USB-HID kind:
+    Blinka's board backend is process-global."""
+    kinds = {str(k).lower() for k in kinds if k}
+    if "basic" in kinds and (kinds & USB_HID_KINDS):
+        raise I2CBusConfigError(
+            "'basic' I2C can't share a process with a USB-HID bus (ft232h/mcp2221): "
+            "Blinka's board backend is process-global. Use 'extended' for the onboard "
+            "bus (a Pi onboard I2C is reachable as extended bus 1)."
+        )
 
 
 def assert_clean_blinka_env(environ=None):
-	"""Raise I2CBusConfigError if any board/chip-forcing BLINKA_* var is set.
-	Called once at control-process startup so nobody can force `basic`/`import
-	board` onto a USB adapter via the environment."""
-	environ = os.environ if environ is None else environ
-	offenders = sorted(
-		key
-		for key in environ
-		if key in _FORBIDDEN_BLINKA_EXACT or any(key.startswith(p) for p in _FORBIDDEN_BLINKA_PREFIXES)
-	)
-	if offenders:
-		raise I2CBusConfigError(
-			f'Board-forcing Blinka environment variable(s) set: {", ".join(offenders)}. '
-			'Remove them and select the ft232h/mcp2221 bus kinds in the wizard instead; '
-			'forcing the Blinka board via the environment breaks `basic` and any import board.'
-		)
+    """Raise I2CBusConfigError if any board/chip-forcing BLINKA_* var is set.
+    Called once at control-process startup so nobody can force `basic`/`import
+    board` onto a USB adapter via the environment."""
+    environ = os.environ if environ is None else environ
+    offenders = sorted(
+        key
+        for key in environ
+        if key in _FORBIDDEN_BLINKA_EXACT or any(key.startswith(p) for p in _FORBIDDEN_BLINKA_PREFIXES)
+    )
+    if offenders:
+        raise I2CBusConfigError(
+            f"Board-forcing Blinka environment variable(s) set: {', '.join(offenders)}. "
+            "Remove them and select the ft232h/mcp2221 bus kinds in the wizard instead; "
+            "forcing the Blinka board via the environment breaks `basic` and any import board."
+        )
 ```
 
 - [ ] **Step 4: Run the tests to verify they pass**
@@ -287,72 +289,72 @@ import common.i2c_bus as i2c_bus
 
 @pytest.fixture(autouse=True)
 def _clean_bus_state():
-	i2c_bus.reset_bus_state()
-	yield
-	i2c_bus.reset_bus_state()
+    i2c_bus.reset_bus_state()
+    yield
+    i2c_bus.reset_bus_state()
 
 
 def test_locked_i2c_lock_and_delegate():
-	backend = mock.Mock()
-	wrapped = i2c_bus._LockedI2C(backend)
-	assert wrapped.try_lock() is True
-	wrapped.unlock()
-	wrapped.unlock()  # double unlock is safe
-	wrapped.writeto(0x10, b'\x01')
-	backend.writeto.assert_called_once_with(0x10, b'\x01')
-	wrapped.scan()
-	backend.scan.assert_called_once()
+    backend = mock.Mock()
+    wrapped = i2c_bus._LockedI2C(backend)
+    assert wrapped.try_lock() is True
+    wrapped.unlock()
+    wrapped.unlock()  # double unlock is safe
+    wrapped.writeto(0x10, b"\x01")
+    backend.writeto.assert_called_once_with(0x10, b"\x01")
+    wrapped.scan()
+    backend.scan.assert_called_once()
 
 
 def test_open_ft232h_sets_env_transiently_and_restores(monkeypatch):
-	monkeypatch.delenv('BLINKA_FT232H', raising=False)
-	created = []
+    monkeypatch.delenv("BLINKA_FT232H", raising=False)
+    created = []
 
-	class FakeBackendI2C:
-		def __init__(self):
-			created.append(os.environ.get('BLINKA_FT232H'))
+    class FakeBackendI2C:
+        def __init__(self):
+            created.append(os.environ.get("BLINKA_FT232H"))
 
-	fake_mod = types_module_with(I2C=FakeBackendI2C)
-	with mock.patch.dict('sys.modules', {'adafruit_blinka.microcontroller.ftdi_mpsse.mpsse.i2c': fake_mod}):
-		bus = i2c_bus.open_i2c_bus('ft232h', 'ftdi://ftdi:232h:FT9/1')
-	assert isinstance(bus, i2c_bus._LockedI2C)
-	# Env was set to the selector during construction, restored (unset) after.
-	assert created == ['ftdi://ftdi:232h:FT9/1']
-	assert 'BLINKA_FT232H' not in os.environ
+    fake_mod = types_module_with(I2C=FakeBackendI2C)
+    with mock.patch.dict("sys.modules", {"adafruit_blinka.microcontroller.ftdi_mpsse.mpsse.i2c": fake_mod}):
+        bus = i2c_bus.open_i2c_bus("ft232h", "ftdi://ftdi:232h:FT9/1")
+    assert isinstance(bus, i2c_bus._LockedI2C)
+    # Env was set to the selector during construction, restored (unset) after.
+    assert created == ["ftdi://ftdi:232h:FT9/1"]
+    assert "BLINKA_FT232H" not in os.environ
 
 
 def test_open_i2c_bus_caches_per_kind_and_selector():
-	class FakeBackendI2C:
-		def __init__(self):
-			pass
+    class FakeBackendI2C:
+        def __init__(self):
+            pass
 
-	fake_mod = types_module_with(I2C=FakeBackendI2C)
-	with mock.patch.dict('sys.modules', {'adafruit_blinka.microcontroller.ftdi_mpsse.mpsse.i2c': fake_mod}):
-		a = i2c_bus.open_i2c_bus('ft232h', '')
-		b = i2c_bus.open_i2c_bus('ft232h', '1')  # '' and '1' are the same adapter
-		c = i2c_bus.open_i2c_bus('ft232h', '')
-	assert a is b is c
+    fake_mod = types_module_with(I2C=FakeBackendI2C)
+    with mock.patch.dict("sys.modules", {"adafruit_blinka.microcontroller.ftdi_mpsse.mpsse.i2c": fake_mod}):
+        a = i2c_bus.open_i2c_bus("ft232h", "")
+        b = i2c_bus.open_i2c_bus("ft232h", "1")  # '' and '1' are the same adapter
+        c = i2c_bus.open_i2c_bus("ft232h", "")
+    assert a is b is c
 
 
 def test_open_i2c_bus_runtime_rejects_basic_after_ft232h():
-	class FakeBackendI2C:
-		def __init__(self):
-			pass
+    class FakeBackendI2C:
+        def __init__(self):
+            pass
 
-	fake_mod = types_module_with(I2C=FakeBackendI2C)
-	with mock.patch.dict('sys.modules', {'adafruit_blinka.microcontroller.ftdi_mpsse.mpsse.i2c': fake_mod}):
-		i2c_bus.open_i2c_bus('ft232h', '')
-		with pytest.raises(i2c_bus.I2CBusConfigError):
-			i2c_bus.open_i2c_bus('basic')
+    fake_mod = types_module_with(I2C=FakeBackendI2C)
+    with mock.patch.dict("sys.modules", {"adafruit_blinka.microcontroller.ftdi_mpsse.mpsse.i2c": fake_mod}):
+        i2c_bus.open_i2c_bus("ft232h", "")
+        with pytest.raises(i2c_bus.I2CBusConfigError):
+            i2c_bus.open_i2c_bus("basic")
 
 
 def types_module_with(**attrs):
-	import types
+    import types
 
-	mod = types.ModuleType('fake')
-	for name, value in attrs.items():
-		setattr(mod, name, value)
-	return mod
+    mod = types.ModuleType("fake")
+    for name, value in attrs.items():
+        setattr(mod, name, value)
+    return mod
 ```
 
 - [ ] **Step 2: Run to verify they fail**
@@ -366,41 +368,41 @@ Append to `common/i2c_bus.py`:
 
 ```python
 class _LockedI2C:
-	"""Wrap a Blinka backend I2C (ft232h/mcp2221) so Adafruit drivers can use it.
+    """Wrap a Blinka backend I2C (ft232h/mcp2221) so Adafruit drivers can use it.
 
-	The backend classes expose scan/writeto/readfrom_into/writeto_then_readfrom
-	but not try_lock/unlock, which adafruit_bus_device.I2CDevice requires. Add a
-	reentrant lock and delegate I/O to the backend."""
+    The backend classes expose scan/writeto/readfrom_into/writeto_then_readfrom
+    but not try_lock/unlock, which adafruit_bus_device.I2CDevice requires. Add a
+    reentrant lock and delegate I/O to the backend."""
 
-	def __init__(self, backend):
-		self._backend = backend
-		self._lock = threading.RLock()
+    def __init__(self, backend):
+        self._backend = backend
+        self._lock = threading.RLock()
 
-	def try_lock(self):
-		return self._lock.acquire(blocking=False)
+    def try_lock(self):
+        return self._lock.acquire(blocking=False)
 
-	def unlock(self):
-		try:
-			self._lock.release()
-		except RuntimeError:
-			pass
+    def unlock(self):
+        try:
+            self._lock.release()
+        except RuntimeError:
+            pass
 
-	def scan(self):
-		return self._backend.scan()
+    def scan(self):
+        return self._backend.scan()
 
-	def writeto(self, address, buffer, **kwargs):
-		return self._backend.writeto(address, buffer, **kwargs)
+    def writeto(self, address, buffer, **kwargs):
+        return self._backend.writeto(address, buffer, **kwargs)
 
-	def readfrom_into(self, address, buffer, **kwargs):
-		return self._backend.readfrom_into(address, buffer, **kwargs)
+    def readfrom_into(self, address, buffer, **kwargs):
+        return self._backend.readfrom_into(address, buffer, **kwargs)
 
-	def writeto_then_readfrom(self, address, out_buffer, in_buffer, **kwargs):
-		return self._backend.writeto_then_readfrom(address, out_buffer, in_buffer, **kwargs)
+    def writeto_then_readfrom(self, address, out_buffer, in_buffer, **kwargs):
+        return self._backend.writeto_then_readfrom(address, out_buffer, in_buffer, **kwargs)
 
-	def deinit(self):
-		deinit = getattr(self._backend, 'deinit', None)
-		if deinit is not None:
-			deinit()
+    def deinit(self):
+        deinit = getattr(self._backend, "deinit", None)
+        if deinit is not None:
+            deinit()
 
 
 _bus_cache = {}  # (kind, selector) -> bus object
@@ -409,99 +411,99 @@ _cache_lock = threading.RLock()
 
 
 def reset_bus_state():
-	"""Clear the bus cache and opened-kind registry. Tests only."""
-	with _cache_lock:
-		_bus_cache.clear()
-		_opened_kinds.clear()
+    """Clear the bus cache and opened-kind registry. Tests only."""
+    with _cache_lock:
+        _bus_cache.clear()
+        _opened_kinds.clear()
 
 
 def _canonical_selector(kind, selector):
-	sel = '' if selector in (None, '') else str(selector)
-	# For ft232h, blank and '1' both mean "first FT232H" -> one cache entry.
-	if kind == 'ft232h' and sel in ('', '1'):
-		sel = ''
-	return sel
+    sel = "" if selector in (None, "") else str(selector)
+    # For ft232h, blank and '1' both mean "first FT232H" -> one cache entry.
+    if kind == "ft232h" and sel in ("", "1"):
+        sel = ""
+    return sel
 
 
 def _construct_ft232h(selector):
-	from adafruit_blinka.microcontroller.ftdi_mpsse.mpsse.i2c import I2C as _FT232H_I2C
+    from adafruit_blinka.microcontroller.ftdi_mpsse.mpsse.i2c import I2C as _FT232H_I2C
 
-	# The backend reads BLINKA_FT232H only during __init__ (get_ft232h_url()).
-	# Set it transiently and restore the prior value so the factory never leaves
-	# a board-forcing var in the environment (keeps assert_clean_blinka_env true
-	# process-wide). If a caller pre-set it (ft232h_relay), restore keeps it set.
-	prev = os.environ.get('BLINKA_FT232H', _UNSET)
-	os.environ['BLINKA_FT232H'] = str(selector) if selector else '1'
-	try:
-		backend = _FT232H_I2C()
-	finally:
-		if prev is _UNSET:
-			os.environ.pop('BLINKA_FT232H', None)
-		else:
-			os.environ['BLINKA_FT232H'] = prev
-	return _LockedI2C(backend)
+    # The backend reads BLINKA_FT232H only during __init__ (get_ft232h_url()).
+    # Set it transiently and restore the prior value so the factory never leaves
+    # a board-forcing var in the environment (keeps assert_clean_blinka_env true
+    # process-wide). If a caller pre-set it (ft232h_relay), restore keeps it set.
+    prev = os.environ.get("BLINKA_FT232H", _UNSET)
+    os.environ["BLINKA_FT232H"] = str(selector) if selector else "1"
+    try:
+        backend = _FT232H_I2C()
+    finally:
+        if prev is _UNSET:
+            os.environ.pop("BLINKA_FT232H", None)
+        else:
+            os.environ["BLINKA_FT232H"] = prev
+    return _LockedI2C(backend)
 
 
 def _construct_mcp2221(selector):
-	from adafruit_blinka.microcontroller.mcp2221 import mcp2221 as _mcp_mod
-	from adafruit_blinka.microcontroller.mcp2221.i2c import I2C as _MCP2221_I2C
+    from adafruit_blinka.microcontroller.mcp2221 import mcp2221 as _mcp_mod
+    from adafruit_blinka.microcontroller.mcp2221.i2c import I2C as _MCP2221_I2C
 
-	if selector:
-		# Point the Blinka MCP2221 singleton at the adapter with this serial.
-		import hid
+    if selector:
+        # Point the Blinka MCP2221 singleton at the adapter with this serial.
+        import hid
 
-		path = None
-		for info in hid.enumerate(_mcp_mod.MCP2221.VID, _mcp_mod.MCP2221.PID):
-			if info.get('serial_number') == str(selector):
-				path = info['path']
-				break
-		if path is None:
-			raise I2CBusConfigError(f'No MCP2221 found with serial {selector!r}.')
-		handle = _mcp_mod.mcp2221._hid
-		try:
-			handle.close()
-		except Exception:
-			pass
-		handle.open_path(path)
-	return _LockedI2C(_MCP2221_I2C())
+        path = None
+        for info in hid.enumerate(_mcp_mod.MCP2221.VID, _mcp_mod.MCP2221.PID):
+            if info.get("serial_number") == str(selector):
+                path = info["path"]
+                break
+        if path is None:
+            raise I2CBusConfigError(f"No MCP2221 found with serial {selector!r}.")
+        handle = _mcp_mod.mcp2221._hid
+        try:
+            handle.close()
+        except Exception:
+            pass
+        handle.open_path(path)
+    return _LockedI2C(_MCP2221_I2C())
 
 
 def _construct_bus(kind, selector):
-	if kind == 'basic':
-		import board
-		import busio
+    if kind == "basic":
+        import board
+        import busio
 
-		return busio.I2C(board.SCL, board.SDA)
-	if kind == 'extended':
-		from adafruit_extended_bus import ExtendedI2C
+        return busio.I2C(board.SCL, board.SDA)
+    if kind == "extended":
+        from adafruit_extended_bus import ExtendedI2C
 
-		return ExtendedI2C(resolve_i2c_bus(selector))
-	if kind == 'ft232h':
-		return _construct_ft232h(selector)
-	if kind == 'mcp2221':
-		return _construct_mcp2221(selector)
-	raise I2CBusConfigError(f'Unknown i2c bus kind {kind!r}.')
+        return ExtendedI2C(resolve_i2c_bus(selector))
+    if kind == "ft232h":
+        return _construct_ft232h(selector)
+    if kind == "mcp2221":
+        return _construct_mcp2221(selector)
+    raise I2CBusConfigError(f"Unknown i2c bus kind {kind!r}.")
 
 
-def open_i2c_bus(bus_kind='basic', bus_selector=None):
-	"""Return a busio.I2C-compatible bus for `bus_kind`, opening it if needed.
+def open_i2c_bus(bus_kind="basic", bus_selector=None):
+    """Return a busio.I2C-compatible bus for `bus_kind`, opening it if needed.
 
-	bus_selector is the stored i2c_bus_num value: a /dev/i2c-N number or adapter
-	match for `extended`, a pyftdi URL for `ft232h`, an MCP2221 serial for
-	`mcp2221`; ignored for `basic`. Buses are cached per (kind, selector) for
-	the process lifetime so every device on one physical bus shares one handle
-	and lock. Raises I2CBusConfigError for an unworkable combination."""
-	kind = (bus_kind or 'basic').strip().lower()
-	selector = _canonical_selector(kind, bus_selector)
-	with _cache_lock:
-		validate_bus_kinds(_opened_kinds | {kind})
-		key = (kind, selector)
-		bus = _bus_cache.get(key)
-		if bus is None:
-			bus = _construct_bus(kind, selector)
-			_bus_cache[key] = bus
-		_opened_kinds.add(kind)
-		return bus
+    bus_selector is the stored i2c_bus_num value: a /dev/i2c-N number or adapter
+    match for `extended`, a pyftdi URL for `ft232h`, an MCP2221 serial for
+    `mcp2221`; ignored for `basic`. Buses are cached per (kind, selector) for
+    the process lifetime so every device on one physical bus shares one handle
+    and lock. Raises I2CBusConfigError for an unworkable combination."""
+    kind = (bus_kind or "basic").strip().lower()
+    selector = _canonical_selector(kind, bus_selector)
+    with _cache_lock:
+        validate_bus_kinds(_opened_kinds | {kind})
+        key = (kind, selector)
+        bus = _bus_cache.get(key)
+        if bus is None:
+            bus = _construct_bus(kind, selector)
+            _bus_cache[key] = bus
+        _opened_kinds.add(kind)
+        return bus
 ```
 
 - [ ] **Step 4: Run to verify they pass**
@@ -544,11 +546,11 @@ Append to `tests/test_i2c_bus.py`:
 
 ```python
 def test_probes_base_reexports_bus_helpers():
-	import common.i2c_bus as cib
-	import probes.base as base
+    import common.i2c_bus as cib
+    import probes.base as base
 
-	assert base.resolve_i2c_bus is cib.resolve_i2c_bus
-	assert base.find_i2c_bus is cib.find_i2c_bus
+    assert base.resolve_i2c_bus is cib.resolve_i2c_bus
+    assert base.find_i2c_bus is cib.find_i2c_bus
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -609,22 +611,22 @@ from unittest import mock
 
 
 def test_kttdevice_opens_bus_via_factory(monkeypatch):
-	import probes.mcp9600_adafruit as mod
+    import probes.mcp9600_adafruit as mod
 
-	fake_bus = object()
-	opened = {}
+    fake_bus = object()
+    opened = {}
 
-	def fake_open(kind, selector):
-		opened['args'] = (kind, selector)
-		return fake_bus
+    def fake_open(kind, selector):
+        opened["args"] = (kind, selector)
+        return fake_bus
 
-	monkeypatch.setattr(mod, 'open_i2c_bus', fake_open)
-	monkeypatch.setattr(mod, 'MCP9600', mock.Mock())
+    monkeypatch.setattr(mod, "open_i2c_bus", fake_open)
+    monkeypatch.setattr(mod, "MCP9600", mock.Mock())
 
-	dev = mod.KTTDevice(i2c_bus_addr=0x67, i2c_bus_kind='ft232h', i2c_bus_num='1', tc_type='K')
-	assert dev.i2c is fake_bus
-	assert opened['args'] == ('ft232h', '1')
-	mod.MCP9600.assert_called_once()
+    dev = mod.KTTDevice(i2c_bus_addr=0x67, i2c_bus_kind="ft232h", i2c_bus_num="1", tc_type="K")
+    assert dev.i2c is fake_bus
+    assert opened["args"] == ("ft232h", "1")
+    mod.MCP9600.assert_called_once()
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -646,11 +648,11 @@ from common.i2c_bus import open_i2c_bus
 Replace the bus-opening branch in `KTTDevice.__init__`:
 
 ```python
-		if i2c_bus_kind == 'basic':
-			# Create the I2C bus
-			self.i2c = busio.I2C(board.SCL, board.SDA)
-		elif i2c_bus_kind == 'extended':
-			self.i2c = ExtendedI2C(resolve_i2c_bus(i2c_bus_num))
+if i2c_bus_kind == "basic":
+    # Create the I2C bus
+    self.i2c = busio.I2C(board.SCL, board.SDA)
+elif i2c_bus_kind == "extended":
+    self.i2c = ExtendedI2C(resolve_i2c_bus(i2c_bus_num))
 ```
 
 with:
@@ -708,22 +710,22 @@ In `tests/test_tof_base.py`, change the `tof_mod` fixture to patch the factory i
 ```python
 @pytest.fixture
 def tof_mod():
-	import distance._tof_base as mod
+    import distance._tof_base as mod
 
-	with mock.patch.object(mod, 'open_i2c_bus', return_value=mock.sentinel.bus):
-		yield mod
+    with mock.patch.object(mod, "open_i2c_bus", return_value=mock.sentinel.bus):
+        yield mod
 ```
 
 Add a test:
 
 ```python
 def test_open_i2c_bus_delegates_to_factory(tof_mod):
-	hopper = _make_hopper(tof_mod, dev_pins={'distance': {'i2c_bus_kind': 'ft232h', 'i2c_bus_num': '1'}})
-	try:
-		assert hopper.opened_with[0] is mock.sentinel.bus
-		tof_mod.open_i2c_bus.assert_called_with('ft232h', '1')
-	finally:
-		_stop(hopper)
+    hopper = _make_hopper(tof_mod, dev_pins={"distance": {"i2c_bus_kind": "ft232h", "i2c_bus_num": "1"}})
+    try:
+        assert hopper.opened_with[0] is mock.sentinel.bus
+        tof_mod.open_i2c_bus.assert_called_with("ft232h", "1")
+    finally:
+        _stop(hopper)
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -749,17 +751,17 @@ from common.i2c_bus import open_i2c_bus
 Replace `_open_i2c_bus`:
 
 ```python
-	def _open_i2c_bus(self):
-		if self.i2c_bus_kind == 'extended':
-			return ExtendedI2C(resolve_i2c_bus(self.i2c_bus_num))
-		return busio.I2C(board.SCL, board.SDA)
+def _open_i2c_bus(self):
+    if self.i2c_bus_kind == "extended":
+        return ExtendedI2C(resolve_i2c_bus(self.i2c_bus_num))
+    return busio.I2C(board.SCL, board.SDA)
 ```
 
 with:
 
 ```python
-	def _open_i2c_bus(self):
-		return open_i2c_bus(self.i2c_bus_kind, self.i2c_bus_num)
+def _open_i2c_bus(self):
+    return open_i2c_bus(self.i2c_bus_kind, self.i2c_bus_num)
 ```
 
 - [ ] **Step 4: Run tests**
@@ -800,32 +802,34 @@ from unittest import mock
 
 
 def _base_config(**fan):
-	return {
-		'outputs': {'power': 0, 'igniter': 1, 'auger': 2, 'fan': 3},
-		'numato': {'device': '/dev/ttyACM0'},
-		'fan_controller': fan,
-		'frequency': 25000,
-	}
+    return {
+        "outputs": {"power": 0, "igniter": 1, "auger": 2, "fan": 3},
+        "numato": {"device": "/dev/ttyACM0"},
+        "fan_controller": fan,
+        "frequency": 25000,
+    }
 
 
 def _make(config):
-	import grillplat.x86_numato as mod
+    import grillplat.x86_numato as mod
 
-	with (
-		mock.patch.object(mod, 'open_i2c_bus', return_value=mock.sentinel.bus) as open_bus,
-		mock.patch.object(mod, 'NumatoUSBRelay'),
-		mock.patch.object(mod, 'EMC2101_LUT') as emc2101,
-		mock.patch.object(mod, 'EMC2301') as emc2301,
-	):
-		platform = mod.GrillPlatform(config)
-		return platform, open_bus, emc2101, emc2301
+    with (
+        mock.patch.object(mod, "open_i2c_bus", return_value=mock.sentinel.bus) as open_bus,
+        mock.patch.object(mod, "NumatoUSBRelay"),
+        mock.patch.object(mod, "EMC2101_LUT") as emc2101,
+        mock.patch.object(mod, "EMC2301") as emc2301,
+    ):
+        platform = mod.GrillPlatform(config)
+        return platform, open_bus, emc2101, emc2301
 
 
 def test_emc_bus_opened_via_factory_mcp2221():
-	platform, open_bus, emc2101, emc2301 = _make(_base_config(chip='emc2101', i2c_bus_kind='mcp2221', i2c_bus_num='SERIAL9'))
-	open_bus.assert_called_once_with('mcp2221', 'SERIAL9')
-	emc2101.assert_called_once_with(mock.sentinel.bus)
-	emc2301.assert_not_called()
+    platform, open_bus, emc2101, emc2301 = _make(
+        _base_config(chip="emc2101", i2c_bus_kind="mcp2221", i2c_bus_num="SERIAL9")
+    )
+    open_bus.assert_called_once_with("mcp2221", "SERIAL9")
+    emc2101.assert_called_once_with(mock.sentinel.bus)
+    emc2301.assert_not_called()
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -854,11 +858,11 @@ In `grillplat/x86_numato.py`:
    (Also drop `import glob` and `import os` if they are now unused — check with `grep -nE '\b(glob|os)\.' grillplat/x86_numato.py`.)
 3. Replace the EMC bus construction
    ```python
-		# Open the fan controller on the configured I2C bus.
-		if self.i2c_bus_kind == 'extended':
-			i2c = ExtendedI2C(resolve_i2c_bus(self.i2c_bus_num))
-		else:
-			i2c = busio.I2C(board.SCL, board.SDA)
+   # Open the fan controller on the configured I2C bus.
+   if self.i2c_bus_kind == "extended":
+       i2c = ExtendedI2C(resolve_i2c_bus(self.i2c_bus_num))
+   else:
+       i2c = busio.I2C(board.SCL, board.SDA)
    ```
    with:
    ```python
@@ -906,23 +910,23 @@ EOF
 In `tests/ft232h_helpers.py`, add a factory patch to `make_ft232h_platform` and surface it on the harness. Replace the `with (...)` block and harness assembly:
 
 ```python
-	fake_board = FakeBoard()
-	fake_dio = FakeDigitalIO()
-	with (
-		mock.patch.object(mod, '_load_ft232h', return_value=(fake_board, fake_dio)),
-		mock.patch.object(mod, 'open_i2c_bus', return_value=mock.sentinel.ft232h_bus) as open_bus,
-		mock.patch.object(mod, 'EMC2101_LUT') as emc2101_cls,
-		mock.patch.object(mod, 'EMC2301') as emc2301_cls,
-	):
-		platform = mod.GrillPlatform(config)
-		harness = types.SimpleNamespace(
-			board=fake_board,
-			dio=fake_dio,
-			open_bus=open_bus,
-			emc2101_cls=emc2101_cls,
-			emc2301_cls=emc2301_cls,
-		)
-		yield platform, harness
+fake_board = FakeBoard()
+fake_dio = FakeDigitalIO()
+with (
+    mock.patch.object(mod, "_load_ft232h", return_value=(fake_board, fake_dio)),
+    mock.patch.object(mod, "open_i2c_bus", return_value=mock.sentinel.ft232h_bus) as open_bus,
+    mock.patch.object(mod, "EMC2101_LUT") as emc2101_cls,
+    mock.patch.object(mod, "EMC2301") as emc2301_cls,
+):
+    platform = mod.GrillPlatform(config)
+    harness = types.SimpleNamespace(
+        board=fake_board,
+        dio=fake_dio,
+        open_bus=open_bus,
+        emc2101_cls=emc2101_cls,
+        emc2301_cls=emc2301_cls,
+    )
+    yield platform, harness
 ```
 
 Add `from unittest import mock` is already imported at the top of the helper (`from unittest import mock`) — keep it. Remove the now-unused `mock.patch.object(mod, 'busio')` line and the `busio=busio_mod` field.
@@ -931,14 +935,14 @@ In `tests/test_ft232h_fan.py`, update `test_emc2101_init_opens_i2c_and_controlle
 
 ```python
 def test_emc2101_init_opens_i2c_and_controller():
-	with make_ft232h_platform(_emc_config('emc2101')) as (plat, harness):
-		assert plat.pwm_fan is True
-		harness.open_bus.assert_called_once_with('ft232h', '1')
-		harness.emc2101_cls.assert_called_once_with(mock.sentinel.ft232h_bus)
-		harness.emc2301_cls.assert_not_called()
-		assert plat.emc is harness.emc2101_cls.return_value
-		assert plat.emc.lut_enabled is False
-		assert plat.emc.manual_fan_speed == 0
+    with make_ft232h_platform(_emc_config("emc2101")) as (plat, harness):
+        assert plat.pwm_fan is True
+        harness.open_bus.assert_called_once_with("ft232h", "1")
+        harness.emc2101_cls.assert_called_once_with(mock.sentinel.ft232h_bus)
+        harness.emc2301_cls.assert_not_called()
+        assert plat.emc is harness.emc2101_cls.return_value
+        assert plat.emc.lut_enabled is False
+        assert plat.emc.manual_fan_speed == 0
 ```
 
 Add `from unittest import mock` to the top of `tests/test_ft232h_fan.py`.
@@ -963,15 +967,15 @@ In `grillplat/ft232h_relay.py`:
    ```
    with:
    ```python
-		# Open the FT232H I2C bus through the shared factory FIRST. This creates
-		# the single MPSSE controller (and sets Blinka's Pin.mpsse_gpio), so the
-		# relay GPIO pins below and any ft232h probe reuse one controller instead
-		# of fighting over the FT232H's single MPSSE engine.
-		self._ft232h_bus = open_i2c_bus('ft232h', self.url)
+   # Open the FT232H I2C bus through the shared factory FIRST. This creates
+   # the single MPSSE controller (and sets Blinka's Pin.mpsse_gpio), so the
+   # relay GPIO pins below and any ft232h probe reuse one controller instead
+   # of fighting over the FT232H's single MPSSE engine.
+   self._ft232h_bus = open_i2c_bus("ft232h", self.url)
 
-		# Now import the ft232h board/digitalio and create one pin per output;
-		# these reuse the controller established above via Pin.mpsse_gpio.
-		board, digitalio = _load_ft232h(self.url)
+   # Now import the ft232h board/digitalio and create one pin per output;
+   # these reuse the controller established above via Pin.mpsse_gpio.
+   board, digitalio = _load_ft232h(self.url)
    ```
 3. Replace `_init_fan_controller` so the EMC uses the factory bus instead of a fresh `busio.I2C`:
    ```python
@@ -1035,11 +1039,11 @@ from common.i2c_bus import I2CBusConfigError
 
 
 def test_build_devices_rejects_board_forcing_env(monkeypatch):
-	import controller.runtime.devices as devices
+    import controller.runtime.devices as devices
 
-	monkeypatch.setenv('BLINKA_FT232H', '1')
-	with pytest.raises(I2CBusConfigError):
-		devices.build_devices({}, errors=[], event_log=None, control_log=None)
+    monkeypatch.setenv("BLINKA_FT232H", "1")
+    with pytest.raises(I2CBusConfigError):
+        devices.build_devices({}, errors=[], event_log=None, control_log=None)
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -1101,54 +1105,54 @@ Append to `tests/test_x86_manifest.py` (which already loads the manifest; reuse 
 
 ```python
 def test_x86_fan_bus_kind_includes_usb_hid():
-	import json
-	import os
+    import json
+    import os
 
-	manifest = json.load(open(os.path.join(os.path.dirname(__file__), '..', 'wizard', 'wizard_manifest.json')))
-	# Locate the x86_numato fan_controller i2c_bus_kind options.
-	numato = manifest['modules']['grillplatform']['x86_numato']
-	deps = numato['settings_dependencies']
-	options = set(deps['i2c_bus_kind']['options'])
-	assert {'basic', 'extended', 'ft232h', 'mcp2221'} <= options
+    manifest = json.load(open(os.path.join(os.path.dirname(__file__), "..", "wizard", "wizard_manifest.json")))
+    # Locate the x86_numato fan_controller i2c_bus_kind options.
+    numato = manifest["modules"]["grillplatform"]["x86_numato"]
+    deps = numato["settings_dependencies"]
+    options = set(deps["i2c_bus_kind"]["options"])
+    assert {"basic", "extended", "ft232h", "mcp2221"} <= options
 ```
 
 Append to `tests/test_distance_manifest.py` a check that at least one `device_distance_i2c_bus_kind` selector includes the USB kinds:
 
 ```python
 def test_distance_bus_kind_includes_usb_hid():
-	import json
-	import os
+    import json
+    import os
 
-	manifest = json.load(open(os.path.join(os.path.dirname(__file__), '..', 'wizard', 'wizard_manifest.json')))
-	found = []
+    manifest = json.load(open(os.path.join(os.path.dirname(__file__), "..", "wizard", "wizard_manifest.json")))
+    found = []
 
-	def walk(node):
-		if isinstance(node, dict):
-			opts = node.get('options')
-			if isinstance(opts, dict) and 'basic' in opts and 'extended' in opts:
-				found.append(set(opts))
-			for value in node.values():
-				walk(value)
-		elif isinstance(node, list):
-			for value in node:
-				walk(value)
+    def walk(node):
+        if isinstance(node, dict):
+            opts = node.get("options")
+            if isinstance(opts, dict) and "basic" in opts and "extended" in opts:
+                found.append(set(opts))
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
 
-	walk(manifest['modules'])
-	assert found, 'no bus-kind selectors found'
-	assert all({'ft232h', 'mcp2221'} <= opts for opts in found)
+    walk(manifest["modules"])
+    assert found, "no bus-kind selectors found"
+    assert all({"ft232h", "mcp2221"} <= opts for opts in found)
 ```
 
 Append to `tests/test_mcp9600_probe.py`:
 
 ```python
 def test_mcp9600_manifest_bus_kind_includes_usb_hid():
-	import json
-	import os
+    import json
+    import os
 
-	manifest = json.load(open(os.path.join(os.path.dirname(__file__), '..', 'wizard', 'wizard_manifest.json')))
-	cfg = manifest['modules']['probes']['mcp9600_adafruit']['device_specific']['config']
-	bus_kind = next(item for item in cfg if item['label'] == 'i2c_bus_kind')
-	assert bus_kind['list_values'] == ['basic', 'extended', 'ft232h', 'mcp2221']
+    manifest = json.load(open(os.path.join(os.path.dirname(__file__), "..", "wizard", "wizard_manifest.json")))
+    cfg = manifest["modules"]["probes"]["mcp9600_adafruit"]["device_specific"]["config"]
+    bus_kind = next(item for item in cfg if item["label"] == "i2c_bus_kind")
+    assert bus_kind["list_values"] == ["basic", "extended", "ft232h", "mcp2221"]
 ```
 
 - [ ] **Step 2: Run to verify they fail**
@@ -1231,27 +1235,29 @@ from common.i2c_bus import I2CBusConfigError, configured_bus_kinds, validate_bus
 
 
 def _settings(distance_kind=None, fan_kind=None):
-	return {
-		'platform': {
-			'devices': {'distance': {'i2c_bus_kind': distance_kind} if distance_kind else {}},
-			'fan_controller': {'i2c_bus_kind': fan_kind} if fan_kind else {},
-		}
-	}
+    return {
+        "platform": {
+            "devices": {"distance": {"i2c_bus_kind": distance_kind} if distance_kind else {}},
+            "fan_controller": {"i2c_bus_kind": fan_kind} if fan_kind else {},
+        }
+    }
 
 
 def _probe_map(*kinds):
-	return {'probe_devices': [{'config': {'i2c_bus_kind': k}} for k in kinds]}
+    return {"probe_devices": [{"config": {"i2c_bus_kind": k}} for k in kinds]}
 
 
 def test_configured_bus_kinds_collects_all_surfaces():
-	kinds = configured_bus_kinds(_settings(distance_kind='ft232h', fan_kind='mcp2221'), _probe_map('ft232h', 'extended'))
-	assert kinds == {'ft232h', 'mcp2221', 'extended'}
+    kinds = configured_bus_kinds(
+        _settings(distance_kind="ft232h", fan_kind="mcp2221"), _probe_map("ft232h", "extended")
+    )
+    assert kinds == {"ft232h", "mcp2221", "extended"}
 
 
 def test_configured_bus_kinds_conflict_raises_when_validated():
-	kinds = configured_bus_kinds(_settings(fan_kind='basic'), _probe_map('ft232h'))
-	with pytest.raises(I2CBusConfigError):
-		validate_bus_kinds(kinds)
+    kinds = configured_bus_kinds(_settings(fan_kind="basic"), _probe_map("ft232h"))
+    with pytest.raises(I2CBusConfigError):
+        validate_bus_kinds(kinds)
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -1265,21 +1271,21 @@ Append to `common/i2c_bus.py`:
 
 ```python
 def configured_bus_kinds(settings, probe_map):
-	"""Collect every I2C bus kind across probe devices, the distance sensor, and
-	the platform fan controller. Used to validate a whole wizard config."""
-	kinds = set()
-	for device in (probe_map or {}).get('probe_devices', []):
-		kind = (device.get('config') or {}).get('i2c_bus_kind')
-		if kind:
-			kinds.add(kind)
-	platform = (settings or {}).get('platform', {})
-	distance = (platform.get('devices', {}) or {}).get('distance', {}) or {}
-	if distance.get('i2c_bus_kind'):
-		kinds.add(distance['i2c_bus_kind'])
-	fan = platform.get('fan_controller', {}) or {}
-	if fan.get('i2c_bus_kind'):
-		kinds.add(fan['i2c_bus_kind'])
-	return kinds
+    """Collect every I2C bus kind across probe devices, the distance sensor, and
+    the platform fan controller. Used to validate a whole wizard config."""
+    kinds = set()
+    for device in (probe_map or {}).get("probe_devices", []):
+        kind = (device.get("config") or {}).get("i2c_bus_kind")
+        if kind:
+            kinds.add(kind)
+    platform = (settings or {}).get("platform", {})
+    distance = (platform.get("devices", {}) or {}).get("distance", {}) or {}
+    if distance.get("i2c_bus_kind"):
+        kinds.add(distance["i2c_bus_kind"])
+    fan = platform.get("fan_controller", {}) or {}
+    if fan.get("i2c_bus_kind"):
+        kinds.add(fan["i2c_bus_kind"])
+    return kinds
 ```
 
 - [ ] **Step 4: Run to verify the helper tests pass**
@@ -1298,22 +1304,20 @@ from common.i2c_bus import I2CBusConfigError, configured_bus_kinds, validate_bus
 In the `add_device` branch, after `new_device` is fully assembled and **before** `wizardInstallInfo['probe_map']['probe_devices'].append(new_device)` / `store_wizard_install_info(...)`, insert a validation guard that includes the candidate device:
 
 ```python
-					candidate = {
-						'probe_devices': wizardInstallInfo['probe_map']['probe_devices'] + [new_device]
-					}
-					try:
-						validate_bus_kinds(configured_bus_kinds(settings, candidate))
-					except I2CBusConfigError as exc:
-						alerts.append({'message': str(exc), 'type': 'error'})
-						errors += 1
+candidate = {"probe_devices": wizardInstallInfo["probe_map"]["probe_devices"] + [new_device]}
+try:
+    validate_bus_kinds(configured_bus_kinds(settings, candidate))
+except I2CBusConfigError as exc:
+    alerts.append({"message": str(exc), "type": "error"})
+    errors += 1
 ```
 
 Guard the append/store so a conflicting device is not persisted:
 
 ```python
-					if errors == 0:
-						wizardInstallInfo['probe_map']['probe_devices'].append(new_device)
-						store_wizard_install_info(wizardInstallInfo)
+if errors == 0:
+    wizardInstallInfo["probe_map"]["probe_devices"].append(new_device)
+    store_wizard_install_info(wizardInstallInfo)
 ```
 
 Apply the equivalent guard in the `edit_device` branch: build the candidate probe_devices list with the edited device substituted at its index, validate, and only `store_wizard_install_info` when `errors == 0`.
@@ -1324,12 +1328,12 @@ Append to `tests/test_i2c_bus_wizard_validation.py` a test that drives the add-d
 
 ```python
 def test_add_conflicting_probe_is_rejected():
-	# basic fan + ft232h probe is the one unworkable combination.
-	kinds = configured_bus_kinds(_settings(fan_kind='basic'), _probe_map('ft232h'))
-	with pytest.raises(I2CBusConfigError):
-		validate_bus_kinds(kinds)
-	# a workable combination validates cleanly
-	validate_bus_kinds(configured_bus_kinds(_settings(fan_kind='mcp2221'), _probe_map('ft232h')))
+    # basic fan + ft232h probe is the one unworkable combination.
+    kinds = configured_bus_kinds(_settings(fan_kind="basic"), _probe_map("ft232h"))
+    with pytest.raises(I2CBusConfigError):
+        validate_bus_kinds(kinds)
+    # a workable combination validates cleanly
+    validate_bus_kinds(configured_bus_kinds(_settings(fan_kind="mcp2221"), _probe_map("ft232h")))
 ```
 
 - [ ] **Step 7: Run tests, format, commit**
