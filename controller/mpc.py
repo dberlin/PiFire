@@ -82,9 +82,10 @@ class Controller(ControllerBase):
             return grey_runtime.model_authority()
 
         def handle_policy_failure(_error):
-            if self._activation_runtime.active_record is not None:
-                if not self.activation_runtime_failure("native-solve-failure"):
-                    self.terminate_mpc_activation("native-failure-compensation-failed")
+            if self._activation_runtime.active_record is not None and not self.activation_runtime_failure(
+                "native-solve-failure"
+            ):
+                self.terminate_mpc_activation("native-failure-compensation-failed")
 
         self._pair_factory = MpcPairFactory(
             cfg,

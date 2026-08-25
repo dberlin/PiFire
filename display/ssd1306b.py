@@ -165,9 +165,8 @@ class Display:
         while True:
             self._event_detect()
 
-            if self.display_timeout:
-                if time.time() > self.display_timeout:
-                    self.display_command = "clear"
+            if self.display_timeout and time.time() > self.display_timeout:
+                self.display_command = "clear"
 
             if self.display_command == "clear":
                 self.display_active = False
@@ -210,9 +209,13 @@ class Display:
                     self.menu["current"]["mode"] = "none"
                     self.menu["current"]["option"] = 0
                     self.display_command = "clear"
-            elif not self.display_timeout and self.display_active:
-                if self.in_data is not None and self.status_data is not None:
-                    self._display_current(self.in_data, self.status_data)
+            elif (
+                not self.display_timeout
+                and self.display_active
+                and self.in_data is not None
+                and self.status_data is not None
+            ):
+                self._display_current(self.in_data, self.status_data)
 
             time.sleep(0.1)
 

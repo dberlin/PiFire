@@ -615,9 +615,8 @@ class ModelObservationPayload:
             raise ValueError("requested combustion load must equal clipped baseline plus probe")
         if self.result_revision < 1:
             raise ValueError("model observation requires a producing result revision")
-        if not self.probe_valid:
-            if self.eligible or self.rejection_reasons != ("invalid-probe",):
-                raise ValueError("invalid probe must be ineligible with the invalid-probe reason")
+        if not self.probe_valid and (self.eligible or self.rejection_reasons != ("invalid-probe",)):
+            raise ValueError("invalid probe must be ineligible with the invalid-probe reason")
         if self.ambient_source is AmbientSource.MEASURED and self.probe_source is None:
             raise ValueError("measured ambient requires a source identifier")
         if self.calibration_fit and self.calibration_stage is None:

@@ -61,9 +61,8 @@ class Display(DisplayBase):
             # This will give us a dictionary where each key has a value of 1 or 0. Where 1 is pressed and 0 is not pressed.
             keys = pygame.key.get_pressed()  # noqa: F841  # debug-scaffold
 
-            if self.display_timeout:
-                if time.time() > self.display_timeout:
-                    self.display_timeout = None
+            if self.display_timeout and time.time() > self.display_timeout:
+                self.display_timeout = None
 
             if self.display_command == "clear":
                 self.display_active = False
@@ -93,9 +92,13 @@ class Display(DisplayBase):
                 else:
                     self.display_text("No IP Found")
 
-            if not self.display_timeout and self.display_active:
-                if self.in_data is not None and self.status_data is not None:
-                    self._display_current(self.in_data, self.status_data)
+            if (
+                not self.display_timeout
+                and self.display_active
+                and self.in_data is not None
+                and self.status_data is not None
+            ):
+                self._display_current(self.in_data, self.status_data)
 
         pygame.quit()
 

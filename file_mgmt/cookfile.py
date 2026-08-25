@@ -205,19 +205,20 @@ def read_cookfile(filename):
         cook_file_struct[jsonfile], status = read_json_file_data(filename, jsonfile)
         if status != "OK":
             break  # Exit loop and function, error string in status
-        if jsonfile == "metadata":
-            # settings["versions"]["cookfile"] is the MINIMUM file version this
-            # build can load. The comparison used to test major/minor/patch
-            # INDEPENDENTLY (`file[0] >= min[0] and file[1] >= min[1] and
-            # file[2] >= min[2]`), which is not how semantic versions order:
-            # against the shipped minimum of 1.5.0 a file written as 2.4.0
-            # failed the `4 >= 5` term and was reported as an OLDER format, so
-            # a file from a NEWER PiFire was routed to the repair/upgrade
-            # prompt that would rewrite it backwards. semantic_ver_is_lower()
-            # is the correct lexicographic comparison and was already in tree.
-            if semantic_ver_is_lower(cook_file_struct["metadata"]["version"], settings["versions"]["cookfile"]):
-                status = "WARNING: Older cookfile version format! "
-                break  # Exit loop and function, error string in status
+        # settings["versions"]["cookfile"] is the MINIMUM file version this
+        # build can load. The comparison used to test major/minor/patch
+        # INDEPENDENTLY (`file[0] >= min[0] and file[1] >= min[1] and
+        # file[2] >= min[2]`), which is not how semantic versions order:
+        # against the shipped minimum of 1.5.0 a file written as 2.4.0
+        # failed the `4 >= 5` term and was reported as an OLDER format, so
+        # a file from a NEWER PiFire was routed to the repair/upgrade
+        # prompt that would rewrite it backwards. semantic_ver_is_lower()
+        # is the correct lexicographic comparison and was already in tree.
+        if jsonfile == "metadata" and semantic_ver_is_lower(
+            cook_file_struct["metadata"]["version"], settings["versions"]["cookfile"]
+        ):
+            status = "WARNING: Older cookfile version format! "
+            break  # Exit loop and function, error string in status
 
     if status == "OK":
         cook_file_struct["learning_diagnostics"], status = read_optional_json_file_data(

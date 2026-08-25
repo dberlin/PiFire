@@ -164,14 +164,13 @@ class CalibrationSummaryEvidence:
         elif self.status == "rejected":
             if self.accepted or self.probe_count != 0 or self.probe_q != 0.0:
                 raise ValueError("rejected calibration evidence must not claim a probe")
-        elif self.status == "cancelled":
-            if (
-                self.accepted
-                or self.probe_count != 0
-                or self.cancellation_reason is None
-                or self.cancellation_command_action == "none"
-            ):
-                raise ValueError("cancelled calibration evidence must retain cancellation attribution")
+        elif self.status == "cancelled" and (
+            self.accepted
+            or self.probe_count != 0
+            or self.cancellation_reason is None
+            or self.cancellation_command_action == "none"
+        ):
+            raise ValueError("cancelled calibration evidence must retain cancellation attribution")
         if len(set(self.completed_stages)) != len(self.completed_stages):
             raise ValueError("completed calibration stages must be unique")
         coast_order = ("low", "middle", "high", "coast")

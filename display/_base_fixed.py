@@ -265,11 +265,10 @@ class _DisplayBase:
                 self._event_detect()
                 if self.menu_active:
                     time.sleep(self.loop_delay)
-            if self.display_timeout:
-                if time.time() > self.display_timeout:
-                    self.display_timeout = None
-                    if not self.display_active:
-                        self.display_command = "clear"
+            if self.display_timeout and time.time() > self.display_timeout:
+                self.display_timeout = None
+                if not self.display_active:
+                    self.display_command = "clear"
             if self.display_command == "clear":
                 self.display_active = False
                 self.display_timeout = None
@@ -320,21 +319,12 @@ class _DisplayBase:
                             self.display_command = "clear"
                             time.sleep(self.loop_delay)
                             continue
-                elif not self.display_timeout and self.display_active:
-                    if self.in_data is not None and self.status_data is not None:
-                        self._display_current(self.in_data, self.status_data)
-                        self.in_data = None
-                        self.status_data = None
-                        """If we are sending the full monitor display for the first time increase loop delay to give display time to handle data."""
-                        if self.monitor_display:
-                            time.sleep(self.loop_delay)
-                            continue
-                        else:
-                            self.monitor_display = True
-                            time.sleep(self.clear_delay)
-                            continue
-            elif not self.display_timeout and self.display_active:
-                if self.in_data is not None and self.status_data is not None:
+                elif (
+                    not self.display_timeout
+                    and self.display_active
+                    and self.in_data is not None
+                    and self.status_data is not None
+                ):
                     self._display_current(self.in_data, self.status_data)
                     self.in_data = None
                     self.status_data = None
@@ -346,6 +336,23 @@ class _DisplayBase:
                         self.monitor_display = True
                         time.sleep(self.clear_delay)
                         continue
+            elif (
+                not self.display_timeout
+                and self.display_active
+                and self.in_data is not None
+                and self.status_data is not None
+            ):
+                self._display_current(self.in_data, self.status_data)
+                self.in_data = None
+                self.status_data = None
+                """If we are sending the full monitor display for the first time increase loop delay to give display time to handle data."""
+                if self.monitor_display:
+                    time.sleep(self.loop_delay)
+                    continue
+                else:
+                    self.monitor_display = True
+                    time.sleep(self.clear_delay)
+                    continue
             time.sleep(self.loop_delay)
 
     """
@@ -1007,18 +1014,17 @@ class _DisplayBase:
             img.paste(label_canvas, coords, label_canvas)
 
         # Lid open detection timer display
-        if status_data["mode"] in [Mode.HOLD]:
-            if status_data["lid_open_detected"]:
-                duration = max(0, int(status_data["lid_open_endtime"] - time.time()))
-                text = f"Lid Pause {duration}s"
-                label_canvas = self._draw_text(
-                    text, self.primary_font, 18, (0, 200, 0), rect=True, outline_color=(0, 200, 0), fill_color=(0, 0, 0)
-                )
-                coords = (
-                    int((self.WIDTH // 2) - (label_canvas.width // 2)),
-                    5 if self._SQUARE else int((self.HEIGHT // 2) - 120),
-                )
-                img.paste(label_canvas, coords, label_canvas)
+        if status_data["mode"] in [Mode.HOLD] and status_data["lid_open_detected"]:
+            duration = max(0, int(status_data["lid_open_endtime"] - time.time()))
+            text = f"Lid Pause {duration}s"
+            label_canvas = self._draw_text(
+                text, self.primary_font, 18, (0, 200, 0), rect=True, outline_color=(0, 200, 0), fill_color=(0, 0, 0)
+            )
+            coords = (
+                int((self.WIDTH // 2) - (label_canvas.width // 2)),
+                5 if self._SQUARE else int((self.HEIGHT // 2) - 120),
+            )
+            img.paste(label_canvas, coords, label_canvas)
 
         # Display Final Screen
         self._display_canvas(img)

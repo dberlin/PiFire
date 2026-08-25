@@ -239,9 +239,11 @@ def _run_install_commands(command_list, percent, increment, status, python_exec)
             command = [python_exec if item == "python" else item for item in command]
         if is_real_hardware():
             for stripped in _stream_command(command, percent, status):
-                if stripped.lower().startswith("reboot_required="):
-                    if stripped.split("=", 1)[1].strip().lower() == "true":
-                        reboot_required = True
+                if (
+                    stripped.lower().startswith("reboot_required=")
+                    and stripped.split("=", 1)[1].strip().lower() == "true"
+                ):
+                    reboot_required = True
         else:
             # This path is for development/testing
             time.sleep(2)

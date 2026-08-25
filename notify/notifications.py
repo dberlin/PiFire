@@ -107,9 +107,11 @@ def check_notify(settings, control, in_data=None, pelletdb=None, grill_platform=
                         send_notifications(
                             "Probe_Temp_Achieved", label=item["label"], target=in_data["notify_targets"][item["label"]]
                         )
-                        if control["mode"] == Mode.RECIPE:
-                            if control["recipe"]["step_data"]["trigger_temps"][item["label"]] > 0:
-                                control["recipe"]["step_data"]["triggered"] = True
+                        if (
+                            control["mode"] == Mode.RECIPE
+                            and control["recipe"]["step_data"]["trigger_temps"][item["label"]] > 0
+                        ):
+                            control["recipe"]["step_data"]["triggered"] = True
                         control["notify_data"][index]["req"] = False
                         control["notify_data"][index]["target"] = 0
                         control["notify_data"][index]["eta"] = None
@@ -123,19 +125,19 @@ def check_notify(settings, control, in_data=None, pelletdb=None, grill_platform=
             elif item["type"] == "timer":
                 if time.time() >= control["timer"]["end"]:
                     send_notifications("Timer_Expired")
-                    if control["mode"] == Mode.RECIPE:
-                        if control["recipe"]["step_data"]["timer"] > 0:
-                            control["recipe"]["step_data"]["triggered"] = True
+                    if control["mode"] == Mode.RECIPE and control["recipe"]["step_data"]["timer"] > 0:
+                        control["recipe"]["step_data"]["triggered"] = True
                     control["timer"]["start"] = 0
                     control["timer"]["paused"] = 0
                     control["timer"]["end"] = 0
                     control["notify_data"][index]["req"] = False
 
             elif item["type"] == "hopper":
-                if (time.time() - item["last_check"]) > (settings["pelletlevel"]["warning_time"] * 60):
-                    if pelletdb["current"]["hopper_level"] <= settings["pelletlevel"]["warning_level"]:
-                        send_notifications("Pellet_Level_Low")
-                        control["notify_data"][index]["last_check"] = time.time()
+                if (time.time() - item["last_check"]) > (settings["pelletlevel"]["warning_time"] * 60) and pelletdb[
+                    "current"
+                ]["hopper_level"] <= settings["pelletlevel"]["warning_level"]:
+                    send_notifications("Pellet_Level_Low")
+                    control["notify_data"][index]["last_check"] = time.time()
 
             elif item["type"] == "test":
                 send_notifications("Test_Notify")
@@ -523,17 +525,16 @@ def _send_onesignal_notification(settings, title_message, body_message, channel)
             eventLogger.debug("OneSignal Response: " + response.text)
 
             json_response = response.json()
-            if "errors" in json_response:
-                if "invalid_player_ids" in json_response["errors"]:
-                    for device in json_response["errors"]["invalid_player_ids"]:
-                        if device in settings["notify_services"]["onesignal"]["devices"]:
-                            eventLogger.info(
-                                "OneSignal: "
-                                + settings["notify_services"]["onesignal"]["devices"][device]["device_name"]
-                                + " has an invalid id and has been removed"
-                            )
-                            settings["notify_services"]["onesignal"]["devices"].pop(device)
-                            write_settings(settings)
+            if "errors" in json_response and "invalid_player_ids" in json_response["errors"]:
+                for device in json_response["errors"]["invalid_player_ids"]:
+                    if device in settings["notify_services"]["onesignal"]["devices"]:
+                        eventLogger.info(
+                            "OneSignal: "
+                            + settings["notify_services"]["onesignal"]["devices"][device]["device_name"]
+                            + " has an invalid id and has been removed"
+                        )
+                        settings["notify_services"]["onesignal"]["devices"].pop(device)
+                        write_settings(settings)
 
         except Exception as e:
             eventLogger.warning("OneSignal Notification failed: %s" % (e))

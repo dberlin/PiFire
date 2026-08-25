@@ -334,14 +334,13 @@ class WLEDProfileManager:
             profile_data["bri"] = int(idle_brightness * 2.55)  # Convert % to 0-255
 
         # Apply night mode modifications
-        if suggested_config.get("night_mode", False):
-            if profile_name in ["idle", "cooking"]:
-                # Use night mode variations
-                if profile_name == "idle":
-                    profile_data["bri"] = int(profile_data["bri"] * 0.3)  # Extra dim
-                    profile_data["seg"][0]["col"] = [[255, 191, 0]]  # Amber
-                elif profile_name == "cooking":
-                    profile_data["bri"] = int(profile_data["bri"] * 0.5)  # Dimmed
+        if suggested_config.get("night_mode", False) and profile_name in ["idle", "cooking"]:
+            # Use night mode variations
+            if profile_name == "idle":
+                profile_data["bri"] = int(profile_data["bri"] * 0.3)  # Extra dim
+                profile_data["seg"][0]["col"] = [[255, 191, 0]]  # Amber
+            elif profile_name == "cooking":
+                profile_data["bri"] = int(profile_data["bri"] * 0.5)  # Dimmed
 
         return profile_data
 

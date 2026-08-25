@@ -759,9 +759,8 @@ MODE_MAP = {
 # Attributed to Python How
 # Slightly modified to check if string is None
 def is_float(string):
-    if string is not None:
-        if string.replace(".", "").isnumeric():
-            return True
+    if string is not None and string.replace(".", "").isnumeric():
+        return True
     return False
 
 

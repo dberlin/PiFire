@@ -313,16 +313,15 @@ class Controller:
 
         # Check if there is a timer running, see if it has expired, send notification and reset
         for index, item in enumerate(self.control["notify_data"]):
-            if item["type"] == "timer" and item["req"]:
-                if ctx.clock.now() >= self.control["timer"]["end"]:
-                    send_notifications("Timer_Expired")
-                    self.control["notify_data"][index]["req"] = False
-                    self.control["timer"]["start"] = 0
-                    self.control["timer"]["paused"] = 0
-                    self.control["timer"]["end"] = 0
-                    self.control["notify_data"][index]["shutdown"] = False
-                    self.control["notify_data"][index]["keep_warm"] = False
-                    store.write_control_snapshot(self.control, origin="control")
+            if item["type"] == "timer" and item["req"] and ctx.clock.now() >= self.control["timer"]["end"]:
+                send_notifications("Timer_Expired")
+                self.control["notify_data"][index]["req"] = False
+                self.control["timer"]["start"] = 0
+                self.control["timer"]["paused"] = 0
+                self.control["timer"]["end"] = 0
+                self.control["notify_data"][index]["shutdown"] = False
+                self.control["notify_data"][index]["keep_warm"] = False
+                store.write_control_snapshot(self.control, origin="control")
 
         # Check if user changed hopper levels and update if required
         if self.control["distance_update"]:

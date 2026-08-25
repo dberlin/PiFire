@@ -1205,9 +1205,10 @@ class StatusIcon(FlexObject):
         else:
             char_id = "\uf071"  # FontAwesome Error Triangle Icon
 
-        if "animation_breathe" in self.objectState:
-            if self.objectState["animation_breathe"] >= len(animation_breath_steps):
-                self.objectState["animation_breathe"] = breath_step = 0
+        if "animation_breathe" in self.objectState and self.objectState["animation_breathe"] >= len(
+            animation_breath_steps
+        ):
+            self.objectState["animation_breathe"] = breath_step = 0
 
         font_size = int(animation_breath_steps[breath_step] * 80)
 

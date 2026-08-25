@@ -76,9 +76,8 @@ class Display:
             events = pygame.event.get()  # noqa: F841  # event-pump
 
             """ Normal display loop"""
-            if self.display_timeout:
-                if time.time() > self.display_timeout:
-                    self.display_command = "clear"
+            if self.display_timeout and time.time() > self.display_timeout:
+                self.display_command = "clear"
 
             if self.display_command == "clear":
                 self.display_active = False
@@ -111,10 +110,13 @@ class Display:
                 else:
                     self.display_text("No IP Found")
 
-            if self.display_active:
-                if not self.display_timeout:
-                    if self.in_data is not None and self.status_data is not None:
-                        self._display_current(self.in_data, self.status_data)
+            if (
+                self.display_active
+                and not self.display_timeout
+                and self.in_data is not None
+                and self.status_data is not None
+            ):
+                self._display_current(self.in_data, self.status_data)
 
     """
 	============== Graphics / Display / Draw Methods ============= 

@@ -376,10 +376,9 @@ class iBBQ_Device:
             device.disconnect()
 
     def get_port_values(self):
-        if not self.device_setup or not self.sensor_thread_active:
-            if len(self.probe_values_C) > 0:
-                for i in range(len(self.probe_values_C)):
-                    self.probe_values_C[i] = None
+        if (not self.device_setup or not self.sensor_thread_active) and len(self.probe_values_C) > 0:
+            for i in range(len(self.probe_values_C)):
+                self.probe_values_C[i] = None
 
         return self.probe_values_C
 

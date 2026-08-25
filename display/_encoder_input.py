@@ -96,10 +96,9 @@ class EncoderInputMixin:
                 self.input_counter += 1
             self.last_direction = "UP"
             self.last_movement_time = current_time
-            if time.time() - self.last_movement_time < 0.3:
-                if self.enter_received:
-                    self.enter_received = False
-                    return  # if enter command is received during this time, execute the enter command and not the up
+            if time.time() - self.last_movement_time < 0.3 and self.enter_received:
+                self.enter_received = False
+                return  # if enter command is received during this time, execute the enter command and not the up
 
     def _dec_callback(self, v):
         current_time = time.time()
@@ -109,10 +108,9 @@ class EncoderInputMixin:
                 self.input_counter += 1
             self.last_direction = "DOWN"
             self.last_movement_time = current_time
-            if time.time() - self.last_movement_time < 0.3:
-                if self.enter_received:
-                    self.enter_received = False
-                    return  # if enter command is received during this time, execute the enter command and not the down
+            if time.time() - self.last_movement_time < 0.3 and self.enter_received:
+                self.enter_received = False
+                return  # if enter command is received during this time, execute the enter command and not the down
 
     """
 	 ====================== Input & Menu Code ========================

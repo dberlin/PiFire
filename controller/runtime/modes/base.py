@@ -470,35 +470,34 @@ class ControlMode:
         in place and writes it when any trigger was set."""
         ctx = self.ctx
         mode = self.name
-        if control["mode"] == Mode.RECIPE:
-            if mode in [Mode.SMOKE, Mode.HOLD]:
-                recipe_trigger_set = False
-                if control["recipe"]["step_data"]["timer"] > 0:
+        if control["mode"] == Mode.RECIPE and mode in [Mode.SMOKE, Mode.HOLD]:
+            recipe_trigger_set = False
+            if control["recipe"]["step_data"]["timer"] > 0:
+                for index, item in enumerate(control["notify_data"]):
+                    if item["type"] == "timer":
+                        control["notify_data"][index]["req"] = True
+                        timer_start = ctx.clock.now()
+                        control["timer"]["start"] = timer_start
+                        control["timer"]["paused"] = 0
+                        control["timer"]["end"] = timer_start + (control["recipe"]["step_data"]["timer"] * 60)
+                        control["timer"]["shutdown"] = False
+                        control["notify_data"][index]["shutdown"] = False
+                        control["notify_data"][index]["keep_warm"] = False
+                        recipe_trigger_set = True
+
+            for probe, value in control["recipe"]["step_data"]["trigger_temps"].items():
+                if value > 0:
                     for index, item in enumerate(control["notify_data"]):
-                        if item["type"] == "timer":
+                        if item["type"] == "probe" and item["label"] == probe:
+                            control["notify_data"][index]["target"] = value
                             control["notify_data"][index]["req"] = True
-                            timer_start = ctx.clock.now()
-                            control["timer"]["start"] = timer_start
-                            control["timer"]["paused"] = 0
-                            control["timer"]["end"] = timer_start + (control["recipe"]["step_data"]["timer"] * 60)
-                            control["timer"]["shutdown"] = False
-                            control["notify_data"][index]["shutdown"] = False
-                            control["notify_data"][index]["keep_warm"] = False
                             recipe_trigger_set = True
+                            break
 
-                for probe, value in control["recipe"]["step_data"]["trigger_temps"].items():
-                    if value > 0:
-                        for index, item in enumerate(control["notify_data"]):
-                            if item["type"] == "probe" and item["label"] == probe:
-                                control["notify_data"][index]["target"] = value
-                                control["notify_data"][index]["req"] = True
-                                recipe_trigger_set = True
-                                break
-
-                if recipe_trigger_set:
-                    ctx.store.write_control_snapshot(control, origin="control")
-                else:
-                    self.ctx.event_log.warning("No trigger set for Hold/Smoke mode in recipe.")
+            if recipe_trigger_set:
+                ctx.store.write_control_snapshot(control, origin="control")
+            else:
+                self.ctx.event_log.warning("No trigger set for Hold/Smoke mode in recipe.")
 
     def _process_control_flags(self, control, now, last, pelletdb):
         """Per-tick settings/distance/hopper/switch flag handling (extracted from
@@ -575,75 +574,80 @@ class ControlMode:
         grill_platform = self.grill
         manual_override = self.state.manual_override
 
-        if mode == Mode.MANUAL or self.settings["safety"]["allow_manual_changes"]:
-            if control["manual"]["change"] in ["power", "igniter", "fan", "auger", "pwm"]:
-                if mode != Mode.MANUAL:
-                    override_time = now + self.settings["safety"]["manual_override_time"]
-                else:
-                    override_time = 0
+        if (mode == Mode.MANUAL or self.settings["safety"]["allow_manual_changes"]) and control["manual"]["change"] in [
+            "power",
+            "igniter",
+            "fan",
+            "auger",
+            "pwm",
+        ]:
+            if mode != Mode.MANUAL:
+                override_time = now + self.settings["safety"]["manual_override_time"]
+            else:
+                override_time = 0
 
-                if control["manual"]["change"] == "fan":
-                    if control["manual"]["output"] and not current_output_status["fan"]:
-                        grill_platform.fan_on()
-                        self.ctx.event_log.debug("Fan ON")
-                    elif not control["manual"]["output"] and current_output_status["fan"]:
-                        grill_platform.fan_off()
-                        self.ctx.event_log.debug("Fan OFF")
-                    manual_override["fan"] = override_time
-                    self._on_manual_output("fan", control["manual"]["output"])
+            if control["manual"]["change"] == "fan":
+                if control["manual"]["output"] and not current_output_status["fan"]:
+                    grill_platform.fan_on()
+                    self.ctx.event_log.debug("Fan ON")
+                elif not control["manual"]["output"] and current_output_status["fan"]:
+                    grill_platform.fan_off()
+                    self.ctx.event_log.debug("Fan OFF")
+                manual_override["fan"] = override_time
+                self._on_manual_output("fan", control["manual"]["output"])
 
-                if control["manual"]["change"] == "auger":
-                    if control["manual"]["output"] and not current_output_status["auger"]:
-                        grill_platform.auger_on()
-                        self.ctx.event_log.debug("Auger ON")
-                    elif not control["manual"]["output"] and current_output_status["auger"]:
-                        grill_platform.auger_off()
-                        self.ctx.event_log.debug("Auger OFF")
-                    manual_override["auger"] = override_time
-                    self._on_manual_output("auger", control["manual"]["output"])
+            if control["manual"]["change"] == "auger":
+                if control["manual"]["output"] and not current_output_status["auger"]:
+                    grill_platform.auger_on()
+                    self.ctx.event_log.debug("Auger ON")
+                elif not control["manual"]["output"] and current_output_status["auger"]:
+                    grill_platform.auger_off()
+                    self.ctx.event_log.debug("Auger OFF")
+                manual_override["auger"] = override_time
+                self._on_manual_output("auger", control["manual"]["output"])
 
-                if control["manual"]["change"] == "igniter":
-                    if control["manual"]["output"] and not current_output_status["igniter"]:
-                        grill_platform.igniter_on()
-                        self.ctx.event_log.debug("Igniter ON")
-                    elif not control["manual"]["output"] and current_output_status["igniter"]:
-                        grill_platform.igniter_off()
-                        self.ctx.event_log.debug("Igniter OFF")
-                    manual_override["igniter"] = override_time
-                    self._on_manual_output("igniter", control["manual"]["output"])
+            if control["manual"]["change"] == "igniter":
+                if control["manual"]["output"] and not current_output_status["igniter"]:
+                    grill_platform.igniter_on()
+                    self.ctx.event_log.debug("Igniter ON")
+                elif not control["manual"]["output"] and current_output_status["igniter"]:
+                    grill_platform.igniter_off()
+                    self.ctx.event_log.debug("Igniter OFF")
+                manual_override["igniter"] = override_time
+                self._on_manual_output("igniter", control["manual"]["output"])
 
-                if control["manual"]["change"] == "power":
-                    if control["manual"]["output"] and not current_output_status["power"]:
-                        grill_platform.power_on()
-                        self.ctx.event_log.debug("Power ON")
-                    elif not control["manual"]["output"] and current_output_status["power"]:
-                        grill_platform.power_off()
-                        self.ctx.event_log.debug("Power OFF")
-                    manual_override["power"] = override_time
-                    self._on_manual_output("power", control["manual"]["output"])
+            if control["manual"]["change"] == "power":
+                if control["manual"]["output"] and not current_output_status["power"]:
+                    grill_platform.power_on()
+                    self.ctx.event_log.debug("Power ON")
+                elif not control["manual"]["output"] and current_output_status["power"]:
+                    grill_platform.power_off()
+                    self.ctx.event_log.debug("Power OFF")
+                manual_override["power"] = override_time
+                self._on_manual_output("power", control["manual"]["output"])
 
-                if (
-                    self.settings["platform"]["dc_fan"]
-                    and control["manual"]["change"] == "pwm"
-                    and current_output_status["fan"]
-                    and control["manual"]["pwm"] != current_output_status["pwm"]
-                ):
-                    speed = control["manual"]["pwm"]
-                    self.ctx.event_log.debug("PWM Speed: " + str(speed) + "%")
-                    grill_platform.set_duty_cycle(speed)
-                    manual_override["pwm"] = override_time
-                    # Fires only when this branch's own gate accepts the request --
-                    # before the reset below wipes the applied speed.
-                    self._on_manual_output("pwm", speed)
-                    control["manual"]["pwm"] = 100  # Reset PWM
+            if (
+                self.settings["platform"]["dc_fan"]
+                and control["manual"]["change"] == "pwm"
+                and current_output_status["fan"]
+                and control["manual"]["pwm"] != current_output_status["pwm"]
+            ):
+                speed = control["manual"]["pwm"]
+                self.ctx.event_log.debug("PWM Speed: " + str(speed) + "%")
+                grill_platform.set_duty_cycle(speed)
+                manual_override["pwm"] = override_time
+                # Fires only when this branch's own gate accepts the request --
+                # before the reset below wipes the applied speed.
+                self._on_manual_output("pwm", speed)
+                control["manual"]["pwm"] = 100  # Reset PWM
 
-                # Reset to False (not None) to match default_control()'s seed and
-                # keep control free of dict-nested nulls: every consumer treats
-                # these as falsy (== 'pwm', `in [...]`, truthiness), so behavior is
-                # identical, and a null here would be a delete under json_patch merge.
-                control["manual"]["change"] = False
-                control["manual"]["output"] = False
-                ctx.store.write_control_snapshot(control, origin="control")
+            # Reset to False (not None) to match default_control()'s seed and
+            # keep control free of dict-nested nulls: every consumer treats
+            # these as falsy (== 'pwm', `in [...]`, truthiness), so behavior is
+            # identical, and a null here would be a delete under json_patch merge.
+            control["manual"]["change"] = False
+            control["manual"]["output"] = False
+            ctx.store.write_control_snapshot(control, origin="control")
 
     def _build_status_data(self, control, pelletdb, start_time):
         """Build the per-0.5s display status dict (extracted from run()). Returns a

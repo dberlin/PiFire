@@ -308,10 +308,12 @@ class MqttNotificationHandler:
         if not change_detected:
             return
 
-        if self._publish_data(topic=f"{self._mqtt_settings['id']}/{context}", payload=json.dumps(payload)):
+        if (
+            self._publish_data(topic=f"{self._mqtt_settings['id']}/{context}", payload=json.dumps(payload))
+            and self._check_homeassistant()
+        ):
             # Publish home assitant auto-discovery info
-            if self._check_homeassistant():
-                self._create_autodiscover(context, data)
+            self._create_autodiscover(context, data)
 
     def _subscribe(self, topic):
         self.client.subscribe(topic)
@@ -322,114 +324,113 @@ class MqttNotificationHandler:
         for device in data:
             device_name = context + "_" + device
             topic_name = device_name
-            if device_name in self.last:
-                if not device_name in set(self.initialized_topics):
-                    discovery = self.default_payload.copy()
-                    discovery["state_topic"] = f"{self.pifire_id}/{context}"
-                    discovery["object_id"] = f"{self.pifire_id}_{device_name}".lower()
-                    discovery["unique_id"] = f"{self.pifire_id}_{device_name}".lower()
-                    discovery["value_template"] = f"{{{{ value_json.{device} }}}}"
-                    discovery["name"] = device.title().replace("_", " ")
+            if device_name in self.last and not device_name in set(self.initialized_topics):
+                discovery = self.default_payload.copy()
+                discovery["state_topic"] = f"{self.pifire_id}/{context}"
+                discovery["object_id"] = f"{self.pifire_id}_{device_name}".lower()
+                discovery["unique_id"] = f"{self.pifire_id}_{device_name}".lower()
+                discovery["value_template"] = f"{{{{ value_json.{device} }}}}"
+                discovery["name"] = device.title().replace("_", " ")
 
-                    datatype = type(data[device])
+                datatype = type(data[device])
 
-                    # Default component for any value type we don't special-case
-                    # below (dict/list/None); scalar branches override as needed.
+                # Default component for any value type we don't special-case
+                # below (dict/list/None); scalar branches override as needed.
+                component = "sensor"
+
+                if datatype == bool:
+                    component = "binary_sensor"
+                    discovery["payload_on"] = True
+                    discovery["payload_off"] = False
+
+                    if device not in {"auger", "igniter", "power", "fan"}:
+                        discovery["enabled_by_default"] = False
+
+                elif datatype == str:
                     component = "sensor"
 
-                    if datatype == bool:
-                        component = "binary_sensor"
-                        discovery["payload_on"] = True
-                        discovery["payload_off"] = False
+                elif datatype == int or datatype == float:
+                    component = "sensor"
+                    discovery["state_class"] = "measurement"
 
-                        if device not in {"auger", "igniter", "power", "fan"}:
-                            discovery["enabled_by_default"] = False
+                    if context in ["probe_data_primary", "probe_data_food", "probe_data_aux"]:
+                        discovery["device_class"] = "temperature"
+                        discovery["unit_of_measurement"] = f"°{self._global_settings['units']}"
+                        suffix = "Temp"
 
-                    elif datatype == str:
-                        component = "sensor"
+                    elif context == "probe_data_tr":
+                        discovery["unit_of_measurement"] = "ohms"
+                        discovery["enabled_by_default"] = False
+                        discovery["entity_category"] = "diagnostic"
+                        suffix = "RTD Ohms"
 
-                    elif datatype == int or datatype == float:
-                        component = "sensor"
-                        discovery["state_class"] = "measurement"
+                    elif context.startswith("probe_data"):
+                        # Generic probe_data context (not primary/food/aux/tr);
+                        # default to the temperature suffix used by those probes.
+                        suffix = "Temp"
+                        # Find this probes name in the settings
+                        for probe in self._probe_settings:
+                            if probe["label"] == device:
+                                discovery["name"] = f"{discovery['name']} {suffix}"
+                                topic_name = context + "_" + probe["port"]
+                                break
 
-                        if context in ["probe_data_primary", "probe_data_food", "probe_data_aux"]:
-                            discovery["device_class"] = "temperature"
-                            discovery["unit_of_measurement"] = f"°{self._global_settings['units']}"
-                            suffix = "Temp"
+                    elif context.startswith("control_notify"):
+                        discovery["device_class"] = "temperature"
+                        discovery["unit_of_measurement"] = f"°{self._global_settings['units']}"
+                        suffix = "Target"
+                        for probe in self._probe_settings:
+                            if probe["label"] == data["label"]:
+                                discovery["name"] = f"{data['name']} {suffix}"
+                                topic_name = context
+                                break
 
-                        elif context == "probe_data_tr":
-                            discovery["unit_of_measurement"] = "ohms"
-                            discovery["enabled_by_default"] = False
-                            discovery["entity_category"] = "diagnostic"
-                            suffix = "RTD Ohms"
+                    elif context.startswith("pid"):
+                        discovery["entity_category"] = "diagnostic"
+                        discovery["enabled_by_default"] = False
 
-                        elif context.startswith("probe_data"):
-                            # Generic probe_data context (not primary/food/aux/tr);
-                            # default to the temperature suffix used by those probes.
-                            suffix = "Temp"
-                            # Find this probes name in the settings
-                            for probe in self._probe_settings:
-                                if probe["label"] == device:
-                                    discovery["name"] = f"{discovery['name']} {suffix}"
-                                    topic_name = context + "_" + probe["port"]
-                                    break
+                    if device in ["u_max", "center", "p", "i", "d", "u", "cycle_ratio"]:
+                        discovery["unit_of_measurement"] = "%"
+                        discovery["enabled_by_default"] = False
+                        discovery["value_template"] = f"{{{{ value_json.{device} | round(2)}}}}"
 
-                        elif context.startswith("control_notify"):
-                            discovery["device_class"] = "temperature"
-                            discovery["unit_of_measurement"] = f"°{self._global_settings['units']}"
-                            suffix = "Target"
-                            for probe in self._probe_settings:
-                                if probe["label"] == data["label"]:
-                                    discovery["name"] = f"{data['name']} {suffix}"
-                                    topic_name = context
-                                    break
+                    elif device in ["available_memory", "free_memory"]:
+                        discovery["unit_of_measurement"] = "b"
 
-                        elif context.startswith("pid"):
-                            discovery["entity_category"] = "diagnostic"
-                            discovery["enabled_by_default"] = False
+                    elif device in ["duty_cycle", "hopper_level", "cpu"]:
+                        discovery["unit_of_measurement"] = "%"
 
-                        if device in ["u_max", "center", "p", "i", "d", "u", "cycle_ratio"]:
-                            discovery["unit_of_measurement"] = "%"
-                            discovery["enabled_by_default"] = False
-                            discovery["value_template"] = f"{{{{ value_json.{device} | round(2)}}}}"
+                    elif device in ["PB", "Td", "Ti", "LidOpenPauseTime"]:
+                        discovery["unit_of_measurement"] = "s"
+                        discovery["enabled_by_default"] = False
 
-                        elif device in ["available_memory", "free_memory"]:
-                            discovery["unit_of_measurement"] = "b"
+                    elif device == "cpu_temp":
+                        discovery["device_class"] = "temperature"
+                        discovery["unit_of_measurement"] = "°C"
 
-                        elif device in ["duty_cycle", "hopper_level", "cpu"]:
-                            discovery["unit_of_measurement"] = "%"
+                    elif device in ["primary_setpoint"]:
+                        discovery["device_class"] = "temperature"
+                        discovery["unit_of_measurement"] = f"°{self._global_settings['units']}"
 
-                        elif device in ["PB", "Td", "Ti", "LidOpenPauseTime"]:
-                            discovery["unit_of_measurement"] = "s"
-                            discovery["enabled_by_default"] = False
+                        # if self._mqtt_settings['control']:
+                        # component = "number"
 
-                        elif device == "cpu_temp":
-                            discovery["device_class"] = "temperature"
-                            discovery["unit_of_measurement"] = "°C"
+                        # Make setpoint subscribeable and subscribe to it
+                        # discovery['command_topic'] = f"{discovery['state_topic']}/set/{device}"
+                        # discovery['min'] = 100
+                        # discovery['max'] = 700
+                        # discovery['mode'] = 'auto'
+                        # discovery['optimistic'] = 'false'
+                        # discovery['step'] = 1
+                        # self._subscribe(discovery['command_topic'])
 
-                        elif device in ["primary_setpoint"]:
-                            discovery["device_class"] = "temperature"
-                            discovery["unit_of_measurement"] = f"°{self._global_settings['units']}"
+                self._publish_autodiscover(
+                    device,
+                    f"{self.discovery_topic}/{component}/{self.pifire_id}/{topic_name}/config",
+                    json.dumps(discovery),
+                )
 
-                            # if self._mqtt_settings['control']:
-                            # component = "number"
-
-                            # Make setpoint subscribeable and subscribe to it
-                            # discovery['command_topic'] = f"{discovery['state_topic']}/set/{device}"
-                            # discovery['min'] = 100
-                            # discovery['max'] = 700
-                            # discovery['mode'] = 'auto'
-                            # discovery['optimistic'] = 'false'
-                            # discovery['step'] = 1
-                            # self._subscribe(discovery['command_topic'])
-
-                    self._publish_autodiscover(
-                        device,
-                        f"{self.discovery_topic}/{component}/{self.pifire_id}/{topic_name}/config",
-                        json.dumps(discovery),
-                    )
-
-                    self.initialized_topics.append(device_name)
+                self.initialized_topics.append(device_name)
 
     def notify(self, context: str, data: dict):
         """Publish changed data to the mqtt broker

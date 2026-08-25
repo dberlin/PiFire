@@ -613,22 +613,21 @@ def _get_app_data_manual_data(settings, arg01, arg02):
 
 
 def _get_app_data_recipe_data(settings, arg01, arg02):
-    if arg01 is not None:
-        if arg01 == "details":
-            filelist = get_recipefilelist()
-            recipedetailslist = []
-            for filename in filelist:
-                filepath = f"{recipe_folder}{filename}"
-                recipe_data, status = read_recipefile(filepath)
-                if status == "OK":
-                    recipe_data = _encode_assets(recipe_data)
-                    recipedetailslist.append({"filename": filename, "details": recipe_data})
-            if recipedetailslist:
-                return _response(
-                    result="OK", data={"uuid": settings["server_info"]["uuid"], "recipe_details": recipedetailslist}
-                )
-            else:
-                return _response(result="Error", message="Error: Recipes details not found")
+    if arg01 is not None and arg01 == "details":
+        filelist = get_recipefilelist()
+        recipedetailslist = []
+        for filename in filelist:
+            filepath = f"{recipe_folder}{filename}"
+            recipe_data, status = read_recipefile(filepath)
+            if status == "OK":
+                recipe_data = _encode_assets(recipe_data)
+                recipedetailslist.append({"filename": filename, "details": recipe_data})
+        if recipedetailslist:
+            return _response(
+                result="OK", data={"uuid": settings["server_info"]["uuid"], "recipe_details": recipedetailslist}
+            )
+        else:
+            return _response(result="Error", message="Error: Recipes details not found")
 
 
 _GET_APP_DATA_DISPATCH = {

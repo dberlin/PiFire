@@ -1064,11 +1064,10 @@ class DisplayBase:
         simply calls this once per iteration.
         """
         if self.display_active != None:
-            if self.display_timeout:
-                if time.time() > self.display_timeout:
-                    self.display_timeout = None
-                    self.display_active = None
-                    self.display_init = True
+            if self.display_timeout and time.time() > self.display_timeout:
+                self.display_timeout = None
+                self.display_active = None
+                self.display_init = True
 
             if self.display_active == "home":
                 if self.display_init:
@@ -1090,13 +1089,16 @@ class DisplayBase:
                     self._update_dash_objects()
                 self._display_background()
 
-            elif self.display_active is not None:
-                if (("menu_" in self.display_active) or ("input_" in self.display_active)) and self.display_init:
-                    """ Initialize Menu / Input Dialog """
-                    self._display_menu_background()
-                    self._build_objects(self.menu_background)
-                    self.display_init = False
-                    self.display_updated = True
+            elif (
+                self.display_active is not None
+                and (("menu_" in self.display_active) or ("input_" in self.display_active))
+                and self.display_init
+            ):
+                """ Initialize Menu / Input Dialog """
+                self._display_menu_background()
+                self._build_objects(self.menu_background)
+                self.display_init = False
+                self.display_updated = True
 
             """ Draw all objects. Perform any animations that need to be displayed. """
             self._draw_objects()
