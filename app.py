@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
 """
 ==============================================================================
  PiFire Web UI (Flask App) Process

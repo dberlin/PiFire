@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """This file contains configuration settings for the application."""
 
 import os
