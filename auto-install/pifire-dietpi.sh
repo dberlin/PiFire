@@ -189,7 +189,7 @@ echo "**                                                                     **"
 echo "**      Installing Dependencies... (This could take several minutes)   **" | tee -a ~/logs/pifire_install.log
 echo "**                                                                     **" | tee -a ~/logs/pifire_install.log
 echo "*************************************************************************" | tee -a ~/logs/pifire_install.log
-$SUDO apt install python3-dev python3-pip python3-venv python3-scipy python3-rpi-lgpio nginx git supervisor nodejs ttf-mscorefonts-installer gfortran libatlas-base-dev libopenblas-dev liblapack-dev libopenjp2-7 libglib2.0-dev bluez bluez-firmware libnss-mdns sway seatd unzip -y 2>&1 | tee -a ~/logs/pifire_install.log
+$SUDO apt install python3-dev nginx git supervisor nodejs ttf-mscorefonts-installer gfortran libatlas-base-dev libopenblas-dev liblapack-dev libopenjp2-7 libglib2.0-dev bluez bluez-firmware libnss-mdns sway seatd unzip -y 2>&1 | tee -a ~/logs/pifire_install.log
 
 # Grab project files
 echo "*************************************************************************" | tee -a ~/logs/pifire_install.log
@@ -327,7 +327,7 @@ cd /usr/local/bin/pifire
 # pipefail, as at the uv installer above.
 if ! (
 	set -o pipefail
-	uv venv --system-site-packages --allow-existing 2>&1 | tee -a ~/logs/pifire_install.log
+	uv venv --allow-existing 2>&1 | tee -a ~/logs/pifire_install.log
 ); then
 	echo " ! Failed to create the Python venv. Exiting." | tee -a ~/logs/pifire_install.log
 	exit 1

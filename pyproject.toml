@@ -21,9 +21,9 @@ dependencies = [
     "netifaces>=0.11.0",
     # Imported eagerly by controller/fopdt_identifier.py, which controller/pid_sp.py
     # loads at module scope -- the shipped PID Smith Predictor controller depends on
-    # it unconditionally, so it cannot live in an optional extra. scipy (declared in
-    # the dev group) also pulls numpy, but this declaration is what stops a future
-    # drop of that package from silently taking numpy with it.
+    # it unconditionally, so it cannot live in an optional extra. scipy also
+    # pulls numpy, but this declaration stops a future dependency change from
+    # silently taking numpy with it.
     "numpy>=1.26",
     "paho-mqtt>=2.1.0",
     "pyftdi>=0.55.0",
@@ -37,6 +37,9 @@ dependencies = [
     # ever in auto-install/requirements.txt, so the dev venv never had it --
     # the platform tests stub the module, which is why nothing noticed.
     "rpi-hardware-pwm>=0.2.2",
+    # Runtime imports in controller/{grey_box,mpc_model,update_mpc}.py require
+    # SciPy in every production venv, not only development/codegen environments.
+    "scipy>=1.18.0",
     "thermoworks-cloud>=0.1.13",
     "uuid>=1.30",
     "zeroconf>=0.149.17",
@@ -71,11 +74,9 @@ dev = [
     "pytest-cov>=5.0.0",
     "pytest-playwright>=0.7.1",
     "pytest-random-order>=1.2.0",
-    # Imported by the controller/MPC surface but previously undeclared, so a
-    # clean `uv sync --group dev` produced 28 collection errors, almost all
-    # scipy plus one each for pandas and casadi. Pinned to match the `codegen`
-    # group so the two resolve together. scipy is imported by
-    # controller/{grey_box,mpc_model,update_mpc}.py; casadi by
+    # The controller/MPC test surface also needs casadi and pandas. SciPy is a
+    # production dependency above; its exact group pin stays aligned with the
+    # codegen environment while these groups resolve together. casadi is used by
     # tests/unit/acados/test_grey_box_definition.py; pandas by
     # tests/unit/mpc/test_mpc_{calibration,refit}.py.
     "casadi==3.7.2",

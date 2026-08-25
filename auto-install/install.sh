@@ -260,7 +260,7 @@ echo "**      Installing Dependencies... (This could take several minutes)   **"
 echo "**                                                                     **" | tee -a ~/logs/pifire_install.log
 echo "*************************************************************************" | tee -a ~/logs/pifire_install.log
 # Install dependencies, exit if failed
-$SUDO apt install python3-dev python3-pip python3-venv python3-scipy nginx git supervisor nodejs ttf-mscorefonts-installer gfortran libopenblas-dev liblapack-dev libopenjp2-7-dev libglib2.0-dev libjpeg-dev zlib1g-dev libfreetype-dev liblcms2-dev libtiff-dev libwebp-dev bluetooth bluez sway seatd unzip -y 2>&1 | tee -a ~/logs/pifire_install.log
+$SUDO apt install python3-dev nginx git supervisor nodejs ttf-mscorefonts-installer gfortran libopenblas-dev liblapack-dev libopenjp2-7-dev libglib2.0-dev libjpeg-dev zlib1g-dev libfreetype-dev liblcms2-dev libtiff-dev libwebp-dev bluetooth bluez sway seatd unzip -y 2>&1 | tee -a ~/logs/pifire_install.log
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
 	echo " !! Failed to install dependencies. Installation cannot continue." | tee -a ~/logs/pifire_install.log
 	exit 1
@@ -271,11 +271,6 @@ if [[ "$OS_VERSION" == "11" || "$OS_VERSION" == "12" ]]; then
 	$SUDO apt install libatlas-base-dev -y 2>&1 | tee -a ~/logs/pifire_install.log
 else
 	echo " + Skipping libatlas-base-dev installation for OS Version $OS_VERSION" | tee -a ~/logs/pifire_install.log
-fi
-# If Raspberry Pi 5, install python3-rpi-lgpio
-if grep -q "Raspberry Pi 5" /proc/device-tree/model 2>/dev/null; then
-	echo " + Raspberry Pi 5 detected, installing python3-rpi-lgpio" | tee -a ~/logs/pifire_install.log
-	$SUDO apt install python3-rpi-lgpio -y
 fi
 
 # Unblock Bluetooth in case it is blocked
@@ -451,7 +446,7 @@ cd /usr/local/bin/pifire
 # is for pipefail, as at the uv installer above.
 if ! (
 	set -o pipefail
-	uv venv --system-site-packages --allow-existing 2>&1 | tee -a ~/logs/pifire_install.log
+	uv venv --allow-existing 2>&1 | tee -a ~/logs/pifire_install.log
 ); then
 	echo " ! Failed to create the Python venv. Exiting." | tee -a ~/logs/pifire_install.log
 	exit 1
@@ -460,9 +455,6 @@ fi
 # Activate VENV
 source .venv/bin/activate
 
-# --inexact: rpi.gpio is installed conditionally below and is deliberately NOT
-# a pyproject dependency, because it has to be skipped on a Pi 5. A default
-# `uv sync` prunes everything outside the lockfile and would remove it again.
 fi
 PIFIRE_NATIVE_REPO="${PIFIRE_TEST_REPO_ROOT:-/usr/local/bin/pifire}"
 pifire_install_acados_prerequisites debian
@@ -478,17 +470,6 @@ fi
 if [[ "$PIFIRE_NATIVE_FLOW_TEST" != "1" ]]; then
 
 
-# rpi.gpio drives the legacy /dev/gpiomem interface, which the Pi 5 does not
-# provide; python3-rpi-lgpio is installed from apt there instead (see above).
-if grep -q "Raspberry Pi 5" /proc/device-tree/model 2>/dev/null; then
-	echo " + Raspberry Pi 5 detected, skipping install of rpi.gpio" | tee -a ~/logs/pifire_install.log
-else
-	echo " + Installing rpi.gpio==0.7.1" | tee -a ~/logs/pifire_install.log
-	if ! uv pip install rpi.gpio==0.7.1 2>&1 | tee -a ~/logs/pifire_install.log; then
-		echo " !! Failed to install rpi.gpio. Installation cannot continue." | tee -a ~/logs/pifire_install.log
-		exit 1
-	fi
-fi
 
 # Find all bluepy-helper executables in various possible locations
 BLUEPY_HELPERS=$(find /usr/local/bin/pifire/.venv/lib/ -path "*/bluepy/bluepy-helper" 2>/dev/null)

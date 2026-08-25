@@ -129,8 +129,15 @@ fi
 # Setup VENV
 echo " + Setting up VENV" | tee -a /usr/local/bin/pifire/logs/upgrade.log
 cd /usr/local/bin/pifire
-# --allow-existing: on an upgrade the venv ALWAYS exists, so without this the
-# command fails every single time and the upgrade continues past it.
+# Rebuild only venvs created by the legacy system-site installer. Reusing one
+# would disable system-site exposure in pyvenv.cfg but preserve packages such as
+# rpi.gpio that were installed directly into the venv; rpi-lgpio cannot safely
+# coexist with that compatibility provider.
+VENV_ARGS=(--allow-existing)
+if grep -qx "include-system-site-packages = true" .venv/pyvenv.cfg 2>/dev/null; then
+	echo " + Rebuilding legacy system-site venv" | tee -a /usr/local/bin/pifire/logs/upgrade.log
+	VENV_ARGS=(--clear)
+fi
 #
 # Fatal for the same reason the sync below is: no `set -e` here, so an unchecked
 # failure is discarded, the activate on the next line fails just as quietly, and
@@ -140,7 +147,7 @@ cd /usr/local/bin/pifire
 # terminal at all; the subshell is for pipefail, as at the uv installer above.
 if ! (
 	set -o pipefail
-	uv venv --system-site-packages --allow-existing 2>&1 | tee -a /usr/local/bin/pifire/logs/upgrade.log
+	uv venv "${VENV_ARGS[@]}" 2>&1 | tee -a /usr/local/bin/pifire/logs/upgrade.log
 ); then
 	echo " !! Failed to create the Python venv. Upgrade cannot continue." | tee -a /usr/local/bin/pifire/logs/upgrade.log
 	exit 1
@@ -149,8 +156,7 @@ fi
 # Activate VENV
 source .venv/bin/activate
 
-# --inexact so a conditionally-installed extra (e.g. rpi.gpio, which is skipped
-# on a Pi 5 and so is deliberately not a pyproject dependency) is not pruned.
+# --inexact preserves platform extras installed later by the hardware wizard.
 echo " + Installing module dependencies from pyproject.toml... " | tee -a /usr/local/bin/pifire/logs/upgrade.log
 uv sync --no-dev --inexact 2>&1 | tee -a /usr/local/bin/pifire/logs/upgrade.log
 # PIPESTATUS, not `if !`: no `set -o pipefail` here, so the pipeline status is
@@ -184,9 +190,17 @@ fi
 echo " - Setting UV flag in the settings database" | tee -a /usr/local/bin/pifire/logs/upgrade.log
 python updater.py --uv
 
-# Run wizard to update module dependencies
+# Replay the selected hardware profiles after a legacy venv rebuild so their
+# Python extras are restored into the isolated environment.
 echo " - Running wizard to update module dependencies" | tee -a /usr/local/bin/pifire/logs/upgrade.log
-python wizard.py --existing
+if ! (
+	set -o pipefail
+	python wizard.py --existing 2>&1 | tee -a /usr/local/bin/pifire/logs/upgrade.log
+); then
+	echo " !! Failed to install selected module dependencies. Upgrade cannot continue." |
+		tee -a /usr/local/bin/pifire/logs/upgrade.log
+	exit 1
+fi
 
 # Get PIP List into JSON file
 echo " - Getting PIP List into JSON file" | tee -a /usr/local/bin/pifire/logs/upgrade.log

@@ -166,10 +166,10 @@ $SUDO dnf -y upgrade --refresh 2>&1 | tee -a "$LOG"
 log "*************************************************************************"
 log "**  Installing dependencies...                                        **"
 log "*************************************************************************"
-# Build toolchain + scientific libraries (scipy), web stack, supervisor,
-# bluetooth, image libs, and DejaVu fonts.
+# Build toolchain, web stack, supervisor, bluetooth, image libraries, and
+# DejaVu fonts.
 $SUDO dnf -y install \
-	python3 python3-devel python3-pip python3-scipy \
+	python3 python3-devel \
 	gcc-gfortran openblas-devel lapack-devel \
 	openjpeg-devel glib2-devel \
 	libjpeg-turbo-devel zlib-ng-compat-devel freetype-devel lcms2-devel libtiff-devel libwebp-devel \
@@ -325,7 +325,7 @@ if ! /bin/curl -LsSf https://astral.sh/uv/install.sh 2>>"$LOG" | $SUDO env UV_IN
 fi
 
 cd /usr/local/bin/pifire
-log " + Creating venv (system-site-packages, for python3-scipy)"
+log " + Creating isolated venv"
 # --allow-existing so a re-run reuses the venv instead of failing with
 # "a virtual environment already exists" and carrying on regardless.
 #
@@ -335,7 +335,7 @@ log " + Creating venv (system-site-packages, for python3-scipy)"
 # resurfaces as an unrelated pip/sync error rather than as the real cause. The
 # `set -o pipefail` at the top of this script is what makes the status uv's and
 # not tee's.
-if ! uv venv --system-site-packages --allow-existing 2>&1 | tee -a "$LOG"; then
+if ! uv venv --allow-existing 2>&1 | tee -a "$LOG"; then
 	log " !! Failed to create the Python venv. Installation cannot continue."
 	exit 1
 fi

@@ -4,7 +4,7 @@
       "server": "1.22.0",
       "cookfile": "1.5.0",
       "recipe": "1.0.0",
-      "build": 115
+      "build": 116
     },
     "update_notes": "",
     "update_warnings": ""
@@ -31,9 +31,7 @@
             "flask_socketio",
             "flask_qrcode"
           ],
-          "apt_dependencies": [
-            "python3-scipy"
-          ],
+          "apt_dependencies": [],
           "command_list": []
         },
         "control": {
@@ -161,12 +159,7 @@
         "control": {
           "py_dependencies": [],
           "apt_dependencies": [],
-          "command_list": [
-            [
-              "bash",
-              "/usr/local/bin/pifire/updater/upgrade.sh"
-            ]
-          ]
+          "command_list": []
         }
       }
     },
@@ -219,6 +212,28 @@
           "py_dependencies": [],
           "apt_dependencies": [],
           "command_list": []
+        }
+      }
+    },
+    {
+      "version": "1.22.0",
+      "build": 116,
+      "reboot_required": false,
+      "dependencies": {
+        "app": {
+          "py_dependencies": [],
+          "apt_dependencies": [],
+          "command_list": []
+        },
+        "control": {
+          "py_dependencies": [],
+          "apt_dependencies": [],
+          "command_list": [
+            [
+              "bash",
+              "/usr/local/bin/pifire/updater/upgrade.sh"
+            ]
+          ]
         }
       }
     }
