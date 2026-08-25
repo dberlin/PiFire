@@ -99,11 +99,13 @@ def _dispatch_probe(monkeypatch):
     monkeypatch.setattr(bf.requests, "get", lambda url: effects.append(("requests.get", url)))
 
     #  cmd_reboot and cmd_poweroff are two of the commands this test dispatches,
-    #  and unpatched they really do reboot the machine: `real_hw` defaults to
-    #  True in a test datastore, so the gate in common/system.py passes, and the
-    #  work happens on a daemon thread that swallows its own exceptions -- so the
-    #  test stays green while the host goes down three seconds later, during
-    #  whatever test is running by then.
+    #  and on a datastore whose `real_hw` is True they really do reboot the
+    #  machine: the gate in common/system.py passes, and the work happens on a
+    #  daemon thread that swallows its own exceptions -- so the test stays green
+    #  while the host goes down three seconds later, during whatever test is
+    #  running by then. tests/conftest.py seeds `real_hw` False, which would
+    #  also stop it; this does not depend on that, because the flag is a
+    #  settings value any test can overwrite.
     #
     #  Recorded as effects rather than blocked outright: the assertion below is
     #  that every command DOES something, so these have to remain observable.

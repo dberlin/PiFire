@@ -16,8 +16,9 @@ tests/web/test_page_admin.py, which documents three real unintended reboots):
     `subprocess.run(["sudo","systemctl","reboot"])` and only falls back to
     `os.system`, so patching `os.system` alone is not sufficient either.
   * `is_real_hardware()` reads `settings["platform"]["real_hw"]`, which
-    `default_settings()` ships as True -- a fresh test datastore does NOT
-    disable the dangerous branch.
+    `default_settings()` ships as True and tests/conftest.py seeds as False.
+    That closes the branch for a test that leaves settings alone -- and reopens
+    it for one that does not, since it is a settings value and nothing more.
 
 So: patch the bound names, patch `os.system`, AND assert nothing
 reboot/poweroff/shutdown-shaped ever reached `subprocess.run`.

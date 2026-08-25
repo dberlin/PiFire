@@ -26,10 +26,12 @@ Other pitfalls handled here:
      is the only redirection point -- there is no module global to rebind.
   2. `Process_Monitor` spawns a NON-DAEMON heartbeat thread and, 30s after a
      missed heartbeat, writes a critical_error and shells out to
-     `supervisorctl restart control` -- for real, since `is_real_hw` reads
-     settings['platform']['real_hw'], which DEFAULTS TO TRUE (base_settings()
-     does not protect you). See the note below `make_ctx` for why nothing
-     patches it any more.
+     `supervisorctl restart control`. `is_real_hw` reads
+     settings['platform']['real_hw'] ONCE, in `__init__`, so what protects a
+     captured run is whatever that blob held at construction -- the suite-wide
+     False (tests/conftest.py), unless the run under capture has seeded
+     settings of its own. base_settings() does not protect you. See the note
+     below `make_ctx` for why nothing patches it any more.
 """
 
 import logging

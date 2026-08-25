@@ -1,3 +1,7 @@
+// Two refusals, both about the backend the suite is pointed at: it must not be
+// serving code the checkout no longer has, and it must not present itself as
+// real hardware. See refuseRealHardware below for the second.
+//
 // Refuses to run the suite against a backend that is serving code the checkout
 // no longer has.
 //
@@ -37,6 +41,62 @@ const RESTART = [
 ].join("\n");
 
 export default async function globalSetup() {
+  await refuseStaleBackend();
+  await refuseRealHardware();
+}
+
+// Refuses to run the suite against a backend that presents itself as a grill.
+//
+// `settings.platform.real_hw` is the gate in front of every lifecycle call in
+// common/system.py -- the supervisor restarts, the reboot, the poweroff. On a
+// True backend, one admin write that escapes a spec's route interception is a
+// real `sudo systemctl reboot` of the machine running the suite. That is not a
+// hypothetical failure mode in this repo: the python suite took this machine
+// down once already, from a green run, and the calls happen on daemon threads
+// so nothing reports them.
+//
+// The python side seeds False for every test (tests/conftest.py). e2e cannot:
+// it drives a live backend reading a real datastore, so the answer has to be
+// in that datastore. admin.spec.ts's route interception stays either way --
+// this is the layer that does not depend on a spec remembering to add one.
+async function refuseRealHardware() {
+  const url = `${ports.pifireUrl}/api/settings`;
+
+  let settings: { platform?: { real_hw?: boolean } } | undefined;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return;
+    settings = ((await res.json()) as { settings?: { platform?: { real_hw?: boolean } } }).settings;
+  } catch {
+    //  Same one-sidedness as the staleness check above: the stubbed demo
+    //  projects need no backend at all.
+    return;
+  }
+
+  if (settings?.platform?.real_hw !== true) return;
+
+  throw new Error(
+    [
+      "",
+      "The PiFire backend claims to be running on real hardware.",
+      "",
+      `  ${ports.pifireUrl} reports settings.platform.real_hw = true, so`,
+      "  is_real_hardware() opens the gate in front of reboot_system(),",
+      "  shutdown_system() and the supervisorctl restarts. An admin write that",
+      "  gets past a spec's route interception powers this machine down.",
+      "",
+      "  Set it on the datastore that backend reads (PIFIRE_DB_PATH, or",
+      "  <repo>/pifire.db by default):",
+      "",
+      "    sqlite3 pifire.db \"UPDATE kv SET value = json_set(value, '$.platform.real_hw', json('false')) WHERE key = 'settings:general'\"",
+      "",
+      RESTART,
+      "",
+    ].join("\n"),
+  );
+}
+
+async function refuseStaleBackend() {
   const url = `${ports.pifireUrl}/api/get/revision`;
 
   let payload: VersionsPayload;

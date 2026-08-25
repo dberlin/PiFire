@@ -101,11 +101,13 @@ WHAT IS OBSERVED (per case, see `_run_case`):
   * which of restart_scripts/reboot_system/shutdown_system was invoked
   * `write_log` messages (the timer branches log)
 
-SAFETY: `real_hw` defaults to True in a fresh test datastore, so
-`is_real_hardware()` is True and the action=='cmd' branch would really run
-`sudo systemctl reboot` / `poweroff`. `_run_case` therefore replaces
-restart_scripts/reboot_system/shutdown_system with recording mocks. Never run
-these cases without those patches in place.
+SAFETY: the action=='cmd' branch runs `sudo systemctl reboot` / `poweroff` on a
+machine that answers `is_real_hardware()` with True. `_run_case` therefore
+replaces restart_scripts/reboot_system/shutdown_system with recording mocks, and
+never runs these cases without them. The suite-wide `real_hw` of False
+(tests/conftest.py) is a second layer, not a substitute: it is one settings
+write away from being untrue inside any given test, and these cases seed
+settings themselves.
 
 DETERMINISM: `time.time` is frozen (the timer branches stamp it into control)
 and `time.sleep` is neutralized (nothing sleeps now; get/hopper used to).
@@ -1574,14 +1576,20 @@ def test_lid_open_always_sets_true_regardless_of_arg(seeded):
 def test_cmd_branch_never_executes_real_system_commands(seeded):
     """Guard-rail for this suite itself.
 
-    `real_hw` defaults to True in a fresh test datastore, so is_real_hardware()
-    is True and the un-mocked cmd branch would really shell out to
-    `sudo systemctl reboot`. If this ever fails, the CASES cmd_* entries are
-    executing real reboots -- stop and fix the patching in _run_case.
+    The un-mocked cmd branch shells out to `sudo systemctl reboot`. Two
+    independent things stop it, and this checks the one that is a property of
+    the suite rather than of this test: `real_hw` is False for every test
+    (tests/conftest.py), so `is_real_hardware()` closes the gate before the
+    call is reached. The mocks below are the second, and hold regardless.
+
+    The flag is asserted rather than assumed because it was True until
+    recently, and that is what let a test run reboot this machine. If this ever
+    fails, the CASES cmd_* entries have nothing but _run_case's patching
+    between them and a real reboot -- stop and fix that first.
     """
-    assert runtime_persistence.read_settings()["platform"]["real_hw"] is True, (
-        "Assumption changed: real_hw is no longer True by default. The cmd_* cases "
-        "rely on _run_case's mocks, not on this flag -- but verify before relaxing."
+    assert runtime_persistence.read_settings()["platform"]["real_hw"] is False, (
+        "the suite is presenting itself as a real appliance again; the cmd_* cases "
+        "would then depend entirely on _run_case's mocks to avoid a real reboot"
     )
     with (
         mock.patch.object(api_commands, "restart_scripts") as m_restart,

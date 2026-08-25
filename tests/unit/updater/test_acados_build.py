@@ -121,10 +121,12 @@ def test_standalone_rebuild_uses_the_conditional_shared_boundary(
         return 0
 
     monkeypatch.setattr(updater, "run_acados_build", rebuild)
-    #  This run reaches FINISHED_PERCENT, and publish_finished() now restarts
-    #  PiFire's supervisor programs on the way out. Unpatched -- `real_hw`
-    #  defaults to True in a test datastore -- that is a real
-    #  `sudo supervisorctl restart all` against the developer's machine.
+    #  This run reaches FINISHED_PERCENT, and publish_finished() restarts
+    #  PiFire's supervisor programs on the way out: a real
+    #  `sudo supervisorctl restart all` against the developer's machine on any
+    #  datastore that answers is_real_hardware() with True. The suite-wide
+    #  `real_hw` of False (tests/conftest.py) closes that gate too; this is the
+    #  layer that holds regardless of what the settings blob says.
     monkeypatch.setattr(updater, "restart_scripts", lambda wait=False: None)
 
     updater.run_acados_rebuild(tmp_path)

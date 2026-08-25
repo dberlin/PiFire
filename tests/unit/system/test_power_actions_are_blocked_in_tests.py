@@ -7,13 +7,17 @@ executed all of these, five seconds apart, and reported nothing:
     sudo /usr/sbin/systemctl reboot
     sudo /usr/sbin/systemctl poweroff
 
-Everything needed for that lined up at once. `real_hw` defaults to True, so
-`is_real_hardware()` -- the gate in front of every lifecycle call in
-common/system.py -- passes in a fresh test datastore. The installers grant
-NOPASSWD sudo for exactly these commands, so on an installed Linux box they
-succeed rather than failing the way they do on an uninstalled developer
-machine. And common/system.py runs them on daemon threads, so no exception
-could reach the test even in principle.
+Everything needed for that lined up at once. `real_hw` was True in a fresh test
+datastore, so `is_real_hardware()` -- the gate in front of every lifecycle call
+in common/system.py -- passed. The installers grant NOPASSWD sudo for exactly
+these commands, so on an installed Linux box they succeed rather than failing
+the way they do on an uninstalled developer machine. And common/system.py runs
+them on daemon threads, so no exception could reach the test even in principle.
+
+The gate is now shut by default (tests/conftest.py seeds `real_hw` False, pinned
+by test_tests_are_not_real_hardware.py). That is the other half of the fix, and
+it is the weaker half: it is a settings value, so it lasts exactly as long as no
+test writes settings of its own.
 
 The guard lives in tests/conftest.py and wraps `subprocess.Popen` and
 `os.system`, which is where every one of these paths ends. It is deliberately
@@ -63,7 +67,7 @@ def test_each_command_from_the_incident_is_refused(command, power_guard):
     with pytest.raises(AssertionError, match="power action"):
         subprocess.Popen(command)
 
-    assert power_guard.executed == [], "the command reached the real primitive"
+    assert power_guard.executed_power_commands() == [], "the command reached the real primitive"
     assert len(power_guard.drain()) == 1
 
 
@@ -73,7 +77,7 @@ def test_the_same_commands_are_refused_as_shell_strings(command, power_guard):
     with pytest.raises(AssertionError, match="power action"):
         os.system(" ".join(command))
 
-    assert power_guard.executed == []
+    assert power_guard.executed_power_commands() == []
     assert len(power_guard.drain()) == 1
 
 
@@ -82,7 +86,7 @@ def test_a_backgrounded_shell_string_is_still_refused(power_guard):
     with pytest.raises(AssertionError, match="power action"):
         os.system("sleep 3 && sudo supervisorctl restart webapp &")
 
-    assert power_guard.executed == []
+    assert power_guard.executed_power_commands() == []
     power_guard.drain()
 
 
@@ -108,11 +112,12 @@ def test_a_command_merely_mentioning_a_power_word_still_runs():
 
 
 def _real_hardware(monkeypatch):
-    """Make the gate PASS, which is its state in a fresh test datastore.
+    """Make the gate PASS, which is what a real appliance does.
 
-    `real_hw` defaults to True, so this is not a contrived configuration -- it
-    is what every test in the suite runs with unless it says otherwise, and it
-    is why the incident was reachable at all.
+    The suite seeds `real_hw` False, so the tests below have to ask for the
+    dangerous configuration rather than inheriting it -- and asking for it is
+    the point: these prove the guard holds when the gate is open, which is the
+    state every installed PiFire runs in.
     """
     monkeypatch.setattr(cs, "is_real_hardware", lambda settings=None: True)
 
@@ -124,7 +129,7 @@ def test_supervisor_restarts_are_refused_on_a_waiting_caller(call, power_guard, 
     # wait=True runs inline, so the refusal surfaces here rather than on a thread.
     getattr(cs, call)(wait=True)
 
-    assert power_guard.executed == [], f"{call} reached the real primitive"
+    assert power_guard.executed_power_commands() == [], f"{call} reached the real primitive"
     assert power_guard.drain(), f"{call} was not refused"
 
 
@@ -179,7 +184,7 @@ def test_supervisor_restarts_are_refused_on_the_daemon_thread_path(call, power_g
     getattr(cs, call)()
     joined_threads()
 
-    assert power_guard.executed == [], f"{call} reached the real primitive"
+    assert power_guard.executed_power_commands() == [], f"{call} reached the real primitive"
     assert power_guard.drain(), f"{call} was not refused"
 
 
@@ -196,7 +201,7 @@ def test_power_off_paths_are_refused(call, power_guard, joined_threads, monkeypa
     getattr(cs, call)()
     joined_threads()
 
-    assert power_guard.executed == [], f"{call} reached the real primitive"
+    assert power_guard.executed_power_commands() == [], f"{call} reached the real primitive"
     seams = {seam for _test, _thread, seam, _command in power_guard.drain()}
     assert seams == {"subprocess.Popen", "os.system"}, (
         f"{call} did not reach both seams; the os.system fallback is the one that used to escape"

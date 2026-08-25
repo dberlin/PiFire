@@ -172,8 +172,10 @@ def _fixed_driver_guarded(mod, **overrides):
 
     `_base_fixed._menu_display`'s "Power_" branch calls `reboot_system()` /
     `shutdown_system()` UNCONDITIONALLY here, leaving the `real_hardware` gate
-    to those functions -- and `real_hw` is True in a fresh test datastore, so
-    the gate does not save us. Any test that goes on to call `_event_detect()`
+    to those functions -- so what stands between a menu keypress and a reboot is
+    whatever `settings['platform']['real_hw']` holds at that moment. The suite
+    seeds it False (tests/conftest.py); a test that writes settings of its own
+    does not inherit that. Any test that goes on to call `_event_detect()`
     / `_display_loop()` / otherwise drive menu navigation on one of these
     drivers must keep them patched for as long as it can reach `_menu_display`
     -- constructing under the patch and then letting it expire before the real

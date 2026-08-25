@@ -1673,6 +1673,12 @@
               "3": "Relay 3"
             },
             "settings": ["platform", "outputs", "fan"]
+          },
+          "real_hw": {
+            "friendly_name": "Real Hardware",
+            "description": "Select Yes if running on real hardware (Default).  Select No if running in a test environment.",
+            "options": { "True": "Yes", "False": "No (Test Only)" },
+            "settings": ["platform", "real_hw"]
           }
         }
       },
@@ -1832,6 +1838,12 @@
               "D7": "D7"
             },
             "settings": ["platform", "outputs", "fan"]
+          },
+          "real_hw": {
+            "friendly_name": "Real Hardware",
+            "description": "Select Yes if running on real hardware (Default).  Select No if running in a test environment.",
+            "options": { "True": "Yes", "False": "No (Test Only)" },
+            "settings": ["platform", "real_hw"]
           }
         }
       },
@@ -1945,6 +1957,12 @@
             "description": "MCP2221A GPIO pin driving the fan relay (gates fan power in both modes).",
             "options": { "GP3": "GP3", "GP0": "GP0", "GP1": "GP1", "GP2": "GP2" },
             "settings": ["platform", "outputs", "fan"]
+          },
+          "real_hw": {
+            "friendly_name": "Real Hardware",
+            "description": "Select Yes if running on real hardware (Default).  Select No if running in a test environment.",
+            "options": { "True": "Yes", "False": "No (Test Only)" },
+            "settings": ["platform", "real_hw"]
           }
         }
       }

@@ -352,10 +352,13 @@ def quiet_updater(monkeypatch):
     monkeypatch.setattr(updater, "change_branch", lambda b: (True, "Branch Changed Successfully", " - ok"))
     monkeypatch.setattr(updater, "install_dependencies", lambda v, b: (0, False))
     monkeypatch.setattr(updater, "rebuild_web_ui_if_stale", lambda *a, **k: True)
-    #  A finished run now RESTARTS, which is the side effect this fixture exists
-    #  to keep out of a unit test: publish_finished() ends with restart_scripts,
-    #  and `real_hw` defaults to True in a test datastore, so unpatched it really
-    #  does run `sudo supervisorctl restart all` on the developer's machine.
+    #  A finished run RESTARTS, which is the side effect this fixture exists to
+    #  keep out of a unit test: publish_finished() ends with restart_scripts,
+    #  which runs `sudo supervisorctl restart all` on any datastore that answers
+    #  is_real_hardware() with True. The suite-wide `real_hw` of False
+    #  (tests/conftest.py) also closes that gate, but this stays: it is the layer
+    #  that does not depend on what the settings blob happens to hold by the time
+    #  publish_finished runs.
     #  Patched on `updater`, where the name is bound -- updater.py imported it at
     #  module level, so patching common.system would be looked straight past.
     monkeypatch.setattr(updater, "restart_scripts", lambda wait=False: None)

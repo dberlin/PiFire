@@ -30,6 +30,7 @@ from common.settings_schema import (
 )
 from common.web_contracts.export import SCHEMA_DIRECTORY, render_contract_artifacts
 from common.web_contracts.registry import WEB_ROOT_CONTRACTS
+from tests import conftest
 from common.web_contracts.settings import (
     ModeResponse,
     SettingsResponse,
@@ -497,7 +498,12 @@ def _masked_defaults_instantiation_diff():
     # by_alias=True: platform.system.one_wire must dump as "1WIRE" so it
     # matches default_settings()'s on-disk key (see assert_parity's comment).
     actual = model.model_dump(mode="json", by_alias=True)
-    expected = default_settings()
+    #  The SHIPPED defaults, not the ones this suite runs on: tests/conftest.py
+    #  rebinds default_settings to answer `real_hw` False, and what this test is
+    #  about is whether the pydantic tree still mirrors what an installation
+    #  gets. Reading the rebound one would compare the schema against the test
+    #  harness and call the disagreement a schema drift.
+    expected = conftest.shipped_default_settings()
     for path, _reason in MASKED_PATHS:
         _delete_path(actual, path)
         _delete_path(expected, path)

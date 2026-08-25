@@ -20,9 +20,10 @@ Three facts make the naive approaches insufficient:
      `os.system`, so patching `os.system` alone catches the fallback and misses
      the primary path.
   3. `is_real_hardware()` reads settings["platform"]["real_hw"], which
-     default_settings() ships as True. A fresh test datastore does NOT disable
-     the dangerous branch, and relying on it is how two of the three real
-     reboots happened.
+     default_settings() ships as True and tests/conftest.py seeds as False. That
+     is a real layer, but it is a SETTINGS value: any test that writes settings
+     of its own gets the shipped answer back, and leaning on the flag is how two
+     of the three real reboots happened. Patch the seams anyway.
 
 The endpoint's own `mode == Stop` guard is a product requirement, NOT a test
 safeguard. Never lean on it to keep a test safe.

@@ -39,10 +39,13 @@ def block_power_actions(what):
     common/system.py's `reboot_system`/`shutdown_system`/`restart_scripts`,
     which use `subprocess`, so a patched `os.system` stopped covering it.
 
-    That gap is not theoretical: `real_hw` defaults to True in a fresh test
-    datastore (asserted in tests/characterization/test_process_command_golden.py),
-    so `is_real_hardware()` is True here and an unblocked call really does run
-    `sudo systemctl reboot`.
+    That gap is not theoretical: the machine that runs this suite answers
+    `is_real_hardware()` with whatever `settings['platform']['real_hw']` holds,
+    and an unblocked call on a True one really does run `sudo systemctl reboot`.
+    The suite seeds it False (tests/conftest.py, pinned by
+    tests/unit/system/test_tests_are_not_real_hardware.py), which is a second
+    layer -- not a reason to drop this one, since a driver test that writes its
+    own settings gets the shipped answer back.
 
     Patch where the names are BOUND rather than in common.system: the bases
     import them at module level, so `mock.patch.object(common.system, ...)`

@@ -87,9 +87,10 @@ the exceptions that would have surfaced them were swallowed with the thread.
 
 Three things have to line up for that, and all three did:
 
-  - `real_hw` defaults to True (common/settings_schema.py), so a fresh test
-    datastore claims to be a real appliance and `is_real_hardware()` -- the gate
-    in front of every lifecycle call in common/system.py -- passes.
+  - `real_hw` was True in a fresh test datastore, so it claimed to be a real
+    appliance and `is_real_hardware()` -- the gate in front of every lifecycle
+    call in common/system.py -- passed. (Now seeded False; see the section
+    below. That is the other layer, and the weaker one.)
   - The installers grant NOPASSWD sudo for exactly these commands, so on an
     installed Linux box they SUCCEED. On a developer machine without PiFire
     installed they fail harmlessly, which is why this stayed invisible.
@@ -221,6 +222,17 @@ def power_guard():
                 _power_attempts.clear()
             return attempts
 
+        def executed_power_commands(self):
+            """The entries in `executed` that are power actions.
+
+            The recorders replace the process-wide primitives, so `executed`
+            also collects whatever unrelated subprocesses other threads happen
+            to run while the fixture is active -- under xdist a worker picks up
+            `ip link` and `ifconfig` from the network probe. Asserting on the
+            whole list fails a test of the guard on someone else's traffic.
+            """
+            return [command for command in self.executed if _POWER_PROGRAMS & set(_command_tokens(command))]
+
     guard = _Guard()
     globals_ = _guarded_popen.__globals__
     # Held in locals, NOT read back from the module on the way out: these names
@@ -272,6 +284,57 @@ def _no_power_actions(request):
         )
         raise AssertionError(f"power action(s) attempted during this test:\n{detail}")
 
+
+"""
+==============================================================================
+ A test datastore is not a real appliance
+==============================================================================
+
+`real_hw` answers one question -- "is there a grill on the other end of these
+pins?" -- and for the test suite the answer is always no. It is True in
+common/defaults.py because that is the right answer for the thing the wizard is
+about to configure, and the wizard offers the value it finds in settings, so
+flipping the shipped default would leave a first-time install on a Raspberry Pi
+looking at "Real Hardware: No (Test Only)" pre-selected. The place the two
+answers diverge is here.
+
+This is the FIRST of the two layers in front of common/system.py, and the
+weaker one: it short-circuits `is_real_hardware()` so the lifecycle calls are
+never reached, whereas the power guard above catches them at the primitive no
+matter how they got there. Neither replaces the other -- a test that wants the
+real-hardware branch (tests/unit/system/test_system_lifecycle.py patches
+`is_real_hardware` in ~20 places) walks straight past this one, and the guard is
+what makes doing that safe.
+
+The rebind is on `common.defaults.default_settings`, so every fresh datastore
+built after this point gets it, including the ones that later tests mint with
+`datastore._reset_for_tests()`. The sys.modules sweep covers what that misses:
+`from common.defaults import default_settings` binds the function OBJECT, so a
+module that imported it BEFORE this ran keeps the original -- the same
+import-time escape that defeated the os.system patch for years. (The sweep
+reaches `common.defaults` itself, since it is in sys.modules too; the explicit
+rebind above is what the sweep is checking against, and says the intent
+plainly.) Both are pinned by
+tests/unit/system/test_tests_are_not_real_hardware.py, which fails on nine
+tests when they are removed.
+"""
+
+from common import defaults as _defaults  # noqa: E402
+
+shipped_default_settings = _defaults.default_settings
+
+
+def _prototype_default_settings():
+    settings = shipped_default_settings()
+    settings["platform"]["real_hw"] = False
+    return settings
+
+
+_defaults.default_settings = _prototype_default_settings
+
+for _module in list(sys.modules.values()):
+    if getattr(_module, "default_settings", None) is shipped_default_settings:
+        setattr(_module, "default_settings", _prototype_default_settings)  # noqa: B010
 
 from common import datastore  # noqa: E402
 

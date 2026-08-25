@@ -44,9 +44,10 @@ unconditionally for every driver as a blanket safety measure.
 
 `display._base_flex.DisplayBase.__init__` reads `common.system.is_real_hardware()`
 (-> `read_settings()["platform"]["real_hw"]`, i.e. the SQLite settings blob) to
-set `self.real_hardware`. That flag defaults to `True`
-(`common/defaults.py::default_settings`) and is what a fresh store is seeded
-with -- NOT a hardware probe, just a config value read verbatim. If left
+set `self.real_hardware`. That flag is a config value read verbatim -- NOT a
+hardware probe -- shipped as `True` and seeded `False` for this suite
+(tests/conftest.py). It is forced below rather than inherited, because a test
+that writes its own settings gets the shipped answer back. If left
 unpatched, ili9341f's
 `_init_display_device` (`if self.real_hardware: from rpi_backlight import
 Backlight`) raises ModuleNotFoundError in this dev/CI environment, since
