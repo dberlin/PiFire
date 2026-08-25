@@ -19,7 +19,7 @@ def section(title):
 
 def run_cmd(cmd, shell=False):
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, shell=shell, timeout=10)
+        result = subprocess.run(cmd, capture_output=True, text=True, shell=shell, timeout=10, check=False)
         return result.stdout.strip(), result.stderr.strip(), result.returncode
     except subprocess.TimeoutExpired:
         return "", "TIMEOUT", -1

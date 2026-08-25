@@ -88,7 +88,7 @@ def update_startup_transaction(repo_root=None):
 
 def get_available_branches():
     command = ["git", "branch", "-a"]
-    branches = subprocess.run(command, capture_output=True, text=True)
+    branches = subprocess.run(command, capture_output=True, text=True, check=False)
     branch_list = []
     error_msg = ""
     if branches.returncode == 0:
@@ -120,13 +120,13 @@ def get_available_branches():
 def update_remote_branches():
     # git remote set-branches origin '*'
     command = ["git", "remote", "set-branches", "origin", "*"]
-    remote_branches = subprocess.run(command, capture_output=True, text=True)
+    remote_branches = subprocess.run(command, capture_output=True, text=True, check=False)
     error_msg = ""
     if remote_branches.returncode != 0:
         error_msg = remote_branches.stderr
     # Fetch Branch Information Locally
     command = ["git", "fetch"]
-    fetch = subprocess.run(command, capture_output=True, text=True)
+    fetch = subprocess.run(command, capture_output=True, text=True, check=False)
     if fetch.returncode != 0:
         error_msg += " | " + remote_branches.stderr
     return error_msg
@@ -141,10 +141,12 @@ def detached_head():
     placeholder `* (HEAD detached at abc1234)` on the starred line, which is
     prose, not a ref, and nothing downstream can tell the two apart.
     """
-    on_branch = subprocess.run(["git", "symbolic-ref", "--quiet", "--short", "HEAD"], capture_output=True, text=True)
+    on_branch = subprocess.run(
+        ["git", "symbolic-ref", "--quiet", "--short", "HEAD"], capture_output=True, text=True, check=False
+    )
     if on_branch.returncode == 0:
         return None
-    sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True)
+    sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=False)
     return sha.stdout.strip() if sha.returncode == 0 else "an unknown commit"
 
 
@@ -166,7 +168,9 @@ def get_branch():
             f"This checkout is not on a branch -- HEAD is detached at {detached}. Check out a branch before updating.",
         )
     # --show-current is only in later versions of git, and unfortunately buster does not have this
-    on_branch = subprocess.run(["git", "symbolic-ref", "--quiet", "--short", "HEAD"], capture_output=True, text=True)
+    on_branch = subprocess.run(
+        ["git", "symbolic-ref", "--quiet", "--short", "HEAD"], capture_output=True, text=True, check=False
+    )
     if on_branch.returncode != 0:
         return ("ERROR Getting Current Branch", on_branch.stderr)
     return (on_branch.stdout.strip(), "")
@@ -174,7 +178,7 @@ def get_branch():
 
 def set_branch(branch_target):
     command = ["git", "checkout", "-f", branch_target]
-    target = subprocess.run(command, capture_output=True, text=True)
+    target = subprocess.run(command, capture_output=True, text=True, check=False)
     error_msg = ""
     result = ""
     if target.returncode == 0:
@@ -187,7 +191,7 @@ def set_branch(branch_target):
 
 def get_remote_url():
     command = ["git", "config", "--get", "remote.origin.url"]
-    remote = subprocess.run(command, capture_output=True, text=True)
+    remote = subprocess.run(command, capture_output=True, text=True, check=False)
     error_msg = ""
     if remote.returncode == 0:
         result = remote.stdout.strip(" \n")
@@ -208,9 +212,9 @@ def get_available_updates(branch=""):
 
     if "ERROR" not in remote and "ERROR" not in branch:
         command = ["git", "fetch"]
-        fetch = subprocess.run(command, capture_output=True, text=True)
+        fetch = subprocess.run(command, capture_output=True, text=True, check=False)
         command = ["git", "rev-list", "--left-only", "--count", f"origin/{branch}...@"]
-        rev_list = subprocess.run(command, capture_output=True, text=True)
+        rev_list = subprocess.run(command, capture_output=True, text=True, check=False)
         # print(f'rev_list.returncode = {rev_list.returncode}')
         # print(f'fetch.returncode = {fetch.returncode}')
 
@@ -242,9 +246,9 @@ def do_update():
     _remote, error_msg2 = get_remote_url()
     if error_msg1 == "" and error_msg2 == "":
         command = ["git", "fetch", "--all"]
-        fetch = subprocess.run(command, capture_output=True, text=True)
+        fetch = subprocess.run(command, capture_output=True, text=True, check=False)
         command = ["git", "reset", "--hard", f"origin/{branch}"]
-        reset = subprocess.run(command, capture_output=True, text=True)
+        reset = subprocess.run(command, capture_output=True, text=True, check=False)
 
         """
 		command = ['git', 'reset', '--hard', 'HEAD']
@@ -279,7 +283,7 @@ def get_log(num_commits=10):
     branch, error_msg = get_branch()
     if error_msg == "":
         command = ["git", "log", f"origin/{branch}", f"-{num_commits}", '--pretty="%h - %cr : %s"']
-        log = subprocess.run(command, capture_output=True, text=True)
+        log = subprocess.run(command, capture_output=True, text=True, check=False)
         if log.returncode == 0:
             result = log.stdout.replace('"', "")
         else:
@@ -306,7 +310,7 @@ def get_remote_version():
         # this only ever displays the newest one, so taking the remote's answer
         # is the whole point.
         fetch_command = ["git", "fetch", "--tags", "--force"]
-        fetch = subprocess.run(fetch_command, capture_output=True, text=True)
+        fetch = subprocess.run(fetch_command, capture_output=True, text=True, check=False)
         # A failed fetch is not fatal. The tags already on disk still answer
         # "what version is this checkout", just possibly not the very newest --
         # and a network blip should not blank the version line.
@@ -316,7 +320,7 @@ def get_remote_version():
         # Now get tags that contain commits from the current branch
         # This command finds tags that are reachable from the branch
         command = ["git", "tag", "--sort=v:refname", "--merged", reachable_from]
-        versions = subprocess.run(command, capture_output=True, text=True)
+        versions = subprocess.run(command, capture_output=True, text=True, check=False)
 
         if versions.returncode == 0:
             version_list = versions.stdout.split("\n")  # Make a list of versions from the output
@@ -342,7 +346,7 @@ def get_current_tag():
     # (e.g. development branches with no version tags in their history), so this
     # succeeds instead of erroring out on the version display.
     command = ["git", "describe", "--tags", "--always"]
-    tag = subprocess.run(command, capture_output=True, text=True)
+    tag = subprocess.run(command, capture_output=True, text=True, check=False)
     if tag.returncode == 0:
         result = tag.stdout.replace("\n", "")
     else:
@@ -482,7 +486,7 @@ def restore_update_snapshot(snapshot, repo_root=REPO_ROOT):
 
 def _change_branch_checkout(branch_target):
     command = ["git", "checkout", "-f", branch_target]
-    target = subprocess.run(command, capture_output=True, text=True)
+    target = subprocess.run(command, capture_output=True, text=True, check=False)
     if target.returncode == 0:
         return True, "Branch Changed Successfully", " - " + target.stdout + target.stderr
     return False, "ERROR Changing Branch", " - " + target.stderr
@@ -492,9 +496,9 @@ def _install_update_checkout():
     branch, error_msg1 = get_branch()
     _remote, error_msg2 = get_remote_url()
     if error_msg1 == "" and error_msg2 == "":
-        fetch = subprocess.run(["git", "fetch"], capture_output=True, text=True)
-        reset = subprocess.run(["git", "reset", "--hard", "HEAD"], capture_output=True, text=True)
-        merge = subprocess.run(["git", "merge", f"origin/{branch}"], capture_output=True, text=True)
+        fetch = subprocess.run(["git", "fetch"], capture_output=True, text=True, check=False)
+        reset = subprocess.run(["git", "reset", "--hard", "HEAD"], capture_output=True, text=True, check=False)
+        merge = subprocess.run(["git", "merge", f"origin/{branch}"], capture_output=True, text=True, check=False)
         if fetch.returncode == 0 and reset.returncode == 0 and merge.returncode == 0:
             return True, "Update Completed Successfully", " - " + fetch.stdout + reset.stdout + merge.stdout
         return False, "ERROR Performing Update.", " - " + fetch.stdout + reset.stdout + merge.stdout
@@ -1170,7 +1174,7 @@ if __name__ == "__main__":
         else:
             command = [python_exec, "-m", "pip", "list", "--format=json"]
 
-        pip_list = subprocess.run(command, capture_output=True, text=True)
+        pip_list = subprocess.run(command, capture_output=True, text=True, check=False)
         if pip_list.returncode == 0:
             write_generic_json(json.loads(pip_list.stdout), "pip_list.json")
             # print(f'PIP List: {pip_list.stdout}')

@@ -506,7 +506,7 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
     # Get PIP List
     command = [python_exec, "updater.py", "-p"]
 
-    pip_list = subprocess.run(command, capture_output=True, text=True)
+    pip_list = subprocess.run(command, capture_output=True, text=True, check=False)
     if pip_list.returncode == 0:
         print("PIP List Command Success.")
 

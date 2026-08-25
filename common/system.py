@@ -96,6 +96,7 @@ def restart_scripts():
                 # this call is running inside -- cannot take the client with it
                 # part-way through the sequence, leaving the rest stopped.
                 start_new_session=True,
+                check=False,
             )
             if result.returncode != 0:
                 print(f"Failed to restart supervisor programs: {result.stderr.strip()}")
@@ -119,11 +120,13 @@ def reboot_system():
             try:
                 time.sleep(3)  # Give time for response to be sent
                 # Try systemctl first (preferred method for systemd)
-                result = subprocess.run(["sudo", "systemctl", "reboot"], capture_output=True, text=True, timeout=10)
+                result = subprocess.run(
+                    ["sudo", "systemctl", "reboot"], capture_output=True, text=True, timeout=10, check=False
+                )
                 if result.returncode != 0:
                     print(f"systemctl reboot failed: {result.stderr}")
                     # Fallback to traditional reboot command
-                    subprocess.run(["sudo", "reboot"], timeout=10)
+                    subprocess.run(["sudo", "reboot"], timeout=10, check=False)
             except subprocess.TimeoutExpired:
                 print("Reboot command timed out")
             except Exception as e:
@@ -145,11 +148,13 @@ def shutdown_system():
             try:
                 time.sleep(3)  # Give time for response to be sent
                 # Try systemctl first (preferred method for systemd)
-                result = subprocess.run(["sudo", "systemctl", "poweroff"], capture_output=True, text=True, timeout=10)
+                result = subprocess.run(
+                    ["sudo", "systemctl", "poweroff"], capture_output=True, text=True, timeout=10, check=False
+                )
                 if result.returncode != 0:
                     print(f"systemctl poweroff failed: {result.stderr}")
                     # Fallback to traditional shutdown command
-                    subprocess.run(["sudo", "shutdown", "-h", "now"], timeout=10)
+                    subprocess.run(["sudo", "shutdown", "-h", "now"], timeout=10, check=False)
             except subprocess.TimeoutExpired:
                 print("Shutdown command timed out")
             except Exception as e:

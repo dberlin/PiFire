@@ -114,7 +114,7 @@ class Process_Monitor:
                     self.process_logger.error(message)
                     # Execute command on real hardware only
                     if self.is_real_hw:
-                        subprocess.run(self.command)
+                        subprocess.run(self.command, check=False)
                     else:
                         print(message)
                     self.active = False  # Pause thread

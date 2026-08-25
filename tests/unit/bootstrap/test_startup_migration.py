@@ -167,6 +167,7 @@ def test_boot_path_import_via_app_import(tmp_path):
         capture_output=True,
         text=True,
         timeout=60,
+        check=False,
     )
     assert proc.returncode == 0, f"importing app.py failed:\nstdout={proc.stdout}\nstderr={proc.stderr}"
 

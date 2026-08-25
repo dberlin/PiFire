@@ -32,6 +32,7 @@ def _run_mapping(
         ],
         capture_output=True,
         text=True,
+        check=False,
     )
 
 

@@ -22,7 +22,7 @@ import updater
 
 
 def git(*args, cwd):
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=False)
 
 
 @pytest.fixture

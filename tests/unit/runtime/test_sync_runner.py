@@ -31,6 +31,7 @@ def test_runner_import_does_not_load_optional_linear_mpc_dependencies():
         cwd=Path(__file__).parents[3],
         capture_output=True,
         text=True,
+        check=False,
     )
 
     assert result.returncode == 0, result.stderr

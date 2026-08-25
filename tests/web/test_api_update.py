@@ -457,7 +457,7 @@ def test_a_branch_name_reaches_the_shell_quoted(ds, client, monkeypatch):
     client.post("/api/update/pull")
 
     assert len(fired) == 1
-    probe = subprocess.run(["sh", "-n", "-c", fired[0]], capture_output=True, text=True)
+    probe = subprocess.run(["sh", "-n", "-c", fired[0]], capture_output=True, text=True, check=False)
     assert probe.returncode == 0, f"the shell cannot parse it: {probe.stderr}"
 
 

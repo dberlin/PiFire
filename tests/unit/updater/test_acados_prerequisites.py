@@ -148,7 +148,9 @@ def _run_failed_pre_migration_flow(
         f"pathlib.Path({str(restart)!r}).write_text('restart'); "
         "sys.exit(code)"
     )
-    completed = subprocess.run([sys.executable, "-c", wrapper], cwd=repo, env=env, capture_output=True, text=True)
+    completed = subprocess.run(
+        [sys.executable, "-c", wrapper], cwd=repo, env=env, capture_output=True, text=True, check=False
+    )
 
     assert not marker.exists(), "the pre-migration updater continued and overwrote terminal failure with Finished"
     assert not restart.exists(), "the pre-migration updater reached its restart path after native failure"

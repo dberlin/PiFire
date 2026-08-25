@@ -37,7 +37,7 @@ def _run_script(config_txt_path, fake_sudo_bin):
     env["PIFIRE_CONFIG_TXT"] = str(config_txt_path)
     # Intentional real-process integration test: runs the actual bash script (with
     # sudo stubbed and /boot redirected above) to verify real script behavior.
-    return subprocess.run(["bash", str(_SCRIPT)], env=env, capture_output=True, text=True, timeout=10)
+    return subprocess.run(["bash", str(_SCRIPT)], env=env, capture_output=True, text=True, timeout=10, check=False)
 
 
 def test_enables_onewire_when_not_yet_configured(tmp_path, fake_sudo_bin):

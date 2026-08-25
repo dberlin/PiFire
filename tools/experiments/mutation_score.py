@@ -314,6 +314,7 @@ def _score():
         capture_output=True,
         text=True,
         env=env,
+        check=False,
     )
     tail = [line for line in proc.stdout.splitlines() if " passed" in line or " failed" in line]
     return tail[-1] if tail else f"NO SUMMARY ({proc.returncode})"

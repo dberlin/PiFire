@@ -80,7 +80,7 @@ class Runner:
 
     def ok(self, *cmd: str) -> bool:
         """Whether a command succeeded, discarding its output."""
-        return subprocess.run(cmd, capture_output=True).returncode == 0
+        return subprocess.run(cmd, capture_output=True, check=False).returncode == 0
 
 
 # ---------------------------------------------------------------------------

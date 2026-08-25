@@ -226,7 +226,9 @@ def test_reboot_system_uses_systemctl_when_it_succeeds(sync_thread):
         cc.reboot_system()
 
     sleep.assert_called_once_with(3)
-    run.assert_called_once_with(["sudo", "systemctl", "reboot"], capture_output=True, text=True, timeout=10)
+    run.assert_called_once_with(
+        ["sudo", "systemctl", "reboot"], capture_output=True, text=True, timeout=10, check=False
+    )
 
 
 def test_reboot_system_falls_back_to_plain_reboot_on_nonzero_returncode(sync_thread, capsys):
@@ -297,7 +299,9 @@ def test_shutdown_system_uses_systemctl_when_it_succeeds(sync_thread):
         cc.shutdown_system()
 
     sleep.assert_called_once_with(3)
-    run.assert_called_once_with(["sudo", "systemctl", "poweroff"], capture_output=True, text=True, timeout=10)
+    run.assert_called_once_with(
+        ["sudo", "systemctl", "poweroff"], capture_output=True, text=True, timeout=10, check=False
+    )
 
 
 def test_shutdown_system_falls_back_to_plain_shutdown_on_nonzero_returncode(sync_thread, capsys):

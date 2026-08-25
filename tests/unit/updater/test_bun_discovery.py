@@ -59,6 +59,7 @@ def run_lib(script, extra_env=None):
         capture_output=True,
         text=True,
         env=env,
+        check=False,
     )
 
 

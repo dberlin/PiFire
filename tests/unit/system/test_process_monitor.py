@@ -58,5 +58,6 @@ def test_an_unstopped_monitor_does_not_keep_the_process_alive(tmp_path):
         capture_output=True,
         text=True,
         timeout=30,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
