@@ -238,25 +238,26 @@ def _load_json_file(filename, default, retry_count=0, max_retries=None):
         return default
 
 
-def read_events(legacy=True):
+def read_events():
     """
-    Read event.log and populate an array of events.
+    Read events.log and populate an array of events, newest first.
 
-    if legacy=true:
-    :return: (event_list, num_events)
+    Short logs are padded out to ten rows with placeholder entries
+    (``["--------", "--:--:--", "---"]``) and `num_events` is reported as ten,
+    which is what fills the events table to a fixed height. `read_events_records`
+    iterates `num_events`, so those placeholders reach its callers too.
 
-    if legacy=false:
     :return: (event_list, num_events)
     """
     # Read all lines of events.log into a list(array)
     try:
         with open(log_path("events.log")) as event_file:
             event_lines = event_file.readlines()
-            event_file.close()
-    # If file not found error, then create events.log file
+    # No log yet (or it is unreadable) means no events. Creating the file here
+    # would be pointless -- create_logger's RotatingFileHandler makes it on the
+    # first write -- and the create itself fails when LOG_DIR is absent, which
+    # raised out of this handler instead of returning an empty list.
     except OSError:
-        with open(log_path("events.log"), "w"):
-            pass
         event_lines = []
 
     # Initialize event_list list
@@ -265,19 +266,14 @@ def read_events(legacy=True):
     # Get number of events
     num_events = len(event_lines)
 
-    if legacy:
-        for x in range(num_events):
-            event_list.insert(0, event_lines[x].split(" ", 2))
+    for x in range(num_events):
+        event_list.insert(0, event_lines[x].split(" ", 2))
 
-        # Error handling if number of events is less than 10, fill array with empty
-        if num_events < 10:
-            for line in range(10 - num_events):
-                event_list.append(["--------", "--:--:--", "---"])
-            num_events = 10
-    else:
-        for x in range(num_events):
-            event_list.append(event_lines[x].split(" ", 2))
-        return event_list
+    # Error handling if number of events is less than 10, fill array with empty
+    if num_events < 10:
+        for line in range(10 - num_events):
+            event_list.append(["--------", "--:--:--", "---"])
+        num_events = 10
 
     return (event_list, num_events)
 

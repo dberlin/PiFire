@@ -241,7 +241,7 @@ def test_read_generic_key_roundtrip(ds):
 def test_read_events_records_returns_dicts(ds, monkeypatch):
     fake_events = [[f"2024-01-0{i}", f"0{i}:00:00", f"message {i}\n"] for i in range(1, 5)]
 
-    def fake_read_events(legacy=True):
+    def fake_read_events():
         return fake_events, len(fake_events)
 
     monkeypatch.setattr("common.common.read_events", fake_read_events)
@@ -260,7 +260,7 @@ def test_read_events_records_returns_dicts(ds, monkeypatch):
 def test_read_events_records_caps_at_60(ds, monkeypatch):
     fake_events = [["2024-01-01", "00:00:00", f"message {i}\n"] for i in range(100)]
 
-    def fake_read_events(legacy=True):
+    def fake_read_events():
         return fake_events, len(fake_events)
 
     monkeypatch.setattr("common.common.read_events", fake_read_events)
