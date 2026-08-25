@@ -242,11 +242,6 @@ def read_events():
     """
     Read events.log and populate an array of events, newest first.
 
-    Short logs are padded out to ten rows with placeholder entries
-    (``["--------", "--:--:--", "---"]``) and `num_events` is reported as ten,
-    which is what fills the events table to a fixed height. `read_events_records`
-    iterates `num_events`, so those placeholders reach its callers too.
-
     :return: (event_list, num_events)
     """
     # Read all lines of events.log into a list(array)
@@ -268,12 +263,6 @@ def read_events():
 
     for x in range(num_events):
         event_list.insert(0, event_lines[x].split(" ", 2))
-
-    # Error handling if number of events is less than 10, fill array with empty
-    if num_events < 10:
-        for line in range(10 - num_events):
-            event_list.append(["--------", "--:--:--", "---"])
-        num_events = 10
 
     return (event_list, num_events)
 

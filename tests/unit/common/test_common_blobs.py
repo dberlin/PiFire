@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+import common.common as common_mod
 from common import datastore, defaults
 from common.common import ErrorKind, flush_events_records, read_events_records
 from common.control_delta import control_delta
@@ -268,6 +269,37 @@ def test_read_events_records_caps_at_60(ds, monkeypatch):
     result = read_events_records()
 
     assert len(result) == 60
+
+
+def test_read_events_does_not_pad_short_logs(tmp_path, monkeypatch):
+    """A log shorter than ten lines used to be padded out with
+    ``["--------", "--:--:--", "---"]`` rows, and num_events reported as ten.
+    That padding existed to fill the legacy events TABLE to a fixed height; its
+    only consumer now is the mobile Socket.IO JSON feed, which was being handed
+    placeholder events as though they were real ones."""
+    monkeypatch.setattr(common_mod, "LOG_DIR", str(tmp_path))
+    (tmp_path / "events.log").write_text("2024-01-01 00:00:01 first\n2024-01-01 00:00:02 second\n")
+
+    events, num_events = common_mod.read_events()
+
+    assert num_events == 2
+    assert [event[0] for event in events] == ["2024-01-01", "2024-01-01"]
+
+
+def test_read_events_records_emits_only_real_events(tmp_path, monkeypatch):
+    monkeypatch.setattr(common_mod, "LOG_DIR", str(tmp_path))
+    (tmp_path / "events.log").write_text("2024-01-01 00:00:01 only one\n")
+
+    assert read_events_records() == [{"date": "2024-01-01", "time": "00:00:01", "message": "only one"}]
+
+
+def test_read_events_on_a_missing_log_is_empty_and_creates_nothing(tmp_path, monkeypatch):
+    """Reading must not invent the file, and must not raise when LOG_DIR itself
+    is absent -- nothing in Python creates it, only the installer scripts do."""
+    monkeypatch.setattr(common_mod, "LOG_DIR", str(tmp_path / "absent"))
+
+    assert common_mod.read_events() == ([], 0)
+    assert not (tmp_path / "absent").exists()
 
 
 def test_flush_events_records_clears_and_returns_empty(ds):
