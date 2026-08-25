@@ -311,6 +311,12 @@
 .pf-probe-health-detail--danger {
   border-color: color-mix(in srgb, var(--danger) 65%, transparent);
 }
+/* No h3 can match both this and `.pf-probes-surface .pf-probes-card > h3`
+   above: .pf-probes-card sits on DevicesCard/PortsCard's <section>, this class
+   on ProbesTab's health blocks, and a direct child has exactly one parent. The
+   descending specificity is therefore unreachable, and the (0,2,0) scope above
+   is pinned by this file's header. */
+/* biome-ignore lint/style/noDescendingSpecificity: disjoint elements, see above */
 .pf-probe-health-detail > h3 {
   @apply m-0;
   font: 700 17px "Barlow";

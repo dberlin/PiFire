@@ -96,6 +96,7 @@ export function GrillGauge({
         {health !== null && health.severity !== "quiet" ? (
           <div
             className={`pf-dash-gauge-health pf-dash-gauge-health--${health.severity}`}
+            role="status"
             aria-label="Control probe health"
           >
             <strong

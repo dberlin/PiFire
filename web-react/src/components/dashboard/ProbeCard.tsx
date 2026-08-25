@@ -66,6 +66,7 @@ export function ProbeCard({
       {p.health !== null && p.health.severity !== "quiet" ? (
         <div
           className={`pf-dash-probehealth pf-dash-probehealth--${p.health.severity}`}
+          role="status"
           aria-label={`Probe health for ${p.name}`}
         >
           <strong
