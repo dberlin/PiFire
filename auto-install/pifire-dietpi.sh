@@ -302,7 +302,15 @@ $SUDO systemctl start bluetooth.service
 # uv installs from pyproject on every architecture. The influxdb [ciso] extra
 # that used to be applied here now lives in pyproject.
 echo " + Installing UV" | tee -a ~/logs/pifire_install.log
-if ! /bin/curl -LsSf https://astral.sh/uv/install.sh | $SUDO env UV_INSTALL_DIR="/usr/local/bin" /bin/sh; then
+# The subshell exists for `set -o pipefail`, which this script does not set
+# file-wide. Without it the `if !` reads the status of the LAST stage only: tee,
+# which always succeeds, so the logging would quietly undo the guard -- and
+# before tee it was the installer /bin/sh, which exits 0 on the empty input a
+# failed curl hands it, so a download failure read as a successful install.
+if ! (
+	set -o pipefail
+	/bin/curl -LsSf https://astral.sh/uv/install.sh 2>>~/logs/pifire_install.log | $SUDO env UV_INSTALL_DIR="/usr/local/bin" /bin/sh 2>&1 | tee -a ~/logs/pifire_install.log
+); then
 	echo " ! Failed to download or install UV. Exiting." | tee -a ~/logs/pifire_install.log
 	exit 1
 fi
@@ -311,7 +319,19 @@ echo " + Setting up VENV" | tee -a ~/logs/pifire_install.log
 cd /usr/local/bin/pifire
 # --allow-existing so a re-run reuses the venv instead of failing with
 # "a virtual environment already exists" and carrying on regardless.
-uv venv --system-site-packages --allow-existing
+#
+# Fatal: nothing runs under `set -e`, so an unchecked failure here is discarded,
+# the activate below fails just as quietly, and the rest of the install runs
+# against the system interpreter. uv's own output goes to the log with it, since
+# that file is all anyone has once the install ends; the subshell is for
+# pipefail, as at the uv installer above.
+if ! (
+	set -o pipefail
+	uv venv --system-site-packages --allow-existing 2>&1 | tee -a ~/logs/pifire_install.log
+); then
+	echo " ! Failed to create the Python venv. Exiting." | tee -a ~/logs/pifire_install.log
+	exit 1
+fi
 
 # Activate VENV
 source .venv/bin/activate

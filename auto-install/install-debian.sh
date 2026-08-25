@@ -348,7 +348,7 @@ log "*************************************************************************"
 log "**  Setting up the Python venv (UV) and installing modules...         **"
 log "*************************************************************************"
 log " + Installing UV"
-if ! /bin/curl -LsSf https://astral.sh/uv/install.sh | $SUDO env UV_INSTALL_DIR="/usr/local/bin" /bin/sh 2>&1 | tee -a "$LOG"; then
+if ! /bin/curl -LsSf https://astral.sh/uv/install.sh 2>>"$LOG" | $SUDO env UV_INSTALL_DIR="/usr/local/bin" /bin/sh 2>&1 | tee -a "$LOG"; then
 	log " !! Failed to install UV. Exiting."
 	exit 1
 fi
@@ -357,7 +357,17 @@ cd /usr/local/bin/pifire
 log " + Creating venv (system-site-packages, for python3-scipy)"
 # --allow-existing so a re-run reuses the venv instead of failing with
 # "a virtual environment already exists" and carrying on regardless.
-uv venv --system-site-packages --allow-existing 2>&1 | tee -a "$LOG"
+#
+# Fatal: nothing runs under `set -e`, so an unchecked failure here is discarded,
+# the activate below fails just as quietly, and the rest of the install runs
+# against the system interpreter -- which on Debian is externally managed, so it
+# resurfaces as an unrelated pip/sync error rather than as the real cause. The
+# `set -o pipefail` at the top of this script is what makes the status uv's and
+# not tee's.
+if ! uv venv --system-site-packages --allow-existing 2>&1 | tee -a "$LOG"; then
+	log " !! Failed to create the Python venv. Installation cannot continue."
+	exit 1
+fi
 # shellcheck disable=SC1091
 source .venv/bin/activate
 

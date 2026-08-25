@@ -112,7 +112,16 @@ echo " - Installing module dependencies... " | tee -a /usr/local/bin/pifire/logs
 # branch, since uv installs from pyproject on every architecture. An install
 # upgrading from a legacy `bin/` venv gets a fresh `.venv/` here.
 echo " + Installing UV" | tee -a /usr/local/bin/pifire/logs/upgrade.log
-if ! /bin/curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="/usr/local/bin" /bin/sh; then
+# The subshell exists for `set -o pipefail`, which this script does not set
+# file-wide -- the same reason the sync below reads PIPESTATUS. Without it the
+# `if !` reads the status of the LAST stage only: tee, which always succeeds, so
+# the logging would quietly undo the guard -- and before tee it was the
+# installer /bin/sh, which exits 0 on the empty input a failed curl hands it, so
+# a download failure read as a successful install.
+if ! (
+	set -o pipefail
+	/bin/curl -LsSf https://astral.sh/uv/install.sh 2>>/usr/local/bin/pifire/logs/upgrade.log | env UV_INSTALL_DIR="/usr/local/bin" /bin/sh 2>&1 | tee -a /usr/local/bin/pifire/logs/upgrade.log
+); then
 	echo "ERROR: Failed to download or install UV. Exiting." | tee -a /usr/local/bin/pifire/logs/upgrade.log
 	exit 1
 fi
@@ -122,7 +131,20 @@ echo " + Setting up VENV" | tee -a /usr/local/bin/pifire/logs/upgrade.log
 cd /usr/local/bin/pifire
 # --allow-existing: on an upgrade the venv ALWAYS exists, so without this the
 # command fails every single time and the upgrade continues past it.
-uv venv --system-site-packages --allow-existing
+#
+# Fatal for the same reason the sync below is: no `set -e` here, so an unchecked
+# failure is discarded, the activate on the next line fails just as quietly, and
+# the upgrade proceeds against the system interpreter. uv's own output goes to
+# the log with it, since that file is all anyone has once the upgrade ends --
+# and an upgrade runs unattended from the web UI, with nobody watching a
+# terminal at all; the subshell is for pipefail, as at the uv installer above.
+if ! (
+	set -o pipefail
+	uv venv --system-site-packages --allow-existing 2>&1 | tee -a /usr/local/bin/pifire/logs/upgrade.log
+); then
+	echo " !! Failed to create the Python venv. Upgrade cannot continue." | tee -a /usr/local/bin/pifire/logs/upgrade.log
+	exit 1
+fi
 
 # Activate VENV
 source .venv/bin/activate
