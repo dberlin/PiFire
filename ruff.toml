@@ -17,7 +17,6 @@ ignore = [
     "E731",  # lambda assignment
     "F401",  # unused imports
     "F403",  # star imports
-    "F405",  # names from star imports
     "F541",  # f-string without placeholders
     "F841",  # unused variables
 
