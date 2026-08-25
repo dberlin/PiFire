@@ -114,15 +114,21 @@ def handle_500(e):
 
 """
 ==============================================================================
- Register Mobile Blueprint
+ Register the Socket.IO handlers
 ==============================================================================
 """
-# Register mobile blueprint and provide it with socketio instance
-# (socketio is created once, above, right after the Flask app.)
-from blueprints.mobile import mobile_bp
-
-mobile_bp.socketio = socketio
-app.register_blueprint(mobile_bp, url_prefix="/mobile")
+# A side-effect import, not a blueprint: `@socketio.on` runs at import time, so
+# importing the module IS the registration. Nothing calls into it by name.
+#
+# It has to happen here rather than at the top of the file: socket_io does
+# `from app import socketio`, so it can only be imported once that object
+# exists.
+#
+# There used to be a `mobile_bp` Blueprint registered at /mobile carrying this
+# import. It served no routes and no hooks -- its whole purpose was to be
+# imported -- and the `mobile_bp.socketio = socketio` line beside it was read by
+# nothing, since socket_io takes socketio from this module directly.
+import blueprints.mobile.socket_io  # noqa: F401
 
 """
 ==============================================================================

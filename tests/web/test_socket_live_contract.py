@@ -99,3 +99,20 @@ def test_pellet_event_carries_a_payload_matching_its_wire_contract(live):
 def test_listen_app_data_is_the_entry_point_clients_emit(live):
     """createLiveConnection emits this by name on every connect."""
     assert callable(live.listen_app_data)
+
+
+def test_importing_the_app_registers_the_socket_handlers():
+    """The handlers exist only as a side effect of importing socket_io.
+
+    Nothing calls into that module by name at startup -- `@socketio.on` runs at
+    import time, and the import is there purely to make that happen. An "unused
+    import" cleanup that removed it would leave the app serving HTTP fine while
+    every client sat on its placeholder state forever, with no error anywhere.
+    """
+    from app import socketio
+
+    registered = set(socketio.server.handlers.get("/", {}))
+
+    assert {"connect", "disconnect", "listen_app_data"} <= registered, (
+        f"the socket_io side-effect import is gone; handlers are {registered}"
+    )

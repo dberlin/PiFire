@@ -1,7 +1,7 @@
-from flask import Blueprint
+"""Socket.IO handlers for the live dashboard feed.
 
-mobile_bp = Blueprint("mobile", __name__)
-# This will be set when registered with the app
-socketio = None
-
-from . import socket_io  # noqa: F401  # side-effect import: registers socketio handlers
+`socket_io` is imported for its side effects by app.py, once the `socketio`
+object it depends on exists. This package deliberately imports nothing itself:
+doing so here would run socket_io at `blueprints.mobile` import time, which is
+earlier than app.py can guarantee.
+"""

@@ -1,7 +1,5 @@
 import re
 
-import pytest
-
 from app import app as flask_app
 
 
@@ -58,9 +56,13 @@ def test_unknown_api_path_is_json_404(client):
 
 
 def test_unknown_mobile_path_is_json_404(client):
+    #  `mobile/` is special-cased by the SPA catch-all (blueprints/spa/routes.py)
+    #  so a client cannot mistake a missing endpoint for an app route. The check
+    #  is on the PATH and never depended on a blueprint being registered.
     r = client.get("/mobile/does-not-exist-xyz")
     assert r.status_code == 404
     assert "text/html" not in r.content_type
+    assert r.get_json() == {"error": "not found"}
 
 
 def test_server_error_template_renders():
@@ -96,8 +98,4 @@ def test_retired_page_routes_are_gone():
         stale = [r for r in rules if r.startswith(prefix)]
         assert not stale, f"{prefix} still routed: {stale}"
     assert any(r.startswith("/api/") for r in rules)  # kept
-    # mobile has no HTTP routes of its own (socketio-only namespace) -- the spa
-    # catch-all special-cases "mobile/" paths to a JSON 404 (see
-    # blueprints/spa/routes.py), so assert the blueprint itself is kept.
-    assert "mobile" in flask_app.blueprints
     assert "/<path:path>" in rules  # SPA catch-all
