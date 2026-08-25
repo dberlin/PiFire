@@ -20,7 +20,7 @@ GREY_MAX_ITERATIONS = 10
 
 def _finite_float(value: object, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, Real):
-        raise ValueError(f"{name} must be a finite real number")
+        raise TypeError(f"{name} must be a finite real number")
     normalized = float(value)
     if not np.isfinite(normalized):
         raise ValueError(f"{name} must be finite")
@@ -29,7 +29,7 @@ def _finite_float(value: object, name: str) -> float:
 
 def _integer(value: object, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, Integral):
-        raise ValueError(f"{name} must be an integer")
+        raise TypeError(f"{name} must be an integer")
     return int(value)
 
 
@@ -184,7 +184,7 @@ class SolverDiagnostics:
             _nonnegative(self.constraint_residual, "constraint_residual"),
         )
         if not isinstance(self.warm_started, bool):
-            raise ValueError("warm_started must be a bool")
+            raise TypeError("warm_started must be a bool")
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,7 +207,7 @@ class GreyBoxSolve:
         if not GREY_HORIZON_MIN <= sequence_q.size <= GREY_HORIZON_CAPACITY:
             raise ValueError(f"sequence length must be between {GREY_HORIZON_MIN} and {GREY_HORIZON_CAPACITY}")
         if not isinstance(self.diagnostics, SolverDiagnostics):
-            raise ValueError("diagnostics must be SolverDiagnostics")
+            raise TypeError("diagnostics must be SolverDiagnostics")
         object.__setattr__(self, "sequence_q", sequence_q)
         object.__setattr__(self, "sequence_residual", sequence_residual)
         object.__setattr__(
@@ -224,6 +224,6 @@ class SolverError(RuntimeError):
 
     def __init__(self, message: str, diagnostics: SolverDiagnostics) -> None:
         if not isinstance(diagnostics, SolverDiagnostics):
-            raise ValueError("diagnostics must be SolverDiagnostics")
+            raise TypeError("diagnostics must be SolverDiagnostics")
         super().__init__(message)
         self.diagnostics = diagnostics

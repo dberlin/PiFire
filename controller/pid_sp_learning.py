@@ -54,7 +54,7 @@ def _owned_json_value(value: object, path: str) -> object:
 
 def _owned_json_mapping(value: object, name: str) -> dict[str, object]:
     if not isinstance(value, Mapping):
-        raise ValueError(f"{name} must be a mapping")
+        raise TypeError(f"{name} must be a mapping")
     owned = _owned_json_value(value, name)
     return cast(dict[str, object], owned)
 
@@ -62,7 +62,7 @@ def _owned_json_mapping(value: object, name: str) -> dict[str, object]:
 def _number(mapping: Mapping[str, object], field: str) -> int | float:
     value = mapping.get(field)
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{field} must be a number")
+        raise TypeError(f"{field} must be a number")
     if isinstance(value, float) and not math.isfinite(value):
         raise ValueError(f"{field} must be finite")
     return value
@@ -80,7 +80,7 @@ def _optional_nonnegative_int(mapping: Mapping[str, object], field: str) -> int 
 def _boolean(mapping: Mapping[str, object], field: str) -> bool:
     value = mapping.get(field)
     if not isinstance(value, bool):
-        raise ValueError(f"{field} must be a boolean")
+        raise TypeError(f"{field} must be a boolean")
     return value
 
 
@@ -213,7 +213,7 @@ class _CanonicalPidSpLearningReport:
 
         decoded = json.loads(self.payload_bytes)
         if not isinstance(decoded, dict):
-            raise ValueError("PID-SP learning report root is not an object")
+            raise TypeError("PID-SP learning report root is not an object")
         return cast(dict[str, object], decoded)
 
     def to_dict(self) -> dict[str, object]:
@@ -227,7 +227,7 @@ class _CanonicalPidSpLearningReport:
 
         revision = self.as_dict().get("revision")
         if not isinstance(revision, str):
-            raise ValueError("PID-SP learning report revision is missing")
+            raise TypeError("PID-SP learning report revision is missing")
         return revision
 
 
@@ -368,9 +368,9 @@ def _learning_gate(value: object) -> PidSpLearningGate:
     passed = mapping["passed"]
     unit = mapping["unit"]
     if not isinstance(name, str):
-        raise ValueError("gate name must be a string")
+        raise TypeError("gate name must be a string")
     if not isinstance(passed, bool):
-        raise ValueError("gate passed must be a boolean")
+        raise TypeError("gate passed must be a boolean")
     if unit is not None and not isinstance(unit, str):
         raise ValueError("gate unit must be a string or null")
     return PidSpLearningGate(
@@ -425,7 +425,7 @@ def _normalize_live(live: object) -> dict[str, object]:
     )
     gates_value = mapping["gates"]
     if not isinstance(gates_value, Sequence) or isinstance(gates_value, (str, bytes, bytearray)):
-        raise ValueError("gates must be an array")
+        raise TypeError("gates must be an array")
     gates = [_learning_gate(value) for value in gates_value]
     normalized = PidSpLiveLearning(
         schema_version=1,

@@ -582,7 +582,7 @@ class GreyLearningRuntime:
         ):
             return
         if not isinstance(preparation, CandidatePreparation):
-            raise RuntimeError("reviewed-candidate-preparation-invalid")
+            raise RuntimeError("reviewed-candidate-preparation-invalid")  # noqa: TRY004  invariant on already-normalized input, not caller type validation
         candidate_descriptor = self._prepared_candidate_descriptor(preparation)
         active_descriptor = self._active_pair().descriptor
         if (

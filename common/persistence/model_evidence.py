@@ -38,10 +38,10 @@ class ModelActivationPair:
     def from_json(cls, value: str) -> ModelActivationPair:
         decoded = json.loads(value)
         if not isinstance(decoded, dict):
-            raise ValueError("stored pair descriptor must be an object")
+            raise TypeError("stored pair descriptor must be an object")
         configuration = decoded.get("configuration")
         if not isinstance(configuration, Mapping):
-            raise ValueError("stored pair configuration must be an object")
+            raise TypeError("stored pair configuration must be an object")
         generation_fields = ("candidate_generation", "role_generation")
         if any(
             isinstance(decoded.get(name), bool) or not isinstance(decoded.get(name), int) or decoded[name] < 0

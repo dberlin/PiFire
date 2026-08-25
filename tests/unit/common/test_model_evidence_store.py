@@ -512,13 +512,14 @@ def test_activation_snapshot_rejects_nonstandard_json_constants(constant):
 
 
 @pytest.mark.parametrize(
-    ("descriptor", "message"),
+    ("descriptor", "message", "expected"),
     [
-        ("[]", "descriptor must be an object"),
-        ('{"configuration":[]}', "configuration must be an object"),
+        ("[]", "descriptor must be an object", TypeError),
+        ('{"configuration":[]}', "configuration must be an object", TypeError),
         (
             '{"configuration":{},"candidate_generation":true,"role_generation":0}',
             "generations must be non-negative integers",
+            ValueError,
         ),
         (
             (
@@ -527,11 +528,12 @@ def test_activation_snapshot_rejects_nonstandard_json_constants(constant):
                 '"ownership_digest":"owner"}'
             ),
             "identity fields must be non-blank strings",
+            ValueError,
         ),
     ],
 )
-def test_activation_pair_rejects_malformed_stored_descriptors(descriptor, message) -> None:
-    with pytest.raises(ValueError, match=message):
+def test_activation_pair_rejects_malformed_stored_descriptors(descriptor, message, expected) -> None:
+    with pytest.raises(expected, match=message):
         ModelActivationPair.from_json(descriptor)
 
 

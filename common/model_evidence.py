@@ -350,7 +350,7 @@ class ActivationEvidence:
         except (TypeError, ValueError, json.JSONDecodeError) as exc:
             raise ValueError("activation snapshot must be valid JSON") from exc
         if not isinstance(decoded, dict):
-            raise ValueError("activation snapshot must be a JSON object")
+            raise TypeError("activation snapshot must be a JSON object")
         return value
 
 
@@ -481,7 +481,7 @@ class ModelEvidenceRecord(BaseModel):
     @classmethod
     def from_db_row(cls, row: ModelEvidenceDbRow) -> ModelEvidenceRecord:
         if not isinstance(row.payload, str):
-            raise ValueError("model evidence payload column must be JSON text")
+            raise TypeError("model evidence payload column must be JSON text")
         try:
             payload = _JSON_VALUE_ADAPTER.validate_json(row.payload)
         except ValidationError as exc:

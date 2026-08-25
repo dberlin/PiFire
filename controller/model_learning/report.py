@@ -57,7 +57,7 @@ def _mapping(value: object, name: str) -> dict[str, object]:
         return {}
     owned = _json_value(value)
     if not isinstance(owned, dict):
-        raise ValueError(f"{name} must be an object")
+        raise TypeError(f"{name} must be an object")
     return owned
 
 
@@ -149,7 +149,7 @@ class LearningReport:
     def as_dict(self) -> dict[str, object]:
         decoded = json.loads(self.payload_bytes)
         if not isinstance(decoded, dict):
-            raise ValueError("learning report root is not an object")
+            raise TypeError("learning report root is not an object")
         return cast(dict[str, object], decoded)
 
     def to_dict(self) -> dict[str, object]:
@@ -159,7 +159,7 @@ class LearningReport:
     def revision(self) -> str:
         value = self.as_dict().get("revision")
         if not isinstance(value, str):
-            raise ValueError("learning report revision is missing")
+            raise TypeError("learning report revision is missing")
         return value
 
 

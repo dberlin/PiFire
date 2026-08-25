@@ -47,7 +47,7 @@ _UNSET = object()
 
 def _finite(value: object, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, Real):
-        raise ValueError(f"{name} must be finite")
+        raise TypeError(f"{name} must be finite")
     normalized = float(value)
     if not math.isfinite(normalized):
         raise ValueError(f"{name} must be finite")
@@ -91,7 +91,7 @@ class GreyFitJob:
         from controller.model_learning.contracts import FitRequest, FrameObservation
 
         if not isinstance(self.request, FitRequest):
-            raise ValueError("request must be a FitRequest")
+            raise TypeError("request must be a FitRequest")
         observations = tuple(self.observations)
         if not observations:
             raise ValueError("observations must not be empty")
@@ -100,7 +100,7 @@ class GreyFitJob:
         if not all(isinstance(frame, FrameObservation) for frame in observations):
             raise ValueError("observations must contain FrameObservation values")
         if not isinstance(self.config, GreyBoxMPCConfig):
-            raise ValueError("config must be a GreyBoxMPCConfig")
+            raise TypeError("config must be a GreyBoxMPCConfig")
         object.__setattr__(self, "observations", observations)
 
 
@@ -120,9 +120,9 @@ class GreyFitSuccess:
         from controller.model_learning.contracts import FitRequest
 
         if not isinstance(self.request, FitRequest):
-            raise ValueError("request must be a FitRequest")
+            raise TypeError("request must be a FitRequest")
         if not isinstance(self.config, GreyBoxMPCConfig):
-            raise ValueError("config must be a GreyBoxMPCConfig")
+            raise TypeError("config must be a GreyBoxMPCConfig")
         for name in ("rmse_c", "max_error_c", "identifiability"):
             normalized = _finite(getattr(self, name), name)
             if normalized < 0.0:
@@ -150,9 +150,9 @@ class GreyFitError:
         from controller.model_learning.contracts import FitRequest
 
         if not isinstance(self.request, FitRequest):
-            raise ValueError("request must be a FitRequest")
+            raise TypeError("request must be a FitRequest")
         if not isinstance(self.code, FitErrorCode):
-            raise ValueError("code must be a FitErrorCode")
+            raise TypeError("code must be a FitErrorCode")
         for name in ("error_type", "detail"):
             value = getattr(self, name)
             if not isinstance(value, str) or not value.strip():
@@ -270,7 +270,7 @@ class GreyFitWorker:
     def __init__(self, kernel: Callable[[GreyFitJob], GreyFitSuccess] | None = None) -> None:
         self._kernel = _fit_grey_job if kernel is None else kernel
         if not callable(self._kernel):
-            raise ValueError("kernel must be callable")
+            raise TypeError("kernel must be callable")
         self._context = multiprocessing.get_context("spawn")
         self._requests: Any = None
         self._results: Any = None
@@ -325,7 +325,7 @@ class GreyFitWorker:
 
     def submit(self, job: GreyFitJob) -> FitSubmission:
         if not isinstance(job, GreyFitJob):
-            raise ValueError("job must be a GreyFitJob")
+            raise TypeError("job must be a GreyFitJob")
         self.start()
         if self._pending is not None:
             return FitSubmission.BUSY
@@ -549,7 +549,7 @@ class TeardownGreyHistory:
         from controller.model_learning.contracts import FrameObservation
 
         if not isinstance(frame, FrameObservation):
-            raise ValueError("frame must be a FrameObservation")
+            raise TypeError("frame must be a FrameObservation")
         reason: str | None = None
         if frame.manual_override or frame.output_source == "manual-override":
             reason = "manual"
@@ -603,7 +603,7 @@ class PassiveGreyHistory:
         from controller.model_learning.contracts import FrameObservation
 
         if not isinstance(frame, FrameObservation):
-            raise ValueError("frame must be a FrameObservation")
+            raise TypeError("frame must be a FrameObservation")
         reason: str | None = None
         if frame.manual_override or frame.output_source == "manual-override":
             reason = "manual"
@@ -670,7 +670,7 @@ def fit_trigger(
 
     resolved = TriggerConfig() if config is None else config
     if not isinstance(resolved, TriggerConfig):
-        raise ValueError("config must be a TriggerConfig")
+        raise TypeError("config must be a TriggerConfig")
     frames = tuple(observations)
     if not all(isinstance(frame, FrameObservation) for frame in frames):
         raise ValueError("observations must contain FrameObservation values")
@@ -709,11 +709,11 @@ def stale_result_reasons(
     from controller.model_learning.contracts import FitRequest, FitResult, FitWindowIdentity
 
     if not isinstance(result, FitResult):
-        raise ValueError("result must be a FitResult")
+        raise TypeError("result must be a FitResult")
     if not isinstance(request, FitRequest):
-        raise ValueError("request must be a FitRequest")
+        raise TypeError("request must be a FitRequest")
     if not isinstance(current_window, FitWindowIdentity):
-        raise ValueError("current_window must be a FitWindowIdentity")
+        raise TypeError("current_window must be a FitWindowIdentity")
     current_generation = _nonnegative_int(current_candidate_generation, "current_candidate_generation")
     submitted = request.window
     returned = result.window
@@ -792,7 +792,7 @@ def grey_config_digest(config: Any) -> str:
     from controller.acados.contracts import GreyBoxMPCConfig
 
     if not isinstance(config, GreyBoxMPCConfig):
-        raise ValueError("config must be a GreyBoxMPCConfig")
+        raise TypeError("config must be a GreyBoxMPCConfig")
     document = {name: getattr(config, name) for name in config.__dataclass_fields__}
     encoded = json.dumps(document, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
@@ -812,7 +812,7 @@ class CandidatePreparation:
 
     def __post_init__(self) -> None:
         if not isinstance(self.candidate, GreyFitSuccess):
-            raise ValueError("candidate must be a GreyFitSuccess")
+            raise TypeError("candidate must be a GreyFitSuccess")
         blockers = tuple(self.blockers)
         if not all(isinstance(value, str) and value for value in blockers):
             raise ValueError("blockers must be non-blank strings")
@@ -888,7 +888,7 @@ def prepare_candidate_off_path(
 ) -> CandidatePreparation:
     """Build and exercise a complete challenger without touching the incumbent."""
     if not isinstance(candidate, GreyFitSuccess):
-        raise ValueError("candidate must be a GreyFitSuccess")
+        raise TypeError("candidate must be a GreyFitSuccess")
     try:
         estimator = estimator_factory(candidate.config)
     except Exception as error:
@@ -964,7 +964,7 @@ def paired_forecast_origin(
     from controller.model_learning.evaluation import ForecastOrigin
 
     if not isinstance(frame, FrameObservation):
-        raise ValueError("frame must be a FrameObservation")
+        raise TypeError("frame must be a FrameObservation")
     if frame.calibration_fit or frame.calibration_stage is not None or frame.probe_q != 0.0:
         return None
     shared = CausalForecastInput(
@@ -1019,11 +1019,11 @@ def handoff_candidate(
     from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin, LearningStatus
 
     if not isinstance(prepared, CandidatePreparation):
-        raise ValueError("prepared must be a CandidatePreparation")
+        raise TypeError("prepared must be a CandidatePreparation")
     if not isinstance(confidence_accepted, bool) or not isinstance(online_enabled, bool):
-        raise ValueError("confidence_accepted and online_enabled must be bools")
+        raise TypeError("confidence_accepted and online_enabled must be bools")
     if not callable(prepare) or not callable(install):
-        raise ValueError("prepare and install must be callable")
+        raise TypeError("prepare and install must be callable")
     del install  # Ownership transfer is intentionally outside this pipeline.
     blockers: list[str] = []
     if not prepared.accepted:
@@ -1165,9 +1165,9 @@ class GreyLearningOrchestrator:
         from controller.model_learning.evaluation import EvaluationConfig
 
         if not isinstance(identity, LiveLearningIdentity):
-            raise ValueError("identity must be a LiveLearningIdentity")
+            raise TypeError("identity must be a LiveLearningIdentity")
         if not isinstance(config, GreyBoxMPCConfig):
-            raise ValueError("config must be a GreyBoxMPCConfig")
+            raise TypeError("config must be a GreyBoxMPCConfig")
         self.identity = identity
         self.config = config
         self.incumbent_pair = incumbent_pair
@@ -1177,9 +1177,9 @@ class GreyLearningOrchestrator:
         self.trigger_config = TriggerConfig() if trigger_config is None else trigger_config
         self.evaluation_config = EvaluationConfig() if evaluation_config is None else evaluation_config
         if not isinstance(self.trigger_config, TriggerConfig):
-            raise ValueError("trigger_config must be a TriggerConfig")
+            raise TypeError("trigger_config must be a TriggerConfig")
         if not isinstance(self.evaluation_config, EvaluationConfig):
-            raise ValueError("evaluation_config must be an EvaluationConfig")
+            raise TypeError("evaluation_config must be an EvaluationConfig")
         self.worker = GreyFitWorker() if worker is None else worker
         self.passive_history = PassiveGreyHistory(
             role_generation=identity.role_generation,
@@ -1251,7 +1251,7 @@ class GreyLearningOrchestrator:
         from controller.acados.contracts import GreyBoxMPCConfig
 
         if not isinstance(identity, LiveLearningIdentity):
-            raise ValueError("identity must be a LiveLearningIdentity")
+            raise TypeError("identity must be a LiveLearningIdentity")
         configuration_changed = identity.configuration_digest != self.identity.configuration_digest
         incumbent_changed = identity.incumbent_digest != self.identity.incumbent_digest
         if configuration_changed and config is None:
@@ -1260,7 +1260,7 @@ class GreyLearningOrchestrator:
             raise ValueError("incumbent digest change requires the corresponding incumbent pair")
         replacement_config = self.config if config is None else config
         if not isinstance(replacement_config, GreyBoxMPCConfig):
-            raise ValueError("config must be a GreyBoxMPCConfig")
+            raise TypeError("config must be a GreyBoxMPCConfig")
         if identity == self.identity and config is None and incumbent_pair is _UNSET:
             return
         replacement_pair = self.incumbent_pair if incumbent_pair is _UNSET else incumbent_pair
@@ -1323,7 +1323,7 @@ class GreyLearningOrchestrator:
         from controller.model_learning.contracts import CandidateOrigin, FitRequest, FrameObservation
 
         if not isinstance(frame, FrameObservation):
-            raise ValueError("frame must be a FrameObservation")
+            raise TypeError("frame must be a FrameObservation")
         self.start()
         completed = () if self._evaluator is None else self._evaluator.observe(frame)
         operator = frame.calibration_fit or frame.calibration_stage is not None or frame.probe_q != 0.0

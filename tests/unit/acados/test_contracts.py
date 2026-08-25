@@ -36,11 +36,15 @@ def test_grey_config_accepts_supported_integer_horizon_boundaries(
     assert config.timestep_s == 25.0
 
 
-@pytest.mark.parametrize("horizon_steps", [4, 25, 5.0, True])
+@pytest.mark.parametrize(
+    ("horizon_steps", "expected"),
+    [(4, ValueError), (25, ValueError), (5.0, TypeError), (True, TypeError)],
+)
 def test_grey_config_rejects_out_of_range_or_non_integer_horizons(
     horizon_steps: object,
+    expected: type[Exception],
 ) -> None:
-    with pytest.raises(ValueError, match="horizon_steps"):
+    with pytest.raises(expected, match="horizon_steps"):
         GreyBoxMPCConfig(horizon_steps=horizon_steps)  # type: ignore[arg-type]
 
 
@@ -67,7 +71,7 @@ def test_grey_config_rejects_non_finite_scalars(field: str, value: float) -> Non
 
 @pytest.mark.parametrize("field", ["C_c", "temperature_weight", "max_iterations"])
 def test_grey_config_rejects_booleans_as_numbers(field: str) -> None:
-    with pytest.raises(ValueError, match=field):
+    with pytest.raises(TypeError, match=field):
         GreyBoxMPCConfig(**{field: True})
 
 
@@ -185,19 +189,19 @@ def test_solver_diagnostics_are_structured_immutable_and_finite() -> None:
 
 
 @pytest.mark.parametrize(
-    ("field", "value"),
+    ("field", "value", "expected"),
     [
-        ("status", True),
-        ("backend_status", True),
-        ("iterations", -1),
-        ("solve_time_s", -0.01),
-        ("objective", np.nan),
-        ("kkt_residual", np.inf),
-        ("constraint_residual", -0.01),
-        ("warm_started", 0),
+        ("status", True, TypeError),
+        ("backend_status", True, TypeError),
+        ("iterations", -1, ValueError),
+        ("solve_time_s", -0.01, ValueError),
+        ("objective", np.nan, ValueError),
+        ("kkt_residual", np.inf, ValueError),
+        ("constraint_residual", -0.01, ValueError),
+        ("warm_started", 0, TypeError),
     ],
 )
-def test_solver_diagnostics_reject_invalid_fields(field: str, value: object) -> None:
+def test_solver_diagnostics_reject_invalid_fields(field: str, value: object, expected: type[Exception]) -> None:
     values: dict[str, object] = {
         "status": 0,
         "backend_status": 0,
@@ -210,7 +214,7 @@ def test_solver_diagnostics_reject_invalid_fields(field: str, value: object) -> 
     }
     values[field] = value
 
-    with pytest.raises(ValueError, match=field):
+    with pytest.raises(expected, match=field):
         SolverDiagnostics(**values)  # type: ignore[arg-type]
 
 

@@ -119,11 +119,11 @@ def test_all_is_a_read_only_selector(ds):
 
 @pytest.mark.parametrize("bad", ["control", None])
 def test_a_bare_kind_is_rejected_by_every_accessor(ds, bad):
-    with pytest.raises(ValueError):
+    with pytest.raises(TypeError):
         runtime_persistence.read_errors(bad)
-    with pytest.raises(ValueError):
+    with pytest.raises(TypeError):
         runtime_persistence.write_errors(bad, ["nope"])
-    with pytest.raises(ValueError):
+    with pytest.raises(TypeError):
         runtime_persistence.flush_errors(bad)
 
 

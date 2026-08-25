@@ -246,7 +246,7 @@ class InMemoryStore:
 
     def read_errors(self, kind):
         if not isinstance(kind, ErrorKind):
-            raise ValueError(f"error kind must be an ErrorKind, got {kind!r}")
+            raise TypeError(f"error kind must be an ErrorKind, got {kind!r}")
         if kind is ErrorKind.ALL:
             # Grouped by owner in ErrorKind declaration order, matching the
             # SQL accessor: a process rewriting its own list must not move its
@@ -263,7 +263,7 @@ class InMemoryStore:
 
     def write_errors(self, kind, errors):
         if not isinstance(kind, ErrorKind):
-            raise ValueError(f"error kind must be an ErrorKind, got {kind!r}")
+            raise TypeError(f"error kind must be an ErrorKind, got {kind!r}")
         if kind is ErrorKind.ALL:
             raise ValueError(f"{kind} is a read-only selector; write and flush need a single owning kind")
         self._errors[kind] = list(errors)

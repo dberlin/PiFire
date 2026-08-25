@@ -109,7 +109,7 @@ class PulseScheduler:
 
     def reset(self, reason: PulseResetReason) -> PulseFrameResult | None:
         if not isinstance(reason, PulseResetReason):
-            raise ValueError("reset reason must be a PulseResetReason")
+            raise TypeError("reset reason must be a PulseResetReason")
         interrupted = self._finish_frame(
             ended_at_s=self._last_at_s,
             complete=False,
@@ -132,7 +132,7 @@ class PulseScheduler:
         self._validate_request(request)
         self._validate_finite("at_s", at_s)
         if not isinstance(actual_auger_on, bool):
-            raise ValueError("actual_auger_on must be a bool")
+            raise TypeError("actual_auger_on must be a bool")
         if self._last_at_s is not None and at_s < self._last_at_s:
             raise ValueError("at_s must be monotone")
 

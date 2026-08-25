@@ -622,28 +622,31 @@ def test_close_attempts_every_owned_handle_once_when_one_close_fails():
 
 
 @pytest.mark.parametrize(
-    ("config", "message"),
+    ("config", "message", "expected"),
     [
-        (dict(CONFIG, C_c=True), "C_c must be a finite number"),
-        (dict(CONFIG, C_c=float("inf")), "C_c must be a finite number"),
-        (dict(CONFIG, n_delay=8.0), "n_delay must be an integer"),
-        (dict(CONFIG, estimator=5), "estimator must be a string"),
-        (dict(CONFIG, enable_fan_input=2), "enable_fan_input must be a boolean"),
+        (dict(CONFIG, C_c=True), "C_c must be a finite number", TypeError),
+        (dict(CONFIG, C_c=float("inf")), "C_c must be a finite number", ValueError),
+        (dict(CONFIG, n_delay=8.0), "n_delay must be an integer", TypeError),
+        (dict(CONFIG, estimator=5), "estimator must be a string", TypeError),
+        (dict(CONFIG, enable_fan_input=2), "enable_fan_input must be a boolean", ValueError),
         (
             dict(CONFIG, enable_online_adaptation="yes"),
             "enable_online_adaptation must be a boolean",
+            TypeError,
         ),
         (
             dict(CONFIG, enable_online_adaptation=1),
             "enable_online_adaptation must be a boolean",
+            TypeError,
         ),
     ],
 )
 def test_normalization_rejects_unsound_runtime_setting_types(
     config: dict[str, JsonValue],
     message: str,
+    expected: type[Exception],
 ):
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(expected, match=message):
         normalize_config(config)
 
 
@@ -666,19 +669,19 @@ def test_normalization_preserves_key_specific_boolean_semantics():
 def test_public_factories_reject_unvalidated_direct_caller_settings():
     estimator_factory = FakeEstimatorFactory()
 
-    with pytest.raises(ValueError, match="C_c must be numeric"):
+    with pytest.raises(TypeError, match="C_c must be numeric"):
         MpcCore.build_estimator(
             dict(CONFIG, C_c=True),
             8,
             ekf_factory=estimator_factory,
         )
-    with pytest.raises(ValueError, match="n_delay must be an integer"):
+    with pytest.raises(TypeError, match="n_delay must be an integer"):
         MpcCore.build_components(
             dict(CONFIG, n_delay=8.0),
             ekf_factory=estimator_factory,
             solver_factory=FakeSolver,
         )
-    with pytest.raises(ValueError, match="estimator must be a string"):
+    with pytest.raises(TypeError, match="estimator must be a string"):
         MpcCore.build_estimator(
             dict(CONFIG, estimator=5),
             8,

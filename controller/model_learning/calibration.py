@@ -23,7 +23,7 @@ _NO_ROOM = "no_probe_room"
 
 def _finite(value: float, name: str) -> float:
     if isinstance(value, bool):
-        raise ValueError(f"{name} must be finite")
+        raise TypeError(f"{name} must be finite")
     value = float(value)
     if not isfinite(value):
         raise ValueError(f"{name} must be finite")
@@ -107,7 +107,7 @@ class CalibrationCommand:
         ):
             raise ValueError("command_revision must be a non-negative integer")
         if isinstance(self.seed, bool) or not isinstance(self.seed, int):
-            raise ValueError("seed must be an integer")
+            raise TypeError("seed must be an integer")
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,7 +166,7 @@ class CalibrationRuntimeContext:
             "fallback",
         ):
             if not isinstance(getattr(self, name), bool):
-                raise ValueError(f"{name} must be a bool")
+                raise TypeError(f"{name} must be a bool")
 
 
 @dataclass(frozen=True, slots=True)
@@ -486,7 +486,7 @@ class CalibrationCoordinator:
         )
         history_value = snapshot.get("completed_stages", ())
         if not isinstance(history_value, tuple):
-            raise ValueError("invalid calibration snapshot")
+            raise TypeError("invalid calibration snapshot")
         history = history_value
         if (
             not isinstance(config, CalibrationConfig)

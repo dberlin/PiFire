@@ -95,7 +95,7 @@ class MpcPairConfiguration:
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError(f"{name} must be a non-negative integer")
         if not isinstance(self.model_identified, bool):
-            raise ValueError("model_identified must be a bool")
+            raise TypeError("model_identified must be a bool")
 
 
 class _OutputAuthorization:
@@ -193,7 +193,7 @@ class MpcPairFactory:
         self._base_configuration = normalize_config(base_configuration)
         control_period = self._base_configuration.get("control_period")
         if not isinstance(control_period, float):
-            raise RuntimeError("normalized control_period must be a float")
+            raise RuntimeError("normalized control_period must be a float")  # noqa: TRY004  invariant on already-normalized input, not caller type validation
         self._control_period = control_period
         self._units = units
         self._cycle_data = cycle_data
@@ -216,7 +216,7 @@ class MpcPairFactory:
         normalized = normalize_config(settings)
         raw_estimator_kind = normalized.get("estimator")
         if not isinstance(raw_estimator_kind, str):
-            raise ValueError("estimator must be 'ekf' or 'kf'")
+            raise TypeError("estimator must be 'ekf' or 'kf'")
         estimator_kind = raw_estimator_kind.lower()
         if estimator_kind == "ekf":
             kind: Literal["ekf", "kf"] = "ekf"
@@ -269,7 +269,7 @@ class MpcPairFactory:
         authorized: bool,
     ) -> OwnedMpcPair:
         if not isinstance(authorized, bool):
-            raise ValueError("authorized must be a bool")
+            raise TypeError("authorized must be a bool")
         settings, expected_native = self._settings(configuration)
         return self._build_owned(
             configuration,
@@ -314,7 +314,7 @@ class MpcPairFactory:
         authorized: bool,
     ) -> OwnedMpcPair:
         if not isinstance(authorized, bool):
-            raise ValueError("authorized must be a bool")
+            raise TypeError("authorized must be a bool")
         settings, expected_native = self._settings(configuration)
         gate = _OutputAuthorization(False)
         try:
@@ -394,7 +394,7 @@ class MpcPairFactory:
     def build_estimator(self, native: GreyBoxMPCConfig) -> MpcEstimator:
         estimator_kind = self._base_configuration.get("estimator")
         if not isinstance(estimator_kind, str):
-            raise RuntimeError("normalized estimator must be a string")
+            raise RuntimeError("normalized estimator must be a string")  # noqa: TRY004  invariant on already-normalized input, not caller type validation
         settings = self._settings_from_native(native, estimator_kind)
         return MpcCore.build_estimator(
             settings,
@@ -619,7 +619,7 @@ class MpcPairFactory:
         for name in _LEGACY_V4_PARAMETER_FIELDS:
             value = parameters.get(name)
             if isinstance(value, bool) or not isinstance(value, Real):
-                raise ValueError(f"legacy descriptor parameter {name} must be numeric")
+                raise TypeError(f"legacy descriptor parameter {name} must be numeric")
             normalized = float(value)
             if not math.isfinite(normalized):
                 raise ValueError(f"legacy descriptor parameter {name} must be finite")
@@ -688,7 +688,7 @@ class MpcPairFactory:
         def number(name: str) -> float:
             value = configuration.get(name)
             if isinstance(value, bool) or not isinstance(value, Real):
-                raise ValueError(f"descriptor {name} must be numeric")
+                raise TypeError(f"descriptor {name} must be numeric")
             return float(value)
 
         return MpcPairFactory._settings_for_native(
@@ -707,14 +707,14 @@ class MpcPairFactory:
         def number(name: str) -> float:
             value = configuration.get(name)
             if isinstance(value, bool) or not isinstance(value, Real):
-                raise ValueError(f"descriptor {name} must be numeric")
+                raise TypeError(f"descriptor {name} must be numeric")
             normalized = float(value)
             return normalized
 
         def integer(name: str) -> int:
             value = configuration.get(name)
             if isinstance(value, bool) or not isinstance(value, Integral):
-                raise ValueError(f"descriptor {name} must be an integer")
+                raise TypeError(f"descriptor {name} must be an integer")
             return int(value)
 
         return GreyBoxMPCConfig(

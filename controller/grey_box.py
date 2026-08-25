@@ -21,7 +21,7 @@ _KELVIN = 273.15
 
 def _finite(value: object, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, Real):
-        raise ValueError(f"{name} must be a finite real number")
+        raise TypeError(f"{name} must be a finite real number")
     result = float(value)
     if not np.isfinite(result):
         raise ValueError(f"{name} must be finite")
@@ -169,7 +169,7 @@ class GreyBoxPredictionAdapter:
         except AttributeError as error:
             raise ValueError("controller must expose cfg and estimator") from error
         if not isinstance(config, Mapping):
-            raise ValueError("controller cfg must be a mapping")
+            raise TypeError("controller cfg must be a mapping")
         configured_step = _finite(config.get("control_period", 5.0), "control_period")
         if configured_step <= 0.0:
             raise ValueError("control_period must be positive")

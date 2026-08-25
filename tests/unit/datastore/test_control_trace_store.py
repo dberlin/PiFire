@@ -410,7 +410,7 @@ def test_prune_timestamp_is_a_strict_non_negative_integer(ds, before_ms):
 
 @pytest.mark.parametrize("before_schema_version", [True, 1.0, "5", None])
 def test_incompatible_prune_schema_version_is_a_strict_integer(ds, before_schema_version):
-    with pytest.raises(ValueError, match="before_schema_version"):
+    with pytest.raises(TypeError, match="before_schema_version"):
         prune_incompatible_control_trace(before_schema_version, limit=1)
 
 

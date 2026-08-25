@@ -146,7 +146,10 @@ def _default_pair_factory() -> MpcPairFactory:
     globals_config = settings.get("globals")
     units = globals_config.get("units") if isinstance(globals_config, Mapping) else None
     if not isinstance(cycle_data, Mapping) or not isinstance(units, str):
-        raise ValueError("controller configuration is incomplete")
+        # ValueError, not TypeError: `_projection_rejection` maps KeyError/TypeError
+        # to INVALID_DATA and everything else to CONFLICT. Incomplete settings are an
+        # operator-fixable CONFLICT, not a malformed activation projection.
+        raise ValueError("controller configuration is incomplete")  # noqa: TRY004
     return MpcPairFactory(
         configured,
         units,

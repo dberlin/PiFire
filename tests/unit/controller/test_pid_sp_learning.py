@@ -202,7 +202,7 @@ def test_non_finite_numeric_gate_observations_are_rejected(value):
 
 @pytest.mark.parametrize("field", ["accepted", "accepted_seconds", "duty_std", "temp_span"])
 def test_booleans_are_not_accepted_as_numeric_gate_observations(field):
-    with pytest.raises(ValueError, match=field):
+    with pytest.raises(TypeError, match=field):
         build_pid_sp_live_learning(
             _identifier_status(**{field: True}),
             _predictor_status(),

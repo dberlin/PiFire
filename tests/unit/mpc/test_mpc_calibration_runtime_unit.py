@@ -125,9 +125,9 @@ def test_command_validation_requires_revision_confirmations_and_finite_ambient()
 
 
 def test_command_validation_rejects_non_integer_seed() -> None:
-    with pytest.raises(ValueError, match="seed must be an integer"):
+    with pytest.raises(TypeError, match="seed must be an integer"):
         replace(_command(), seed=True)
-    with pytest.raises(ValueError, match="seed must be an integer"):
+    with pytest.raises(TypeError, match="seed must be an integer"):
         replace(_command(), seed=1.5)
 
 

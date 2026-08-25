@@ -148,7 +148,7 @@ def _validate(payload: dict[str, Any]) -> None:
 
     conditions = payload["conditions"]
     if not isinstance(conditions, dict):
-        raise ValueError("evidence must record measurement conditions")
+        raise TypeError("evidence must record measurement conditions")
     expected_conditions = {
         "plants": [name for name, _ in PLANTS],
         "seeds": list(SEEDS),

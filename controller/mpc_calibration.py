@@ -87,7 +87,7 @@ class CalibrationCommand:
         if self.empty_grill_confirmed is not True or self.pellets_confirmed is not True:
             raise ValueError("calibration confirmations are required")
         if isinstance(self.seed, bool) or not isinstance(self.seed, int):
-            raise ValueError("calibration seed must be an integer")
+            raise TypeError("calibration seed must be an integer")
 
 
 @dataclass(frozen=True, slots=True)

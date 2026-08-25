@@ -188,17 +188,17 @@ def test_steady_temperature_inverts_the_shared_equilibrium_load(params, setpoint
 
 
 @pytest.mark.parametrize(
-    "params",
+    ("params", "expected"),
     [
-        None,
-        {},
-        {"C_c": 306.0, "h_amb": 0.5, "T_amb": 20.0, "K_Q": 0.0, "sigma": 0.0},
-        {"C_c": 306.0, "h_amb": float("nan"), "T_amb": 20.0, "K_Q": 100.0, "sigma": 0.0},
-        {"C_c": 306.0, "h_amb": 0.0, "T_amb": 20.0, "K_Q": 100.0, "sigma": 0.0},
+        (None, TypeError),
+        ({}, ValueError),
+        ({"C_c": 306.0, "h_amb": 0.5, "T_amb": 20.0, "K_Q": 0.0, "sigma": 0.0}, ValueError),
+        ({"C_c": 306.0, "h_amb": float("nan"), "T_amb": 20.0, "K_Q": 100.0, "sigma": 0.0}, ValueError),
+        ({"C_c": 306.0, "h_amb": 0.0, "T_amb": 20.0, "K_Q": 100.0, "sigma": 0.0}, ValueError),
     ],
 )
-def test_equilibrium_primitives_reject_absent_or_nonphysical_models(params):
-    with pytest.raises(ValueError):
+def test_equilibrium_primitives_reject_absent_or_nonphysical_models(params, expected):
+    with pytest.raises(expected):
         mpc_model.steady_combustion_load(params, 120.0)
-    with pytest.raises(ValueError):
+    with pytest.raises(expected):
         mpc_model.steady_temperature(params, 0.5)

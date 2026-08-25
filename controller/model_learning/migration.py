@@ -73,7 +73,7 @@ def migrate_mpc_learning_authority(
     from controller.mpc_snapshot import GreySnapshotInvalid, migrate_grey_learning_snapshot
 
     if not isinstance(defaults, dict):
-        raise ValueError("defaults must be an object")
+        raise TypeError("defaults must be an object")
     with _model_evidence_connection(database_path) as connection, datastore.transaction(connection) as conn:
         controller_envelope = _migration_json_blob(conn, MODEL_STATE_KEY)
         controller_snapshot = None

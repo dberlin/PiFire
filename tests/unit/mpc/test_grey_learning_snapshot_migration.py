@@ -318,7 +318,7 @@ def test_non_object_defaults_are_rejected_before_authority_is_rewritten(ds):
     original = _v3()
     _seed_controller(original)
 
-    with pytest.raises(ValueError, match="defaults must be an object"):
+    with pytest.raises(TypeError, match="defaults must be an object"):
         migrate_mpc_learning_authority(defaults=[PARAMS])
 
     assert _stored_controller() == original

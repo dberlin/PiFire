@@ -189,21 +189,21 @@ def _ignore_failure(_error: BaseException) -> None:
 def _float_setting(config: Mapping[str, JsonValue], key: str) -> float:
     value = config[key]
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{key} must be numeric")
+        raise TypeError(f"{key} must be numeric")
     return float(value)
 
 
 def _int_setting(config: Mapping[str, JsonValue], key: str) -> int:
     value = config[key]
     if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"{key} must be an integer")
+        raise TypeError(f"{key} must be an integer")
     return value
 
 
 def _str_setting(config: Mapping[str, JsonValue], key: str) -> str:
     value = config[key]
     if not isinstance(value, str):
-        raise ValueError(f"{key} must be a string")
+        raise TypeError(f"{key} must be a string")
     return value
 
 

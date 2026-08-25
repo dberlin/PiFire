@@ -611,21 +611,22 @@ def test_restore_rejects_malformed_numeric_and_integer_descriptor_fields() -> No
 
     for field, invalid in (("C_c", "bad"), ("horizon_steps", 5.5)):
         malformed = dict(values, **{field: invalid})
-        with pytest.raises(ValueError, match=field):
+        with pytest.raises(TypeError, match=field):
             pair_factory.restore(descriptor(malformed))
 
 
 @pytest.mark.parametrize(
-    ("change", "message"),
+    ("change", "message", "expected"),
     [
-        ({"est_q_temp": "bad"}, "est_q_temp"),
-        ({"est_q_temp": None}, "est_q_temp"),
-        ({"unexpected": 1.0}, "fields"),
+        ({"est_q_temp": "bad"}, "est_q_temp", TypeError),
+        ({"est_q_temp": None}, "est_q_temp", ValueError),
+        ({"unexpected": 1.0}, "fields", ValueError),
     ],
 )
 def test_restore_rejects_malformed_incomplete_or_extra_estimator_settings_before_build(
     change: dict[str, object],
     message: str,
+    expected: type[Exception],
 ) -> None:
     events: list[str] = []
     pair_factory, ekf, kf, solvers = factory(events)
@@ -640,7 +641,7 @@ def test_restore_rejects_malformed_incomplete_or_extra_estimator_settings_before
         durable_configuration.pop("est_q_temp")
     else:
         durable_configuration.update(change)
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(expected, match=message):
         malformed = descriptor(durable_configuration)
         pair_factory.restore(malformed)
 
@@ -732,21 +733,22 @@ def test_restore_explicitly_migrates_pre_task3_nested_v4_descriptor(
 
 
 @pytest.mark.parametrize(
-    ("case", "message"),
+    ("case", "message", "expected"),
     (
-        ("schema", "schema"),
-        ("boolean-delay", "integer 8"),
-        ("float-delay", "integer 8"),
-        ("wrong-delay", "integer 8"),
-        ("nonmapping-parameters", "parameters"),
-        ("missing-parameter", "parameters"),
-        ("boolean-parameter", "numeric"),
-        ("string-parameter", "numeric"),
+        ("schema", "schema", ValueError),
+        ("boolean-delay", "integer 8", ValueError),
+        ("float-delay", "integer 8", ValueError),
+        ("wrong-delay", "integer 8", ValueError),
+        ("nonmapping-parameters", "parameters", ValueError),
+        ("missing-parameter", "parameters", ValueError),
+        ("boolean-parameter", "numeric", TypeError),
+        ("string-parameter", "numeric", TypeError),
     ),
 )
 def test_nested_v4_migration_rejects_every_malformed_legacy_shape(
     case: str,
     message: str,
+    expected: type[Exception],
 ) -> None:
     legacy_configuration: dict[str, JsonValue] = {
         "schema": "pifire-grey-box-model/v4",
@@ -781,7 +783,7 @@ def test_nested_v4_migration_rejects_every_malformed_legacy_shape(
             parameters["theta"] = "bad"
     legacy = descriptor(legacy_configuration)
 
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(expected, match=message):
         MpcPairFactory.migrate_legacy_descriptor(legacy)
 
 
@@ -848,14 +850,15 @@ def test_closed_pair_cannot_be_reauthorized() -> None:
 def test_configuration_runtime_validation_rejects_each_invalid_identity_field() -> None:
     settings = normalize_config(DEFAULT_MPC_CONFIG)
     invalid_values = (
-        ("other", 0, 0, False),
-        ("ekf", True, 0, False),
-        ("ekf", 0, -1, False),
-        ("ekf", 0, 0, 1),
+        ("other", 0, 0, False, ValueError),
+        # the generation guards mix a type check with `value < 0`, so they stay ValueError
+        ("ekf", True, 0, False, ValueError),
+        ("ekf", 0, -1, False, ValueError),
+        ("ekf", 0, 0, 1, TypeError),
     )
 
-    for estimator_kind, candidate_generation, role_generation, model_identified in invalid_values:
-        with pytest.raises(ValueError):
+    for estimator_kind, candidate_generation, role_generation, model_identified, expected in invalid_values:
+        with pytest.raises(expected):
             MpcPairConfiguration(
                 settings,
                 estimator_kind,
@@ -887,7 +890,7 @@ def test_configured_accepts_kf_and_rejects_non_string_estimator() -> None:
         role_generation=3,
     )
     assert configured.estimator_kind == "kf"
-    with pytest.raises(ValueError, match="estimator"):
+    with pytest.raises(TypeError, match="estimator"):
         pair_factory.configured(
             dict(DEFAULT_MPC_CONFIG, estimator=7),
             candidate_generation=0,
@@ -899,13 +902,13 @@ def test_authorization_validation_precedes_build_and_adopt_ownership_transfer() 
     events: list[str] = []
     pair_factory, ekf, _kf, solvers = factory(events)
 
-    with pytest.raises(ValueError, match="authorized"):
+    with pytest.raises(TypeError, match="authorized"):
         pair_factory.build(configuration(), authorized=1)
     assert ekf.instances == [] and solvers.instances == []
 
     estimator = Estimator(events)
     solver = Solver(GreyBoxMPCConfig(horizon_steps=5), events)
-    with pytest.raises(ValueError, match="authorized"):
+    with pytest.raises(TypeError, match="authorized"):
         pair_factory.adopt(configuration(), estimator, solver, authorized=1)
     assert estimator.closed == solver.closed == 0
 

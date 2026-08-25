@@ -146,7 +146,7 @@ def _normalized_load(value):
 def _thermal_parameters(params):
     """Return the finite physical coefficients shared by steady-state helpers."""
     if not isinstance(params, dict):
-        raise ValueError("a thermal model parameter mapping is required")
+        raise TypeError("a thermal model parameter mapping is required")
     try:
         h_amb = float(params["h_amb"])
         t_amb = float(params["T_amb"])

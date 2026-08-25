@@ -81,7 +81,7 @@ def main() -> int:
         clock_now = getattr(context.clock, "now", None)
         clock_advance = getattr(context.clock, "advance", None)
         if not callable(clock_now) or not callable(clock_advance):
-            raise RuntimeError("smoke context requires a controllable clock")
+            raise RuntimeError("smoke context requires a controllable clock")  # noqa: TRY004  invariant on already-normalized input, not caller type validation
 
         for _ in range(45):
             mode.on_tick(clock_now(), 180.0, grill.get_output_status())

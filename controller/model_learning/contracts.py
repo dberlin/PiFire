@@ -18,7 +18,7 @@ FloatArray = npt.NDArray[np.float64]
 def _finite_float(value: object, name: str) -> float:
     """Normalize one finite real scalar without admitting booleans."""
     if isinstance(value, bool) or not isinstance(value, Real):
-        raise ValueError(f"{name} must be a finite real number")
+        raise TypeError(f"{name} must be a finite real number")
     normalized = float(value)
     if not np.isfinite(normalized):
         raise ValueError(f"{name} must be finite")
@@ -126,9 +126,9 @@ class FitRequest:
         if not isinstance(self.request_id, str) or not self.request_id.strip():
             raise ValueError("request_id must be non-blank")
         if not isinstance(self.origin, CandidateOrigin):
-            raise ValueError("origin must be a CandidateOrigin")
+            raise TypeError("origin must be a CandidateOrigin")
         if not isinstance(self.window, FitWindowIdentity):
-            raise ValueError("window must be a FitWindowIdentity")
+            raise TypeError("window must be a FitWindowIdentity")
         object.__setattr__(
             self,
             "candidate_generation",
@@ -149,16 +149,16 @@ class FitResult:
         if not isinstance(self.request_id, str) or not self.request_id.strip():
             raise ValueError("request_id must be non-blank")
         if not isinstance(self.origin, CandidateOrigin):
-            raise ValueError("origin must be a CandidateOrigin")
+            raise TypeError("origin must be a CandidateOrigin")
         if not isinstance(self.window, FitWindowIdentity):
-            raise ValueError("window must be a FitWindowIdentity")
+            raise TypeError("window must be a FitWindowIdentity")
         object.__setattr__(
             self,
             "candidate_generation",
             _nonnegative_int(self.candidate_generation, "candidate_generation"),
         )
         if not isinstance(self.status, FitStatus):
-            raise ValueError("status must be a FitStatus")
+            raise TypeError("status must be a FitStatus")
         if self.candidate_digest is not None:
             _require_digest(self.candidate_digest, "candidate_digest")
 
@@ -249,13 +249,13 @@ class FrameObservation:
         observation_sequence = _nonnegative_int(self.observation_sequence, "observation_sequence")
         object.__setattr__(self, "observation_sequence", observation_sequence)
         if not isinstance(self.probe_valid, bool):
-            raise ValueError("probe_valid must be a bool")
+            raise TypeError("probe_valid must be a bool")
         if self.probe_source is not None and (not isinstance(self.probe_source, str) or not self.probe_source.strip()):
             raise ValueError("probe_source must be a non-empty string when present")
         if not isinstance(self.ambient_source, AmbientSource):
-            raise ValueError("ambient_source must be an AmbientSource")
+            raise TypeError("ambient_source must be an AmbientSource")
         if not isinstance(self.ambient_uncertainty, AmbientUncertainty):
-            raise ValueError("ambient_uncertainty must be an AmbientUncertainty")
+            raise TypeError("ambient_uncertainty must be an AmbientUncertainty")
         baseline_q = self.requested_q if self.baseline_q is None else _bounded_duty(self.baseline_q, "baseline_q")
         probe_q = _finite_float(self.probe_q, "probe_q")
         if not -1.0 <= probe_q <= 1.0:
@@ -342,7 +342,7 @@ class FrameObservation:
             raise ValueError("completed_calibration_stages must be unique known heating stages")
         object.__setattr__(self, "completed_calibration_stages", completed_stages)
         if not isinstance(self.calibration_fit, bool):
-            raise ValueError("calibration_fit must be a bool")
+            raise TypeError("calibration_fit must be a bool")
         if self.calibration_fit and self.calibration_stage is None:
             raise ValueError("calibration_fit requires calibration_stage")
         if self.allocation_join_reason is not None and (
@@ -361,7 +361,7 @@ class FrameObservation:
             "continuous",
         ):
             if not isinstance(getattr(self, name), bool):
-                raise ValueError(f"{name} must be a bool")
+                raise TypeError(f"{name} must be a bool")
 
     @property
     def time_s(self) -> float:

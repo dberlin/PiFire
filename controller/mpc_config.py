@@ -96,7 +96,7 @@ RETIRED_PARAMETER_KEYS = ("C_f", "h_fc")
 
 def _validated_float(value: JsonValue, key: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{key} must be a finite number")
+        raise TypeError(f"{key} must be a finite number")
     normalized = float(value)
     if not math.isfinite(normalized):
         raise ValueError(f"{key} must be a finite number")
@@ -105,13 +105,13 @@ def _validated_float(value: JsonValue, key: str) -> float:
 
 def _validated_int(value: JsonValue, key: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"{key} must be an integer")
+        raise TypeError(f"{key} must be an integer")
     return value
 
 
 def _validated_bool(value: JsonValue, key: str) -> bool:
     if not isinstance(value, bool):
-        raise ValueError(f"{key} must be a boolean")
+        raise TypeError(f"{key} must be a boolean")
     return value
 
 
@@ -125,7 +125,7 @@ def _validated_fan_bool(value: JsonValue) -> bool:
 
 def _validated_estimator(value: JsonValue) -> str:
     if not isinstance(value, str):
-        raise ValueError("estimator must be a string")
+        raise TypeError("estimator must be a string")
     return value
 
 

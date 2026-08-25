@@ -465,9 +465,12 @@ def test_runtime_discretization_keeps_fixed_map_and_unit_running_cost_scaling(
     assert result.diagnostics.objective == result.objective
 
 
-@pytest.mark.parametrize("horizon_steps", [4, 25, 5.0, True])
+@pytest.mark.parametrize(
+    ("horizon_steps", "expected"),
+    [(4, ValueError), (25, ValueError), (5.0, TypeError), (True, TypeError)],
+)
 def test_invalid_horizons_are_rejected_before_native_create(
-    horizon_steps: object, monkeypatch: pytest.MonkeyPatch
+    horizon_steps: object, expected: type[Exception], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     native_create_called = False
 
@@ -478,7 +481,7 @@ def test_invalid_horizons_are_rejected_before_native_create(
 
     monkeypatch.setattr(_ffi, "create", unexpected_create)
 
-    with pytest.raises(ValueError, match="horizon_steps"):
+    with pytest.raises(expected, match="horizon_steps"):
         AcadosGreyBoxMPC(
             GreyBoxMPCConfig(horizon_steps=horizon_steps)  # type: ignore[arg-type]
         )

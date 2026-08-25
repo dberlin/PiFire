@@ -1058,7 +1058,7 @@ class ControlTraceRecord(BaseModel):
 
         ts_ms, session_id, cook_id, controller, event_kind, schema_version, payload_json = values
         if not isinstance(payload_json, str):
-            raise ValueError("control trace payload column must be JSON text")
+            raise TypeError("control trace payload column must be JSON text")
         try:
             decoded_payload: object = _JSON_VALUE_ADAPTER.validate_json(payload_json)
         except ValidationError as exc:

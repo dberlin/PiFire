@@ -107,7 +107,7 @@ class GreyControlPairDescriptor:
         _generation(self.candidate_generation, "candidate_generation")
         _generation(self.role_generation, "role_generation")
         if not isinstance(self.configuration, Mapping):
-            raise ValueError("configuration must be a mapping")
+            raise TypeError("configuration must be a mapping")
         owned = _owned_json(self.configuration)
         assert isinstance(owned, dict)
         estimator_fields = frozenset(owned) & _ESTIMATOR_CONSTRUCTION_FIELDS
@@ -150,10 +150,10 @@ class GreyControlPairDescriptor:
     def from_dict(cls, value: Mapping[str, object]) -> GreyControlPairDescriptor:
         configuration = value.get("configuration")
         if not isinstance(configuration, Mapping):
-            raise ValueError("configuration must be a mapping")
+            raise TypeError("configuration must be a mapping")
         ownership_digest = value.get("ownership_digest", "")
         if not isinstance(ownership_digest, str):
-            raise ValueError("ownership_digest must be a string")
+            raise TypeError("ownership_digest must be a string")
         return cls(
             model_digest=_digest(value.get("model_digest"), "model_digest"),
             configuration=configuration,
@@ -451,10 +451,10 @@ def _record_from_persisted_state(
     ) -> tuple[GreyControlPairDescriptor, GreyControlPairDescriptor]:
         raw = getattr(state, f"{name}_pair_json", None)
         if not isinstance(raw, str):
-            raise ValueError(f"persisted activation is missing {name} pair")
+            raise TypeError(f"persisted activation is missing {name} pair")
         decoded = json.loads(raw)
         if not isinstance(decoded, dict):
-            raise ValueError(f"persisted {name} pair must be an object")
+            raise TypeError(f"persisted {name} pair must be an object")
         source = GreyControlPairDescriptor.from_dict(decoded)
         return source, MpcPairFactory.migrate_legacy_descriptor(source)
 

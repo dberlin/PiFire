@@ -71,7 +71,7 @@ class Controller(ControllerBase):
 
         horizon_steps = cfg["n_horizon"]
         if isinstance(horizon_steps, bool) or not isinstance(horizon_steps, int):
-            raise RuntimeError("normalized n_horizon must be an integer")
+            raise RuntimeError("normalized n_horizon must be an integer")  # noqa: TRY004  invariant on already-normalized input, not caller type validation
         self._calibration = MpcCalibrationRuntime(
             horizon_steps=horizon_steps,
             u_max=self.u_max,

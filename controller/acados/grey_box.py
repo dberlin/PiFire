@@ -34,7 +34,7 @@ _STATUS_NAMES = {
 
 def _finite_scalar(value: Real, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, Real):
-        raise ValueError(f"{name} must be a finite real number")
+        raise TypeError(f"{name} must be a finite real number")
     normalized = float(value)
     if not math.isfinite(normalized):
         raise ValueError(f"{name} must be finite")
@@ -123,7 +123,7 @@ class AcadosGreyBoxMPC:
     def __init__(self, config: GreyBoxMPCConfig | None = None) -> None:
         resolved = GreyBoxMPCConfig() if config is None else config
         if not isinstance(resolved, GreyBoxMPCConfig):
-            raise ValueError("config must be a GreyBoxMPCConfig")
+            raise TypeError("config must be a GreyBoxMPCConfig")
         status, handle = _ffi.create(_native_config(resolved))
         if status != _ffi.STATUS_SUCCESS or not handle:
             if handle:

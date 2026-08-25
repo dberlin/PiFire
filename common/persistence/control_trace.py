@@ -207,7 +207,7 @@ def prune_control_trace(before_ms: int, *, limit: int) -> int:
 def prune_incompatible_control_trace(before_schema_version: int, *, limit: int) -> int:
     """Delete at most ``limit`` older rows outside the compatible schema range."""
     if isinstance(before_schema_version, bool) or not isinstance(before_schema_version, int):
-        raise ValueError("before_schema_version must be an integer")
+        raise TypeError("before_schema_version must be an integer")
     limit = _require_control_trace_limit(limit)
     with datastore.transaction() as connection:
         cursor = connection.execute(

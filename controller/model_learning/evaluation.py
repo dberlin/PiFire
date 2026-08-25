@@ -82,9 +82,9 @@ class ForecastOrigin:
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{name} must be non-blank")
         if not isinstance(self.ambient_source, AmbientSource):
-            raise ValueError("ambient_source must be an AmbientSource")
+            raise TypeError("ambient_source must be an AmbientSource")
         if not isinstance(self.calibration_fit, bool):
-            raise ValueError("calibration_fit must be a bool")
+            raise TypeError("calibration_fit must be a bool")
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,7 +97,7 @@ class CompletedForecastOrigin:
 
     def __post_init__(self) -> None:
         if not isinstance(self.forecast, ForecastOrigin):
-            raise ValueError("forecast must be a ForecastOrigin")
+            raise TypeError("forecast must be a ForecastOrigin")
         object.__setattr__(self, "completion_time_s", _finite(self.completion_time_s, "completion_time_s"))
         if self.completion_time_s <= self.forecast.origin_time_s:
             raise ValueError("completion_time_s must follow the forecast origin")

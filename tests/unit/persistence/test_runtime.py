@@ -232,17 +232,20 @@ def test_error_kinds_are_isolated_and_all_reads_declaration_order(ds):
     assert runtime.read_errors(ErrorKind.ALL) == ["control replaced", "web"]
 
 
-@pytest.mark.parametrize("bad_kind", [ErrorKind.ALL, "control", None])
-def test_error_writes_and_flushes_reject_non_owner_selectors(ds, bad_kind):
-    with pytest.raises(ValueError):
+@pytest.mark.parametrize(
+    ("bad_kind", "expected"),
+    [(ErrorKind.ALL, ValueError), ("control", TypeError), (None, TypeError)],
+)
+def test_error_writes_and_flushes_reject_non_owner_selectors(ds, bad_kind, expected):
+    with pytest.raises(expected):
         runtime.write_errors(bad_kind, ["not written"])
-    with pytest.raises(ValueError):
+    with pytest.raises(expected):
         runtime.flush_errors(bad_kind)
 
 
 @pytest.mark.parametrize("bad_kind", ["control", None])
 def test_error_reads_reject_non_enum_kinds(ds, bad_kind):
-    with pytest.raises(ValueError):
+    with pytest.raises(TypeError):
         runtime.read_errors(bad_kind)
 
 

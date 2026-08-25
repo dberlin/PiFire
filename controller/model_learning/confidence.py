@@ -40,7 +40,7 @@ class ConfidenceConfig:
         if self.bootstrap_replicates != 10_000:
             raise ValueError("confidence bootstrap uses exactly 10,000 replicates")
         if isinstance(self.bootstrap_seed, bool) or not isinstance(self.bootstrap_seed, int):
-            raise ValueError("bootstrap_seed must be an integer")
+            raise TypeError("bootstrap_seed must be an integer")
         values = (
             self.maximum_signed_bias_c,
             self.maximum_band_bias_c,

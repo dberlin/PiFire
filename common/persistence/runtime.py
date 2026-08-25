@@ -128,7 +128,7 @@ def read_status():
 
 def _writable_error_kind(kind):
     if not isinstance(kind, ErrorKind):
-        raise ValueError(f"error kind must be an ErrorKind, got {kind!r}")
+        raise TypeError(f"error kind must be an ErrorKind, got {kind!r}")
     if kind is ErrorKind.ALL:
         raise ValueError(f"{kind} is a read-only selector; write and flush need a single owning kind")
     return kind.value
@@ -137,7 +137,7 @@ def _writable_error_kind(kind):
 def read_errors(kind):
     """Read one owner's errors, or all owners in declaration order."""
     if not isinstance(kind, ErrorKind):
-        raise ValueError(f"error kind must be an ErrorKind, got {kind!r}")
+        raise TypeError(f"error kind must be an ErrorKind, got {kind!r}")
     if kind is ErrorKind.ALL:
         owners = [candidate.value for candidate in ErrorKind if candidate is not ErrorKind.ALL]
         placeholders = ",".join("?" for _ in owners)
