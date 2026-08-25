@@ -1,0 +1,1169 @@
+<title>History Chart Duty Overlay</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<style>
+  /* PiFire commits to a single dark world -- these tokens are lifted from
+     web-react/src/theme.css so the mockups read as the actual app, not as a
+     document about it. No theme media query: the palette IS the product. */
+  :root {
+    --page: #0c0a09;
+    --inset: #1c1712;
+    --card: #2c231a;
+    --border: rgba(255, 255, 255, 0.13);
+    --border-soft: rgba(255, 255, 255, 0.07);
+    --text: #f4ede2;
+    --dim: #8a7f70;
+    --label: #7d7264;
+    --row-label: #cfc6b8;
+
+    --ember: #ff8a2b;       /* fuel  -- auger duty */
+    --ice: #3cc7d0;         /* air   -- fan duty */
+    --setpoint: #6cc8ff;
+    --ok: #5ec96f;
+    --warn: #ffb020;
+    --danger: #ff5a4d;
+    --cooking: #ffd23f;
+
+    --measure: 68ch;
+    --wide: 1080px;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--page);
+    color: var(--text);
+    font-family: "Barlow", system-ui, -apple-system, sans-serif;
+    font-size: 16.5px;
+    line-height: 1.62;
+    margin: 0;
+    padding: 0 24px 120px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: var(--wide);
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 34px;
+  }
+
+  .prose { max-width: var(--measure); }
+
+  /* ---- type ---- */
+  h1, h2, h3 {
+    font-family: "Barlow Condensed", "Barlow", sans-serif;
+    text-transform: uppercase;
+    text-wrap: balance;
+    margin: 0;
+    line-height: 1.06;
+  }
+  h1 { font-size: clamp(2.6rem, 6vw, 4.1rem); font-weight: 700; letter-spacing: 0.005em; }
+  h2 { font-size: clamp(1.55rem, 3vw, 2.05rem); font-weight: 700; letter-spacing: 0.018em; }
+  h3 { font-size: 1.18rem; font-weight: 600; letter-spacing: 0.03em; color: var(--row-label); }
+
+  p { margin: 0; }
+  .prose > * + * { margin-top: 15px; }
+
+  a { color: var(--ember); text-underline-offset: 3px; }
+  a:focus-visible, button:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--ember);
+    outline-offset: 3px;
+  }
+
+  code, .mono {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.855em;
+  }
+  code {
+    background: var(--inset);
+    border: 1px solid var(--border-soft);
+    border-radius: 4px;
+    padding: 0.08em 0.36em;
+    color: var(--row-label);
+  }
+
+  .eyebrow {
+    font-family: "Barlow Condensed", sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.19em;
+    font-size: 0.83rem;
+    font-weight: 600;
+    color: var(--label);
+  }
+
+  strong { color: #fff; font-weight: 600; }
+
+  /* ---- header ---- */
+  header {
+    padding: 72px 0 18px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .lede {
+    font-size: 1.24rem;
+    color: var(--row-label);
+    max-width: 62ch;
+    line-height: 1.5;
+  }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 26px;
+    font-size: 0.87rem;
+    color: var(--label);
+  }
+  .meta .mono { color: var(--dim); }
+
+  /* ---- sections ---- */
+  section {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    scroll-margin-top: 24px;
+  }
+  .sec-head {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    flex-wrap: wrap;
+    border-top: 1px solid var(--border-soft);
+    padding-top: 30px;
+  }
+
+  /* ---- the finding callout ---- */
+  .finding {
+    background: linear-gradient(180deg, rgba(255, 138, 43, 0.09), rgba(255, 138, 43, 0.03));
+    border: 1px solid rgba(255, 138, 43, 0.34);
+    border-radius: 3px;
+    border-left: 3px solid var(--ember);
+    padding: 24px 26px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .finding p { max-width: 66ch; }
+  .finding .eyebrow { color: var(--ember); }
+
+  /* ---- pipeline ---- */
+  .pipe {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .stage {
+    flex: 1 1 132px;
+    background: var(--inset);
+    border: 1px solid var(--border-soft);
+    border-top: 2px solid var(--ok);
+    border-radius: 3px;
+    padding: 13px 14px 15px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+  }
+  .stage.dead { border-top-color: var(--danger); background: rgba(255, 90, 77, 0.06); }
+  .stage-k {
+    font-family: "Barlow Condensed", sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.13em;
+    font-size: 0.76rem;
+    color: var(--ok);
+    font-weight: 600;
+  }
+  .stage.dead .stage-k { color: var(--danger); }
+  .stage-v { font-size: 0.93rem; color: var(--row-label); line-height: 1.35; }
+  .stage-src {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.7rem;
+    color: var(--label);
+    word-break: break-all;
+    margin-top: auto;
+    padding-top: 6px;
+  }
+
+  /* ---- chart cards ---- */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .card-head {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    padding: 15px 18px;
+    border-bottom: 1px solid var(--border-soft);
+    background: rgba(0, 0, 0, 0.22);
+  }
+  .card-head h3 { flex: 1 1 auto; }
+  .card-body { padding: 16px 18px 18px; }
+  .card-note {
+    padding: 0 18px 18px;
+    font-size: 0.94rem;
+    color: var(--dim);
+    max-width: 74ch;
+  }
+  .card-note strong { color: var(--row-label); }
+
+  .chip {
+    font-family: "Barlow Condensed", sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.11em;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 3px 9px 2px;
+    border-radius: 2px;
+    border: 1px solid currentColor;
+    white-space: nowrap;
+  }
+  .chip.rec { color: var(--ok); background: rgba(94, 201, 111, 0.11); }
+  .chip.alt { color: var(--dim); }
+  .chip.no  { color: var(--danger); background: rgba(255, 90, 77, 0.09); }
+  .chip.cost { color: var(--warn); background: rgba(255, 176, 32, 0.09); }
+
+  canvas { display: block; width: 100%; touch-action: none; }
+
+  /* ---- series toggles ---- */
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    margin-bottom: 13px;
+  }
+  .lg {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    background: var(--inset);
+    border: 1px solid var(--border-soft);
+    border-radius: 2px;
+    padding: 7px 11px;
+    color: var(--dim);
+    font-family: "Barlow", sans-serif;
+    font-size: 0.845rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    cursor: pointer;
+    min-height: 36px;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+  }
+  .lg:hover { background: #241d16; }
+  .lg .sw {
+    width: 11px; height: 11px; border-radius: 2px; flex: 0 0 auto;
+    background: currentColor; opacity: 0.28;
+  }
+  .lg[aria-pressed="true"] { color: var(--text); border-color: var(--border); }
+  .lg[aria-pressed="true"] .sw { opacity: 1; }
+  .lg[data-dash="1"] .sw {
+    background: repeating-linear-gradient(90deg, currentColor 0 3px, transparent 3px 6px);
+  }
+
+  /* uPlot-style legend, for the comparison */
+  .uleg {
+    display: flex; flex-wrap: wrap; gap: 14px;
+    font: 600 12px "Barlow", sans-serif;
+    color: var(--dim);
+    padding: 8px 2px 0;
+  }
+  .uleg button {
+    background: none; border: 0; padding: 0; cursor: pointer;
+    font: inherit; color: inherit;
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  .uleg button[aria-pressed="false"] { opacity: 0.42; text-decoration: line-through; }
+  .uleg .sw { width: 9px; height: 9px; border-radius: 50%; background: currentColor; }
+
+  /* single switch */
+  .swrow { display: flex; align-items: center; gap: 11px; margin-bottom: 13px; }
+  .switch {
+    position: relative; width: 46px; height: 26px; flex: 0 0 auto;
+    border-radius: 13px; border: 1px solid var(--border);
+    background: var(--inset); cursor: pointer; padding: 0;
+    transition: background 0.16s, border-color 0.16s;
+  }
+  .switch::after {
+    content: ""; position: absolute; top: 3px; left: 3px;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--label); transition: transform 0.16s, background 0.16s;
+  }
+  .switch[aria-pressed="true"] { background: rgba(255, 138, 43, 0.24); border-color: var(--ember); }
+  .switch[aria-pressed="true"]::after { transform: translateX(20px); background: var(--ember); }
+  .swrow label { font-size: 0.93rem; color: var(--row-label); font-weight: 600; cursor: pointer; }
+
+  /* ---- tables ---- */
+  .tbl-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 3px; }
+  table { border-collapse: collapse; width: 100%; min-width: 620px; font-size: 0.94rem; }
+  th, td { text-align: left; padding: 12px 15px; vertical-align: top; border-bottom: 1px solid var(--border-soft); }
+  thead th {
+    font-family: "Barlow Condensed", sans-serif;
+    text-transform: uppercase; letter-spacing: 0.13em;
+    font-size: 0.78rem; color: var(--label); font-weight: 600;
+    background: rgba(0, 0, 0, 0.25);
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr.pick { background: rgba(94, 201, 111, 0.055); }
+  td .mono { color: var(--dim); }
+  .opt-id {
+    font-family: "Barlow Condensed", sans-serif;
+    font-weight: 700; font-size: 1.02rem; letter-spacing: 0.06em;
+    color: var(--text);
+  }
+
+  /* ---- side-by-side ---- */
+  .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 780px) { .duo { grid-template-columns: 1fr; } }
+  .duo .card-head { padding: 12px 15px; }
+  .duo .card-body { padding: 13px 15px 15px; }
+
+  /* ---- decisions ---- */
+  .asks { display: flex; flex-direction: column; gap: 2px; }
+  .ask {
+    display: grid;
+    grid-template-columns: 34px 1fr;
+    gap: 0 15px;
+    padding: 17px 18px 17px 14px;
+    background: var(--inset);
+    border: 1px solid var(--border-soft);
+    border-radius: 3px;
+    align-items: start;
+  }
+  .ask + .ask { margin-top: 8px; }
+  .ask-n {
+    font-family: "Barlow Condensed", sans-serif;
+    font-size: 1.5rem; font-weight: 700; color: var(--ember);
+    line-height: 1; padding-top: 2px;
+    font-variant-numeric: tabular-nums;
+  }
+  .ask-q { font-weight: 600; color: var(--text); }
+  .ask-a { font-size: 0.93rem; color: var(--dim); margin-top: 4px; }
+  .ask-a b { color: var(--ok); font-weight: 600; }
+
+  .foot {
+    border-top: 1px solid var(--border);
+    padding-top: 22px;
+    font-size: 0.88rem;
+    color: var(--label);
+    max-width: 74ch;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header>
+    <span class="eyebrow">PiFire · History chart · Design companion</span>
+    <h1>History chart<br>duty overlay</h1>
+    <p class="lede">
+      Putting auger and fan duty on the cook graph — what it takes, what it should look
+      like, and the four calls that shaped it. All four are now made; the options not taken
+      stay below as the record of what was weighed.
+    </p>
+    <div class="meta">
+      <span>2026-08-25 · decided</span>
+      <span class="mono">docs/superpowers/plans/2026-08-25-history-chart-duty-series.md</span>
+      <span>Every chart below is live — click the toggles.</span>
+    </div>
+  </header>
+
+  <section>
+    <div class="finding">
+      <span class="eyebrow">The finding that reframes the request</span>
+      <p style="font-size:1.1rem;color:var(--text)">
+        The history chart can't show duty because <strong>history doesn't record duty.</strong>
+      </p>
+      <p>
+        Duty is computed, published and rendered <em>live</em> — the dashboard has AUGER DUTY
+        and FAN DUTY tiles today. But nothing writes it to the history store, and the one
+        slot in the schema that looks purpose-built for it records hardcoded zeros. So this
+        is a persistence change with a charting tail, not the other way round. Roughly 70%
+        of the work sits behind the API.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>Where the data dies</h2>
+      <span class="chip alt">Verified in tree</span>
+    </div>
+    <div class="prose">
+      <p>
+        Every stage of the live path already exists and is already pinned by contracts. The
+        break is at the history write, and only there.
+      </p>
+    </div>
+    <div class="pipe">
+      <div class="stage">
+        <span class="stage-k">Computed</span>
+        <span class="stage-v"><code>cycle_ratio</code> 0–1<br><code>fan_duty</code> 0–100</span>
+        <span class="stage-src">modes/base.py:689</span>
+      </div>
+      <div class="stage">
+        <span class="stage-k">Published</span>
+        <span class="stage-v">Socket, every 0.5&nbsp;s</span>
+        <span class="stage-src">socket_io.py:444</span>
+      </div>
+      <div class="stage">
+        <span class="stage-k">Pinned</span>
+        <span class="stage-v">DashSocketPayload</span>
+        <span class="stage-src">web_contracts/core.py:205</span>
+      </div>
+      <div class="stage">
+        <span class="stage-k">Rendered</span>
+        <span class="stage-v">Dashboard duty tiles</span>
+        <span class="stage-src">deriveView.ts:252</span>
+      </div>
+      <div class="stage dead">
+        <span class="stage-k">Persisted</span>
+        <span class="stage-v"><strong>Never.</strong> Columns hold temps only; the ext-data slot writes <code>CR&nbsp;=&nbsp;0</code></span>
+        <span class="stage-src">modes/base.py:944</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>1 · The visual treatment</h2>
+    </div>
+    <div class="prose">
+      <p>
+        Temperature is °F on the left axis; duty is a 0–100&nbsp;% control signal. They can't
+        share a scale — a 225&nbsp;°F trace and a 0–1 ratio on one axis pins duty flat to the
+        floor. Three ways out, all rendered below against the same synthetic four-hour brisket
+        cook: a startup ramp, a settle, a long hold, and a stall.
+      </p>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>A · Right-hand percent axis</h3>
+        <span class="chip rec">Chosen</span>
+        <span class="chip alt">0 px of extra height</span>
+      </div>
+      <div class="card-body">
+        <div class="legend" id="lgA"></div>
+        <canvas id="cA" height="330"></canvas>
+      </div>
+      <p class="card-note">
+        Duty gets its own scale, fixed to <code>[0, 100]</code> so a line's height means the
+        same thing in every window and every cook — and a <strong>stepped path</strong>, because
+        duty is a step function and interpolating it draws ramps that never happened. Shared
+        gridlines are what make “the auger ramped forty seconds before the temperature moved”
+        readable at a glance. <strong>Turn on <em>Auger requested</em></strong> to see the duty
+        floor clamping — the line the controller asked for, separating from the one it got.
+        It records by default and draws off by default; the chips are how you reach it.
+      </p>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>B · Stacked duty panel</h3>
+        <span class="chip alt">Held as the escalation</span>
+        <span class="chip cost">~110 px of height</span>
+      </div>
+      <div class="card-body">
+        <canvas id="cB" height="400"></canvas>
+      </div>
+      <p class="card-note">
+        The classic volume-panel arrangement: shared x-axis, synced cursor, total separation of
+        units. It is unambiguously the clearest reading of duty on its own — and it costs about
+        110&nbsp;px of vertical budget on a page that is
+        <strong>already overflowing a 1280×720 viewport</strong>. PiFire runs on kitchen and
+        garage tablets, so that is real money. Escalate to this only if A tests badly with four
+        or more probes already on the plot.
+      </p>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>C · Filled band inside the temperature axis</h3>
+        <span class="chip no">Rejected</span>
+      </div>
+      <div class="card-body">
+        <canvas id="cC" height="300"></canvas>
+      </div>
+      <p class="card-note">
+        Cheapest to build and it does fit — but a duty line's vertical position now means
+        nothing, since it is scaled into whatever the bottom fifth of the temperature range
+        happens to be. The band moves when a probe goes cold. Reading a value off it requires
+        knowing a conversion nobody is holding in their head.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>2 · The toggle</h2>
+      <span class="chip alt">The question you actually asked</span>
+    </div>
+    <div class="prose">
+      <p>
+        All three work. They differ on discoverability, on touch, and on whether they can do
+        anything beyond duty.
+      </p>
+    </div>
+
+    <div class="duo">
+      <div class="card">
+        <div class="card-head"><h3>1 · uPlot's own legend</h3><span class="chip alt">Free</span></div>
+        <div class="card-body">
+          <canvas id="cL1" height="190"></canvas>
+          <div class="uleg" id="ul1"></div>
+        </div>
+        <p class="card-note">
+          Already rendered and already clickable — zero code. But nothing signals that it is a
+          control, and a 12&nbsp;px text target fails on the touchscreen this runs on.
+        </p>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>3 · One “Show duty” switch</h3><span class="chip alt">Simplest</span></div>
+        <div class="card-body">
+          <div class="swrow">
+            <button class="switch" id="sw3" aria-pressed="false" aria-labelledby="sw3l"></button>
+            <label id="sw3l" for="sw3">Show duty</label>
+          </div>
+          <canvas id="cL3" height="190"></canvas>
+        </div>
+        <p class="card-note">
+          One decision, unmissable. But auger and fan arrive together whether you wanted both
+          or not, and it does nothing for the probes.
+        </p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>2 · Chip row above the chart</h3>
+        <span class="chip rec">Chosen</span>
+        <span class="chip alt">Closes an existing hole</span>
+      </div>
+      <div class="card-body">
+        <div class="legend" id="lg2"></div>
+        <canvas id="c2" height="270"></canvas>
+      </div>
+      <p class="card-note">
+        36&nbsp;px touch targets, visible as controls, and each series independent. The reason to
+        prefer it, though, is what it fixes on the way past: today a probe you disabled in
+        Settings has its history <strong>silently discarded</strong> — the adapter drops
+        <code>hidden</code> datasets outright because, in its own words, “the chart has no
+        per-series visibility toggle to defer the decision to”. A chip row lets
+        <code>hidden</code> mean <strong>off by default but available</strong> instead of
+        <strong>invisible</strong>. Try <em>Ambient (off)</em> above.
+      </p>
+    </div>
+
+    <div class="finding" style="border-left-color:var(--warn);border-color:rgba(255,176,32,.34);background:linear-gradient(180deg,rgba(255,176,32,.08),rgba(255,176,32,.03))">
+      <span class="eyebrow" style="color:var(--warn)">Hard constraint · whichever wins</span>
+      <p>
+        <code>HistoryChart.tsx</code> rebuilds uPlot whenever the series <em>shape</em> changes,
+        and that shape is keyed on label + colour. Implementing a toggle by adding or removing
+        entries in the <code>series</code> array therefore
+        <strong>drops the user's zoom on every click.</strong> Toggles must go through
+        <code>setSeries(i, {show})</code> on the live instance, with visibility held outside the
+        shape key — every series always constructed, only <code>show</code> changing. Worth its
+        own test: this looks perfect in a screenshot and is infuriating in the hand.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>3 · The trap in the downsampler</h2>
+      <span class="chip no">Would ship silently</span>
+    </div>
+    <div class="prose">
+      <p>
+        <code>prepare_chartdata</code> thins points by <em>shape fidelity</em>, picking one shared
+        index set for every series against a tolerance measured <strong>in degrees</strong> —
+        2.0&nbsp;°F by default. A cycle ratio lives in 0.0–1.0, so a full 0&nbsp;→&nbsp;100&nbsp;%
+        auger swing moves <em>one unit</em>: half the tolerance. Duty contributes nothing to
+        which points survive, and short pulses between two thermally quiet samples vanish.
+      </p>
+      <p>
+        Below: the same twenty minutes of a steady hold, reduced both ways. Faint ticks mark the
+        samples the reducer kept.
+      </p>
+    </div>
+    <div class="duo">
+      <div class="card">
+        <div class="card-head"><h3>As it would ship</h3><span class="chip no">Pulses lost</span></div>
+        <div class="card-body"><canvas id="cD1" height="200"></canvas></div>
+        <p class="card-note">Indices chosen by temperature shape alone. The duty trace is drawn through whatever survived — every pulse between kept samples is gone, and the line reads as a slow drift that never happened.</p>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Duty joins the fidelity check</h3><span class="chip rec">Correct</span></div>
+        <div class="card-body"><canvas id="cD2" height="200"></canvas></div>
+        <p class="card-note">Feed <code>cycle_ratio × 100</code> into the check so a 2&nbsp;% duty change carries the same weight as 2&nbsp;°F. Every edge survives, at a cost of a few dozen extra points.</p>
+      </div>
+    </div>
+    <div class="prose">
+      <p>
+        The code already makes this exact argument for the target and setpoint series — “step
+        functions just like P/F … they must share the same fidelity check or a step edge can be
+        smoothed into a ramp that never happened.” Duty is the same class of series; it just
+        needs the unit correction too. <strong>Prove it with a negative control:</strong> a
+        one-sample pulse on a flat trace must survive reduction with the correction and must
+        <em>not</em> survive without it. Assert both directions, or the test proves nothing.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>4 · Where duty gets stored</h2>
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr><th style="width:46px"></th><th>Approach</th><th>Cost</th><th>Verdict</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="opt-id">B1</span></td>
+            <td>Fill the existing <code>ext_data</code> CR/RCR stub for real</td>
+            <td>Low</td>
+            <td>Ships behind a setting that defaults <strong>off</strong>, so most users get a duty chart with no duty on it. Inherits a bug where <code>unpack_history</code> takes its key set from row 0 — enable it mid-cook and every later row is silently dropped.</td>
+          </tr>
+          <tr class="pick">
+            <td><span class="opt-id">B2</span></td>
+            <td>Real <code>cycle_ratio</code> / <code>fan_duty</code> columns + migration</td>
+            <td>Medium</td>
+            <td><strong>Recommended.</strong> ~12&nbsp;bytes/row, under 350&nbsp;KB across full retention. Direct precedent: <code>_migrate_history_to_numeric_psp</code> already rebuilds this table. Pre-migration rows read <code>NULL</code>, which the adapter already null-pads into gaps.</td>
+          </tr>
+          <tr>
+            <td><span class="opt-id">B3</span></td>
+            <td>Don't persist — overlay the live socket tail only</td>
+            <td>Trivial</td>
+            <td>The point of the history page is looking <em>back</em>. Vanishes on reload, never reaches cook files.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="prose">
+      <p>
+        Two things ride along with B2. <strong>Retire the CR/RCR stub in the same change</strong> —
+        once duty has real columns, leaving a second duty path that reports zeros is just a lie
+        with a longer lifespan. And <strong>extract the duty computation into one helper</strong>
+        called by both the status write and the history write: it already carries a Manual-mode
+        branch, a PWM branch and fan-off gating, and two copies would drift on exactly the cases
+        nobody checks. A dashboard reading 0&nbsp;% while history plots 100&nbsp;% for the same
+        instant is a bug no one would think to look for. It is a cross-process seam, so pin both
+        ends.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>Decided</h2>
+      <span class="chip rec">All four · 2026-08-25</span>
+    </div>
+    <div class="asks">
+      <div class="ask">
+        <span class="ask-n">1</span>
+        <div>
+          <div class="ask-q">Overlay on a right-hand axis, not a stacked panel.</div>
+          <div class="ask-a">Costs no vertical space on a page already overflowing 720p, and shared gridlines are what make the correlation readable. <b>B stays held as the escalation</b> if the overlay reads badly once four or more probes are on the plot.</div>
+        </div>
+      </div>
+      <div class="ask">
+        <span class="ask-n">2</span>
+        <div>
+          <div class="ask-q">Chip row for visibility.</div>
+          <div class="ask-a">Touch-sized, obviously a control, and it recovers the disabled-probe history the chart currently throws away. <b>Now on the critical path</b> — the chips are the only way to reach the duty series, so this ships with the chart rather than trailing it.</div>
+        </div>
+      </div>
+      <div class="ask">
+        <span class="ask-n">3</span>
+        <div>
+          <div class="ask-q">Cook files get duty too.</div>
+          <div class="ask-a">Same code path; costs a format bump, and cooks saved before the change render duty as gaps. “The live chart has it but my saved cook doesn't” is the worse outcome.</div>
+        </div>
+      </div>
+      <div class="ask">
+        <span class="ask-n">4</span>
+        <div>
+          <div class="ask-q">Requested duty is recorded alongside applied.</div>
+          <div class="ask-a">The duty floor sets the lowest temperature a grill can actually hold, and the shipped 25&nbsp;s default can't hold 225&nbsp;°F on a real MAK. Right now that failure is invisible: the grill just runs warm. Plot both lines and it is obvious — the controller asks for 8&nbsp;%, the floor clamps to 12&nbsp;%, and they visibly separate and stay separated. This is what <code>RCR</code> in the dead stub was supposed to be.</div>
+        </div>
+      </div>
+      <div class="ask" style="border-color:rgba(255,176,32,.3);background:rgba(255,176,32,.045)">
+        <span class="ask-n" style="color:var(--warn)">5</span>
+        <div>
+          <div class="ask-q">Storage: real columns (B2), decided by consequence.</div>
+          <div class="ask-a">Not asked directly, but settled by&nbsp;(4). The reason to record requested duty is to make the duty-floor failure <em>visible</em> — and a feature gated on a setting that defaults <strong>off</strong> cannot make anything visible. B1 is incompatible with the decision above rather than merely worse than it. Flagged in case avoiding schema churn matters more than&nbsp;(4) does.</div>
+        </div>
+      </div>
+    </div>
+    <p class="foot">
+      Three duty columns, then — applied auger, requested auger, fan — so the migration is
+      written once rather than revisited. Phasing, the contract and codegen notes, the mobile
+      SVG chart's second-axis problem, and the parallelisation split are in the design doc
+      alongside this page.
+    </p>
+  </section>
+
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  const C = {
+    ink:    "#f4ede2",
+    dim:    "#8a7f70",
+    label:  "#7d7264",
+    grid:   "rgba(255,255,255,0.062)",
+    axis:   "rgba(255,255,255,0.15)",
+    inset:  "#1c1712",
+    ember:  "#ff8a2b",
+    ice:    "#3cc7d0",
+    setp:   "#6cc8ff",
+    ok:     "#5ec96f",
+    warn:   "#ffb020",
+    cook:   "#ffd23f",
+    danger: "#ff5a4d",
+  };
+
+  const FONT = '600 11px "Barlow", system-ui, sans-serif';
+
+  /* ---------- synthetic cook: 4 hours, one sample per minute ---------- */
+  const N = 240;
+
+  // Deterministic noise so the page renders identically every load.
+  let seed = 0x9e3779b9;
+  const rnd = () => {
+    seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5;
+    return ((seed >>> 0) / 4294967296) - 0.5;
+  };
+
+  const t = [], pit = [], food = [], amb = [], setp = [], augerApplied = [], augerReq = [], fan = [];
+  const FLOOR = 12;                     // duty floor, % -- the clamp that matters
+
+  for (let i = 0; i < N; i++) {
+    t.push(i);
+
+    // Pit: ambient -> startup ramp -> overshoot -> settle -> hold with wander
+    let p;
+    if (i < 22)      p = 72 + (i / 22) ** 1.55 * 168;
+    else if (i < 44) p = 240 - (i - 22) * 0.72;
+    else             p = 225 + Math.sin(i / 15) * 3.1 + Math.sin(i / 4.3) * 1.1;
+    pit.push(p + rnd() * 1.5);
+
+    // Food: rise, long stall around 152, then push to 203
+    let f;
+    if (i < 18)       f = 41 + i * 0.5;
+    else if (i < 96)  f = 50 + (i - 18) * 1.31;
+    else if (i < 172) f = 152 + (i - 96) * 0.045;
+    else              f = 155.4 + (i - 172) * 0.7;
+    food.push(Math.min(f, 203) + rnd() * 0.7);
+
+    amb.push(68 + Math.sin(i / 60) * 3 + rnd() * 0.8);
+    setp.push(225);
+
+    // Requested duty: pinned high through startup, then the controller settles
+    // low -- low enough that the floor clamps it for long stretches.
+    let req;
+    if (i < 22)      req = 100;
+    else if (i < 44) req = 100 - (i - 22) * 3.4;
+    else {
+      req = 17 - Math.sin(i / 15) * 9 - Math.sin(i / 4.3) * 3.4 + rnd() * 2;
+    }
+    req = Math.max(0, Math.min(100, req));
+    augerReq.push(+req.toFixed(1));
+    augerApplied.push(+Math.max(req, i < 22 ? req : FLOOR).toFixed(1));
+
+    fan.push(i < 30 ? 100 : 68 + Math.sin(i / 21) * 12 + (rnd() > 0.35 ? 4 : 0));
+  }
+
+  /* ---------- series definitions ---------- */
+  const S = {
+    pit:   { key: "pit",   label: "Grill",           color: C.ember,  data: pit,          axis: "t", w: 1.9 },
+    food:  { key: "food",  label: "Probe 1",         color: C.cook,   data: food,         axis: "t", w: 1.6 },
+    setp:  { key: "setp",  label: "Set point",       color: C.setp,   data: setp,         axis: "t", w: 1.3, dash: [7, 5] },
+    amb:   { key: "amb",   label: "Ambient (off)",   color: C.ok,     data: amb,          axis: "t", w: 1.4 },
+    aug:   { key: "aug",   label: "Auger duty",      color: C.ember,  data: augerApplied, axis: "d", w: 1.5, step: true },
+    augr:  { key: "augr",  label: "Auger requested", color: C.warn,   data: augerReq,     axis: "d", w: 1.3, step: true, dash: [4, 3] },
+    fan:   { key: "fan",   label: "Fan duty",        color: C.ice,    data: fan,          axis: "d", w: 1.4, step: true },
+  };
+
+  /* ---------- renderer ---------- */
+  function fit(cv) {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = cv.clientWidth || 700;
+    const h = +cv.getAttribute("height");
+    cv.width = Math.round(w * dpr);
+    cv.height = Math.round(h * dpr);
+    const g = cv.getContext("2d");
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { g, w, h };
+  }
+
+  function niceTicks(lo, hi, n) {
+    const raw = (hi - lo) / n;
+    const mag = 10 ** Math.floor(Math.log10(raw));
+    const step = [1, 2, 2.5, 5, 10].find((m) => m * mag >= raw) * mag;
+    const out = [];
+    for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(+v.toFixed(6));
+    return out;
+  }
+
+  function plotFrame(g, box, tLo, tHi, dLo, dHi, opts) {
+    const { x, y, w, h } = box;
+    g.fillStyle = C.inset;
+    g.fillRect(x, y, w, h);
+
+    g.font = FONT;
+    g.textBaseline = "middle";
+
+    // horizontal gridlines + left temperature axis
+    if (opts.tempAxis !== false) {
+      const ticks = niceTicks(tLo, tHi, 4);
+      g.strokeStyle = C.grid;
+      g.lineWidth = 1;
+      g.fillStyle = C.label;
+      g.textAlign = "right";
+      for (const v of ticks) {
+        const py = Math.round(y + h - ((v - tLo) / (tHi - tLo)) * h) + 0.5;
+        if (py < y || py > y + h) continue;
+        g.beginPath(); g.moveTo(x, py); g.lineTo(x + w, py); g.stroke();
+        g.fillText(v + "°", x - 7, py);
+      }
+    } else {
+      const ticks = niceTicks(dLo, dHi, 2);
+      g.strokeStyle = C.grid; g.lineWidth = 1;
+      for (const v of ticks) {
+        const py = Math.round(y + h - ((v - dLo) / (dHi - dLo)) * h) + 0.5;
+        g.beginPath(); g.moveTo(x, py); g.lineTo(x + w, py); g.stroke();
+      }
+    }
+
+    // right duty axis
+    if (opts.dutyAxis) {
+      g.fillStyle = C.dim;
+      g.textAlign = "left";
+      for (const v of [0, 50, 100]) {
+        const py = Math.round(y + h - ((v - dLo) / (dHi - dLo)) * h) + 0.5;
+        g.fillText(v + "%", x + w + 7, py);
+      }
+      g.save();
+      g.translate(x + w + 38, y + h / 2);
+      g.rotate(Math.PI / 2);
+      g.textAlign = "center";
+      g.fillStyle = C.label;
+      g.font = '600 10px "Barlow Condensed", sans-serif';
+      g.fillText("DUTY", 0, 0);
+      g.restore();
+    }
+
+    // frame
+    g.strokeStyle = C.axis;
+    g.lineWidth = 1;
+    g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+  }
+
+  function xAxis(g, box, showLabels) {
+    const { x, y, w, h } = box;
+    g.font = FONT;
+    g.textAlign = "center";
+    g.textBaseline = "top";
+    g.strokeStyle = C.grid;
+    for (let hr = 0; hr <= 4; hr++) {
+      const px = Math.round(x + (hr / 4) * w) + 0.5;
+      g.beginPath(); g.moveTo(px, y); g.lineTo(px, y + h); g.stroke();
+      if (showLabels) {
+        g.fillStyle = C.label;
+        g.fillText(hr + ":00", px, y + h + 7);
+      }
+    }
+  }
+
+  function drawSeries(g, box, s, lo, hi, idx) {
+    const { x, y, w, h } = box;
+    const px = (i) => x + (i / (N - 1)) * w;
+    const py = (v) => y + h - ((v - lo) / (hi - lo)) * h;
+    const pts = idx || s.data.map((_, i) => i);
+
+    g.save();
+    g.beginPath();
+    g.rect(x, y, w, h);
+    g.clip();
+
+    g.strokeStyle = s.color;
+    g.lineWidth = s.w;
+    g.lineJoin = "round";
+    g.lineCap = "round";
+    g.setLineDash(s.dash || []);
+    g.globalAlpha = s.axis === "d" ? 0.9 : 1;
+
+    g.beginPath();
+    pts.forEach((i, n) => {
+      const cx = px(i), cy = py(s.data[i]);
+      if (n === 0) { g.moveTo(cx, cy); return; }
+      if (s.step) { g.lineTo(cx, py(s.data[pts[n - 1]])); }
+      g.lineTo(cx, cy);
+    });
+    g.stroke();
+
+    if (s.fill) {
+      g.lineTo(px(pts[pts.length - 1]), y + h);
+      g.lineTo(px(pts[0]), y + h);
+      g.closePath();
+      g.globalAlpha = 0.13;
+      g.fillStyle = s.color;
+      g.fill();
+    }
+    g.restore();
+  }
+
+  /** mode: "overlay" | "panel" | "inline" | "temp" */
+  function render(cv, keys, mode) {
+    const { g, w, h } = fit(cv);
+    g.clearRect(0, 0, w, h);
+
+    const padL = 44, padR = mode === "temp" ? 12 : 52, padT = 10, padB = 26;
+    const temps = keys.map((k) => S[k]).filter((s) => s.axis === "t");
+    const duties = keys.map((k) => S[k]).filter((s) => s.axis === "d");
+
+    let tLo = Infinity, tHi = -Infinity;
+    for (const s of temps) for (const v of s.data) { if (v < tLo) tLo = v; if (v > tHi) tHi = v; }
+    if (!temps.length) { tLo = 0; tHi = 100; }
+    const padY = (tHi - tLo) * 0.12 || 10;
+    tLo = Math.max(0, tLo - padY); tHi = tHi + padY;
+
+    if (mode === "panel" && duties.length) {
+      const gap = 8;
+      const dh = 96;
+      const top = { x: padL, y: padT, w: w - padL - padR, h: h - padT - padB - dh - gap };
+      const bot = { x: padL, y: top.y + top.h + gap, w: top.w, h: dh };
+      plotFrame(g, top, tLo, tHi, 0, 100, { dutyAxis: false });
+      xAxis(g, top, false);
+      for (const s of temps) drawSeries(g, top, s, tLo, tHi);
+
+      plotFrame(g, bot, 0, 100, 0, 100, { tempAxis: false, dutyAxis: true });
+      xAxis(g, bot, true);
+      for (const s of duties) drawSeries(g, bot, s, 0, 100);
+
+      g.font = '600 10px "Barlow Condensed", sans-serif';
+      g.textAlign = "left"; g.textBaseline = "top";
+      g.fillStyle = C.label;
+      g.fillText("DUTY  %", bot.x + 7, bot.y + 6);
+      return;
+    }
+
+    const box = { x: padL, y: padT, w: w - padL - padR, h: h - padT - padB };
+    plotFrame(g, box, tLo, tHi, 0, 100, { dutyAxis: mode === "overlay" && duties.length > 0 });
+    xAxis(g, box, true);
+
+    if (mode === "inline") {
+      // Duty squeezed into the bottom fifth of the temperature axis -- the
+      // point being that its height is now meaningless.
+      const bandTop = tLo + (tHi - tLo) * 0.22;
+      g.save();
+      g.fillStyle = "rgba(255,255,255,0.022)";
+      const yTop = box.y + box.h - ((bandTop - tLo) / (tHi - tLo)) * box.h;
+      g.fillRect(box.x, yTop, box.w, box.y + box.h - yTop);
+      g.restore();
+      for (const s of duties) {
+        drawSeries(g, box, { ...s, fill: true, data: s.data.map((v) => tLo + (v / 100) * (bandTop - tLo)) }, tLo, tHi);
+      }
+      for (const s of temps) drawSeries(g, box, s, tLo, tHi);
+      return;
+    }
+
+    for (const s of duties) drawSeries(g, box, s, 0, 100);
+    for (const s of temps) drawSeries(g, box, s, tLo, tHi);
+  }
+
+  /* ---------- reducer demo ---------- */
+  function reducerDemo(cv, dutyAware) {
+    const { g, w, h } = fit(cv);
+    g.clearRect(0, 0, w, h);
+    const box = { x: 40, y: 10, w: w - 40 - 46, h: h - 10 - 24 };
+
+    const M = 120;
+    const temp = [], duty = [];
+    for (let i = 0; i < M; i++) {
+      temp.push(225 + Math.sin(i / 26) * 2.4);
+      // A framed pulse train: short bursts, long gaps.
+      duty.push(i % 9 < 2 ? 46 : 8);
+    }
+
+    g.fillStyle = C.inset; g.fillRect(box.x, box.y, box.w, box.h);
+    g.strokeStyle = C.grid; g.lineWidth = 1;
+    for (const frac of [0, 0.5, 1]) {
+      const py = Math.round(box.y + box.h * frac) + 0.5;
+      g.beginPath(); g.moveTo(box.x, py); g.lineTo(box.x + box.w, py); g.stroke();
+    }
+
+    // Which samples the reducer keeps.
+    const kept = [0];
+    for (let i = 1; i < M; i++) {
+      const last = kept[kept.length - 1];
+      const dT = Math.abs(temp[i] - temp[last]);
+      const dD = dutyAware ? Math.abs(duty[i] - duty[last]) : 0;
+      if (Math.max(dT, dD) >= 2.0) kept.push(i);
+    }
+    if (kept[kept.length - 1] !== M - 1) kept.push(M - 1);
+
+    const px = (i) => box.x + (i / (M - 1)) * box.w;
+    const pyT = (v) => box.y + box.h - ((v - 219) / (232 - 219)) * box.h;
+    const pyD = (v) => box.y + box.h - (v / 100) * box.h;
+
+    // kept-sample ticks
+    g.strokeStyle = "rgba(255,255,255,0.2)";
+    g.lineWidth = 1;
+    for (const i of kept) {
+      const x = Math.round(px(i)) + 0.5;
+      g.beginPath(); g.moveTo(x, box.y + box.h - 5); g.lineTo(x, box.y + box.h); g.stroke();
+    }
+
+    // temperature, through the kept samples
+    g.strokeStyle = C.ember; g.lineWidth = 1.8; g.globalAlpha = 0.55;
+    g.beginPath();
+    kept.forEach((i, n) => (n ? g.lineTo(px(i), pyT(temp[i])) : g.moveTo(px(i), pyT(temp[i]))));
+    g.stroke();
+    g.globalAlpha = 1;
+
+    // the true duty signal, ghosted
+    g.strokeStyle = C.dim; g.lineWidth = 1; g.globalAlpha = 0.32;
+    g.beginPath();
+    for (let i = 0; i < M; i++) {
+      if (i) g.lineTo(px(i), pyD(duty[i - 1]));
+      i ? g.lineTo(px(i), pyD(duty[i])) : g.moveTo(px(i), pyD(duty[i]));
+    }
+    g.stroke();
+    g.globalAlpha = 1;
+
+    // duty as it would actually be drawn
+    g.strokeStyle = dutyAware ? C.ice : C.danger;
+    g.lineWidth = 1.9;
+    g.beginPath();
+    kept.forEach((i, n) => {
+      if (n) g.lineTo(px(i), pyD(duty[kept[n - 1]]));
+      n ? g.lineTo(px(i), pyD(duty[i])) : g.moveTo(px(i), pyD(duty[i]));
+    });
+    g.stroke();
+
+    g.strokeStyle = C.axis; g.lineWidth = 1;
+    g.strokeRect(box.x + 0.5, box.y + 0.5, box.w - 1, box.h - 1);
+
+    g.font = FONT;
+    g.fillStyle = C.label;
+    g.textAlign = "left"; g.textBaseline = "top";
+    g.fillText(kept.length + " of " + M + " samples kept", box.x + 8, box.y + 7);
+    g.textAlign = "left"; g.textBaseline = "middle";
+    g.fillStyle = C.dim;
+    g.fillText("100%", box.x + box.w + 7, pyD(100));
+    g.fillText("0%", box.x + box.w + 7, pyD(0));
+  }
+
+  /* ---------- toggle wiring ---------- */
+  const charts = [];
+
+  function chipRow(host, cv, defs, mode) {
+    const on = new Set(defs.filter((d) => d.on).map((d) => d.key));
+    host.innerHTML = "";
+    for (const d of defs) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "lg";
+      b.setAttribute("aria-pressed", String(on.has(d.key)));
+      if (S[d.key].dash) b.dataset.dash = "1";
+      b.style.color = on.has(d.key) ? "" : "";
+      b.innerHTML = '<span class="sw" style="color:' + S[d.key].color + '"></span>' + S[d.key].label;
+      b.addEventListener("click", () => {
+        on.has(d.key) ? on.delete(d.key) : on.add(d.key);
+        b.setAttribute("aria-pressed", String(on.has(d.key)));
+        draw();
+      });
+      host.appendChild(b);
+    }
+    const draw = () => render(cv, defs.filter((d) => on.has(d.key)).map((d) => d.key), mode);
+    charts.push(draw);
+    draw();
+  }
+
+  function uplotLegend(host, cv, defs) {
+    const on = new Set(defs.filter((d) => d.on).map((d) => d.key));
+    host.innerHTML = "";
+    for (const d of defs) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute("aria-pressed", String(on.has(d.key)));
+      b.style.color = S[d.key].color;
+      b.innerHTML = '<span class="sw"></span><span style="color:var(--dim)">' + S[d.key].label + "</span>";
+      b.addEventListener("click", () => {
+        on.has(d.key) ? on.delete(d.key) : on.add(d.key);
+        b.setAttribute("aria-pressed", String(on.has(d.key)));
+        draw();
+      });
+      host.appendChild(b);
+    }
+    const draw = () => render(cv, defs.filter((d) => on.has(d.key)).map((d) => d.key), "overlay");
+    charts.push(draw);
+    draw();
+  }
+
+  /* ---------- mount ---------- */
+  const A = document.getElementById("cA");
+  chipRow(document.getElementById("lgA"), A, [
+    { key: "pit", on: true }, { key: "food", on: true }, { key: "setp", on: true },
+    { key: "aug", on: true }, { key: "fan", on: true }, { key: "augr", on: false },
+  ], "overlay");
+
+  const B = document.getElementById("cB");
+  const drawB = () => render(B, ["pit", "food", "setp", "aug", "fan"], "panel");
+  charts.push(drawB); drawB();
+
+  const Cc = document.getElementById("cC");
+  const drawC = () => render(Cc, ["pit", "food", "setp", "aug", "fan"], "inline");
+  charts.push(drawC); drawC();
+
+  uplotLegend(document.getElementById("ul1"), document.getElementById("cL1"), [
+    { key: "pit", on: true }, { key: "setp", on: true }, { key: "aug", on: true }, { key: "fan", on: true },
+  ]);
+
+  const L3 = document.getElementById("cL3");
+  const sw3 = document.getElementById("sw3");
+  const drawL3 = () => render(L3, sw3.getAttribute("aria-pressed") === "true"
+    ? ["pit", "setp", "aug", "fan"] : ["pit", "setp"], "overlay");
+  sw3.addEventListener("click", () => {
+    sw3.setAttribute("aria-pressed", String(sw3.getAttribute("aria-pressed") !== "true"));
+    drawL3();
+  });
+  charts.push(drawL3); drawL3();
+
+  chipRow(document.getElementById("lg2"), document.getElementById("c2"), [
+    { key: "pit", on: true }, { key: "food", on: true }, { key: "setp", on: true },
+    { key: "amb", on: false }, { key: "aug", on: false }, { key: "fan", on: false },
+  ], "overlay");
+
+  const D1 = document.getElementById("cD1"), D2 = document.getElementById("cD2");
+  const drawD = () => { reducerDemo(D1, false); reducerDemo(D2, true); };
+  charts.push(drawD); drawD();
+
+  let raf = 0;
+  window.addEventListener("resize", () => {
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(() => charts.forEach((fn) => fn()));
+  });
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(() => charts.forEach((fn) => fn()));
+  }
+})();
+</script>
