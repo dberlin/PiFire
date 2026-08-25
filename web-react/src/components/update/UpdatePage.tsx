@@ -23,6 +23,7 @@ import {
   upgradeDeps,
 } from "../../helpers/update/updateApi";
 import type { UpdateResult } from "../../helpers/update/updateTypes";
+import { ConfirmAction } from "../dashboard/ConfirmAction";
 import { StreamingLogPanel } from "../logs/StreamingLogPanel";
 import "./update.css";
 
@@ -55,6 +56,10 @@ export function UpdatePage() {
   const [done, setDone] = useState<null | "ok" | "reboot" | "failed">(null);
   const [showBuildLog, setShowBuildLog] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  // Dismissal of the restart prompt, and ONLY of the prompt: "Restart Later"
+  // leaves the server's restart_pending flag standing, so the ask comes back
+  // on the next visit and keeps coming back until something actually restarts.
+  const [restartDeferred, setRestartDeferred] = useState(false);
 
   const apply = useCallback((s: UpdateResult<UpdateState>, c: UpdateResult<UpdateCheck>) => {
     if (s.ok && s.data) {
@@ -72,12 +77,32 @@ export function UpdatePage() {
   }, [apply]);
 
   useEffect(() => {
-    // Cancellation-safe: a user who navigates away before both requests
+    // Cancellation-safe: a user who navigates away before the requests
     // land must not set state on an unmounted tree.
     let cancelled = false;
-    Promise.all([fetchUpdateState(), fetchUpdateCheck()]).then(([s, c]) => {
-      if (!cancelled) apply(s, c);
-    });
+    Promise.all([fetchUpdateState(), fetchUpdateCheck(), fetchUpdateStatus()]).then(
+      ([s, c, status]) => {
+        if (cancelled) return;
+        apply(s, c);
+        // Reattach to a run that is STILL GOING. Progress used to live only in
+        // this component's memory, set by the click that started the run, so a
+        // reload -- or a phone picked up in place of the laptop -- during a
+        // multi-minute update left `progress` null, which switched the poll
+        // below off, which meant the finished state never arrived and the
+        // restart it asks for was never offered. The update completed and
+        // nothing ever said so.
+        //
+        // Terminal percents are deliberately NOT restored: the store keeps the
+        // last run's status forever, so honouring 101 here would show "Update
+        // complete" on every visit from now on. What genuinely outlives a run
+        // is the restart_pending flag, which is server state with an owner that
+        // clears it. Percent 0 is excluded for the same reason -- the route
+        // writes it before launching the updater, and a launch that failed
+        // leaves it lying there.
+        const percent = status.ok && status.data ? status.data.percent : null;
+        if (percent !== null && percent > 0 && percent <= 100) setProgress(status.data);
+      },
+    );
     return () => {
       cancelled = true;
     };
@@ -97,11 +122,15 @@ export function UpdatePage() {
       setProgress(r.data);
       const failed = isFailure(r.data.percent);
       if (r.data.percent <= 100 && !failed) return;
-      setDone(failed ? "failed" : r.data.percent === REBOOT_REQUIRED_PERCENT ? "reboot" : "ok");
-      // Reload the state the run just changed -- which is how the build-log
-      // offer below learns a rebuild failed.
-      void load();
       clearInterval(id);
+      // Reload BEFORE latching `done`, not after. This is how the build-log
+      // offer below learns a rebuild failed -- and now also how the finished
+      // panel learns whether the updater restarted PiFire itself or left that
+      // to be asked for. Setting `done` first rendered one frame of "PiFire is
+      // restarting" against stale state, which is precisely the claim this
+      // change exists to stop making falsely.
+      await load();
+      setDone(failed ? "failed" : r.data.percent === REBOOT_REQUIRED_PERCENT ? "reboot" : "ok");
     }, 250); // matches wizard/InstallProgress.tsx's polling cadence
     return () => clearInterval(id);
   }, [polling, load]);
@@ -121,6 +150,9 @@ export function UpdatePage() {
     }
     setProgress({ percent: 0, status: "Starting…", output: "" });
     setDone(null);
+    // A restart deferred for the PREVIOUS run has no bearing on this one, and
+    // this run will publish a pending flag of its own if it needs to.
+    setRestartDeferred(false);
     // A new run writes a new transcript. Leaving the panel open would show the
     // previous build's failure until the first line of this one lands.
     setShowBuildLog(false);
@@ -292,23 +324,18 @@ export function UpdatePage() {
           />
           <p>{progress.status}</p>
           <pre className="pf-update-log">{progress.output}</pre>
-          {/* The run says "Finished! Restarting Server..." and then nothing
-              restarts anything -- the updater is a detached process that cannot
-              restart the service it was launched from, and the page was only
-              announcing the finish. So the page offers it, the way the wizard's
-              InstallProgress does at the end of an install. Until the service
-              restarts, what is running is still the pre-update code. */}
+          {/* No "Restart Now" button here any more. The updater restarts PiFire
+              itself when the grill is stopped, and when it is lit it publishes
+              restart_pending and the modal below asks. A button that appeared
+              only while this component happened to be mounted, at the end of a
+              run it had to have watched from the start, was the reason updates
+              shipped code nothing ever loaded. */}
           {done === "ok" && (
-            <div className="pf-update-done">
-              <p>Update complete. Restart the service to run the new code.</p>
-              <button
-                type="button"
-                className="pf-admin-btn"
-                onClick={() => void runSystemAction("restart")}
-              >
-                Restart Now
-              </button>
-            </div>
+            <p className="pf-update-done">
+              {state.restart_pending
+                ? "Update complete. PiFire must restart to run the new code."
+                : "Update complete — PiFire is restarting to load the new code."}
+            </p>
           )}
           {done === "reboot" && (
             <div className="pf-update-done">
@@ -347,6 +374,24 @@ export function UpdatePage() {
         </button>
         {log !== null && <pre className="pf-update-log">{log}</pre>}
       </section>
+
+      {/* Driven by SERVER state, not by anything this run remembers, so it is
+          equally there for the tab that started the update and for a phone
+          opening the page an hour later. It stays until something restarts
+          PiFire: app.py clears the flag at its own boot, so the ask ends when
+          -- and only when -- the code it is asking about is actually loaded. */}
+      <ConfirmAction
+        open={state.restart_pending && !restartDeferred}
+        title="Restart required — the grill is running"
+        message="An update is installed but PiFire is still running the code from before it. Restarting stops the control process, which will drop an active fire, so it was left to you. Restart once the cook is finished."
+        confirmLabel="Restart Anyway"
+        cancelLabel="Restart Later"
+        onConfirm={() => {
+          setRestartDeferred(true);
+          void runSystemAction("restart");
+        }}
+        onCancel={() => setRestartDeferred(true)}
+      />
     </div>
   );
 }

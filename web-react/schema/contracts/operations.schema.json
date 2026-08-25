@@ -932,6 +932,10 @@
           "title": "Remote Version",
           "type": "string"
         },
+        "restart_pending": {
+          "title": "Restart Pending",
+          "type": "boolean"
+        },
         "version": {
           "title": "Version",
           "type": "string"
@@ -953,7 +957,8 @@
         "remote_url",
         "remote_version",
         "web_ui_stale",
-        "web_ui_build_failed"
+        "web_ui_build_failed",
+        "restart_pending"
       ],
       "title": "UpdateState",
       "type": "object"

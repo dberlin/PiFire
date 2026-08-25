@@ -41,6 +41,7 @@ def test_state_returns_the_update_data_shape(ds, client, monkeypatch):
         "remote_version": "v1.8.1",
         "web_ui_stale": False,
         "web_ui_build_failed": False,
+        "restart_pending": False,
     }
 
 
@@ -483,3 +484,51 @@ def test_a_launch_that_worked_still_reports_started(ds, client, monkeypatch):
     assert resp.status_code == 200
     assert resp.get_json()["data"] == {"started": True}
     assert len(fired) == 1
+
+
+def test_state_reports_a_restart_the_updater_could_not_take(ds, client, monkeypatch):
+    """An update that finished while the grill was lit could not restart PiFire
+    -- `supervisorctl restart all` would have dropped the fire -- so it leaves
+    this flag and the page asks.
+
+    On /state rather than /status on purpose. A run's percent describes one run
+    and is only ever seen by a tab that watched it from the start; this
+    describes what the machine is still owed and has to survive the tab.
+    """
+    import blueprints.api_update.routes as ur
+    from common.persistence.install_state import set_update_restart_pending
+
+    _stub_reads(monkeypatch)
+    monkeypatch.setattr(ur, "web_ui_needs_rebuild", lambda root: False)
+    monkeypatch.setattr(ur, "last_build_failed", lambda: False)
+    monkeypatch.setattr(ur, "detached_head", lambda: None)
+
+    assert client.get("/api/update/state").get_json()["data"]["restart_pending"] is False
+
+    set_update_restart_pending(True)
+
+    assert client.get("/api/update/state").get_json()["data"]["restart_pending"] is True
+
+
+def test_the_webapp_clears_the_pending_restart_at_its_own_boot():
+    """Reaching app.py's module body means the webapp has just started, so the
+    code an update installed is the code now running, whoever restarted it.
+
+    Source-level, like tests/unit/system/test_supervisor_restart_is_uniform.py:
+    the call runs once at import, and by the time any test can observe it the
+    module is long imported. What is worth pinning is that it is there at all
+    and that it happens at boot, beside the banner flush that clears for the
+    same reason.
+    """
+    from pathlib import Path
+
+    from tests.conftest import REPO_BASE
+
+    source = Path(REPO_BASE, "app.py").read_text()
+    assert "set_update_restart_pending(False)" in source, (
+        "app.py must clear the pending-restart flag at boot, or the updater "
+        "page keeps asking for a restart that already happened"
+    )
+    assert source.index("set_update_restart_pending(False)") < source.index("app.register_blueprint"), (
+        "the clear belongs in the boot preamble, not after routes can be served"
+    )

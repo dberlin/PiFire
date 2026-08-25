@@ -37,7 +37,76 @@ def is_real_hardware(settings=None):
     return bool(settings["platform"]["real_hw"])
 
 
-def restart_control():
+#: Seconds between being asked for a restart and asking supervisor for one,
+#: when the caller is still running. Restarting `webapp` -- or `all`, which
+#: includes it -- kills the process answering the very request that asked, so
+#: the response has to get out first. The old
+#: `os.system("sleep 3 && sudo supervisorctl restart webapp &")` bought that
+#: time with a shell; this buys it without one.
+RESTART_GRACE_SECONDS = 3
+
+
+def _restart_supervisor_programs(target, wait):
+    """Ask supervisor to restart `target`. The ONE place that runs supervisorctl.
+
+    `supervisorctl restart <target>`, not a restart of the supervisor SERVICE.
+    The unit is named `supervisor` on Debian / Raspberry Pi OS and `supervisord`
+    on Fedora / RHEL, and this had no way to tell which, so it tried every name
+    in turn. Each installer's sudoers grant names only its own unit, so the
+    wrong guess was not merely a missing unit -- it was outside NOPASSWD, and a
+    sudo that found a tty would sit at a password prompt until the timeout,
+    which then abandoned the remaining names entirely. `supervisorctl` is one
+    name on both platforms, and both installers already grant it.
+
+    It also stops short of bouncing supervisord itself, which is all that was
+    ever wanted: the programs come back and the supervisor managing them stays
+    up.
+
+    No systemctl fallback. Reaching this means some PiFire process is running,
+    and they are the programs supervisord manages -- so a supervisord that needs
+    starting cannot be the one that just got here.
+
+    `wait=True` is for a caller that is ABOUT TO EXIT -- updater.py, which ends
+    the moment publish_finished returns. The default hands the work to a daemon
+    thread, which is right for a server that has a response to finish and
+    useless there: a daemon thread dies with its process, so supervisorctl would
+    never run at all. A waiting caller also skips the grace period, having no
+    in-flight response to protect.
+    """
+    command = ["sudo", "supervisorctl", "restart", target]
+
+    def _restart():
+        if not wait:
+            time.sleep(RESTART_GRACE_SECONDS)
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                # sudo must never reach a password prompt: given a tty on stdin
+                # it would block until the timeout and restart nothing.
+                stdin=subprocess.DEVNULL,
+                # Its own session, so that restarting a program this call is
+                # running inside cannot take the client with it part-way through
+                # the sequence, leaving the rest stopped.
+                start_new_session=True,
+                check=False,
+            )
+            if result.returncode != 0:
+                print(f"Failed to restart supervisor program(s) '{target}': {result.stderr.strip()}")
+        except subprocess.TimeoutExpired:
+            print(f"supervisorctl restart {target} timed out")
+        except Exception as e:
+            print(f"Error running supervisorctl: {e}")
+
+    if wait:
+        _restart()
+        return
+    threading.Thread(target=_restart, daemon=True).start()
+
+
+def restart_control(wait=False):
     """
     Restart the Control Script
 
@@ -46,68 +115,27 @@ def restart_control():
     the command either fails or restarts something the developer is using.
     """
     if is_real_hardware():
-        os.system("sleep 3 && sudo supervisorctl restart control &")
+        _restart_supervisor_programs("control", wait)
 
 
-def restart_webapp():
+def restart_webapp(wait=False):
     """
     Restart the WebApp Script
 
     Gated on real hardware -- see restart_control.
     """
     if is_real_hardware():
-        os.system("sleep 3 && sudo supervisorctl restart webapp &")
+        _restart_supervisor_programs("webapp", wait)
 
 
-def restart_scripts():
+def restart_scripts(wait=False):
     """Restart PiFire's supervisor programs: control, webapp and display.
 
-    `supervisorctl restart all`, not a restart of the supervisor SERVICE. The
-    unit is named `supervisor` on Debian / Raspberry Pi OS and `supervisord` on
-    Fedora / RHEL, and this had no way to tell which, so it tried every name in
-    turn. Each installer's sudoers grant names only its own unit, so the wrong
-    guess was not merely a missing unit -- it was outside NOPASSWD, and a sudo
-    that found a tty would sit at a password prompt until the timeout, which
-    then abandoned the remaining names entirely. `supervisorctl` is one name on
-    both platforms, and both installers already grant it.
-
-    It also stops short of bouncing supervisord itself, which is all that was
-    ever wanted: the three programs come back and the supervisor managing them
-    stays up.
-
-    No systemctl fallback. Reaching this means the webapp is answering requests,
-    and the webapp is one of the programs supervisord manages -- so a supervisord
-    that needs starting cannot be the one that just served this.
+    Gated on real hardware -- see restart_control.
     """
     if not is_real_hardware():
         return
-
-    def _restart():
-        try:
-            result = subprocess.run(
-                ["sudo", "supervisorctl", "restart", "all"],
-                capture_output=True,
-                text=True,
-                timeout=60,
-                # sudo must never reach a password prompt: given a tty on stdin
-                # it would block until the timeout and restart nothing.
-                stdin=subprocess.DEVNULL,
-                # Its own session, so that restarting `webapp` -- the program
-                # this call is running inside -- cannot take the client with it
-                # part-way through the sequence, leaving the rest stopped.
-                start_new_session=True,
-                check=False,
-            )
-            if result.returncode != 0:
-                print(f"Failed to restart supervisor programs: {result.stderr.strip()}")
-        except subprocess.TimeoutExpired:
-            print("supervisorctl restart timed out")
-        except Exception as e:
-            print(f"Error running supervisorctl: {e}")
-
-    # Off the request thread: this kills the webapp that is answering, so the
-    # response has to go out first.
-    threading.Thread(target=_restart, daemon=True).start()
+    _restart_supervisor_programs("all", wait)
 
 
 def reboot_system():

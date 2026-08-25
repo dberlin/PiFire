@@ -16,7 +16,6 @@ PiFire Flexible Display Interface Library
  Imported Libraries
 """
 import logging
-import os
 import socket
 import time
 
@@ -36,7 +35,7 @@ from common.persistence.runtime import (
     read_status,
     write_settings,
 )
-from common.system import is_real_hardware
+from common.system import is_real_hardware, reboot_system, restart_scripts, shutdown_system
 from display._loggers import resolve_loggers
 
 # The widget classes below are never referenced by literal name in this file;
@@ -1467,10 +1466,9 @@ class DisplayBase:
         if "reboot" in self.command:
             data = {"updated": True, "mode": "Stop"}
             enqueue_control_delta(control_delta(set_values=data), origin="display")
-            if self.real_hardware:
-                os.system("sleep 3 && sudo reboot &")
-            else:
-                pass
+            #  reboot_system() gates on real hardware itself and keeps the same
+            #  grace period the shell `sleep 3` gave.
+            reboot_system()
             self.display_active = "dash"
             self.display_init = True
             self.display_loop_active = False
@@ -1478,10 +1476,7 @@ class DisplayBase:
         if "poweroff" in self.command:
             data = {"updated": True, "mode": "Stop"}
             enqueue_control_delta(control_delta(set_values=data), origin="display")
-            if self.real_hardware:
-                os.system("sleep 3 && sudo shutdown -h now &")
-            else:
-                pass
+            shutdown_system()
             self.display_active = "dash"
             self.display_init = True
             self.display_loop_active = False
@@ -1489,18 +1484,15 @@ class DisplayBase:
         if "restart" in self.command:
             data = {"updated": True, "mode": "Stop"}
             enqueue_control_delta(control_delta(set_values=data), origin="display")
-            if self.real_hardware:
-                # supervisorctl, like common/system.py's restart_scripts and
-                # restart_webapp. `sudo service supervisor restart` named a unit
-                # that only exists on Debian -- and no installer grants the
-                # `service` command under NOPASSWD at all, so this asked for a
-                # password no one was there to type.
-                #
-                # The sleep stays: `restart all` includes the display, and this
-                # runs on the display's own thread.
-                os.system("sleep 3 && sudo supervisorctl restart all &")
-            else:
-                pass
+            #  Through common, like every other lifecycle call: it is the one
+            #  place that knows supervisorctl is the handle (`sudo service
+            #  supervisor restart`, which this used to run, named a unit that
+            #  only exists on Debian -- and no installer grants the `service`
+            #  command under NOPASSWD, so it asked for a password no one was
+            #  there to type). It gates on real hardware itself, and keeps the
+            #  grace period: `restart all` includes the display, and this runs
+            #  on the display's own thread.
+            restart_scripts()
             self.display_active = "dash"
             self.display_init = True
             self.display_loop_active = False

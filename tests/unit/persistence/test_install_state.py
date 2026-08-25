@@ -5,10 +5,12 @@ import pytest
 
 from common.persistence.install_state import (
     delete_wizard_install_info,
+    get_update_restart_pending,
     get_updater_install_status,
     get_wizard_install_status,
     load_os_info,
     load_wizard_install_info,
+    set_update_restart_pending,
     set_updater_install_status,
     set_wizard_install_status,
     store_os_info,
@@ -155,3 +157,16 @@ def test_corrupt_install_status_write_is_rejected_without_losing_prior_state(ds)
         ds.set_blob("updater:status", "not-json")
 
     assert get_updater_install_status() == (50, "running", "line")
+
+
+def test_pending_restart_defaults_to_nothing_owed(ds):
+    """An install that has never deferred a restart must not look like one that
+    has -- the flag drives a modal on the updater page."""
+    assert get_update_restart_pending() is False
+
+
+def test_pending_restart_round_trips(ds):
+    set_update_restart_pending(True)
+    assert get_update_restart_pending() is True
+    set_update_restart_pending(False)
+    assert get_update_restart_pending() is False

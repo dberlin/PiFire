@@ -39,9 +39,9 @@ def _controller(monkeypatch, *, mode, critical_error):
     """A booted controller whose platform failed to build, mid-cook in `mode`."""
     _neutralize_externals(monkeypatch)
     settings = base_settings()
-    # `os.system("sleep 3 && sudo shutdown -h now &")` lives at the tail of the
-    # Shutdown dispatch; _neutralize_externals already swapped controller.os for
-    # a recorder, and this keeps the branch unreached as well.
+    # `shutdown_system()` lives at the tail of the Shutdown dispatch;
+    # _neutralize_externals already swapped controller.shutdown_system for a
+    # recorder, and this keeps the branch unreached as well.
     settings["shutdown"]["auto_power_off"] = False
     control_data = base_control(mode=mode)
     control_data["critical_error"] = critical_error

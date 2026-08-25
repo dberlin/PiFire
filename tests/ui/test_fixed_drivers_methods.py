@@ -73,6 +73,7 @@ test_st7789p_display_current_completes_and_forwards_to_device below. Not
 validated on real ST7789 hardware.
 """
 
+import contextlib
 import importlib
 import sys
 import threading
@@ -84,7 +85,7 @@ from PIL import Image, ImageFont
 
 import display._base_fixed  # noqa: F401  pre-warm real PIL/qrcode/common imports; see module docstring
 from common.modes import Mode
-from tests.ui._driver_helpers import RecordingLogger
+from tests.ui._driver_helpers import RecordingLogger, block_power_actions
 from tests.ui._menu_walk import build_dash_menu_input_touch_steps, run_menu_walk
 
 FULL_DEV_PINS = {
@@ -215,8 +216,15 @@ def _no_bg_threads():
     return patched
 
 
+@contextlib.contextmanager
 def _no_os_system(name):
-    return mock.patch("os.system", side_effect=AssertionError(f"os.system blocked for {name}"))
+    """Blocks the shell-out AND the common/system.py calls the power menu now
+    makes instead -- see block_power_actions."""
+    with (
+        mock.patch("os.system", side_effect=AssertionError(f"os.system blocked for {name}")),
+        block_power_actions(name),
+    ):
+        yield
 
 
 _real_truetype = ImageFont.truetype

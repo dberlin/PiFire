@@ -34,10 +34,11 @@ during these tests: `threading.Thread` (all four) and `multiprocessing.
 Process` (_base_dsi only) are patched to no-ops for every construction,
 mirroring test_fixed_base_drivers_load.py / test_fixed_drivers_methods.py's
 `_no_bg_threads`/`_no_multiprocessing` guards, so no infinite `while True`
-loop ever actually starts. `os.system` is blocked (raises AssertionError) for
-every _base_fixed/_base_flex construction as a blanket safety measure, even
-though none of the paths exercised here reach it (only `_menu_display`'s
-"Power_"/reboot branches do, which this file does not select).
+loop ever actually starts. The power actions (`reboot_system`/`shutdown_system`/
+`restart_scripts`) and `os.system` are blocked for every _base_fixed/_base_flex
+construction as a blanket safety measure, even though none of the paths
+exercised here reach them (only `_menu_display`'s "Power_"/reboot branches do,
+which this file does not select).
 
 trebuc.ttf/impact.ttf (bare filenames, resolved via system fontconfig on
 this dev box) and FA-Free-Solid.otf (vendored in static/font/) all load
@@ -65,7 +66,7 @@ import display.pygame_240x320b as mod_320b
 import display.qtapp as qtapp_mod
 from common.modes import Mode
 from display.qtbackend import PiFireBackend
-from tests.ui._driver_helpers import RecordingLogger, instantiate
+from tests.ui._driver_helpers import RecordingLogger, block_power_actions, instantiate
 from tests.ui._menu_walk import build_dash_menu_input_touch_steps, run_menu_walk
 
 FULL_DEV_PINS = {
@@ -165,25 +166,29 @@ def test_pygame_64x128_public_status_methods():
 
 @contextlib.contextmanager
 def _fixed_driver_guarded(mod, **overrides):
-    """Constructs a _base_fixed-family driver (pygame_240x320/240x320b) with
-    `os.system` kept neutralized as a recording no-op for the FULL body of
-    the `with` block -- not just construction.
+    """Constructs a _base_fixed-family driver (pygame_240x320/240x320b) with the
+    power actions kept neutralized for the FULL body of the `with` block -- not
+    just construction.
 
-    `_base_fixed._menu_display`'s "Power_" branch calls
-    `os.system("... sudo reboot ...")` / `os.system("... shutdown ...")`
-    UNCONDITIONALLY, with no `real_hardware` gate (unlike _base_flex's
-    equivalent in `_command_handler`). Any test that goes on to call
-    `_event_detect()` / `_display_loop()` / otherwise drive menu navigation
-    on one of these drivers must keep `os.system` patched for as long as it
-    can reach `_menu_display` -- constructing under the patch and then
-    letting it expire before the real risk (menu navigation) happens is
-    avoidance-by-design, not a guard. Use `instantiate` (tests/ui/_driver_helpers.py)
-    instead for tests that never touch `_event_detect`/`_display_loop`/menu state."""
+    `_base_fixed._menu_display`'s "Power_" branch calls `reboot_system()` /
+    `shutdown_system()` UNCONDITIONALLY here, leaving the `real_hardware` gate
+    to those functions -- and `real_hw` is True in a fresh test datastore, so
+    the gate does not save us. Any test that goes on to call `_event_detect()`
+    / `_display_loop()` / otherwise drive menu navigation on one of these
+    drivers must keep them patched for as long as it can reach `_menu_display`
+    -- constructing under the patch and then letting it expire before the real
+    risk (menu navigation) happens is avoidance-by-design, not a guard. Use
+    `instantiate` (tests/ui/_driver_helpers.py) instead for tests that never
+    touch `_event_detect`/`_display_loop`/menu state.
+
+    `os.system` stays patched alongside as a recording blanket guard: the
+    branch no longer shells out, but nothing else here should either."""
     kwargs = {"dev_pins": FULL_DEV_PINS, "buttonslevel": "HIGH", "rotation": 0, "units": "F", "config": {}}
     kwargs.update(overrides)
     with (
         mock.patch.object(threading, "Thread") as mock_thread,
         mock.patch("os.system") as mock_os_system,
+        block_power_actions(mod.__name__),
     ):
         mock_thread.return_value.start = lambda: None
         d = mod.Display(**kwargs)
@@ -194,7 +199,11 @@ def _assert_no_reboot_or_shutdown(mock_os_system):
     """Defense-in-depth proof for the `_fixed_driver_guarded` tests: even
     though none of them intentionally select a menu "Power_" item, confirm
     the neutralized `os.system` was never actually asked to reboot, shut
-    down, or power off the machine running the test suite."""
+    down, or power off the machine running the test suite.
+
+    The power branch itself no longer goes through `os.system` -- that is
+    covered by `block_power_actions`, which raises rather than records. This
+    stays as the blanket check on anything else that might shell out."""
     dangerous_terms = ("reboot", "shutdown", "poweroff", "power off")
     for call in mock_os_system.call_args_list:
         command = str(call.args[0]) if call.args else ""
@@ -462,10 +471,11 @@ def test_pygame_240x320b_event_detect_opens_menu_and_renders_it(monkeypatch):
             pygame.quit()
 
         # Defense-in-depth: _base_fixed._menu_display's "Power_" branch calls
-        # os.system(...reboot/shutdown...) UNCONDITIONALLY, no real_hardware
-        # gate. This test only opens the menu (mode "none" -> "inactive"),
-        # never navigates to and selects a "Power_" item, so os.system must
-        # not have been touched at all -- not merely "not reboot-shaped".
+        # reboot_system()/shutdown_system() UNCONDITIONALLY. Those are blocked
+        # outright by _fixed_driver_guarded, so reaching them raises here. This
+        # test only opens the menu (mode "none" -> "inactive"), never navigates
+        # to and selects a "Power_" item, so os.system must not have been
+        # touched at all either -- not merely "not reboot-shaped".
         mock_os_system.assert_not_called()
         _assert_no_reboot_or_shutdown(mock_os_system)
 
@@ -535,6 +545,7 @@ def _make_dsi(monkeypatch, event_log=None, control_log=None, **config_overrides)
         mock.patch.object(threading, "Thread") as mock_thread,
         mock.patch.object(multiprocessing, "Process") as mock_proc,
         mock.patch("os.system", side_effect=AssertionError("os.system blocked for dsi_800x480t")),
+        block_power_actions("dsi_800x480t"),
     ):
         mock_thread.return_value.start = lambda: None
         mock_proc.return_value.start = lambda: None

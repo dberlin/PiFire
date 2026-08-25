@@ -59,11 +59,27 @@ const state = {
     detached: null,
     web_ui_stale: false,
     web_ui_build_failed: false,
+    restart_pending: false,
   },
+};
+
+//  What GET /api/update/status answers when no run is going. The store keeps
+//  the last run's numbers forever, and percent 0 is what a mutation route
+//  writes just before launching the updater, so this is also what a launch
+//  that never got off the ground leaves behind.
+const IDLE_STATUS = {
+  ok: true,
+  status: 200,
+  message: "",
+  data: { percent: 0, status: "", output: "" },
 };
 
 function seed(overrides: Partial<Record<keyof typeof apiMocks, unknown>> = {}) {
   apiMocks.fetchUpdateState.mockResolvedValue(state);
+  //  The page reads this on MOUNT now, to reattach to a run already in
+  //  progress, so every test needs it resolvable whether or not it clicks
+  //  anything.
+  apiMocks.fetchUpdateStatus.mockResolvedValue(IDLE_STATUS);
   apiMocks.fetchUpdateCheck.mockResolvedValue({
     ok: true,
     status: 200,
@@ -133,7 +149,12 @@ describe("UpdatePage", () => {
     await screen.findByText(/v1\.8\.0/);
     fireEvent.click(screen.getByRole("button", { name: /update to latest/i }));
     expect(await screen.findByText(/updates run on pifire hardware/i)).toBeInTheDocument();
-    expect(api.fetchUpdateStatus).not.toHaveBeenCalled();
+    //  Not "never called": mount reads the status once to see whether a run is
+    //  already going. What must not happen is the 250ms POLL, which would sit
+    //  there forever against a run that was never launched.
+    const afterMount = apiMocks.fetchUpdateStatus.mock.calls.length;
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(apiMocks.fetchUpdateStatus.mock.calls.length).toBe(afterMount);
   });
 
   it("surfaces a 400 branch refusal as a friendly message", async () => {
@@ -161,11 +182,15 @@ describe("UpdatePage", () => {
     let calls = 0;
     (api.fetchUpdateStatus as ReturnType<typeof rs.fn>).mockImplementation(async () => {
       calls += 1;
+      //  Call 1 is the mount's "is a run already going?" read and has to look
+      //  idle -- an in-flight percent there makes the page attach on its own,
+      //  and the click below would then prove nothing.
+      const percent = calls === 1 ? 0 : calls < 3 ? 40 : 101;
       return {
         ok: true,
         status: 200,
         message: "",
-        data: { percent: calls < 2 ? 40 : 101, status: "Working", output: "line" },
+        data: { percent, status: "Working", output: "line" },
       };
     });
     renderPage();
@@ -405,16 +430,22 @@ describe("UpdatePage on a detached checkout", () => {
 });
 
 describe("UpdatePage finishing a run", () => {
-  function seedFinish(percent: number) {
+  function seedFinish(percent: number, stateOverrides: Record<string, unknown> = {}) {
     seed({
       upgradeDeps: { ok: true, status: 200, message: "", data: { started: true } },
       fetchUpdateStatus: {
         ok: true,
         status: 200,
         message: "",
-        data: { percent, status: "Finished!", output: " - Finished!  Restarting Server..." },
+        data: { percent, status: "Finished!", output: " - Finished!" },
       },
     });
+    if (Object.keys(stateOverrides).length > 0) {
+      apiMocks.fetchUpdateState.mockResolvedValue({
+        ...state,
+        data: { ...state.data, ...stateOverrides },
+      });
+    }
     systemActionMock.mockReset();
     systemActionMock.mockResolvedValue({ ok: true, status: 200, message: "", data: null });
   }
@@ -425,18 +456,41 @@ describe("UpdatePage finishing a run", () => {
     fireEvent.click(screen.getByRole("button", { name: /upgrade dependencies/i }));
   };
 
-  it("offers the restart the status line promises", async () => {
-    /* The run publishes "Finished! Restarting Server..." and then nothing
-       restarts anything -- the updater is detached and cannot restart the
-       service it was launched from. The page only announced the finish, so an
-       operator was left on the pre-update code with no way forward. */
+  it("says the updater is restarting PiFire, and offers no button to do it", async () => {
+    /* The updater restarts supervisor's programs itself when the grill is
+       stopped, so there is nothing left to ask for. The old "Restart Now"
+       button was the ONLY thing that ever loaded an update's code, and it
+       existed only while this component happened to be mounted -- which is how
+       a finished update ended up serving pre-update Python for days. */
     seedFinish(101);
     await finish();
 
-    const button = await screen.findByRole("button", { name: "Restart Now" });
-    fireEvent.click(button);
+    expect(await screen.findByText(/PiFire is restarting/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Restart Now" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Restart Anyway" })).toBeNull();
+  });
+
+  it("asks before restarting when the run finished with the grill running", async () => {
+    /* `supervisorctl restart all` stops the control process, so an automatic
+       restart mid-cook drops the fire. The updater publishes restart_pending
+       instead and the page asks. */
+    seedFinish(101, { restart_pending: true });
+    await finish();
+
+    expect(await screen.findByText("Restart required — the grill is running")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Restart Anyway" }));
 
     await waitFor(() => expect(systemActionMock).toHaveBeenLastCalledWith("restart"));
+  });
+
+  it("restarts nothing when the answer is Restart Later", async () => {
+    seedFinish(101, { restart_pending: true });
+    await finish();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Restart Later" }));
+
+    expect(screen.queryByText("Restart required — the grill is running")).toBeNull();
+    expect(systemActionMock).not.toHaveBeenCalled();
   });
 
   it("offers both a reboot and a service restart when a reboot is required", async () => {
@@ -452,7 +506,7 @@ describe("UpdatePage finishing a run", () => {
   });
 
   it("surfaces a refused restart instead of appearing to do nothing", async () => {
-    seedFinish(101);
+    seedFinish(101, { restart_pending: true });
     systemActionMock.mockResolvedValue({
       ok: false,
       status: 409,
@@ -461,7 +515,7 @@ describe("UpdatePage finishing a run", () => {
     });
     await finish();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Restart Now" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Restart Anyway" }));
 
     expect(await screen.findByText("system_active")).toBeInTheDocument();
   });
@@ -471,7 +525,120 @@ describe("UpdatePage finishing a run", () => {
     await finish();
 
     await waitFor(() => expect(screen.getAllByRole("alert").length).toBeGreaterThan(0));
-    expect(screen.queryByRole("button", { name: "Restart Now" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Restart Anyway" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Reboot Now" })).toBeNull();
+  });
+});
+
+describe("UpdatePage reattaching to a run it did not start", () => {
+  /* Progress used to live only in this component's memory, set by the click
+     that started the run. A reload during a multi-minute update -- or reaching
+     for a phone instead of the laptop -- left it null, which switched the poll
+     off, which meant the finished state never arrived and the restart it asks
+     for was never offered. The update completed and nothing ever said so. */
+
+  it("polls a run already in progress, with nothing clicked", async () => {
+    seed({
+      fetchUpdateStatus: {
+        ok: true,
+        status: 200,
+        message: "",
+        data: { percent: 40, status: "Installing Python Dependencies...", output: "line" },
+      },
+    });
+    renderPage();
+
+    expect(await screen.findByText("Installing Python Dependencies...")).toBeInTheDocument();
+    const seen = apiMocks.fetchUpdateStatus.mock.calls.length;
+    await waitFor(() => expect(apiMocks.fetchUpdateStatus.mock.calls.length).toBeGreaterThan(seen));
+  });
+
+  it("reaches the finished state of a run started somewhere else", async () => {
+    let calls = 0;
+    seed();
+    apiMocks.fetchUpdateStatus.mockImplementation(async () => {
+      calls += 1;
+      return {
+        ok: true,
+        status: 200,
+        message: "",
+        data: { percent: calls < 2 ? 60 : 101, status: "Finished!", output: "" },
+      };
+    });
+    renderPage();
+
+    expect(await screen.findByText(/PiFire is restarting/i)).toBeInTheDocument();
+  });
+
+  it("does NOT resurrect the last run's finished state on a later visit", async () => {
+    /* The store keeps a terminal percent forever, so honouring 101 on mount
+       would put "Update complete" on the page at every visit from now on.
+       What legitimately outlives a run is restart_pending, which has an owner
+       that clears it -- app.py, at its own boot. */
+    seed({
+      fetchUpdateStatus: {
+        ok: true,
+        status: 200,
+        message: "",
+        data: { percent: 101, status: "Finished!", output: " - Finished!" },
+      },
+    });
+    renderPage();
+    await screen.findByText("Actions");
+
+    expect(screen.queryByText(/update complete/i)).toBeNull();
+    expect(screen.queryByText(/PiFire is restarting/i)).toBeNull();
+  });
+
+  it("ignores a percent 0 left behind by a launch that never happened", async () => {
+    seed();
+    renderPage();
+    await screen.findByText("Actions");
+
+    const afterMount = apiMocks.fetchUpdateStatus.mock.calls.length;
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(apiMocks.fetchUpdateStatus.mock.calls.length).toBe(afterMount);
+  });
+});
+
+describe("UpdatePage pending restart", () => {
+  beforeEach(() => {
+    systemActionMock.mockReset();
+    systemActionMock.mockResolvedValue({ ok: true, status: 200, message: "", data: null });
+  });
+
+  const seedPending = () => {
+    seed();
+    apiMocks.fetchUpdateState.mockResolvedValue({
+      ...state,
+      data: { ...state.data, restart_pending: true },
+    });
+  };
+
+  it("asks on a plain visit, with no run in this tab at all", async () => {
+    /* The whole point of the flag being server state: the tab that ran the
+       update is usually long gone by the time anyone reads the answer. */
+    seedPending();
+    renderPage();
+
+    expect(await screen.findByText("Restart required — the grill is running")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Restart Anyway" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Restart Later" })).toBeInTheDocument();
+  });
+
+  it("says why it did not restart on its own", async () => {
+    seedPending();
+    renderPage();
+
+    const message = await screen.findByText(/drop an active fire/i);
+    expect(message.textContent).toMatch(/running the code from before/i);
+  });
+
+  it("stays quiet when nothing is pending", async () => {
+    seed();
+    renderPage();
+    await screen.findByText("Actions");
+
+    expect(screen.queryByText("Restart required — the grill is running")).toBeNull();
   });
 });

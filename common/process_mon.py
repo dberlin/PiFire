@@ -5,12 +5,15 @@
 
 Description: This class object can be generated to both generate heartbeats
     and monitor heartbeats from a running process.  If the heartbeat fails to
-    register before a set timeout, then the monitor will log the incident, fire off a command
-    and stop.
+    register before a set timeout, then the monitor will log the incident, run a
+    recovery callable and stop.
 
-    process = (str) Name of the process being monitored, used in logging
-    command = (list) Command in subprocess format (i.e. ['echo', 'This is an example message.'])
-    timeout = (int/float) Time in seconds to wait before logging an error and running the command
+    process    = (str) Name of the process being monitored, used in logging
+    on_timeout = (callable) Recovery to run when the heartbeat stops. Pass one of
+                 common/system.py's lifecycle functions rather than a command:
+                 that module owns how PiFire restarts things, including the
+                 `sudo` the installers grant NOPASSWD for.
+    timeout    = (int/float) Time in seconds to wait before logging an error and recovering
 
 ==============================================================================
 """
@@ -21,7 +24,6 @@ Description: This class object can be generated to both generate heartbeats
 ==============================================================================
 """
 import logging
-import subprocess
 import threading
 import time
 
@@ -39,10 +41,16 @@ from notify.notifications import send_notifications
 
 
 class Process_Monitor:
-    def __init__(self, process, command, timeout=5):
+    def __init__(self, process, on_timeout, timeout=5):
         self.process = process  # name of the process to monitor
-        self.timeout = timeout  # time in seconds to wait before logging an error and running the specified command
-        self.command = command  # subprocess formatted command to run when a timeout occurs
+        self.timeout = timeout  # time in seconds to wait before logging an error and running the recovery
+        #  A callable, not an argv list. This took `["supervisorctl", "restart",
+        #  "control"]` and ran it verbatim -- with no `sudo`, unlike every other
+        #  supervisorctl call in the tree, and the installers grant NOPASSWD for
+        #  `sudo supervisorctl` specifically. Recovery from a hung control loop
+        #  was one permission away from never working, and nothing pointed at
+        #  it because the command lived here rather than in common/system.py.
+        self.on_timeout = on_timeout
 
         self.last_heartbeat = time.time()
         self.active = False
@@ -112,9 +120,12 @@ class Process_Monitor:
                     message = f"The {self.process} process experienced a timeout event (no heartbeat detected in {self.timeout} seconds) and is being reset."
                     self.event_logger.error(message)
                     self.process_logger.error(message)
-                    # Execute command on real hardware only
+                    # Recover on real hardware only. The recovery itself gates
+                    # on real hardware again -- it is common/system.py's rule,
+                    # not this module's -- but the print is the dev-box
+                    # behaviour worth keeping.
                     if self.is_real_hw:
-                        subprocess.run(self.command, check=False)
+                        self.on_timeout()
                     else:
                         print(message)
                     self.active = False  # Pause thread

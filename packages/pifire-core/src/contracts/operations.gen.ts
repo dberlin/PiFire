@@ -96,6 +96,7 @@ type Branches = string[];
 type Detached = string | null;
 type RemoteUrl = string;
 type RemoteVersion = string;
+type RestartPending = boolean;
 type Version1 = string;
 type WebUiBuildFailed = boolean;
 type WebUiStale = boolean;
@@ -443,6 +444,7 @@ export interface UpdateState {
   detached: Detached;
   remote_url: RemoteUrl;
   remote_version: RemoteVersion;
+  restart_pending: RestartPending;
   version: Version1;
   web_ui_build_failed: WebUiBuildFailed;
   web_ui_stale: WebUiStale;

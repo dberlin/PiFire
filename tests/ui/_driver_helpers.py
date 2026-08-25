@@ -15,10 +15,47 @@ rather than stub kwargs, keeping this module decoupled from any one file's
 stub set.
 """
 
+import contextlib
 import importlib
 import sys
 import threading
 from unittest import mock
+
+#: The module-level names each display base binds from common/system.py, and
+#: through which every power action in display code now runs.
+_POWER_SEAMS = (
+    ("display._base_fixed", ("reboot_system", "shutdown_system")),
+    ("display._base_flex", ("reboot_system", "shutdown_system", "restart_scripts")),
+)
+
+
+@contextlib.contextmanager
+def block_power_actions(what):
+    """Block every way display code can power-cycle or restart the host.
+
+    The power menu used to shell out with `os.system("... sudo reboot &")`, and
+    every harness in this directory blocked exactly that -- see the history of
+    real reboot incidents the docstrings here keep referring to. It now calls
+    common/system.py's `reboot_system`/`shutdown_system`/`restart_scripts`,
+    which use `subprocess`, so a patched `os.system` stopped covering it.
+
+    That gap is not theoretical: `real_hw` defaults to True in a fresh test
+    datastore (asserted in tests/characterization/test_process_command_golden.py),
+    so `is_real_hardware()` is True here and an unblocked call really does run
+    `sudo systemctl reboot`.
+
+    Patch where the names are BOUND rather than in common.system: the bases
+    import them at module level, so `mock.patch.object(common.system, ...)`
+    would be looked straight past.
+    """
+    with contextlib.ExitStack() as stack:
+        for module_path, names in _POWER_SEAMS:
+            module = importlib.import_module(module_path)
+            for name in names:
+                stack.enter_context(
+                    mock.patch.object(module, name, side_effect=AssertionError(f"{name} blocked for {what}"))
+                )
+        yield
 
 
 def load_driver(module_path, overlay):
@@ -57,6 +94,7 @@ def instantiate(mod, **overrides):
     with (
         mock.patch.object(threading, "Thread") as mock_thread,
         mock.patch("os.system", side_effect=AssertionError(f"os.system blocked for {mod.__name__}")),
+        block_power_actions(mod.__name__),
     ):
         mock_thread.return_value.start = lambda: None
         return mod.Display(**kwargs)

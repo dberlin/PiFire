@@ -9,14 +9,15 @@ they WRITE (the next_mode updated-guard, the `setpoint if=="Hold" else 0` rule,
 and every recipe_mode internal edge). Per-mode dispatch (work_cycle) IS spied so
 a scenario exercises only the transition bookkeeping, not a full work cycle.
 
-SAFETY: build_controller() neutralizes controller.py's module-level os.system
-(via the loop-golden _neutralize_externals helper) AND sets
+SAFETY: build_controller() neutralizes controller.py's module-level
+shutdown_system (via the loop-golden _neutralize_externals helper) AND sets
 shutdown.auto_power_off=False, so no scenario here can reach a real halt.
 
 Two scenarios DO drive the Shutdown->Stop edge with auto_power_off back on --
 the pair asserting that an aborted shutdown powers nothing off while a
-completed one still does. Both re-patch os through the recorder first and
-assert on what it recorded, which is the only way to test a halt at all.
+completed one still does. Both re-patch shutdown_system through the recorder
+first and assert on what it recorded, which is the only way to test a halt at
+all.
 """
 
 from tests.characterization._controller_harness import (
@@ -28,9 +29,9 @@ from tests.characterization.fixtures import base_control, base_pellet_db, base_s
 
 
 def build_controller(monkeypatch, *, mode="Stop", settings=None, control_over=None):
-    """Construct a real Controller with os.system neutralized and
+    """Construct a real Controller with shutdown_system neutralized and
     auto_power_off disabled. Returns (controller, store)."""
-    _neutralize_externals(monkeypatch)  # patches controller_mod.os -> recorder, plus notify/cookfile
+    _neutralize_externals(monkeypatch)  # patches controller_mod.shutdown_system -> recorder, plus notify/cookfile
     settings = settings if settings is not None else base_settings()
     settings["shutdown"]["auto_power_off"] = False
     control_data = base_control(mode=mode)
@@ -354,7 +355,7 @@ def test_shutdown_aborted_by_an_operator_powers_nothing_off(monkeypatch):
     c._dispatch_shutdown()
 
     assert store.read_control()["mode"] == "Smoke"  # the abort took
-    assert [call for call in sent if call[0] == "os.system"] == []
+    assert [call for call in sent if call[0] == "shutdown_system"] == []
 
 
 def test_shutdown_that_completes_still_powers_off(monkeypatch):
@@ -368,4 +369,4 @@ def test_shutdown_that_completes_still_powers_off(monkeypatch):
     c._dispatch_shutdown()
 
     assert store.read_control()["mode"] == "Stop"
-    assert [call[0] for call in sent if call[0] == "os.system"] == ["os.system"]
+    assert [call[0] for call in sent if call[0] == "shutdown_system"] == ["shutdown_system"]

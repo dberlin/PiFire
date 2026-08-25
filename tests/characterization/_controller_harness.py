@@ -77,13 +77,5 @@ def _neutralize_externals(monkeypatch):
             ("create_cookfile", cook_id, learning_report_provider)
         ),
     )
-    monkeypatch.setattr(controller_mod, "os", _FakeOs(sent))
+    monkeypatch.setattr(controller_mod, "shutdown_system", lambda: sent.append(("shutdown_system",)))
     return sent
-
-
-class _FakeOs:
-    def __init__(self, sink):
-        self._sink = sink
-
-    def system(self, cmd):
-        self._sink.append(("os.system", cmd))

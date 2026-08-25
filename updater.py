@@ -39,7 +39,10 @@ from common.common import (
     write_log,
 )
 from common.install_log import INSTALL_FAILED_PERCENT
+from common.modes import Mode
+from common.persistence.control import read_control
 from common.persistence.install_state import (
+    set_update_restart_pending,
     set_updater_install_status,
     set_wizard_install_status,
 )
@@ -47,6 +50,7 @@ from common.persistence.runtime import (
     read_settings,
     write_settings,
 )
+from common.system import restart_scripts
 from common.web_ui_build import (
     BUILD_FAIL_MARKER,
     BUILD_LOG_NAME,
@@ -629,17 +633,60 @@ FINISHED_PERCENT = 101
 REBOOT_REQUIRED_PERCENT = 142
 
 
+def grill_is_stopped():
+    """True when the control process is idle, so a restart interrupts no cook.
+
+    Read at the END of a run rather than trusting the mode check /api/update/pull
+    made at the start: an update takes minutes, and nothing prevents someone
+    starting a cook from the dashboard or the mobile app while it runs.
+
+    An unreadable control record counts as running. The cost of being wrong one
+    way is a restart the user has to click; the other way it is a dropped fire.
+    """
+    try:
+        return read_control().get("mode") == Mode.STOP
+    except Exception:
+        logger.exception("Could not read the control mode; assuming the grill is running")
+        return False
+
+
 def publish_finished(reboot):
-    """End a run so the page stops polling.
+    """End a run so the page stops polling, and restart PiFire when it is safe.
 
     Published by whatever ran LAST, not by install_dependencies: an update
     rebuilds the web UI after the dependencies, and that rebuild publishes
     progress of its own. Ending inside install_dependencies left every update
     sitting at percent 95 -- "Checking Web UI..." -- against a process that had
     already exited.
+
+    "Finished!  Restarting Server..." used to be a plain lie. Nothing in the
+    update path called supervisorctl, so the new code sat on disk while the old
+    code kept serving it, and the only way to load it was a button on a page
+    that had usually navigated away by the time the run ended. The update
+    completed, said it was restarting, and left a webapp answering from before
+    the pull -- new routes 404ing against a bundle that had them.
     """
-    percent = REBOOT_REQUIRED_PERCENT if reboot else FINISHED_PERCENT
-    set_updater_install_status(percent, "Finished!", " - Finished!  Restarting Server...")
+    if reboot:
+        #  Not ours to take: power-cycling the machine is a bigger thing than
+        #  bouncing three programs, and the page offers it.
+        _publish(REBOOT_REQUIRED_PERCENT, "Finished!", " - Finished!  A reboot is required to load the update.")
+        return
+
+    if not grill_is_stopped():
+        #  `restart all` stops the control process too, which mid-cook means
+        #  dropping the fire. The flag outlives this run so the page can keep
+        #  offering the restart however long the cook lasts.
+        set_update_restart_pending(True)
+        _publish(FINISHED_PERCENT, "Finished!", " - Finished!  Restart required -- the grill is running.")
+        return
+
+    set_update_restart_pending(False)
+    _publish(FINISHED_PERCENT, "Finished!", " - Finished!  Restarting PiFire...")
+    #  wait=True because this process exits the moment this returns. The default
+    #  runs supervisorctl on a daemon thread, which is right for a server with a
+    #  response to finish and useless here -- the thread would die with the
+    #  process before supervisorctl ran at all.
+    restart_scripts(wait=True)
 
 
 def report_failure(status, output):
@@ -1004,7 +1051,9 @@ def install_dependencies(current_version_string="0.0.0", current_build=None):
 
     percent = 100
     status = "Finished!"
-    output = " - Finished!  Restarting Server..."
+    #  Not "Restarting Server...": this is a mid-run step, the caller publishes
+    #  the terminal state, and only the caller knows whether a restart happened.
+    output = " - Dependencies and migrations complete"
     set_updater_install_status(percent, status, output)
     if DEBUG:
         print(f"Percent: {percent}")

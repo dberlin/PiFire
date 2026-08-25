@@ -30,6 +30,7 @@ from werkzeug.exceptions import InternalServerError
 
 from common import datastore
 from common.common import ErrorKind, create_logger, log_path
+from common.persistence.install_state import set_update_restart_pending
 from common.persistence.runtime import flush_errors, read_settings
 from common.system import is_real_hardware
 
@@ -46,6 +47,13 @@ datastore.init()
 # detached extra_installer child, so an install failure's banner now stands
 # until this process restarts. No other kind is ours to clear.
 flush_errors(ErrorKind.WEB)
+
+# An update that finished while the grill was lit could not restart PiFire --
+# `restart all` would have dropped the fire -- so it left a flag and the updater
+# page keeps offering the restart. Reaching HERE means the webapp has just
+# started, so whatever eventually restarted it, the code that update installed
+# is the code now running and the flag is satisfied.
+set_update_restart_pending(False)
 
 """
 ==============================================================================

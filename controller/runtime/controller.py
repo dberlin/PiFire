@@ -15,17 +15,17 @@ All datastore access goes through `self.ctx.store` (a `Store`; production uses
 loop is deterministic and testable without a real SQLite datastore or wall clock.
 
 Notification/cookfile helpers (`check_notify`, `send_notifications`,
-`create_cookfile`) and `os.system` remain module-level references so tests can
-monkeypatch them.
+`create_cookfile`) and `shutdown_system` remain module-level references so tests
+can monkeypatch them.
 """
 
 import copy
-import os
 from os.path import exists
 
 from common.common import ErrorKind
 from common.defaults import default_control
 from common.modes import COOK_MODES, SAFE_MODES, Mode, StatusState
+from common.system import shutdown_system
 from controller.learning_report import controller_learning_report
 from controller.runtime.heartbeat import stamp_control_heartbeat
 from controller.runtime.modes.hold import HoldMode
@@ -665,7 +665,10 @@ class Controller:
         self.control = store.read_control()
         if settings["shutdown"]["auto_power_off"] and self.control["mode"] == Mode.STOP:
             self.eventLogger.info("Shutdown mode ended powering off grill")
-            os.system("sleep 3 && sudo shutdown -h now &")
+            #  Through common, which owns the command, gates on real hardware
+            #  (this used to power off a developer's workstation) and keeps the
+            #  same grace period the shell `sleep 3` gave.
+            shutdown_system()
 
     def _dispatch_monitor(self):
         # Monitor (monitor the OEM controller)

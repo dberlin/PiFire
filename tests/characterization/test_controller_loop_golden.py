@@ -32,7 +32,6 @@ from common.defaults import default_metrics
 from controller.runtime.clock import ManualClock
 from distance.intervals import HOPPER_LEVEL_REFRESH_INTERVAL
 from tests.characterization._controller_harness import (
-    _FakeOs,
     _neutralize_externals,
     _RecordingDistance,
     _spy_dispatch,
@@ -374,8 +373,8 @@ def test_tick_stop_mode_cookfile_failure_is_contained(monkeypatch, caplog):
     # metrics_list) != 0: ... if metrics_list[-1]["mode"] != Mode.PRIME:`).
     store.append_metric(dict(default_metrics(), mode="Smoke"))
 
-    # Neutralize check_notify/send_notifications/os.system as usual, but let
-    # create_cookfile raise instead of the no-op spy.
+    # Neutralize check_notify/send_notifications/shutdown_system as usual, but
+    # let create_cookfile raise instead of the no-op spy.
     sent = []
     monkeypatch.setattr(controller_mod, "check_notify", lambda *a, **k: sent.append(("check_notify", k)))
     monkeypatch.setattr(controller_mod, "send_notifications", lambda *a, **k: sent.append(("send_notifications", a, k)))
@@ -386,7 +385,7 @@ def test_tick_stop_mode_cookfile_failure_is_contained(monkeypatch, caplog):
         raise RuntimeError("disk full")
 
     monkeypatch.setattr(controller_mod, "create_cookfile", _boom)
-    monkeypatch.setattr(controller_mod, "os", _FakeOs(sent))
+    monkeypatch.setattr(controller_mod, "shutdown_system", lambda: sent.append(("shutdown_system",)))
 
     _spy_dispatch(c)
     c.setup()

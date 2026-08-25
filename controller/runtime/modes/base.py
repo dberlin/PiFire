@@ -18,6 +18,7 @@ from functools import partial
 
 from common.modes import Mode, StatusState
 from common.process_mon import Process_Monitor
+from common.system import restart_control
 from controller.runtime.heartbeat import stamp_control_heartbeat
 from controller.runtime.logic.cycle import smoke_cycle_times
 from controller.runtime.logic.fan import start_fan
@@ -792,7 +793,7 @@ class ControlMode:
         probe_complex = self.probe_complex
 
         # Setup Process Monitor and Start
-        monitor = Process_Monitor("control", ["supervisorctl", "restart", "control"], timeout=30)
+        monitor = Process_Monitor("control", restart_control, timeout=30)
         monitor.start_monitor()
 
         # Precondition for entering into main control loop

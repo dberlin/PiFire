@@ -189,6 +189,7 @@ class UpdateState(WireModel):
     remote_version: str
     web_ui_stale: bool
     web_ui_build_failed: bool
+    restart_pending: bool
 
 
 class UpdateCheck(WireModel):

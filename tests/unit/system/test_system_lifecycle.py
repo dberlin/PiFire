@@ -36,8 +36,14 @@ class _SyncThread:
 
 @pytest.fixture
 def sync_thread():
-    with mock.patch.object(cc.threading, "Thread", _SyncThread):
-        yield
+    #  time.sleep goes with the thread: every non-waiting restart now opens with
+    #  RESTART_GRACE_SECONDS, and running that for real would charge the suite
+    #  three seconds per test to assert nothing.
+    with (
+        mock.patch.object(cc.threading, "Thread", _SyncThread),
+        mock.patch.object(cc.time, "sleep") as slept,
+    ):
+        yield slept
 
 
 # --------------------------------------------------------------------------
@@ -66,47 +72,75 @@ def test_is_real_hardware_reads_settings_when_none_passed():
 # --------------------------------------------------------------------------
 
 
-def test_restart_control_invokes_supervisorctl_via_os_system():
+def test_restart_control_asks_supervisorctl_for_control(sync_thread):
     #  is_real_hardware is pinned rather than left to the ambient datastore:
     #  it reads settings["platform"]["real_hw"], so without this the test's
     #  meaning depends on whichever settings blob happens to be loaded.
+    ok = mock.Mock(returncode=0, stderr="")
     with (
         mock.patch.object(cc, "is_real_hardware", return_value=True),
-        mock.patch.object(cc.os, "system") as m,
+        mock.patch.object(cc.subprocess, "run", return_value=ok) as run,
     ):
         cc.restart_control()
-    m.assert_called_once_with("sleep 3 && sudo supervisorctl restart control &")
+
+    assert run.call_args.args[0] == ["sudo", "supervisorctl", "restart", "control"]
 
 
-def test_restart_webapp_invokes_supervisorctl_via_os_system():
+def test_restart_webapp_asks_supervisorctl_for_webapp(sync_thread):
+    ok = mock.Mock(returncode=0, stderr="")
     with (
         mock.patch.object(cc, "is_real_hardware", return_value=True),
-        mock.patch.object(cc.os, "system") as m,
+        mock.patch.object(cc.subprocess, "run", return_value=ok) as run,
     ):
         cc.restart_webapp()
-    m.assert_called_once_with("sleep 3 && sudo supervisorctl restart webapp &")
+
+    assert run.call_args.args[0] == ["sudo", "supervisorctl", "restart", "webapp"]
 
 
-def test_restart_control_noop_when_not_real_hardware():
+def test_every_restart_runs_through_the_same_mechanism(sync_thread):
+    """These three used to be two mechanisms. restart_control and
+    restart_webapp shelled out with `os.system("sleep 3 && ... &")` -- no
+    timeout, no DEVNULL on stdin, and a failure that went nowhere -- while
+    restart_scripts used subprocess with all three. A caller had no way to know
+    which behaviour it was getting from the name."""
+    ok = mock.Mock(returncode=0, stderr="")
+    seen = []
+    for call in (cc.restart_control, cc.restart_webapp, cc.restart_scripts):
+        with (
+            mock.patch.object(cc, "is_real_hardware", return_value=True),
+            mock.patch.object(cc.subprocess, "run", return_value=ok) as run,
+            mock.patch.object(cc.os, "system") as shelled,
+        ):
+            call()
+        seen.append(run.call_args)
+        shelled.assert_not_called()
+
+    for call_args in seen:
+        assert call_args.kwargs["stdin"] is subprocess.DEVNULL
+        assert call_args.kwargs["start_new_session"] is True
+        assert call_args.kwargs["timeout"] == 60
+
+
+def test_restart_control_noop_when_not_real_hardware(sync_thread):
     """These two were the only lifecycle calls in this module WITHOUT the
     is_real_hardware() gate that reboot_system, shutdown_system and
     restart_scripts all have -- so on a dev box they shelled out to sudo
     supervisorctl where every neighbouring function was a no-op."""
     with (
         mock.patch.object(cc, "is_real_hardware", return_value=False),
-        mock.patch.object(cc.os, "system") as m,
+        mock.patch.object(cc.subprocess, "run") as run,
     ):
         cc.restart_control()
-    m.assert_not_called()
+    run.assert_not_called()
 
 
-def test_restart_webapp_noop_when_not_real_hardware():
+def test_restart_webapp_noop_when_not_real_hardware(sync_thread):
     with (
         mock.patch.object(cc, "is_real_hardware", return_value=False),
-        mock.patch.object(cc.os, "system") as m,
+        mock.patch.object(cc.subprocess, "run") as run,
     ):
         cc.restart_webapp()
-    m.assert_not_called()
+    run.assert_not_called()
 
 
 # --------------------------------------------------------------------------
@@ -178,7 +212,7 @@ def test_restart_scripts_reports_a_refusal_without_raising(sync_thread, capsys):
         cc.restart_scripts()  # must not raise
 
     out = capsys.readouterr().out
-    assert "Failed to restart supervisor programs" in out
+    assert "Failed to restart supervisor program(s)" in out
     assert "refused connection" in out, "the reason is the only thing an operator can act on"
 
 
@@ -200,6 +234,78 @@ def test_restart_scripts_survives_a_missing_supervisorctl(sync_thread, capsys):
         cc.restart_scripts()  # must not raise
 
     assert "Error running supervisorctl" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------
+# wait=True -- for a caller that is about to exit
+# --------------------------------------------------------------------------
+
+
+def test_waiting_restart_does_not_use_a_thread_at_all():
+    """updater.py exits the moment publish_finished returns. A daemon thread
+    dies with its process, so the default path would never have run
+    supervisorctl -- the update would announce a restart and perform none,
+    which is exactly the bug wait=True exists for. No sync_thread fixture
+    here: the point is that threading is not reached."""
+    ok = mock.Mock(returncode=0, stderr="")
+    with (
+        mock.patch.object(cc, "is_real_hardware", return_value=True),
+        mock.patch.object(cc.subprocess, "run", return_value=ok) as run,
+        mock.patch.object(cc.threading, "Thread") as thread,
+    ):
+        cc.restart_scripts(wait=True)
+
+    thread.assert_not_called()
+    assert run.call_args.args[0] == ["sudo", "supervisorctl", "restart", "all"]
+
+
+def test_waiting_restart_skips_the_grace_period():
+    """The grace exists to let an in-flight response escape before the server
+    answering it dies. A caller that waits has no response to protect, and
+    sleeping would only delay a process whose whole job is now finished."""
+    ok = mock.Mock(returncode=0, stderr="")
+    with (
+        mock.patch.object(cc, "is_real_hardware", return_value=True),
+        mock.patch.object(cc.subprocess, "run", return_value=ok),
+        mock.patch.object(cc.time, "sleep") as slept,
+    ):
+        cc.restart_scripts(wait=True)
+
+    slept.assert_not_called()
+
+
+def test_a_non_waiting_restart_lets_the_response_out_first(sync_thread):
+    """Restarting `all` kills the webapp answering the request that asked for
+    it. Without the pause the client can lose the connection before the reply
+    lands, and a restart that worked looks like one that failed."""
+    ok = mock.Mock(returncode=0, stderr="")
+    with (
+        mock.patch.object(cc, "is_real_hardware", return_value=True),
+        mock.patch.object(cc.subprocess, "run", return_value=ok),
+    ):
+        cc.restart_scripts()
+
+    sync_thread.assert_called_once_with(cc.RESTART_GRACE_SECONDS)
+
+
+def test_a_waiting_restart_still_reports_a_refusal(capsys):
+    fail = mock.Mock(returncode=1, stderr="refused connection\n")
+    with (
+        mock.patch.object(cc, "is_real_hardware", return_value=True),
+        mock.patch.object(cc.subprocess, "run", return_value=fail),
+    ):
+        cc.restart_scripts(wait=True)  # must not raise
+
+    assert "refused connection" in capsys.readouterr().out
+
+
+def test_a_waiting_restart_is_still_gated_on_real_hardware():
+    with (
+        mock.patch.object(cc, "is_real_hardware", return_value=False),
+        mock.patch.object(cc.subprocess, "run") as run,
+    ):
+        cc.restart_scripts(wait=True)
+    run.assert_not_called()
 
 
 # --------------------------------------------------------------------------

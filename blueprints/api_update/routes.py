@@ -21,6 +21,7 @@ from common.persistence.control import (
     read_control,
 )
 from common.persistence.install_state import (
+    get_update_restart_pending,
     get_updater_install_status,
     set_updater_install_status,
 )
@@ -134,6 +135,13 @@ def update_state():
                 # nothing out of date, and a stale bundle can simply never have
                 # been built. This is what puts the build log on offer.
                 "web_ui_build_failed": last_build_failed(),
+                # Whether an update installed code these processes have not
+                # loaded. Set by a run that finished while the grill was lit and
+                # so could not restart anything; cleared at the webapp's own
+                # boot. Outlives the tab the update was started from, which is
+                # the whole point -- the restart prompt used to live only in the
+                # page's memory and vanished with a reload.
+                "restart_pending": get_update_restart_pending(),
             },
         )
     )

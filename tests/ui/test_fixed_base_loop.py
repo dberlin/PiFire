@@ -30,6 +30,7 @@ from unittest import mock
 
 import pytest
 
+from tests.ui._driver_helpers import block_power_actions
 from tests.ui.fixed_base_harness import make_base
 
 SAMPLE_IN_DATA = {
@@ -85,6 +86,7 @@ def _drive_one_iteration(base):
 
     with (
         mock.patch("os.system", side_effect=AssertionError("os.system must not be reached by _display_loop here")),
+        block_power_actions("_display_loop"),
         mock.patch("time.time", return_value=1_000_000.0),
         mock.patch("time.sleep", side_effect=_sleep_then_stop),
     ):

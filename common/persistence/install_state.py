@@ -9,6 +9,7 @@ _OS_INFO_KEY = "system:os_info"
 _WIZARD_INSTALL_KEY = "wizard:install"
 _WIZARD_STATUS_PREFIX = "wizard"
 _UPDATER_STATUS_PREFIX = "updater"
+_UPDATE_RESTART_PENDING_KEY = "updater:restart_pending"
 
 
 def _read_json_key_or_none(key):
@@ -73,3 +74,19 @@ def get_updater_install_status():
 def set_updater_install_status(percent, status, output):
     """Store updater installation percent, status, and output values."""
     _set_install_status(_UPDATER_STATUS_PREFIX, percent, status, output)
+
+
+def get_update_restart_pending():
+    """True when installed code is still waiting for a service restart.
+
+    Set by an update that finished while the grill was lit, where restarting
+    supervisor's programs would have dropped the fire. It outlives the browser
+    tab that started the update on purpose: the run's percent says what one
+    RUN did, and this says what the machine is still owed.
+    """
+    return bool(_read_json_key_or_none(_UPDATE_RESTART_PENDING_KEY))
+
+
+def set_update_restart_pending(pending):
+    """Record whether installed code is still waiting for a service restart."""
+    datastore.set_blob(_UPDATE_RESTART_PENDING_KEY, json.dumps(bool(pending)))

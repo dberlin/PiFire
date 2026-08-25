@@ -16,8 +16,8 @@ notifications (FakeNotifier.sent), display commands, grill calls and the final
 persisted control -- so we assert against those directly.
 
 SAFETY: these run a single per-mode work cycle via `run_work_cycle`; they never
-touch controller.py's Shutdown->Stop os.system path (the only os.system call in
-the controller lives in controller.py, not in any mode file exercised here).
+touch controller.py's Shutdown->Stop halt path (the only shutdown_system() call
+in the controller lives in controller.py, not in any mode file exercised here).
 """
 
 from controller.runtime.runner import ControllerUpdateResult

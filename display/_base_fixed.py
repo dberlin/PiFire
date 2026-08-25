@@ -17,7 +17,6 @@ PiFire Display Interface Library
  Imported Libraries
 """
 import logging
-import os
 import socket
 import time
 
@@ -27,6 +26,7 @@ from PIL import Image, ImageDraw, ImageFont
 from common.control_delta import control_delta
 from common.modes import Mode
 from common.persistence.control import enqueue_control_delta, read_control
+from common.system import reboot_system, shutdown_system
 from display._loggers import resolve_loggers
 
 """
@@ -1168,13 +1168,17 @@ class _DisplayBase:
                         control_delta(set_values={"updated": True, "mode": Mode.STOP}), origin="display"
                     )
 
+                    #  Through common rather than a shell of its own: it is the
+                    #  one place that owns these commands, it gates on real
+                    #  hardware, and it keeps the same grace period the `sleep
+                    #  3` gave -- which is what lets the message above be read.
                     if "Off" in selected:
                         self.display_text("Shutting Down...")
-                        os.system("sleep 3 && sudo shutdown -h now &")
+                        shutdown_system()
                     # elif 'Restart' in selected:
                     else:
                         self.display_text("Restarting...")
-                        os.system("sleep 3 && sudo reboot &")
+                        reboot_system()
 
                     self.display_command = None
                     self.menu["current"]["mode"] = "none"

@@ -1,8 +1,8 @@
 """Hermetic snapshot harness for the legacy fixed DisplayBase classes.
 
 Renders a base's `_display_*` methods to a PIL image (captured at the
-`_display_canvas` sink) and hashes the raw pixel bytes. os.system is
-neutralized because `_menu_display` shells out to `sudo reboot`.
+`_display_canvas` sink) and hashes the raw pixel bytes. The power actions are
+neutralized because `_menu_display` can reboot or halt the host.
 """
 
 import hashlib
@@ -10,6 +10,8 @@ import importlib
 from unittest import mock
 
 from PIL import ImageFont
+
+from tests.ui._driver_helpers import block_power_actions
 
 try:
     ImageFont.truetype("trebuc.ttf", 20)
@@ -20,7 +22,10 @@ except OSError:
 
 def make_base(module, rotation=0, units="F"):
     mod = importlib.import_module(module)
-    with mock.patch("os.system", side_effect=AssertionError("os.system blocked in snapshot harness")):
+    with (
+        mock.patch("os.system", side_effect=AssertionError("os.system blocked in snapshot harness")),
+        block_power_actions("snapshot harness"),
+    ):
         base = mod.DisplayBase(dev_pins={}, buttonslevel="HIGH", rotation=rotation, units=units, config={})
     base._captured = None
     base._display_canvas = lambda canvas: setattr(base, "_captured", canvas)
