@@ -969,7 +969,7 @@
     "x": 0,
     "y": 94,
     "w": 390,
-    "h": 2528,
+    "h": 750,
     "fontSize": "16px",
     "fontWeight": "400",
     "styles": {
@@ -1045,7 +1045,7 @@
       "align-items": "normal",
       "position": "static",
       "z-index": "auto",
-      "overflow": "visible",
+      "overflow": "auto",
       "transform": "none"
     }
   },
@@ -1599,7 +1599,7 @@
     "x": 0,
     "y": 300,
     "w": 390,
-    "h": 2322,
+    "h": 544,
     "fontSize": "16px",
     "fontWeight": "400",
     "styles": {

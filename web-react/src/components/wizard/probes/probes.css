@@ -254,6 +254,38 @@
   @apply flex justify-end gap-[10px] pt-[4px];
 }
 
+/* Devices and Ports side by side, so the default map (one device, four probes)
+   fits 1280x720 without handing the pane a scrollbar. Two columns only where
+   there is room: below this width the ports table's own min-content width
+   pushes past the viewport, so it stacks back to one column, which is exactly
+   the layout every other settings tab uses.
+
+   The wrapper exists rather than placing the two cards straight onto
+   .pf-section-body because that grid is the shared label/control/unit subgrid
+   every settings field lines up on (settings.css:84). Retargeting its columns
+   here would break .pf-field's subgrid on this tab alone. */
+.pf-probes-split {
+  @apply grid gap-[14px];
+  grid-column: 1 / -1;
+  /* minmax(0, 1fr), never a bare `1fr` and never an implicit auto track. The
+     cards' min-content width is the ports table's, which is far wider than a
+     phone: an auto-sized track adopts that floor and the card grows past this
+     wrapper. .pf-settings-content is overflow-y:auto, which computes overflow-x
+     to `auto` as well, so the result is a sideways scroll INSIDE the pane that
+     never reaches documentElement.scrollWidth -- a document-level overflow
+     check reports zero the whole time. */
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (min-width: 1000px) {
+  .pf-settings-content:has(.pf-probes-surface) {
+    @apply max-w-[1100px];
+  }
+  .pf-probes-split {
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    align-items: start;
+  }
+}
+
 /* Settings > Probes is also the all-role health details surface. Aux probes
    belong here rather than gaining fabricated dashboard cards. */
 .pf-probe-health-details {

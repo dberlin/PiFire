@@ -25,8 +25,23 @@
 .pf-shell-main .pf-fit {
   @apply absolute;
 }
+/* `height`, not `min-height`: settings.css:47 already declares
+   `overflow-y: auto` on .pf-settings-content, but a min-height floor leaves the
+   flex row free to grow past the pane, so that declaration never fired and
+   .pf-shell-main scrolled instead -- carrying the settings tab rail off the top
+   of the screen. A bounded height is what hands the scroll to the content pane
+   and pins the rail. min-height: 0 lets the pane shrink below its content, which
+   is the other half of making a flex child scrollable. */
 .pf-shell-main .pf-settings {
-  min-height: 100%;
+  height: 100%;
+  min-height: 0;
+}
+/* Eleven tabs plus the title clear 720p, but not the 480px-tall grill panel. */
+.pf-shell-main .pf-settings-nav {
+  overflow-y: auto;
+}
+.pf-shell-main .pf-settings-content {
+  min-height: 0;
 }
 
 /* ---- navbar ---- */

@@ -969,7 +969,7 @@
     "x": 0,
     "y": 56,
     "w": 1280,
-    "h": 2004,
+    "h": 664,
     "fontSize": "16px",
     "fontWeight": "400",
     "styles": {
@@ -1011,7 +1011,7 @@
     "x": 0,
     "y": 56,
     "w": 220,
-    "h": 2004,
+    "h": 664,
     "fontSize": "16px",
     "fontWeight": "400",
     "styles": {
@@ -1045,7 +1045,7 @@
       "align-items": "normal",
       "position": "static",
       "z-index": "auto",
-      "overflow": "visible",
+      "overflow": "auto",
       "transform": "none"
     }
   },
@@ -1599,7 +1599,7 @@
     "x": 220,
     "y": 56,
     "w": 720,
-    "h": 2004,
+    "h": 664,
     "fontSize": "16px",
     "fontWeight": "400",
     "styles": {

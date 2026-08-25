@@ -360,4 +360,42 @@ describe("ProbesTab", () => {
     expect(region).toHaveTextContent("Last reported: PROBE UNAVAILABLE");
     expect(screen.getByText("Report age at last update").closest("div")).toHaveTextContent("0s");
   });
+
+  // The health card is folded away when nothing has been reported, because the
+  // empty card is 95px of heading over one sentence and that is what keeps the
+  // default probe map off a scrollbar at 1280x720. The danger in a fold is that
+  // it swallows a fault, so the fold condition is the REPORT COUNT and nothing
+  // else -- never the state, never the severity. These two cases are the fold's
+  // safety gate: drop the count test and the fold stops saving anything; drop
+  // the fault test and a future "only show unhealthy" refinement could hide a
+  // confirmed open/short with no test objecting.
+  it("folds the health card away only when nothing at all has been reported", async () => {
+    renderTab(<ProbesTab />, { ...ctx(), thermocoupleHealth: [] }, CATALOG);
+
+    await screen.findByRole("region", { name: "Probe ports" });
+    expect(screen.queryByRole("region", { name: "Thermocouple health" })).toBeNull();
+    expect(screen.queryByText("No thermocouple health has been reported.")).toBeNull();
+  });
+
+  it("keeps the health card, expanded and legible, whenever anything is reported", async () => {
+    // A healthy probe is the weakest possible reason to render, and a confirmed
+    // open/short is the one that must never be missed.
+    for (const report of [
+      health("Primary", "Grill", "healthy", "none"),
+      health("Primary", "Grill", "suspected", "notify_only"),
+      health("Primary", "Grill", "confirmed", "stopped"),
+    ]) {
+      renderTab(<ProbesTab />, { ...ctx(), thermocoupleHealth: [report] }, CATALOG);
+
+      const region = await screen.findByRole("region", { name: "Thermocouple health" });
+      // Rendered, not merely present: a collapsed card would have the heading
+      // and no detail article behind it.
+      expect(region).toHaveTextContent("Primary · Grill");
+      expect(region.querySelector(".pf-probe-health-detail")).not.toBeNull();
+      if (report.report.state === "confirmed") {
+        expect(region).toHaveTextContent("open, short");
+      }
+      cleanup();
+    }
+  });
 });

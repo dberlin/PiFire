@@ -1045,7 +1045,7 @@
       "align-items": "normal",
       "position": "static",
       "z-index": "auto",
-      "overflow": "visible",
+      "overflow": "auto",
       "transform": "none"
     }
   },

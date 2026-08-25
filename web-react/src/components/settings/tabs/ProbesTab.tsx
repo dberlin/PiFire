@@ -191,17 +191,23 @@ export function ProbesTab() {
         />
         <p className="pf-settings-hint">{POLICY_IMPACT[working.policy]}</p>
 
-        <DevicesCard
-          probeMap={working.probeMap}
-          modules={catalog.modules}
-          baseUrl={BASE_URL}
-          onChange={(probeMap) => setWorking((draft) => ({ ...draft, probeMap }))}
-        />
-        <PortsCard
-          probeMap={working.probeMap}
-          profiles={readLiveProfiles(settings)}
-          onChange={(probeMap) => setWorking((draft) => ({ ...draft, probeMap }))}
-        />
+        {/* Devices and Ports sit side by side above 1000px (probes.css). The
+            wrapper is what owns those two columns -- .pf-section-body's own
+            grid is the shared label/control/unit subgrid and cannot be
+            retargeted here without breaking every field on the tab. */}
+        <div className="pf-probes-split">
+          <DevicesCard
+            probeMap={working.probeMap}
+            modules={catalog.modules}
+            baseUrl={BASE_URL}
+            onChange={(probeMap) => setWorking((draft) => ({ ...draft, probeMap }))}
+          />
+          <PortsCard
+            probeMap={working.probeMap}
+            profiles={readLiveProfiles(settings)}
+            onChange={(probeMap) => setWorking((draft) => ({ ...draft, probeMap }))}
+          />
+        </div>
 
         <div className="pf-settings-actions">
           <button
@@ -232,12 +238,20 @@ export function ProbesTab() {
         </div>
       </Section>
 
-      <section className="pf-probe-health-details" aria-label="Thermocouple health">
-        <h2>Thermocouple health</h2>
-        {thermocoupleHealth.length === 0 ? (
-          <p className="pf-settings-hint">No thermocouple health has been reported.</p>
-        ) : (
-          thermocoupleHealth.map((item) => {
+      {/* Folded away when there is nothing to report, which is what lets the
+          default map fit 1280x720 without a scrollbar: the empty card is 95px
+          of heading over one sentence.
+
+          The condition is the REPORT COUNT and nothing else, so this cannot
+          hide a fault -- a faulted probe is a report, and any report at all
+          renders the card. It never collapses a card that has content, and
+          there is no default-collapsed state to expand. Pinned by
+          ProbesTab.test.tsx ("keeps the health card ... whenever anything is
+          reported"). */}
+      {thermocoupleHealth.length > 0 && (
+        <section className="pf-probe-health-details" aria-label="Thermocouple health">
+          <h2>Thermocouple health</h2>
+          {thermocoupleHealth.map((item) => {
             const health = projectProbeHealth(item);
             const stateCopy = health.state
               .replaceAll("_", " ")
@@ -312,9 +326,9 @@ export function ProbesTab() {
                 </dl>
               </article>
             );
-          })
-        )}
-      </section>
+          })}
+        </section>
+      )}
     </div>
   );
 }
