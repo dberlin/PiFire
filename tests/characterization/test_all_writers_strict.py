@@ -72,7 +72,6 @@ this file exercises):
 import copy
 import json
 import os
-import tempfile
 import types
 from unittest import mock
 
@@ -285,48 +284,6 @@ def sio(ds):
         mock.patch.object(socket_io, "restart_scripts", side_effect=_rec("restart_scripts")),
     ):
         yield types.SimpleNamespace(mod=socket_io, calls=calls)
-
-
-def test_socketio_update_settings_writes_strict(sio):
-    payload = json.dumps({"globals": {"grill_name": "Strict Socket"}})
-    resp = sio.mod._post_app_data("update_action", "settings", payload)
-    assert resp["result"] == "OK"
-    assert read_settings()["globals"]["grill_name"] == "Strict Socket"
-    _assert_strict()
-
-
-def test_socketio_admin_factory_defaults_writes_strict(sio):
-    resp = sio.mod._post_app_data("admin_action", "factory_defaults")
-    assert resp["result"] == "OK"
-    # FIXED: the handler used to `rm settings.json` before reseeding -- a dead
-    # call against a file that does not exist once SQLite is the store.
-    assert not any(c[0] == "os.system" and "settings.json" in c[1] for c in sio.calls), sio.calls
-    _assert_strict()
-
-
-def test_socketio_units_f_writes_strict(sio):
-    settings = read_settings()
-    settings["globals"]["units"] = "C"
-    write_settings_store(settings)
-    resp = sio.mod._post_app_data("units_action", "f_units")
-    assert resp["result"] == "OK"
-    assert read_settings()["globals"]["units"] == "F"
-    _assert_strict()
-
-
-def test_socketio_units_c_writes_strict(sio):
-    resp = sio.mod._post_app_data("units_action", "c_units")
-    assert resp["result"] == "OK"
-    assert read_settings()["globals"]["units"] == "C"
-    _assert_strict()
-
-
-def test_socketio_probe_update_writes_strict(sio):
-    payload = json.dumps({"probes_action": {"label": "Grill", "name": "Strict Grill"}})
-    resp = sio.mod._post_app_data("probes_action", "probe_update", payload)
-    assert resp["result"] == "OK"
-    assert read_settings()["probe_settings"]["probe_map"]["probe_info"][0]["name"] == "Strict Grill"
-    _assert_strict()
 
 
 # =====================================================================

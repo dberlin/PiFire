@@ -169,12 +169,19 @@ def test_delete_removes_the_file(client, folders):
 
 
 @pytest.mark.parametrize("hostile", ["../victim.pfrecipe", "/etc/hosts", "", "Nope.pfrecipe"])
-def test_delete_refuses_traversal_and_unknown_names(client, folders, tmp_path, hostile):
-    victim = tmp_path / "victim.pfrecipe"
-    victim.write_text("do not delete me")
+def test_delete_refuses_traversal_and_unknown_names(client, folders, hostile):
+    #  The decoy has to sit where `../` actually RESOLVES -- the parent of the
+    #  recipe folder -- or nothing could reach it and `exists()` passes whatever
+    #  the route does. It used to be written into pytest's unrelated tmp_path.
+    _history, recipe_dir = folders
+    victim = os.path.join(os.path.dirname(recipe_dir.rstrip("/")), "victim.pfrecipe")
+    with open(victim, "w") as handle:
+        handle.write("do not delete me")
+
     resp = client.post("/api/files/recipes/delete", json={"file": hostile})
+
     assert resp.status_code in (400, 404)
-    assert victim.exists()
+    assert os.path.exists(victim)
 
 
 def test_delete_with_no_body_is_400(client, folders):

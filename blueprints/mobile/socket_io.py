@@ -13,9 +13,7 @@ Description: This library provides socketio functions for app.py
  Imported Modules
 ==============================================================================
 """
-import json
 import math
-import os
 import threading
 import time
 from base64 import b64encode
@@ -24,7 +22,6 @@ from threading import Event
 
 from flask import request
 from pydantic import ValidationError
-from werkzeug.utils import secure_filename
 
 from app import socketio
 from common.app import (
@@ -36,23 +33,15 @@ from common.app import (
 )
 from common.common import (
     ErrorKind,
-    convert_settings_units,
-    epoch_to_time,
     flush_events_records,
     read_generic_json,
-    write_log,
 )
-from common.control_delta import NOTIFY_POST_KEYS, ControlDeltaError, control_delta, notify_ops_from_post
-from common.defaults import default_control, default_settings
-from common.log_actions import clear_events_log
+from common.control_delta import control_delta
 from common.modes import Mode
-from common.pellets_actions import clear_pellet_db, dispatch_pellet_action
 from common.persistence.control import (
     enqueue_control_delta,
-    flush_control,
     read_control,
 )
-from common.persistence.history import flush_history, request_history_clear
 from common.persistence.runtime import (
     CONTROL_HEARTBEAT_STALE_AFTER,
     flush_connected_users,
@@ -69,18 +58,10 @@ from common.persistence.runtime import (
     seed_pellets_store,
     seed_settings_store,
     write_connected_user,
-    write_pellet_db,
 )
-from common.settings_schema import SettingsValidationError, apply_settings_delta
 from common.system import (
     gather_system_info,
-    reboot_system,
-    restart_control,
-    restart_scripts,
-    restart_webapp,
-    shutdown_system,
 )
-from common.web_contracts.control import ControlPatchRequest
 from common.web_contracts.core import (
     DashSocketPayload,
     PelletSocketPayload,
@@ -203,11 +184,6 @@ def listen_app_data(force=False):
 @socketio.on("get_app_data")
 def get_app_data(action=None, arg01=None, arg02=None):
     return _get_app_data(action, arg01, arg02)
-
-
-@socketio.on("post_app_data")
-def post_app_data(action=None, type=None, json_data=None):
-    return _post_app_data(action, type, json_data)
 
 
 """
@@ -632,326 +608,6 @@ def _get_app_data(action=None, arg01=None, arg02=None):
     if handler is None:
         return _response(result="Error", message="Error: Received request without valid action")
     return handler(settings, arg01, arg02)
-
-
-def _post_app_data_update(settings, type, request):
-    if type == "settings":
-        control = read_control()
-        for key in request:
-            if key in settings:
-                settings = apply_settings_delta(settings, request)
-                _write_settings(settings, control)
-                return _response(result="OK", data=settings)
-            else:
-                return _response(result="Error", message="Error: Key not found in settings")
-    elif type == "control":
-        control = read_control()
-        if "timer" in request:
-            # start/paused/end are one countdown and the control code branches
-            # on their combinations, so a timer state computed from a read that
-            # cannot see the write queue is exactly the cross-writer race this
-            # door used to feed. The timer_action commands queue ops the drain
-            # resolves against live state; use those. Mirrors _api_post_control.
-            return _response(
-                result="Error",
-                message="Error: control['timer'] cannot be set here; use the timer_action commands",
-            )
-        for key in request:
-            # NOTIFY_POST_KEYS widens the membership test because `notify_updates`
-            # is a wire key, not a control member -- it addresses entries INSIDE
-            # control["notify_data"] rather than naming a key of its own.
-            if key in control or key in NOTIFY_POST_KEYS:
-                # A posted patch is ALREADY a statement of intent -- the client
-                # sent only what it means -- so it is WRAPPED as a delta, not
-                # rewritten. The notify keys are the exception, and
-                # notify_ops_from_post() is shared with _api_post_control so the
-                # two doors cannot drift.
-                try:
-                    patch = ControlPatchRequest.model_validate(request, strict=True)
-                    payload, ops = notify_ops_from_post(patch.model_dump(mode="python", exclude_unset=True))
-                    enqueue_control_delta(control_delta(set_values=payload, ops=ops), origin="app-socketio")
-                except (ControlDeltaError, ValidationError) as exc:
-                    return _response(result="Error", message=f"Error: {exc}")
-                return _response(result="OK", data=control)
-            else:
-                return _response(result="Error", message="Error: Key not found in control")
-    else:
-        return _response(result="Error", message="Error: Received request without valid type")
-
-
-def _post_app_data_admin(settings, type, request):
-    if type == "clear_history":
-        write_log("Clearing History Log.")
-        request_history_clear()
-        return _response(result="OK")
-    elif type == "clear_events":
-        write_log("Clearing Events Log.")
-        clear_events_log()
-        return _response(result="OK")
-    elif type == "clear_pelletdb":
-        write_log("Clearing Pellet Database.")
-        clear_pellet_db()
-        return _response(result="OK")
-    elif type == "clear_pelletdb_log":
-        pelletdb = read_pellets_store()
-        pelletdb["log"].clear()
-        write_pellet_db(pelletdb)
-        write_log("Clearing Pellet Database Log.")
-        return _response(result="OK")
-    elif type == "factory_defaults":
-        flush_history()
-        flush_control()
-        # This door never reset pellets, not even pre-SQLite -- only the admin
-        # page had the `rm pelletdb.json`. Both say "factory defaults", so both
-        # do the same thing, through the same clear_pellet_db().
-        clear_pellet_db()
-        settings = default_settings()
-        control = default_control()
-        _write_settings(settings, control)
-        write_log("Resetting Settings, Control, History and Pellet Database to factory defaults.")
-        return _response(result="OK")
-    elif type == "reboot":
-        write_log("Admin: Reboot")
-        try:
-            reboot_system()  # Use the improved function from common
-        except Exception as e:
-            write_log(f"Admin: Reboot failed: {e}")
-            # Fallback to original method
-            os.system("sleep 3 && sudo reboot &")
-        return _response(result="OK")
-    elif type == "shutdown":
-        write_log("Admin: Shutdown")
-        try:
-            shutdown_system()  # Use the improved function from common
-        except Exception as e:
-            write_log(f"Admin: Shutdown failed: {e}")
-            # Fallback to original method
-            os.system("sleep 3 && sudo shutdown -h now &")
-        return _response(result="OK")
-    elif type == "restart_control":
-        write_log("Admin: Restart Control")
-        restart_control()
-        return _response(result="OK")
-    elif type == "restart_webapp":
-        write_log("Admin: Restart WebApp")
-        restart_webapp()
-        return _response(result="OK")
-    elif type == "restart_supervisor":
-        write_log("Admin: Restart Supervisor")
-        restart_scripts()
-        return _response(result="OK")
-    else:
-        return _response(result="Error", message="Error: Received request without valid type")
-
-
-def _post_app_data_units(settings, type, request):
-    if type == "f_units" and settings["globals"]["units"] == "C":
-        settings = convert_settings_units("F", settings)
-        control = read_control()
-        _write_settings(settings, control)
-        control["updated"] = True
-        control["units_change"] = True
-        enqueue_control_delta(control_delta(set_values={"updated": True, "units_change": True}), origin="app-socketio")
-        write_log("Changed units to Fahrenheit")
-        return _response(result="OK", data=settings)
-    elif type == "c_units" and settings["globals"]["units"] == "F":
-        settings = convert_settings_units("C", settings)
-        control = read_control()
-        _write_settings(settings, control)
-        control["updated"] = True
-        control["units_change"] = True
-        enqueue_control_delta(control_delta(set_values={"updated": True, "units_change": True}), origin="app-socketio")
-        write_log("Changed units to Celsius")
-        return _response(result="OK", data=settings)
-    else:
-        return _response(result="Error", message="Error: Units could not be changed")
-
-
-def _post_app_data_pellets(settings, type, request):
-    pelletdb = read_pellets_store()
-    return dispatch_pellet_action(
-        pelletdb,
-        type,
-        request["pellets_action"],
-        invalid_action_message="Error: Received request without valid type",
-    )
-
-
-def _post_app_data_timer(settings, type, request):
-    control = read_control()
-    index = None
-    for i, notify_obj in enumerate(control["notify_data"]):
-        if notify_obj["type"] == "timer":
-            index = i
-            break
-    if index is None:
-        return _response(result="Error", message="Error: No timer entry found")
-    # This handler is the second, independent implementation of the same timer
-    # grammar common/api_commands.py::_cmd_set_timer serves. Both now emit the
-    # SAME ops (common/control_delta.py), so the two doors can no longer drift
-    # and two timer gestures in one control cycle compose instead of racing.
-    # The `index` lookup above survives only for its no-timer-entry guard; the
-    # ops locate the entry by type themselves.
-    if type == "start_timer":
-        if control["timer"]["paused"] == 0:
-            # The ranges are required for a FRESH start, and that answer is a
-            # request-time one (it is in the payload, not in control state).
-            if "hours_range" in request["timer_action"] and "minutes_range" in request["timer_action"]:
-                now = time.time()
-                seconds = request["timer_action"]["hours_range"] * 60 * 60
-                seconds = seconds + request["timer_action"]["minutes_range"] * 60
-                write_log("Timer started.  Ends at: " + epoch_to_time(now + seconds))
-                enqueue_control_delta(
-                    control_delta(
-                        ops=[
-                            {
-                                "op": "timer.start_with_options",
-                                "at": now,
-                                "seconds": seconds,
-                                "shutdown": request["timer_action"]["timer_shutdown"],
-                                "keep_warm": request["timer_action"]["timer_keep_warm"],
-                            }
-                        ]
-                    ),
-                    origin="app-socketio",
-                )
-                return _response(result="OK")
-            else:
-                return _response(result="Error", message="Error: Start time not specified")
-        else:
-            # Unpause. As before, the ranges are ignored on this path; the drain
-            # picks resume-vs-fresh-start from live state.
-            now = time.time()
-            write_log(
-                "Timer unpaused.  Ends at: "
-                + epoch_to_time((control["timer"]["end"] - control["timer"]["paused"]) + now)
-            )
-            enqueue_control_delta(
-                control_delta(ops=[{"op": "timer.start_or_resume", "at": now, "seconds": None}]), origin="app-socketio"
-            )
-            return _response(result="OK")
-    elif type == "pause_timer":
-        write_log("Timer paused.")
-        enqueue_control_delta(control_delta(ops=[{"op": "timer.pause", "at": time.time()}]), origin="app-socketio")
-        return _response(result="OK")
-    elif type == "stop_timer":
-        write_log("Timer stopped.")
-        enqueue_control_delta(control_delta(ops=[{"op": "timer.clear"}]), origin="app-socketio")
-        return _response(result="OK")
-    else:
-        return _response(result="Error", message="Error: Received request without valid type")
-
-
-def _post_app_data_recipes(settings, type, request):
-    if type == "recipe_delete":
-        if request["recipes_action"]["filename"]:
-            filename = request["recipes_action"]["filename"]
-            # Guard against command injection / path traversal: only delete a
-            # bare filename that resolves to a real file directly inside
-            # recipe_folder. Mirrors blueprints/recipes/routes.py's
-            # _recipes_json_deletefile, this handler's already-hardened HTTP
-            # sibling.
-            safe_name = secure_filename(filename)
-            filepath = os.path.join(recipe_folder, safe_name)
-            if safe_name and os.path.isfile(filepath):
-                os.remove(filepath)
-            return _response(result="OK")
-    elif type == "recipe_start":
-        if request["recipes_action"]["filename"]:
-            filename = request["recipes_action"]["filename"]
-            # recipe.filename is stated as a nested `set`, which deep-merges --
-            # step/step_data are the control loop's and are not touched here.
-            enqueue_control_delta(
-                control_delta(
-                    set_values={
-                        "updated": True,
-                        "mode": Mode.RECIPE,
-                        "recipe": {"filename": recipe_folder + filename},
-                    }
-                ),
-                origin="app-socketio",
-            )
-            return _response(result="OK")
-    else:
-        return _response(result="Error", message="Error: Received request without valid type")
-
-
-def _post_app_data_probes(settings, type, request):
-    if type == "probe_update":
-        if all(v in ("name", "label", "profile_id", "enabled") for v in request["probes_action"]):
-            control = read_control()
-            return _update_probe_config(settings, control, request)
-        else:
-            return _response(result="Error", message="Error: Missing required argument, probe cannot be updated")
-    else:
-        return _response(result="Error", message="Error: Received request without valid type")
-
-
-def _post_app_data_notify(settings, type, request):
-    if type == "notify_update":
-        if "label" in request["notify_action"]:
-            control = read_control()
-            return _update_notify_data(control, request)
-        else:
-            return _response(result="Error", message="Error: Request missing probe label")
-    else:
-        return _response(result="Error", message="Error: Received request without valid type")
-
-
-_POST_APP_DATA_DISPATCH = {
-    "update_action": _post_app_data_update,
-    "admin_action": _post_app_data_admin,
-    "units_action": _post_app_data_units,
-    "pellets_action": _post_app_data_pellets,
-    "timer_action": _post_app_data_timer,
-    "recipes_action": _post_app_data_recipes,
-    "probes_action": _post_app_data_probes,
-    "notify_action": _post_app_data_notify,
-}
-
-
-# pellets_action/timer_action/recipes_action/probes_action/notify_action
-# subscript request["..._action"] unconditionally (not via .get()), so an
-# empty dict would still raise KeyError. update_action/admin_action/
-# units_action either don't touch `request` at all or only iterate its
-# keys, so an empty dict degrades gracefully for them (see the pinned
-# "empty settings/control request returns None" tests below).
-_ACTIONS_REQUIRING_JSON_DATA = {
-    "pellets_action",
-    "timer_action",
-    "recipes_action",
-    "probes_action",
-    "notify_action",
-}
-
-
-def _post_app_data(action=None, type=None, json_data=None):
-    settings = read_settings_store()
-
-    handler = _POST_APP_DATA_DISPATCH.get(action)
-    if handler is None:
-        return _response(result="Error", message="Error: Received request without valid action")
-
-    if json_data is not None:
-        request = json.loads(json_data)
-    elif action in _ACTIONS_REQUIRING_JSON_DATA:
-        # Bail out with the same Error envelope style used everywhere else
-        # in this module, before ever calling a handler that would crash
-        # trying to subscript a missing key.
-        return _response(result="Error", message="Error: Received request without JSON data")
-    else:
-        request = {}
-
-    try:
-        return handler(settings, type, request)
-    except SettingsValidationError as exc:
-        # Single choke point for every _write_settings()/
-        # save_settings_and_flag_update() call reachable from this dispatcher:
-        # the settings tree failed strict validation and was NOT
-        # persisted. Same {"result": "Error", "message": ...} envelope every
-        # other failure path in this module already returns -- no crash back
-        # to the socket.io client.
-        return _response(result="Error", message="Error: Settings update rejected: " + "; ".join(exc.errors))
 
 
 def _get_probe_data(probe_type, settings, current, probe_device_info, notify_data):

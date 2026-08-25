@@ -307,58 +307,6 @@ def test_post_control_rejects_a_malformed_notify_update(client):
     assert c.SqliteQueue("queue_control_write").length() == 0
 
 
-def test_socket_control_door_takes_notify_updates_too(sio):
-    """`notify_updates` is a WIRE key, not a control member, so this door's
-    "key must exist in control" test had to learn about it."""
-    update = {"label": "Grill", "type": "probe", "fields": {"req": True, "target": 165}}
-    resp = sio._post_app_data("update_action", "control", json.dumps({"notify_updates": [update]}))
-    assert resp["result"] == "OK"
-    control_persistence.execute_control_writes()
-    assert _notify_entry("Grill", "probe")["target"] == 165
-
-
-def test_socket_control_door_rejects_a_timer_value(sio):
-    resp = sio._post_app_data("update_action", "control", json.dumps({"timer": {"start": 0, "paused": 0, "end": 0}}))
-    assert resp["result"] == "Error"
-    assert "timer" in resp["message"]
-    assert c.SqliteQueue("queue_control_write").length() == 0
-
-
-def test_socket_control_door_returns_validation_envelope_for_internal_cook_id(sio):
-    response = sio._post_app_data(
-        "update_action",
-        "control",
-        json.dumps({"cook_id": "client-selected"}),
-    )
-
-    assert response["result"] == "Error"
-    assert "cook_id" in response["message"]
-    assert c.SqliteQueue("queue_control_write").length() == 0
-
-
-def test_socket_control_door_still_accepts_ordinary_members(sio):
-    assert sio._post_app_data("update_action", "control", json.dumps({"s_plus": True}))["result"] == "OK"
-    control_persistence.execute_control_writes()
-    assert read_control()["s_plus"] is True
-
-
-def test_socket_timer_stop_then_pause_leaves_the_timer_stopped(sio):
-    """The socket door is a SECOND implementation of the same timer grammar
-    common/api_commands.py serves. Both now emit the same ops, so this pair
-    composes here exactly as it does over REST."""
-    control = read_control()
-    control["timer"] = {"start": 1000.0, "paused": 0, "end": 2000.0}
-    control_persistence.write_control_snapshot(control, origin="seed")
-    c.SqliteQueue("queue_control_write").flush()
-
-    payload = json.dumps({"timer_action": {}})
-    assert sio._post_app_data("timer_action", "stop_timer", payload)["result"] == "OK"
-    assert sio._post_app_data("timer_action", "pause_timer", payload)["result"] == "OK"
-    control_persistence.execute_control_writes()
-
-    assert read_control()["timer"] == {"start": 0, "paused": 0, "end": 0}
-
-
 def _notify_entry(label, type_):
     return next(e for e in read_control()["notify_data"] if e["label"] == label and e["type"] == type_)
 
