@@ -14,13 +14,12 @@ power the machine off, and it stays that way.
 import datetime
 import os
 import pathlib
-import re
 import sqlite3
 import tempfile
 import zipfile
 
-from common import datastore
-from common.common import LOG_DIR, read_generic_json
+from common import datastore, log_actions
+from common.common import read_generic_json
 from common.system import gather_system_info
 
 #: backup_settings() writes PiFire_<ts>.json and backup_pellet_db() writes
@@ -33,9 +32,11 @@ _BACKUP_PREFIXES = {"settings": "PiFire_", "pelletdb": "PelletDB_"}
 #: The two kinds a client may name. Exposed so routes validate against one list.
 BACKUP_KINDS = frozenset(_BACKUP_PREFIXES)
 
-#: Derived from the one place logging resolves its directory, so this surface
-#: cannot end up listing a different folder than the one being written to.
-LOG_FOLDER = os.path.join(LOG_DIR, "")
+#: Owned by common/log_actions.py, which every transport shares. Re-bound here
+#: rather than read through the module so this surface keeps its own name to
+#: resolve: every helper below does `folder or LOG_FOLDER` and passes the result
+#: down explicitly, which is what lets a test repoint just this surface.
+LOG_FOLDER = log_actions.LOG_FOLDER
 
 
 def list_backups(folder):
@@ -65,18 +66,8 @@ def list_logs(folder=None):
         return []
 
 
-#: A log family member is `<stem>.log`, or `<stem>.log.<n>` once rotated.
-#: Anything else in the folder -- logfiles.txt, stray notes -- is not a log and
-#: is not offered.
-_LOG_MEMBER = re.compile(r"^(?P<stem>.+)\.log(?:\.(?P<index>\d+))?$")
-
-
 def list_log_families(folder=None):
-    """{stem: [member filenames, OLDEST FIRST]}.
-
-    RotatingFileHandler shifts suffixes upward on rollover -- `x.log` becomes
-    `x.log.1`, `x.log.1` becomes `x.log.2` -- so the highest-numbered member is
-    the oldest and sorts first. `x.log` itself is index 0 and sorts last.
+    """{stem: [member filenames, OLDEST FIRST]}; see common.log_actions.
 
     list_logs() above deliberately keeps its flat `.log`-only contract: the
     admin page's LogsCard is built against it. This is the view that can see a
@@ -84,21 +75,7 @@ def list_log_families(folder=None):
 
     `folder` resolves at call time; see list_logs.
     """
-    folder = folder or LOG_FOLDER
-    try:
-        names = os.listdir(folder)
-    except OSError:
-        return {}
-    families = {}
-    for name in names:
-        match = _LOG_MEMBER.match(name)
-        if match:
-            index = int(match["index"] or 0)
-            families.setdefault(match["stem"], []).append((index, name))
-    return {
-        stem: [name for _, name in sorted(members, key=lambda pair: -pair[0])]
-        for stem, members in sorted(families.items())
-    }
+    return log_actions.list_log_families(folder or LOG_FOLDER)
 
 
 def stitch_family(stem, folder=None):
@@ -179,78 +156,24 @@ def state_payload(settings, control, backup_folder):
     }
 
 
-def _clear_family(folder, members):
-    """Empty one log family; return the member names that were handled.
-
-    The live member is TRUNCATED, never unlinked. create_logger gives every
-    logger a RotatingFileHandler, and on POSIX os.remove only drops the
-    directory entry: the handler's descriptor stays valid and goes on appending
-    to an orphaned inode. Unlinking therefore looks like it worked and is not --
-    the file the viewer reads never fills again, and the bytes are not reclaimed
-    until the process exits. control.py and display_process.py hold their own
-    handlers on these same files and this process cannot reopen them, so the
-    only clear that reaches all three is one through the inode they share.
-
-    Truncating is safe for those handlers because they append: once the file is
-    empty the next write lands at offset 0 rather than leaving a sparse hole
-    where the old bytes were.
-
-    Rotated members are unlinked. Nothing holds them open, and truncating them
-    would leave empty files sitting in the folder forever.
-    """
-    handled = []
-    for name in members:
-        path = os.path.join(folder, name)
-        match = _LOG_MEMBER.match(name)
-        try:
-            if match and match["index"]:
-                os.remove(path)
-            else:
-                #  "r+b", not "w": "w" would CREATE the file when none exists,
-                #  manufacturing an empty log for a process that never wrote one.
-                with open(path, "r+b") as handle:
-                    handle.truncate(0)
-            handled.append(name)
-        except OSError:
-            continue
-    return handled
-
-
 def clear_events_log(folder=None):
-    """Empty the event log in BOTH stores.
+    """Empty the event log in BOTH stores; see common.log_actions.
 
-    Flask runs `os.system("rm ./logs/events.log")` for this. The paths are built
-    here rather than handed to a shell -- no interpolation, no shell, and a
-    missing file is success rather than a silently swallowed `rm` error.
-
-    Three things that single `rm` misses:
-
-    - Rotated members. `events.log.1` and its siblings hold most of the history,
-      so removing only `events.log` leaves the bulk of it on disk.
-    - The database. Every logger create_logger builds writes to a
-      RotatingFileHandler AND a SqliteLogHandler, so clearing one sink alone
-      leaves the other holding what the user asked to be rid of.
-    - The open descriptor. `rm` unlinks a file the running process still holds
-      open, so events written afterwards vanish into an orphaned inode. See
-      _clear_family, which truncates the live member instead.
+    Flask runs `os.system("rm ./logs/events.log")` for this, and so did the
+    mobile Socket.IO surface. Three things that single `rm` misses -- rotated
+    members, the database rows, and the descriptor the running process still
+    holds open -- are handled once, in the shared action.
 
     Returns True: _MAINTENANCE_ACTIONS dispatches this and the admin page's
     MaintenanceCard is built against the resulting response shape.
 
     `folder` resolves at call time; see list_logs.
     """
-    folder = folder or LOG_FOLDER
-    _clear_family(folder, list_log_families(folder).get("events", []))
-    datastore.clear_log("events")
-    return True
+    return log_actions.clear_events_log(folder or LOG_FOLDER)
 
 
 def delete_logs(folder=None):
-    """Clear every member of every log family, reporting what was handled.
-
-    Flask runs `os.system("rm logs/*.log")` inside a bare `except:`, so a
-    failure is indistinguishable from success. This enumerates server-side and
-    names what it cleared.
+    """Clear every member of every log family; see common.log_actions.
 
     Rotated members are included. Deleting only `*.log` left the backups on
     disk, so the log viewer still had content to show after a "Delete All" --
@@ -258,16 +181,11 @@ def delete_logs(folder=None):
 
     "Cleared", not "removed", for the live member of each family: it is
     truncated in place so that handlers already holding it open keep writing
-    where the viewer looks. _clear_family has the full reasoning. The reported
-    list still names it -- the user asked for that log to be empty, and it is.
+    where the viewer looks.
 
     `folder` resolves at call time; see list_logs.
     """
-    folder = folder or LOG_FOLDER
-    removed = []
-    for members in list_log_families(folder).values():
-        removed.extend(_clear_family(folder, members))
-    return sorted(removed)
+    return log_actions.clear_all_logs(folder or LOG_FOLDER)
 
 
 def _archive_log_families(archive, folder, prefix=""):

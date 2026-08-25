@@ -393,10 +393,34 @@ def test_post_admin_clear_history_is_accepted_and_durable_while_control_is_down(
     assert SqliteQueue("queue_systemq").list() == [["clear_history"]]
 
 
-def test_post_admin_clear_events(sio):
+def test_post_admin_clear_events(sio, tmp_path, monkeypatch):
+    """FIXED: this used to run `os.system("rm ./logs/events.log")`.
+
+    Three defects in one line. It shelled out; it left the rotated members and
+    the database rows behind; and it unlinked a file the running process still
+    holds open through a RotatingFileHandler, so every event written afterwards
+    went into an orphaned inode instead of the file the viewer reads. It now
+    goes through the same shared action the admin panel uses.
+    """
+    import os as _os
+
+    from common import log_actions
+
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    (log_dir / "events.log").write_text("noise\n")
+    (log_dir / "events.log.1").write_text("older\n")
+    monkeypatch.setattr(log_actions, "LOG_FOLDER", str(log_dir) + _os.sep)
+    datastore.execute_write("INSERT INTO logs(name, ts, message) VALUES(?,?,?)", ("events", 0, "row"))
+
     resp = sio.mod._post_app_data("admin_action", "clear_events")
+
     assert resp["result"] == "OK"
-    assert ("os.system", "rm ./logs/events.log") in sio.calls
+    assert [call for call in sio.calls if call[0] == "os.system"] == []
+    #  Emptied in place, not unlinked -- see common/log_actions.clear_family.
+    assert (log_dir / "events.log").read_text() == ""
+    assert not (log_dir / "events.log.1").exists()
+    assert datastore.read_log("events") == []
 
 
 def test_post_admin_clear_pelletdb(sio):

@@ -48,8 +48,9 @@ this file exercises):
     blueprints.api_admin.routes.restart_scripts and the global os.system,
     mirroring tests/web/test_api_admin_backups.py's `env` fixture. Nothing
     destructive runs.
-  - blueprints/mobile/socket_io.py: os.system() (clear_events/
-    recipe_delete) + reboot_system()/shutdown_system()/
+  - blueprints/mobile/socket_io.py: os.system() (recipe_delete; clear_events
+    goes through common/log_actions.py now, no shell)
+    + reboot_system()/shutdown_system()/
     restart_control()/restart_webapp()/restart_scripts(). The `sio` fixture
     below patches the same module-level names, mirroring
     tests/web/test_socketio_app_data.py's `sio` fixture. Nothing destructive

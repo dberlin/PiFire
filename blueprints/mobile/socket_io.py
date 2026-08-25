@@ -67,6 +67,7 @@ from common.system import (
 )
 from common.modes import Mode
 from controller.learning_report import controller_learning_report_revision
+from common.log_actions import clear_events_log
 from common.pellets_actions import clear_pellet_db, dispatch_pellet_action
 from common.app import (
     CONTROL_DOWN_ERROR,
@@ -718,7 +719,7 @@ def _post_app_data_admin(settings, type, request):
         return _response(result="OK")
     elif type == "clear_events":
         write_log("Clearing Events Log.")
-        os.system("rm ./logs/events.log")
+        clear_events_log()
         return _response(result="OK")
     elif type == "clear_pelletdb":
         write_log("Clearing Pellet Database.")
