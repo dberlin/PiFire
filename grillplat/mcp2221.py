@@ -8,9 +8,9 @@ bus's HID handle). EasyMCP2221.Device is per-adapter, so multiple MCP2221s can
 be open at once. See docs/superpowers/specs/2026-07-14-mcp2221-easymcp2221-backend-design.md.
 """
 
-from _thread import RLock as RLockType
 import logging
 import threading
+from _thread import RLock as RLockType
 
 from common.i2c_bus import _LockedI2C
 
@@ -146,8 +146,9 @@ def reset_state():
 
 
 def _open_mcp2221_device(selector: str) -> object:
-    from common.i2c_bus import I2CBusConfigError
     from EasyMCP2221 import Device as _MCP2221Device
+
+    from common.i2c_bus import I2CBusConfigError
 
     try:
         if selector:

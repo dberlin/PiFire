@@ -9,14 +9,14 @@ from common.control_trace import (
     ActuationMode,
     AllocationPayload,
     AppliedOutputPayload,
-    ControlTraceRecord,
     ControllerType,
+    ControlTraceRecord,
     FramedPulseFramePayload,
     InhibitReason,
     MpcFailureState,
     MpcUpdatePayload,
-    ResultStaleState,
     RecorderGapPayload,
+    ResultStaleState,
     SafetyEventPayload,
     SafetyEventType,
     SessionPayload,
@@ -25,8 +25,8 @@ from common.control_trace import (
 )
 from common.persistence.control_trace import append_control_trace
 from controller.applied_output import OutputSource
-from controller.mpc_config import DEFAULT_MPC_CONFIG, FITTED_PARAMETER_KEYS
 from controller.mpc_allocator import ALLOCATOR_REVISION, allocate
+from controller.mpc_config import DEFAULT_MPC_CONFIG, FITTED_PARAMETER_KEYS
 from controller.update_mpc import (
     _FREE,
     TraceSelectionError,
@@ -34,7 +34,6 @@ from controller.update_mpc import (
     fit_params,
     load_trace_samples,
 )
-
 
 SESSION_ID = "mpc-session"
 COOK_ID = "mak-cook"
@@ -773,12 +772,12 @@ def test_load_trace_samples_has_equivalent_fahrenheit_and_celsius_frames(ds):
     for left, right in zip(fahrenheit, celsius, strict=True):
         np.testing.assert_allclose(left, right)
     init = {key: float(DEFAULT_MPC_CONFIG[key]) for key in ("C_c", "h_amb", "K_Q", "theta")}
-    fit_kwargs = dict(
-        T_amb=30.0,
-        init=init,
-        sigma=float(DEFAULT_MPC_CONFIG["sigma"]),
-        n_delay=int(DEFAULT_MPC_CONFIG["n_delay"]),
-    )
+    fit_kwargs = {
+        "T_amb": 30.0,
+        "init": init,
+        "sigma": float(DEFAULT_MPC_CONFIG["sigma"]),
+        "n_delay": int(DEFAULT_MPC_CONFIG["n_delay"]),
+    }
     fahrenheit_fit = fit_params(*fahrenheit, **fit_kwargs)
     celsius_fit = fit_params(*celsius, **fit_kwargs)
     for key in ("C_c", "h_amb", "K_Q", "theta"):

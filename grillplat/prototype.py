@@ -19,9 +19,10 @@
 import logging
 
 from gpiozero.threads import GPIOThread
+
 from common.common import is_float
-from grillplat.system_commands import SystemCommandsMixin
 from grillplat.actuator_capabilities import AUGER_TIMING
+from grillplat.system_commands import SystemCommandsMixin
 
 """
 	==============================

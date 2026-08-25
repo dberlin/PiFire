@@ -39,6 +39,7 @@ import pytest
 
 from common.app import CONTROL_DOWN_ERROR
 from common.common import ErrorKind
+from common.defaults import default_pellets, default_settings
 from common.persistence.control import (
     default_control,
     write_control_snapshot,
@@ -53,7 +54,6 @@ from common.persistence.runtime import (
     write_pellet_db,
     write_settings_store,
 )
-from common.defaults import default_pellets, default_settings
 from tests.conftest import REPO_BASE
 
 _DURABLE = "Grill Platform Error: Could not load the grill platform module."
@@ -68,7 +68,7 @@ def consumers(ds):
     init_status()
     write_generic_key("probe_device_info", {})
 
-    import blueprints.mobile.socket_io as socket_io
+    from blueprints.mobile import socket_io
 
     # The liveness verdict is process-local module state; a test that leaves it
     # False would poison every later test in the session.

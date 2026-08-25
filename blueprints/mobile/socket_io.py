@@ -15,70 +15,74 @@ Description: This library provides socketio functions for app.py
  Imported Modules
 ==============================================================================
 """
-from collections.abc import Mapping
-import threading
 import json
 import math
 import os
+import threading
 import time
+from base64 import b64encode
+from collections.abc import Mapping
+from threading import Event
 
-from common.common import (
-    ErrorKind,
-    read_events_records,
-    flush_events_records,
-    read_generic_json,
-    write_log,
-    convert_settings_units,
-    epoch_to_time,
-)
-from common.control_delta import NOTIFY_POST_KEYS, ControlDeltaError, control_delta, notify_ops_from_post
-from common.persistence.control import (
-    read_control,
-    flush_control,
-    enqueue_control_delta,
-)
-from common.persistence.runtime import (
-    read_settings_store,
-    seed_settings_store,
-    read_pellets_store,
-    seed_pellets_store,
-    read_status,
-    read_current,
-    read_errors,
-    read_warnings_snapshot,
-    read_generic_key,
-    read_control_heartbeat,
-    CONTROL_HEARTBEAT_STALE_AFTER,
-    write_pellet_db,
-    write_connected_user,
-    read_connected_users,
-    flush_connected_users,
-    remove_connected_user,
-)
-from common.persistence.history import flush_history, request_history_clear
-from common.defaults import default_settings, default_control
-from common.system import (
-    reboot_system,
-    shutdown_system,
-    restart_control,
-    restart_webapp,
-    restart_scripts,
-    gather_system_info,
-)
-from common.modes import Mode
-from controller.learning_report import controller_learning_report_revision
-from common.log_actions import clear_events_log
-from common.pellets_actions import clear_pellet_db, dispatch_pellet_action
+from flask import request
+from pydantic import ValidationError
+from werkzeug.utils import secure_filename
+
+from app import socketio
 from common.app import (
     CONTROL_DOWN_ERROR,
-    create_ui_hash,
-    update_probe_config,
-    save_settings_and_flag_update,
     api_response,
+    create_ui_hash,
+    save_settings_and_flag_update,
+    update_probe_config,
 )
-from pydantic import ValidationError
-
+from common.common import (
+    ErrorKind,
+    convert_settings_units,
+    epoch_to_time,
+    flush_events_records,
+    read_events_records,
+    read_generic_json,
+    write_log,
+)
+from common.control_delta import NOTIFY_POST_KEYS, ControlDeltaError, control_delta, notify_ops_from_post
+from common.defaults import default_control, default_settings
+from common.log_actions import clear_events_log
+from common.modes import Mode
+from common.pellets_actions import clear_pellet_db, dispatch_pellet_action
+from common.persistence.control import (
+    enqueue_control_delta,
+    flush_control,
+    read_control,
+)
+from common.persistence.history import flush_history, request_history_clear
+from common.persistence.runtime import (
+    CONTROL_HEARTBEAT_STALE_AFTER,
+    flush_connected_users,
+    read_connected_users,
+    read_control_heartbeat,
+    read_current,
+    read_errors,
+    read_generic_key,
+    read_pellets_store,
+    read_settings_store,
+    read_status,
+    read_warnings_snapshot,
+    remove_connected_user,
+    seed_pellets_store,
+    seed_settings_store,
+    write_connected_user,
+    write_pellet_db,
+)
 from common.settings_schema import SettingsValidationError, apply_settings_delta
+from common.system import (
+    gather_system_info,
+    reboot_system,
+    restart_control,
+    restart_scripts,
+    restart_webapp,
+    shutdown_system,
+)
 from common.web_contracts.control import ControlPatchRequest
 from common.web_contracts.core import (
     DashSocketPayload,
@@ -86,13 +90,9 @@ from common.web_contracts.core import (
     ThermocoupleHealthView,
     project_thermocouple_health_outcome,
 )
-from flask import request
-from werkzeug.utils import secure_filename
-from app import socketio
 from config import Config
-from file_mgmt.recipes import read_recipefile, get_recipefilelist
-from base64 import b64encode
-from threading import Event
+from controller.learning_report import controller_learning_report_revision
+from file_mgmt.recipes import get_recipefilelist, read_recipefile
 
 thread_lock = threading.Lock()
 thread_event = Event()
@@ -657,8 +657,8 @@ def _get_app_data(action=None, arg01=None, arg02=None):
 def _post_app_data_update(settings, type, request):
     if type == "settings":
         control = read_control()
-        for key in request.keys():
-            if key in settings.keys():
+        for key in request:
+            if key in settings:
                 settings = apply_settings_delta(settings, request)
                 _write_settings(settings, control)
                 return _response(result="OK", data=settings)
@@ -676,11 +676,11 @@ def _post_app_data_update(settings, type, request):
                 result="Error",
                 message="Error: control['timer'] cannot be set here; use the timer_action commands",
             )
-        for key in request.keys():
+        for key in request:
             # NOTIFY_POST_KEYS widens the membership test because `notify_updates`
             # is a wire key, not a control member -- it addresses entries INSIDE
             # control["notify_data"] rather than naming a key of its own.
-            if key in control.keys() or key in NOTIFY_POST_KEYS:
+            if key in control or key in NOTIFY_POST_KEYS:
                 # A posted patch is ALREADY a statement of intent -- the client
                 # sent only what it means -- so it is WRAPPED as a delta, not
                 # rewritten. The notify keys are the exception, and
@@ -898,7 +898,7 @@ def _post_app_data_recipes(settings, type, request):
 
 def _post_app_data_probes(settings, type, request):
     if type == "probe_update":
-        if all(v in ("name", "label", "profile_id", "enabled") for v in request["probes_action"].keys()):
+        if all(v in ("name", "label", "profile_id", "enabled") for v in request["probes_action"]):
             control = read_control()
             return _update_probe_config(settings, control, request)
         else:
@@ -909,7 +909,7 @@ def _post_app_data_probes(settings, type, request):
 
 def _post_app_data_notify(settings, type, request):
     if type == "notify_update":
-        if "label" in request["notify_action"].keys():
+        if "label" in request["notify_action"]:
             control = read_control()
             return _update_notify_data(control, request)
         else:
@@ -1008,7 +1008,7 @@ def _get_probe_data(probe_type, settings, current, probe_device_info, notify_dat
             probe_list.append(probe_data)
     for probe in probe_list:
         for index, notify_obj in enumerate(notify_data):
-            if notify_data[index]["label"] == probe["label"]:
+            if notify_obj["label"] == probe["label"]:
                 if notify_obj["type"] == "probe":
                     probe["eta"] = notify_obj["eta"]
                     probe["target"] = notify_obj["target"]

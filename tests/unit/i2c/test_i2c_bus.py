@@ -5,7 +5,7 @@ from unittest import mock
 import pytest
 from EasyMCP2221.exceptions import LowSCLError, LowSDAError, NotAckError, TimeoutError
 
-import common.i2c_bus as i2c_bus
+from common import i2c_bus
 from common.i2c_bus import I2CBusConfigError, assert_clean_blinka_env, validate_bus_kinds
 from common.i2c_bus_config import BasicBus, FT232HBus, MCP2221Bus
 from grillplat import mcp2221
@@ -283,9 +283,8 @@ def test_open_mcp2221_selector_opens_matching_serial():
 
 def test_open_mcp2221_selector_not_found_raises():
     modules, FakeDevice = _fake_easymcp2221_module(not_found_serials={"ZZZZ"})
-    with mock.patch.dict("sys.modules", modules):
-        with pytest.raises(i2c_bus.I2CBusConfigError):
-            i2c_bus.open_i2c_bus(MCP2221Bus(serial="ZZZZ"))
+    with mock.patch.dict("sys.modules", modules), pytest.raises(i2c_bus.I2CBusConfigError):
+        i2c_bus.open_i2c_bus(MCP2221Bus(serial="ZZZZ"))
 
 
 def test_open_mcp2221_two_selectors_stay_independently_live():
@@ -675,7 +674,7 @@ def test_configured_bus_kinds_skips_a_device_with_no_bus():
 def test_probes_base_no_longer_reexports_resolve_i2c_bus():
     """resolve_i2c_bus is gone; find_i2c_bus stays a discovery primitive."""
     import common.i2c_bus as cib
-    import probes.base as base
+    from probes import base
 
     assert base.find_i2c_bus is cib.find_i2c_bus
     assert not hasattr(base, "resolve_i2c_bus")

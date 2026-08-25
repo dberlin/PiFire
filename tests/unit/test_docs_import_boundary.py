@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import ast
-from collections.abc import Iterator
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest

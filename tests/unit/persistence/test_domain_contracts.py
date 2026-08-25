@@ -8,11 +8,6 @@ from common.control_delta import control_delta
 from common.persistence.control import (
     read_pending_control_writes,
 )
-from common.persistence.runtime import (
-    clear_warnings_through,
-    read_warnings_snapshot,
-    write_warning,
-)
 from common.persistence.install_state import (
     delete_wizard_install_info,
     get_updater_install_status,
@@ -22,6 +17,11 @@ from common.persistence.install_state import (
     set_updater_install_status,
     set_wizard_install_status,
     store_wizard_install_info,
+)
+from common.persistence.runtime import (
+    clear_warnings_through,
+    read_warnings_snapshot,
+    write_warning,
 )
 from controller.runtime.store import SqliteStore
 

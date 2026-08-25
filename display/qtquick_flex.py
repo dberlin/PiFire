@@ -21,12 +21,12 @@ import multiprocessing
 import os
 import threading
 
-from display._base_flex import DisplayBase
-from display._loggers import resolve_loggers
 from common.control_delta import control_delta
 from common.persistence.control import enqueue_control_delta, read_control
 from common.persistence.runtime import read_status
 from common.system import is_real_hardware
+from display._base_flex import DisplayBase
+from display._loggers import resolve_loggers
 
 
 class Display(DisplayBase):

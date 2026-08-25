@@ -23,8 +23,8 @@ Usage: python -m controller.update_mpc (--cook COOK_ID | --session SESSION_ID)
 
 import argparse
 import json
-import os
 import math
+import os
 import sqlite3
 import sys
 
@@ -33,7 +33,6 @@ from scipy.optimize import least_squares
 
 from common.persistence.control_trace import read_control_trace_cook, read_control_trace_session
 from controller.model_learning.trace import TraceSelectionError, calibration_samples
-
 from controller.model_promotion import T_FLOOR_C, T_HAZARD_C, effective_tau, steady_state_at_full_fire
 from controller.mpc_model import simulate_grey_box
 

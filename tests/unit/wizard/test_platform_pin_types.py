@@ -22,9 +22,9 @@ import pytest
 
 import wizard
 from common import defaults
-from common.persistence import runtime as runtime_persistence
-from common.persistence import install_state as install_persistence
 from common.common import read_wizard
+from common.persistence import install_state as install_persistence
+from common.persistence import runtime as runtime_persistence
 
 
 @pytest.fixture

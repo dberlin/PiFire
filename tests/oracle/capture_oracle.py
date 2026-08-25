@@ -10,8 +10,8 @@ import json
 import os
 
 from common import common as c
-from common.control_delta import control_delta
 from common import defaults
+from common.control_delta import control_delta
 from common.persistence import control as control_persistence
 from common.persistence import history as history_persistence
 

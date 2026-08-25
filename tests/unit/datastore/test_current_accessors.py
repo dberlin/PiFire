@@ -2,6 +2,7 @@ import copy
 import json
 
 import pytest
+
 from common.persistence import runtime as runtime_persistence
 
 

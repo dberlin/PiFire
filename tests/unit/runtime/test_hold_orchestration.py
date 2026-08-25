@@ -81,7 +81,6 @@ class _OrderedRunner(FakeControllerRunner):
         self.stop()
         if self.failure == "runner-stop":
             raise RuntimeError("runner stop failed")
-        return None
 
     def refit_from_cook(self):
         self.events.append("runner:refit")

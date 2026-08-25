@@ -18,7 +18,7 @@ import time
 
 import pytest
 
-from display._base_flex import DisplayBase, NEW_EMBER_FLEX_TYPES
+from display._base_flex import NEW_EMBER_FLEX_TYPES, DisplayBase
 from display.flexobject import resolve_accent
 
 BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))

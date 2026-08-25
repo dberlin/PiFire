@@ -1,4 +1,4 @@
-from controller.runtime.clock import ManualClock, RealClock, Clock
+from controller.runtime.clock import Clock, ManualClock, RealClock
 
 
 def test_manual_clock_starts_at_zero_and_sleep_advances():

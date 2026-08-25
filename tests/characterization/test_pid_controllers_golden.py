@@ -8,8 +8,9 @@ captured from the CURRENT (pre-refactor) code and must not change when methods
 move into PIDControllerBase or when the dead dispatch surface is deleted.
 """
 
-import time
 import importlib
+import time
+
 import pytest
 
 PID_CONFIGS = {

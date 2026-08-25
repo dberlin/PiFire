@@ -1,21 +1,12 @@
 import collections
+import json
 import threading
 import time
-import json
 from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
 
-from controller.applied_output import AppliedOutput, OutputSource
-from controller.base import ControllerLearningDiagnostics
-from controller.model_learning.activation import (
-    ActivationPhase,
-    PreparedActivationRecord,
-)
-from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin, FrameObservation
-from tests.unit.mpc._solver_fixtures import owned_pair
-from tests.unit.runtime._persistence_helpers import _current_pair_descriptor
 from common.control_trace import (
     ActuationMode,
     ControllerType,
@@ -25,7 +16,6 @@ from common.control_trace import (
     ResultStaleState,
     TraceEventKind,
 )
-from common.persistence.model_evidence import ModelActivationState
 from common.model_evidence import (
     ConfidenceDecisionEvidence,
     EvidenceKind,
@@ -35,24 +25,34 @@ from common.model_evidence import (
     RefreshDiagnosticsEvidence,
     SessionSummaryEvidence,
 )
+from common.persistence.model_evidence import ModelActivationState
+from controller.applied_output import AppliedOutput, OutputSource
+from controller.base import ControllerLearningDiagnostics
+from controller.model_learning.activation import (
+    ActivationPhase,
+    PreparedActivationRecord,
+)
+from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin, FrameObservation
+from controller.model_learning.evaluation import CompletedForecastOrigin, ForecastOrigin
+from controller.mpc import Controller as MpcController
+from controller.mpc_config import DEFAULT_MPC_CONFIG as MPC_DEFAULTS
 from controller.runtime.control_trace_session import ControlTraceSession, TraceSessionContext
-from controller.runtime.modes.hold_learning import HoldLearningRuntime
 from controller.runtime.model_persistence import (
     DurableActivationReceipt,
     EvidenceSubmission,
     ModelPersistenceWorker,
 )
+from controller.runtime.modes.hold_learning import HoldLearningRuntime
 from controller.runtime.runner import (
-    SyncControllerRunner,
-    ThreadedControllerRunner,
     _MAX_PENDING_OBSERVATIONS,
     _MAX_PENDING_OUTPUTS,
+    SyncControllerRunner,
+    ThreadedControllerRunner,
     _freeze_evidence,
     build_runner,
 )
-from controller.mpc import Controller as MpcController
-from controller.mpc_config import DEFAULT_MPC_CONFIG as MPC_DEFAULTS
-from controller.model_learning.evaluation import CompletedForecastOrigin, ForecastOrigin
+from tests.unit.mpc._solver_fixtures import owned_pair
+from tests.unit.runtime._persistence_helpers import _current_pair_descriptor
 
 
 def _frame(index: int) -> FrameObservation:
@@ -319,7 +319,6 @@ def test_runners_retire_generation_bound_context_until_rebound() -> None:
 
         def observe_frame(self, _observation):
             self.observed.set()
-            return None
 
     class ProcessingBarrier:
         def __init__(self):
@@ -1495,7 +1494,6 @@ def test_threaded_runner_isolates_observation_failure_and_marks_the_next_frame_d
             if not self.failed:
                 self.failed = True
                 raise FloatingPointError("learner failed")
-            return None
 
         def observation_failure(self, observation, error):
             self.failures.append((observation, error))

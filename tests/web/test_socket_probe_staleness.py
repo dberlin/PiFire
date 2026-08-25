@@ -13,7 +13,6 @@ and the real cards showing a stale number as though it were live.
 
 import json
 
-from common.web_contracts.core import ProbeDataPayload, ProbeStatusPayload
 from common import datastore
 from common.persistence.runtime import (
     flush_current,
@@ -24,6 +23,7 @@ from common.persistence.runtime import (
     write_current,
     write_generic_key,
 )
+from common.web_contracts.core import ProbeDataPayload, ProbeStatusPayload
 
 
 def _labels():

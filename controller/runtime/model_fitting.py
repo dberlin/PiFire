@@ -6,10 +6,9 @@ existing NumPy/SciPy fitting kernel.
 """
 
 from __future__ import annotations
-from collections import deque
-from dataclasses import dataclass, field
-from enum import StrEnum
+
 import hashlib
+import itertools
 import json
 import math
 import multiprocessing
@@ -17,8 +16,12 @@ import os
 import queue
 import threading
 import time
+from collections import deque
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
+from enum import StrEnum
 from numbers import Integral, Real
-from typing import TYPE_CHECKING, Any, Callable, Sequence
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from controller.model_learning.contracts import FitRequest
@@ -686,7 +689,7 @@ def fit_trigger(
     if any(not frame.continuous for frame in frames) or any(
         later.observation_sequence != earlier.observation_sequence + 1
         or not math.isclose(later.frame_start_s, earlier.frame_end_s, rel_tol=0.0, abs_tol=1e-9)
-        for earlier, later in zip(frames, frames[1:])
+        for earlier, later in itertools.pairwise(frames)
     ):
         blockers.append("discontinuity")
     score = _finite(identifiability, "identifiability")
@@ -1226,7 +1229,7 @@ class GreyLearningOrchestrator:
         ):
             pair = self._prepared.candidate_pair
             owned = (
-                (getattr(pair, "controller"), getattr(pair, "estimator"))
+                (pair.controller, pair.estimator)
                 if hasattr(pair, "controller") and hasattr(pair, "estimator")
                 else (pair,)
             )

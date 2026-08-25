@@ -21,32 +21,29 @@ monkeypatch them.
 
 import copy
 import os
+from os.path import exists
 
 from common.common import ErrorKind
 from common.defaults import default_control
 from common.modes import COOK_MODES, SAFE_MODES, Mode, StatusState
-from notify.notifications import check_notify, send_notifications
-from file_mgmt.cookfile import create_cookfile
-from file_mgmt.recipes import convert_recipe_units
-from file_mgmt.common import read_json_file_data
-from os.path import exists
-
-from distance.intervals import HOPPER_LEVEL_REFRESH_INTERVAL
-
 from controller.learning_report import controller_learning_report
 from controller.runtime.heartbeat import stamp_control_heartbeat
+from controller.runtime.modes.hold import HoldMode
+from controller.runtime.modes.manual import ManualMode
+from controller.runtime.modes.monitor import MonitorMode
+from controller.runtime.modes.prime import PrimeMode
+from controller.runtime.modes.reignite import ReigniteMode
+from controller.runtime.modes.shutdown import ShutdownMode
+from controller.runtime.modes.smoke import SmokeMode
+from controller.runtime.modes.startup import StartupMode
 from controller.runtime.state import WorkCycleState
 from controller.runtime.system_commands import process_system_commands
-from controller.runtime.transitions import request_transition, should_keep_power_on, TransitionKind
-from controller.runtime.modes.monitor import MonitorMode
-from controller.runtime.modes.manual import ManualMode
-from controller.runtime.modes.shutdown import ShutdownMode
-from controller.runtime.modes.prime import PrimeMode
-from controller.runtime.modes.startup import StartupMode
-from controller.runtime.modes.reignite import ReigniteMode
-from controller.runtime.modes.smoke import SmokeMode
-from controller.runtime.modes.hold import HoldMode
-
+from controller.runtime.transitions import TransitionKind, request_transition, should_keep_power_on
+from distance.intervals import HOPPER_LEVEL_REFRESH_INTERVAL
+from file_mgmt.common import read_json_file_data
+from file_mgmt.cookfile import create_cookfile
+from file_mgmt.recipes import convert_recipe_units
+from notify.notifications import check_notify, send_notifications
 
 _MODE_HANDLERS = {
     Mode.MONITOR: MonitorMode,

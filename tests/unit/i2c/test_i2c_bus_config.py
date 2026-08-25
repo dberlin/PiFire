@@ -122,14 +122,14 @@ def test_kernel_bus_number_resolves_to_itself():
 
 
 def test_kernel_adapter_name_resolves_via_find_i2c_bus(monkeypatch):
-    import common.i2c_bus as i2c_bus
+    from common import i2c_bus
 
     monkeypatch.setattr(i2c_bus, "find_i2c_bus", lambda match: 5 if match == "CP2112" else None)
     assert KernelAdapterName(adapter="CP2112").resolve_bus_num() == 5
 
 
 def test_kernel_serial_match_resolves_via_find_i2c_bus_by_serial(monkeypatch):
-    import common.i2c_bus as i2c_bus
+    from common import i2c_bus
 
     monkeypatch.setattr(i2c_bus, "find_i2c_bus_by_serial", lambda serial: 42 if serial == "AB12" else None)
     assert KernelSerialMatch(serial="AB12").resolve_bus_num() == 42

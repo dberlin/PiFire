@@ -12,13 +12,17 @@ Controllers:
 Holds at 220/375/425 F and a 225 -> 375 F step.
 """
 
-import warnings, sys, json, importlib
+import importlib
+import json
+import sys
+import warnings
 
 warnings.filterwarnings("ignore")
 sys.path.insert(0, ".")
 sys.path.insert(0, "docs/superpowers/experiments")
 import numpy as np
-from mpc_nl_tune import NLCascade, LinKF, TSTEP, PLANT_H, F2C, C2F, UMIN, UMAX
+from mpc_nl_tune import C2F, F2C, PLANT_H, TSTEP, UMAX, UMIN, LinKF, NLCascade
+
 from controller.grill_sim import GrillSim
 
 

@@ -10,7 +10,6 @@ from common.control_trace import AmbientSource
 from controller.model_learning.contracts import FrameObservation
 from controller.model_learning.evaluation import CausalForecastEvaluator, ForecastOrigin
 
-
 _INCUMBENT = "a" * 64
 _CHALLENGER = "b" * 64
 

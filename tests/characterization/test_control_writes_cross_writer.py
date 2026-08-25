@@ -43,10 +43,10 @@ from unittest import mock
 
 import pytest
 
-from common.control_delta import control_delta
-
 from common import api_commands
 from common import common as c
+from common.control_delta import control_delta
+from common.defaults import default_settings
 from common.persistence import control as control_persistence
 from common.persistence import runtime as runtime_persistence
 from common.persistence.control import (
@@ -56,7 +56,6 @@ from common.persistence.control import (
 from common.persistence.runtime import (
     write_settings_store,
 )
-from common.defaults import default_settings
 
 FIXED_NOW = 1_700_000_000.0
 

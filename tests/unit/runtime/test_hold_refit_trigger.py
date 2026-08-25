@@ -10,11 +10,10 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
-from common.controller_model_state import CheckpointSaveOutcome
 
-from common.model_evidence import CandidateAssessmentEvidence, ConfidenceDecisionEvidence
 from common.control_trace import ActuationMode
-
+from common.controller_model_state import CheckpointSaveOutcome
+from common.model_evidence import CandidateAssessmentEvidence, ConfidenceDecisionEvidence
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.model_learning.contracts import (
     CandidateOrigin,

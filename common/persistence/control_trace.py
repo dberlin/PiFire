@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import os
+import sqlite3
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-import os
 from pathlib import Path
-import sqlite3
 
 from common import datastore
 from common.control_trace import (
@@ -15,7 +15,6 @@ from common.control_trace import (
     ControlTraceDbRow,
     ControlTraceRecord,
 )
-
 
 CONTROL_TRACE_MAX_LIMIT = 10_000
 _SQLITE_SIGNED_INT_MAX = 2**63 - 1

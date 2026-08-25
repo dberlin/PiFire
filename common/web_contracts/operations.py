@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Self, TypeAliasType
 
 from pydantic import (
     Field,
@@ -11,20 +11,16 @@ from pydantic import (
     model_validator,
 )
 from pydantic.json_schema import SkipJsonSchema
-from typing_extensions import Self, TypeAliasType
 
 from .base import ExtensibleWireModel, FiniteFloat, WireModel
 
 NonNegativeInt = Annotated[int, Field(ge=0, strict=True)]
-FiniteNumber = TypeAliasType("FiniteNumber", int | FiniteFloat)
-Reading = TypeAliasType("Reading", str | int | FiniteFloat)
-BackupKind = TypeAliasType("BackupKind", Literal["settings", "pelletdb"])
-SystemAction = TypeAliasType("SystemAction", Literal["reboot", "shutdown", "restart"])
-MaintenanceAction = TypeAliasType(
-    "MaintenanceAction",
-    Literal["clear_history", "clear_events", "clear_pelletdb", "clear_pelletdb_log"],
-)
-Segment = TypeAliasType("Segment", Literal["High", "Medium", "Low"])
+type FiniteNumber = int | FiniteFloat
+type Reading = str | int | FiniteFloat
+type BackupKind = Literal["settings", "pelletdb"]
+type SystemAction = Literal["reboot", "shutdown", "restart"]
+type MaintenanceAction = Literal["clear_history", "clear_events", "clear_pelletdb", "clear_pelletdb_log"]
+type Segment = Literal["High", "Medium", "Low"]
 
 
 class _SparseWireModel(WireModel):

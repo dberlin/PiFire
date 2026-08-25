@@ -6,7 +6,7 @@ import pytest
 from common.control_trace import AllocationClampReason
 from controller.mpc_allocator import AllocationResult, allocate, normalized_load_from_auger_duty
 
-CFG = dict(u_max=0.9, fan_min_pct=40.0, fan_max_pct=100.0, enable_fan=True)
+CFG = {"u_max": 0.9, "fan_min_pct": 40.0, "fan_max_pct": 100.0, "enable_fan": True}
 
 
 def test_zero_load_maps_to_zero_auger_and_minimum_fan_with_frozen_diagnostics():

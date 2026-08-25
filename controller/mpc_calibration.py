@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import math
+import time
 from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
-import math
-import time
 from types import MappingProxyType
 from typing import Protocol, TypeAlias
 
@@ -16,6 +16,8 @@ import numpy.typing as npt
 from controller.applied_output import AppliedOutput, FrameFeedbackDisposition
 from controller.model_learning.calibration import (
     CalibrationCommand as _CoordinatorCalibrationCommand,
+)
+from controller.model_learning.calibration import (
     CalibrationCoordinator,
     CalibrationDecision,
     CalibrationProgress,

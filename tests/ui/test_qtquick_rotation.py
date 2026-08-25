@@ -3,7 +3,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject
 from PySide6.QtGui import QGuiApplication
 
-import display.qtapp as qtapp
+from display import qtapp
 from display.qtbackend import PiFireBackend
 
 QML_DIR = Path("display/qml").resolve()

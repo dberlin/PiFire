@@ -11,7 +11,6 @@ from typing import cast
 
 from common.cook_diagnostics import ControllerLearningReport
 from common.persistence.protocols import JsonValue
-
 from common.web_contracts.learning import (
     FopdtPidSpCheckpoint,
     IpdtPidSpCheckpoint,
@@ -24,7 +23,6 @@ from common.web_contracts.learning import (
     PidSpLiveLearning,
     PidSpLiveLearningStatus,
 )
-
 from controller.fopdt_identifier import (
     AMBIENT_F,
     CONFIRM_WINDOW,
@@ -355,7 +353,7 @@ def _live_from_status(status: object) -> object:
 
 def _gate_value(mapping: Mapping[str, object], field: str) -> PidSpGateValue:
     value = mapping.get(field)
-    if isinstance(value, bool) or isinstance(value, int):
+    if isinstance(value, (bool, int)):
         return value
     if isinstance(value, float) and math.isfinite(value):
         return value

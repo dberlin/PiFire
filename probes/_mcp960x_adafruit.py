@@ -1,6 +1,5 @@
-from collections.abc import Mapping
-
 import time
+from collections.abc import Mapping
 
 from adafruit_mcp9600 import MCP9600
 

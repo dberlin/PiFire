@@ -2,24 +2,24 @@ from __future__ import annotations
 
 import itertools
 import logging
-
-from dataclasses import dataclass, replace
 from collections.abc import Callable
+from dataclasses import dataclass, replace
 
 import numpy as np
 import numpy.typing as npt
 import pytest
-import controller.mpc_core as mpc_core_module
 
+import controller.mpc_core as mpc_core_module
 from controller.acados import GreyBoxMPCConfig, SolverDiagnostics, SolverError
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.base import MpcFailureState
 from controller.model_learning.calibration import CalibrationDecision, CalibrationProgress
+from controller.mpc_calibration import TemperatureForecast
 from controller.mpc_config import (
     DEFAULT_MPC_CONFIG,
     FITTED_PARAMETER_KEYS,
-    JsonValue,
     MODEL_PARAMETER_KEYS,
+    JsonValue,
     ModelMetadata,
     finite_float,
     model_is_identified,
@@ -29,10 +29,8 @@ from controller.mpc_config import (
     to_celsius,
     warn_about_model,
 )
-from controller.mpc_calibration import TemperatureForecast
 from controller.mpc_core import MpcCore, MpcSolver, MpcStep
 from controller.runtime.context import EVENT_LOG_NAME
-
 
 U_MAX = 0.9
 CYCLE: dict[str, JsonValue] = {"u_min": 0.1, "u_max": U_MAX}
@@ -138,7 +136,7 @@ def solve_result(
     first: float,
     *,
     sequence_residual: npt.NDArray[np.float64] | None = None,
-    objective: int | float = 3.0,
+    objective: float = 3.0,
     diagnostics: FakeDiagnostics | None = None,
 ) -> FakeSolve:
     return FakeSolve(
@@ -167,9 +165,9 @@ class FakeSolver:
         self,
         state: npt.ArrayLike,
         *,
-        setpoint_c: float | int,
-        q_previous: float | int,
-        equilibrium_q: float | int,
+        setpoint_c: float,
+        q_previous: float,
+        equilibrium_q: float,
     ) -> FakeSolve:
         self.calls.append(
             (

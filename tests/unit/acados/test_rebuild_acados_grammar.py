@@ -14,11 +14,10 @@ this repository and a hard SyntaxError here.
 from __future__ import annotations
 
 import ast
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import pytest
-
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 

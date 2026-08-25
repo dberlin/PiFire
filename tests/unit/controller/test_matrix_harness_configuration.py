@@ -13,8 +13,8 @@ import types
 
 import pytest
 
-import common.defaults as defaults
 import tools.experiments.controller_matrix as matrix
+from common import defaults
 from common.control_trace import ActuationMode
 from controller.applied_output import OutputSource
 from controller.runtime.logic.pulse import PulseScheduler as ProductionPulseScheduler

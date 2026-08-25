@@ -13,9 +13,6 @@ real modal falling back to a fixed ceiling with nothing failing.
 import pytest
 from pydantic import ValidationError
 
-from common.web_contracts.core import DashSocketPayload
-
-
 from common.persistence.runtime import (
     flush_current,
     init_status,
@@ -24,6 +21,7 @@ from common.persistence.runtime import (
     write_generic_key,
     write_settings,
 )
+from common.web_contracts.core import DashSocketPayload
 
 
 def _dash_data(*, probe_device_info=None, **status_over):

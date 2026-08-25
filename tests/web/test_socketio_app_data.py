@@ -49,24 +49,23 @@ from flask import request as flask_request
 from app import app as flask_app
 from common import datastore
 from common.common import ErrorKind
-from common.web_contracts.core import PelletSocketPayload
+from common.defaults import default_control, default_pellets, default_settings
 from common.persistence.control import (
     execute_control_writes,
     read_control,
     write_control_snapshot,
 )
 from common.persistence.history import read_history, write_history
-from common.sqlite_queue import SqliteQueue
 from common.persistence.runtime import (
     CONTROL_HEARTBEAT_KEY,
     CONTROL_HEARTBEAT_STALE_AFTER,
+    flush_current,
+    init_status,
     read_connected_users,
     read_current,
-    flush_current,
     read_errors,
     read_pellets_store,
     read_settings,
-    init_status,
     read_status,
     write_connected_user,
     write_errors,
@@ -74,7 +73,8 @@ from common.persistence.runtime import (
     write_pellet_db,
     write_settings_store,
 )
-from common.defaults import default_control, default_pellets, default_settings
+from common.sqlite_queue import SqliteQueue
+from common.web_contracts.core import PelletSocketPayload
 
 # Index of the single ``type == "timer"`` entry in a default notify_data list
 # (12 probe/limit entries for 4 probes come first). Pinned so the timer tests
@@ -107,7 +107,7 @@ def sio(ds):
     # runtime); seed an empty map so _get_probe_data has something to read.
     write_generic_key("probe_device_info", {})
 
-    import blueprints.mobile.socket_io as socket_io
+    from blueprints.mobile import socket_io
 
     # The control-liveness verdict is process-local module state that outlives
     # the `ds` datastore, so reset it around every test or a check that failed

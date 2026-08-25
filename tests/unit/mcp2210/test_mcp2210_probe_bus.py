@@ -1,10 +1,10 @@
 import sys
 import types
+
 import pytest
 
-import probes.base as base
 from grillplat import mcp2210
-
+from probes import base
 
 # --- _gp_index ---
 
@@ -120,6 +120,7 @@ def test_max31865_init_device_uses_resolver(monkeypatch):
     monkeypatch.setitem(sys.modules, "adafruit_max31865", fake_ada)
 
     import importlib
+
     import probes.max31865_adafruit as probe
 
     importlib.reload(probe)  # bind the fake adafruit_max31865
@@ -166,7 +167,7 @@ def test_manifest_max31865_has_spi_bus_fields():
 
     cs = next(i for i in entry["device_specific"]["config"] if i["label"] == "cs")
     # GP0-GP8 stored values are appended after the board pins.
-    assert all(str(n) in cs["list_values"] for n in range(0, 9))
+    assert all(str(n) in cs["list_values"] for n in range(9))
 
     deps = " ".join(entry["py_dependencies"])
     # The bridge driver is vendored at grillplat/mcp2210 and needs only hid.

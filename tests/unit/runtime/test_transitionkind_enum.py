@@ -4,7 +4,7 @@ request_transition when called with enum members instead of plain strings.
 Reuses the fake-ctx pattern from test_request_transition.py.
 """
 
-from controller.runtime.transitions import request_transition, TransitionKind
+from controller.runtime.transitions import TransitionKind, request_transition
 
 
 class _FakeDisplay:

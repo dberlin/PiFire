@@ -1,6 +1,6 @@
 from common.modes import Mode
-from controller.runtime.modes.base import ControlMode
 from controller.runtime.logic.fan import start_fan
+from controller.runtime.modes.base import ControlMode
 
 
 class ShutdownMode(ControlMode):

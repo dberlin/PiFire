@@ -1,7 +1,7 @@
 """Behavioral contract for the pure guarded calibration coordinator."""
 
-from dataclasses import FrozenInstanceError, replace
 import math
+from dataclasses import FrozenInstanceError, replace
 
 import pytest
 
@@ -12,31 +12,30 @@ from controller.model_learning.calibration import (
     CalibrationRuntimeContext,
 )
 
-
 CENTERS = tuple((fahrenheit - 32.0) * 5.0 / 9.0 for fahrenheit in (225.0, 325.0, 425.0))
 
 
 def context(**changes):
-    values = dict(
-        now_s=0.0,
-        temp_c=CENTERS[0],
-        target_c=CENTERS[0],
-        baseline_q=0.50,
-        realized_q=0.50,
-        safety_ceiling_c=260.0,
-        allocator_headroom=0.05,
-        error_rate_headroom=0.05,
-        capability_headroom=0.05,
-        saturation_headroom=0.05,
-        rank_progress=1.0,
-        coverage_progress=1.0,
-    )
+    values = {
+        "now_s": 0.0,
+        "temp_c": CENTERS[0],
+        "target_c": CENTERS[0],
+        "baseline_q": 0.50,
+        "realized_q": 0.50,
+        "safety_ceiling_c": 260.0,
+        "allocator_headroom": 0.05,
+        "error_rate_headroom": 0.05,
+        "capability_headroom": 0.05,
+        "saturation_headroom": 0.05,
+        "rank_progress": 1.0,
+        "coverage_progress": 1.0,
+    }
     values.update(changes)
     return CalibrationRuntimeContext(**values)
 
 
 def command(**changes):
-    values = dict(command_revision=7, seed=17)
+    values = {"command_revision": 7, "seed": 17}
     values.update(changes)
     return CalibrationCommand(**values)
 

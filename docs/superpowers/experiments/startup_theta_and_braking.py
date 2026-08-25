@@ -289,7 +289,7 @@ def main(argv=None):
             for name, r in (("baseline", base), ("braked", braked)):
                 print(
                     f"{label if name == 'baseline' else '':<24}{name:<10}{r['iae']:>10.0f}"
-                    f"{r['in5']:>8.1f}{r['overshoot']:>11.1f}{str(r['settle']):>9}"
+                    f"{r['in5']:>8.1f}{r['overshoot']:>11.1f}{r['settle']!s:>9}"
                 )
 
 

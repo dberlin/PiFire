@@ -5,7 +5,8 @@ Imported Libraries
 import math
 
 import qrcode
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
+
 from display.flexrect import Rect
 
 """
@@ -262,7 +263,6 @@ class FlexObject:
         This function will process the input and return the object canvas.
         The inheriting function will override this function.
         """
-        pass
 
 
 class GaugeCircle(FlexObject):
@@ -323,14 +323,14 @@ class GaugeCircle(FlexObject):
 
         # Units Label (Small Centered)
         unit_label = f"{self.objectData['units']}°"
-        font_point_size = font_point_size = round((size[1] * 0.35) / 4)  # Font size as a ratio of the object size
+        font_point_size = round((size[1] * 0.35) / 4)  # Font size as a ratio of the object size
         font = ImageFont.truetype(self.objectData["font"], font_point_size)
         font_bbox = font.getbbox(self.objectData["units"])  # Grab the width of the text
         font_width = font_bbox[2] - font_bbox[0]
         font_height = font_bbox[3] - font_bbox[1]
 
         label_x = (size[0] // 2) - (font_width // 2)
-        label_y = round((size[1] * 0.60))
+        label_y = round(size[1] * 0.60)
         label_origin = (label_x, label_y)
         draw.text(label_origin, unit_label, font=font, fill=self.objectData["fg_color"])
 
@@ -349,7 +349,7 @@ class GaugeCircle(FlexObject):
         # print(f'Font bbox= {font_bbox}')
 
         label_x = (size[0] // 2) - (font_width // 2)
-        label_y = round((size[1] * 0.75))
+        label_y = round(size[1] * 0.75)
         label_origin = (label_x, label_y)
         draw.text(label_origin, label_displayed, font=font, fill=self.objectData["fg_color"])
         # Gauge Label Rectangle
@@ -380,7 +380,7 @@ class GaugeCircle(FlexObject):
             font_height = font_bbox[3] - font_bbox[1]
 
             label_x = (size[0] // 2) - (font_width // 2) - (dual_label * ((font_width // 2) + 10))
-            label_y = round((size[1] * (0.20 + (dual_label * 0.05))))
+            label_y = round(size[1] * (0.20 + (dual_label * 0.05)))
             label_origin = (label_x, label_y)
             draw.text(label_origin, notify_point_label, font=font, fill=self.objectData["np_color"])
             # Notify Point Label Rectangle
@@ -410,7 +410,7 @@ class GaugeCircle(FlexObject):
             font_height = font_bbox[3] - font_bbox[1]
 
             label_x = (size[0] // 2) - (font_width // 2) + (dual_label * ((font_width // 2) + 10))
-            label_y = round((size[1] * (0.20 + (dual_label * 0.05))))
+            label_y = round(size[1] * (0.20 + (dual_label * 0.05)))
             label_origin = (label_x, label_y)
             draw.text(label_origin, set_point_label, font=font, fill=self.objectData["sp_color"])
             # Set Point Label Rectangle
@@ -454,18 +454,12 @@ class GaugeCircle(FlexObject):
         if self.objectState["animation_temps"][0] != self.objectData["temps"][0]:
             self.objectState["animation_temps"][0] += self.step_value
 
-            if self.objectState["animation_temps"][0] <= 0:
-                self.objectState["animation_temps"][0] = self.objectData["temps"][0]
-                self.objectState["animation_active"] = False  # if len(self.objectData['label']) <= 5 else True
-
-            elif (self.delta >= 0) and (
-                abs(self.objectState["animation_temps"][0]) >= abs(self.objectData["temps"][0])
-            ):
-                self.objectState["animation_temps"][0] = self.objectData["temps"][0]
-                self.objectState["animation_active"] = False  # if len(self.objectData['label']) <= 5 else True
-
-            elif (self.delta <= 0) and (
-                abs(self.objectState["animation_temps"][0]) <= abs(self.objectData["temps"][0])
+            if (
+                self.objectState["animation_temps"][0] <= 0
+                or (self.delta >= 0)
+                and (abs(self.objectState["animation_temps"][0]) >= abs(self.objectData["temps"][0]))
+                or (self.delta <= 0)
+                and (abs(self.objectState["animation_temps"][0]) <= abs(self.objectData["temps"][0]))
             ):
                 self.objectState["animation_temps"][0] = self.objectData["temps"][0]
                 self.objectState["animation_active"] = False  # if len(self.objectData['label']) <= 5 else True
@@ -504,7 +498,7 @@ class GaugeCompact(FlexObject):
         gauge.paste(current_temp, (40, 75), current_temp)
 
         # Determine if Displaying Notify Point AND Set Point
-        dual_temp = True if self.objectData["temps"][1] != 0 and self.objectData["temps"][2] != 0 else False
+        dual_temp = bool(self.objectData["temps"][1] != 0 and self.objectData["temps"][2] != 0)
 
         if dual_temp:
             font_size = 30
@@ -550,8 +544,7 @@ class GaugeCompact(FlexObject):
         current_temp_adjusted = (
             int((self.objectData["temps"][0] / max_temp) * 320) + 40 if self.objectData["temps"][0] > 0 else 40
         )
-        if current_temp_adjusted > 360:
-            current_temp_adjusted = 360
+        current_temp_adjusted = min(current_temp_adjusted, 360)
         current_temp_bar = (40, 160, current_temp_adjusted, 170)
         draw.rounded_rectangle(temp_bar, radius=10, fill=(0, 0, 0, 200))
         draw.rounded_rectangle(current_temp_bar, radius=10, fill=self.objectData["fg_color"])
@@ -561,8 +554,7 @@ class GaugeCompact(FlexObject):
             notify_temp_adjusted = (
                 int((self.objectData["temps"][1] / max_temp) * 320) + 40 if self.objectData["temps"][1] > 0 else 0
             )
-            if notify_temp_adjusted > 360:
-                notify_temp_adjusted = 360
+            notify_temp_adjusted = min(notify_temp_adjusted, 360)
             triangle_coords = [
                 (notify_temp_adjusted, 168),
                 (notify_temp_adjusted + 10, 150),
@@ -575,8 +567,7 @@ class GaugeCompact(FlexObject):
             set_temp_adjusted = (
                 int((self.objectData["temps"][2] / max_temp) * 320) + 40 if self.objectData["temps"][2] > 0 else 0
             )
-            if set_temp_adjusted > 360:
-                set_temp_adjusted = 360
+            set_temp_adjusted = min(set_temp_adjusted, 360)
             triangle_coords = [(set_temp_adjusted, 168), (set_temp_adjusted + 10, 150), (set_temp_adjusted - 10, 150)]
             draw.polygon(triangle_coords, fill=self.objectData["sp_color"])
 
@@ -1023,7 +1014,7 @@ class SystemCard(FlexObject):
         row_count = len(self.objectData["button_list"])
         spacing = int(self.objectData["size"][1] / row_count)
         self.objectData["touch_areas"] = []
-        for index in range(0, row_count):
+        for index in range(row_count):
             x_left = self.objectData["position"][0]
             y_top = self.objectData["position"][1] + (index * spacing)
             width = self.objectData["size"][0]
@@ -1164,7 +1155,7 @@ class ControlPanel(FlexObject):
         spacing = int((self.objectData["size"][0]) / (len(self.objectData["button_list"])))
         # Draw Dividing Lines
         self.objectData["touch_areas"] = []
-        for index in range(0, len(self.objectData["button_list"])):
+        for index in range(len(self.objectData["button_list"])):
             x_left = self.objectData["position"][0] + (index * spacing)
             y_top = self.objectData["position"][1]
             width = spacing
@@ -1214,7 +1205,7 @@ class StatusIcon(FlexObject):
         else:
             char_id = "\uf071"  # FontAwesome Error Triangle Icon
 
-        if "animation_breathe" in self.objectState.keys():
+        if "animation_breathe" in self.objectState:
             if self.objectState["animation_breathe"] >= len(animation_breath_steps):
                 self.objectState["animation_breathe"] = breath_step = 0
 
@@ -1343,7 +1334,7 @@ class MenuGeneric(FlexObject):
 
         number_of_buttons = len(self.objectData["button_list"])
 
-        two_column_mode = True if number_of_buttons > 6 else False
+        two_column_mode = number_of_buttons > 6
 
         if two_column_mode:
             button_height = 50
@@ -1720,8 +1711,7 @@ class _InputNumberBase(FlexObject):
 
             if self.objectData["data"]["input"] == "down":
                 self.objectData["data"]["value"] -= self.objectData["step"]
-                if self.objectData["data"]["value"] < 0:
-                    self.objectData["data"]["value"] = 0
+                self.objectData["data"]["value"] = max(self.objectData["data"]["value"], 0)
 
             """ Convert value to list of characters """
             temp_string = str(self.objectData["data"]["value"])
@@ -1746,9 +1736,11 @@ class _InputNumberBase(FlexObject):
                 if "." in self.objectState["value"]:
                     self.objectState["value"].pop()
                     self.objectState["value"].append(self.objectData["data"]["input"])
-                elif len(self.objectState["value"]) == 3 and self.objectData["data"]["input"] == ".":
-                    self.objectState["value"].append(self.objectData["data"]["input"])
-                elif len(self.objectState["value"]) < 3:
+                elif (
+                    len(self.objectState["value"]) == 3
+                    and self.objectData["data"]["input"] == "."
+                    or len(self.objectState["value"]) < 3
+                ):
                     self.objectState["value"].append(self.objectData["data"]["input"])
 
             """ Combine list of characters back to string and then back to a float or int """
@@ -2081,8 +2073,7 @@ class HopperStatus(FlexObject):
         current_level_adjusted = (
             int((self.objectData["data"]["level"] / 100) * 320) + 40 if self.objectData["data"]["level"] > 0 else 40
         )
-        if current_level_adjusted > 360:
-            current_level_adjusted = 360
+        current_level_adjusted = min(current_level_adjusted, 360)
         current_level_bar = (40, 160, current_level_adjusted, 170)
         draw.rounded_rectangle(level_bar, radius=10, fill=(0, 0, 0, 200))
         draw.rounded_rectangle(current_level_bar, radius=10, fill=fg_color)

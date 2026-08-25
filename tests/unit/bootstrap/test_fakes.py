@@ -1,6 +1,6 @@
 from tests.fakes.grill import FakeGrillPlatform
-from tests.fakes.probes import FakeProbes
 from tests.fakes.notifier import FakeNotifier
+from tests.fakes.probes import FakeProbes
 
 
 def test_grill_records_calls_and_toggles_output():
@@ -21,8 +21,8 @@ def test_probes_yield_scripted_sequence():
             {"primary": {"Grill": 110}, "food": {}, "aux": {}, "tr": {}},
         ]
     )
-    assert list(p.read_probes()["primary"].values())[0] == 100
-    assert list(p.read_probes()["primary"].values())[0] == 110
+    assert next(iter(p.read_probes()["primary"].values())) == 100
+    assert next(iter(p.read_probes()["primary"].values())) == 110
 
 
 def test_notifier_records_sent():

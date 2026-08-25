@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 import json
 import os
+from collections.abc import Callable
+from copy import deepcopy
 from pathlib import Path
-from typing import Callable
 
 import pytest
 
@@ -18,7 +18,6 @@ from controller.acados.codegen.manifest import (
     create_manifest,
     validate_environment,
 )
-
 
 Generator = Callable[[Path], Path]
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]

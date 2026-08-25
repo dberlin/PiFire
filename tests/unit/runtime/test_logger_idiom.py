@@ -13,18 +13,17 @@ import ast
 import logging
 import pathlib
 
+from controller.runtime.clock import ManualClock
 from controller.runtime.context import ControllerContext, Devices
-from controller.runtime.state import WorkCycleState
 from controller.runtime.modes.monitor import MonitorMode
 from controller.runtime.modes.shutdown import ShutdownMode
-from tests.fakes.grill import FakeGrillPlatform
+from controller.runtime.state import WorkCycleState
+from controller.runtime.store import InMemoryStore
+from tests.characterization.fixtures import base_control, base_pellet_db, base_settings
 from tests.fakes.distance import FakeDistance
+from tests.fakes.grill import FakeGrillPlatform
 from tests.fakes.notifier import FakeNotifier
 from tests.fakes.probes import FakeProbes
-from tests.characterization.fixtures import base_settings, base_control, base_pellet_db
-from controller.runtime.store import InMemoryStore
-from controller.runtime.clock import ManualClock
-
 
 _RUNTIME_ROOT = pathlib.Path(__file__).resolve().parents[3] / "controller"
 

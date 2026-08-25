@@ -28,8 +28,8 @@ NEW constraint must trace the same way.
 """
 
 import copy
-from types import UnionType
 from collections.abc import Mapping
+from types import UnionType
 from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
 from pydantic import (
@@ -160,7 +160,7 @@ class _MCP2221Bus(_Section):
 
 
 I2CBusConfig = Annotated[
-    Union[_BasicBus, _KernelBusNumber, _KernelAdapterName, _KernelSerialMatch, _FT232hBus, _MCP2221Bus],
+    _BasicBus | _KernelBusNumber | _KernelAdapterName | _KernelSerialMatch | _FT232hBus | _MCP2221Bus,
     Field(union_mode="left_to_right"),
 ]
 
@@ -376,7 +376,7 @@ class PwmSettings(_Section):
     ]
 
     @model_validator(mode="after")
-    def _check_profiles(self) -> "PwmSettings":
+    def _check_profiles(self) -> PwmSettings:
         # Clamp source: React RangeProfileTable's construction invariant
         # (web-react/src/components/settings/RangeProfileTable.tsx handleAdd/
         # handleRemove keep profiles == boundaries + 1); PwmTab.tsx wires
@@ -412,7 +412,7 @@ class SmartStart(_Section):
     ]
 
     @model_validator(mode="after")
-    def _check_profile_count(self) -> "SmartStart":
+    def _check_profile_count(self) -> SmartStart:
         # Clamp source: RangeProfileTable's construction invariant (see
         # PwmSettings._check_profiles above) as wired by StartupTab.tsx.
         if len(self.profiles) != len(self.temp_range_list) + 1:
@@ -683,7 +683,7 @@ class SettingsSchema(_Section):
     recipe: Recipe = Recipe()
 
     @model_validator(mode="after")
-    def _check_startup_pwm_duty_cycle(self) -> "SettingsSchema":
+    def _check_startup_pwm_duty_cycle(self) -> SettingsSchema:
         # Clamp source: blueprints/settings/routes.py:493-497 -- chained
         # min()/max() against the sibling `pwm` section's min_duty_cycle/
         # max_duty_cycle. Cross-SECTION (startup vs. pwm are siblings here),

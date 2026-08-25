@@ -20,15 +20,16 @@ Toggles:
   ALL off       : everything above combined -> should approach the matched plant
 """
 
-import warnings, sys
+import sys
+import warnings
 
 warnings.filterwarnings("ignore")
 sys.path.insert(0, ".")
 import numpy as np
+
+from controller.grill_sim import GrillSim
 from controller.mpc import Controller
 from controller.mpc_config import DEFAULT_MPC_CONFIG
-from controller.grill_sim import GrillSim
-
 from docs.superpowers.experiments import _pinned_two_lump  # noqa: F401,E402
 
 _pinned_two_lump.require_pinned_model(__name__)

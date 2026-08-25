@@ -42,13 +42,15 @@ Requirements:
  Imported Libraries
 *****************************************
 """
-import threading
-import time
 import logging
 import struct  # NEW: required for battery unpack in DataDelegate
+import threading
+import time
+
+from bluepy.btle import BTLEDisconnectError, DefaultDelegate, Peripheral, Scanner
 
 from probes.base import ProbeInterface
-from bluepy.btle import DefaultDelegate, Scanner, Peripheral, BTLEDisconnectError
+
 # from icecream import ic  # For debugging
 
 """
@@ -150,7 +152,7 @@ class iBBQ_Device:
 
         self.status = {
             "battery_percentage": self.battery_percentage,
-            "battery_charging": True if self.battery_percentage == 0 else False,
+            "battery_charging": self.battery_percentage == 0,
             "connected": self.device_setup,
             "hardware_id": self.hardware_id,
         }
@@ -215,7 +217,7 @@ class iBBQ_Device:
 
                     # We should now have a dict of bbq devices, let's sort by rssi and choose the one with the best connection
                     if len(bbqs) > 0:
-                        bbq = bbqs[sorted(bbqs.keys(), reverse=True)[0]].addr
+                        bbq = bbqs[max(bbqs.keys())].addr
                         logger_msg = f"(ibbq) Using Inkbird device {bbq}"  # NEW (generic label)
                         self.logger.debug(logger_msg)
                         # ic(logger_msg)
@@ -403,8 +405,8 @@ class iBBQ_Device:
             self.status["battery_percentage"] = (
                 self.battery_percentage if (self.battery_percentage > 0 and self.device_setup) else None
             )
-            self.status["battery_charging"] = (
-                True if (self.battery_percentage == 0 and self.device_setup) else False
+            self.status["battery_charging"] = bool(
+                self.battery_percentage == 0 and self.device_setup
             )  # Reads zero when charging
         else:
             self.status["battery_percentage"] = self.battery_percentage

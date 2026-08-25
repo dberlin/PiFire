@@ -1,15 +1,14 @@
 """Contract tests for the committed production-path coast experiment."""
 
 from __future__ import annotations
-import json
 
+import json
 from typing import Any
 
 import pytest
 
 from controller.mpc_config import DEFAULT_MPC_CONFIG
 from tools.experiments import braking_horizon
-
 
 TARGETS_F = (225, 350, 450)
 SEEDS = (0, 1, 2)

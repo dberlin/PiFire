@@ -20,13 +20,13 @@ for why both of those matter.
 from __future__ import annotations
 
 import collections
-from copy import deepcopy
 import importlib
 import math
 import threading
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Protocol, TypeAlias, runtime_checkable
@@ -41,7 +41,6 @@ from common.model_evidence import (
     SessionSummaryEvidence,
 )
 from common.persistence.model_evidence import ModelActivationState
-
 from controller.base import (
     ControllerLearningDiagnostics,
     ControllerStatusCapture,
@@ -313,7 +312,7 @@ class _ResultQualityTracker:
     consecutive_deadline_miss_count: int = 0
     stale_state: ResultStaleState = ResultStaleState.FRESH
 
-    def completed(self, result: "ControllerUpdateResult") -> tuple["ControllerUpdateResult", ResultStaleState | None]:
+    def completed(self, result: ControllerUpdateResult) -> tuple[ControllerUpdateResult, ResultStaleState | None]:
         deadline_missed = self.control_period is not None and result.solve_duration_seconds > self.control_period
         if deadline_missed:
             self.deadline_miss_count += 1
@@ -336,8 +335,8 @@ class _ResultQualityTracker:
         )
 
     def polled(
-        self, result: "ControllerUpdateResult", monotonic_now: float
-    ) -> tuple["ControllerUpdateResult", ResultStaleState | None]:
+        self, result: ControllerUpdateResult, monotonic_now: float
+    ) -> tuple[ControllerUpdateResult, ResultStaleState | None]:
         if result.revision == 0 or self.control_period is None:
             return result, None
         age = max(0.0, monotonic_now - result.solve_end_monotonic)
@@ -357,7 +356,7 @@ class _ResultQualityTracker:
         return _with_result_quality(quality_result), next_state if transition else None
 
 
-def _quality_status(result: "ControllerUpdateResult") -> dict[str, StatusScalar]:
+def _quality_status(result: ControllerUpdateResult) -> dict[str, StatusScalar]:
     return {
         "solve_duration_seconds": result.solve_duration_seconds,
         "result_age_seconds": result.result_age_seconds,
@@ -515,7 +514,7 @@ class ControllerRunner(ABC, ModelLifecycleRunner):
     @abstractmethod
     def set_safety_ceiling_c(self, ceiling_c): ...
     @abstractmethod
-    def request_calibration(self, command: "CalibrationCommand") -> None: ...
+    def request_calibration(self, command: CalibrationCommand) -> None: ...
 
     @abstractmethod
     def cancel_calibration(self, reason: str) -> None: ...
@@ -641,7 +640,7 @@ class SyncControllerRunner(ControllerRunner):
     def set_safety_ceiling_c(self, ceiling_c):
         self._core.set_safety_ceiling_c(ceiling_c)
 
-    def request_calibration(self, command: "CalibrationCommand") -> None:
+    def request_calibration(self, command: CalibrationCommand) -> None:
         self._core.request_calibration(command)
 
     def cancel_calibration(self, reason: str) -> None:
@@ -1236,7 +1235,7 @@ class ThreadedControllerRunner(ControllerRunner):
         with self._lock:
             self._pending_safety_ceiling_c = ceiling_c
 
-    def request_calibration(self, command: "CalibrationCommand") -> None:
+    def request_calibration(self, command: CalibrationCommand) -> None:
         with self._lock:
             self._pending_calibrations.append(("command", command))
 

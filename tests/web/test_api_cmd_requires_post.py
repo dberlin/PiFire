@@ -27,7 +27,7 @@ from unittest import mock
 
 import pytest
 
-import common.api_commands as api_commands
+from common import api_commands
 
 _HAZARD_TOKENS = ("reboot", "poweroff", "shutdown", "supervisor", "systemctl")
 

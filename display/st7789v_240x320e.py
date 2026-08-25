@@ -19,9 +19,11 @@ PiFire Display Interface Library
  Imported Libraries
 """
 import threading
-import ST7789 as ST7789
-from display._base_240x320 import DisplayBase
+
+import ST7789
 from PIL import Image
+
+from display._base_240x320 import DisplayBase
 from display._encoder_input import SimpleEncoderInputMixin
 
 """

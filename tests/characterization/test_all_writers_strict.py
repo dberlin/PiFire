@@ -78,8 +78,8 @@ from unittest import mock
 
 import pytest
 
-from common.persistence.runtime import read_settings, write_settings_store
 from common.defaults import default_control, default_settings
+from common.persistence.runtime import read_settings, write_settings_store
 from common.settings_schema import validate_settings_tree
 
 
@@ -131,9 +131,9 @@ def client_and_store(ds):
 
 @pytest.fixture
 def admin_client(ds, tmp_path):
-    from app import app as flask_app
     import blueprints.api_admin.routes as admin_routes
     import common.backups as backups_module
+    from app import app as flask_app
 
     flask_app.config.update(TESTING=True)
     backup_dir = str(tmp_path / "backups") + os.sep
@@ -254,15 +254,15 @@ def test_admin_restoresettings_invalid_backup_rejected_no_crash(admin_client):
 @pytest.fixture
 def sio(ds):
     write_settings_store(default_settings())
+    from common.defaults import default_pellets
     from common.persistence.control import write_control_snapshot
     from common.persistence.runtime import init_status, write_pellet_db
-    from common.defaults import default_pellets
 
     write_control_snapshot(default_control(), origin="test-writer-matrix")
     write_pellet_db(default_pellets())
     init_status()
 
-    import blueprints.mobile.socket_io as socket_io
+    from blueprints.mobile import socket_io
 
     calls = []
 
@@ -521,8 +521,8 @@ def test_onesignal_invalid_player_id_cleanup_writes_strict(ds):
 @pytest.fixture
 def flex_display(ds, tmp_path):
     write_settings_store(default_settings())
-    from common.persistence.control import write_control_snapshot
     from common.defaults import default_control as _default_control
+    from common.persistence.control import write_control_snapshot
 
     write_control_snapshot(_default_control(), origin="test-writer-matrix")
 
@@ -641,8 +641,8 @@ def no_install(monkeypatch):
 
 def test_run_wizard_writes_strict(ds, no_install):
     import wizard
-    from common.persistence import runtime as runtime_persistence
     from common.common import read_wizard
+    from common.persistence import runtime as runtime_persistence
 
     settings = default_settings()
     settings["probe_settings"]["probe_map"]["probe_devices"] = []
@@ -714,7 +714,7 @@ def test_migration_v1_4_cascade_full_migrates_strict(migration_env):
     old["startup"] = {"start_to_mode": {}}
     old["start_to_mode"] = {"grill1_setpoint": 225}
     old["dashboard"] = {"sentinel_old_dash": True}
-    for key in d["notify_services"].keys():
+    for key in d["notify_services"]:
         old[key] = {"legacy_marker": key}
     del old["notify_services"]
     old["probe_settings"]["probe_options"] = {"x": 1}
@@ -741,7 +741,7 @@ def test_migration_v1_4_cascade_preserves_start_to_mode_strict(migration_env):
     old["versions"] = {"server": "1.4.0", "build": 0}
     old["startup"] = {"start_to_mode": {}}
     old["start_to_mode"] = {"grill1_setpoint": 225}
-    for key in d["notify_services"].keys():
+    for key in d["notify_services"]:
         old[key] = {}
     del old["notify_services"]
     old["probe_settings"]["probe_options"] = {}

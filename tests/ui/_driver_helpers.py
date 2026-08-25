@@ -43,16 +43,16 @@ def instantiate(mod, **overrides):
     drivers) or in a shared mixin module (`display._luma_panel`,
     `display._encoder_input`) -- without requiring each driver to keep its
     own `import threading` around just so tests can reach it."""
-    kwargs = dict(
-        dev_pins={
+    kwargs = {
+        "dev_pins": {
             "display": {"dc": 24, "led": 5, "rst": 25},
             "input": {"up_clk": 16, "down_dt": 20, "enter_sw": 21},
         },
-        buttonslevel="HIGH",
-        rotation=0,
-        units="F",
-        config={},
-    )
+        "buttonslevel": "HIGH",
+        "rotation": 0,
+        "units": "F",
+        "config": {},
+    }
     kwargs.update(overrides)
     with (
         mock.patch.object(threading, "Thread") as mock_thread,

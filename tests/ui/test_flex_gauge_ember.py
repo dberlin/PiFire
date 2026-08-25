@@ -1,4 +1,5 @@
 from PIL import Image
+
 from display.flexobject import GaugeEmber, resolve_accent
 
 

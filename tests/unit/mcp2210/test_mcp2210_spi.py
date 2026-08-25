@@ -1,6 +1,8 @@
 import pytest
+
+from grillplat.mcp2210 import MCP2210, MCP2210Error
+from grillplat.mcp2210 import _protocol as p
 from tests._fake_hid import FakeHID
-from grillplat.mcp2210 import MCP2210, MCP2210Error, _protocol as p
 
 
 def make():

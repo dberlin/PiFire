@@ -86,9 +86,11 @@ CASES = [
         {"kind": "ft232h", "url": "1"},
         True,
         False,
-        "FT232HBus.__post_init__ normalizes '1' to '' -- both name 'the first "
-        "FT232H found' -- so parse_i2c_bus accepts it; the TS rule only "
-        "special-cases a blank url, so it reports '1' as not ftdi://-prefixed.",
+        (
+            "FT232HBus.__post_init__ normalizes '1' to '' -- both name 'the first "
+            "FT232H found' -- so parse_i2c_bus accepts it; the TS rule only "
+            "special-cases a blank url, so it reports '1' as not ftdi://-prefixed."
+        ),
     ),
     (
         "ft232h url ftdi://...",
@@ -102,9 +104,11 @@ CASES = [
         {"kind": "ft232h", "url": "CP2112"},
         True,
         False,
-        "parse_i2c_bus stores any non-blank, non-'1' ft232h url as-is -- it "
-        "does not format-check it. The wizard's ftdi:// prefix check is a "
-        "keystroke-time UX hint, not a structural rule Python enforces.",
+        (
+            "parse_i2c_bus stores any non-blank, non-'1' ft232h url as-is -- it "
+            "does not format-check it. The wizard's ftdi:// prefix check is a "
+            "keystroke-time UX hint, not a structural rule Python enforces."
+        ),
     ),
     ("mcp2221 serial empty", {"kind": "mcp2221", "serial": ""}, True, True, None),
     (

@@ -1,6 +1,5 @@
+from common import datastore, defaults
 from common.persistence import history as c
-from common import defaults
-from common import datastore
 
 
 def test_replace_last_matches_oracle(ds, oracle):

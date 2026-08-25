@@ -23,15 +23,16 @@ PiFire Display Interface Library
 """
  Imported Libraries
 """
-import time
 import multiprocessing
+import time
+from pathlib import Path
+
 import pygame
+from PIL import ImageFilter
 from pygame import image as PyImage
 
-from PIL import ImageFilter
 from display._base_flex import DisplayBase
 from display._flex_helpers import DummyBacklight  # noqa: F401  # re-exported for isinstance checks
-from pathlib import Path
 
 """
 Display class definition

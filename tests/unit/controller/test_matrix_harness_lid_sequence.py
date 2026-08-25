@@ -3,9 +3,9 @@
 import sys
 import types
 
-import tools.experiments.controller_matrix as controller_matrix
 from common.defaults import default_settings
 from controller.applied_output import OutputSource
+from tools.experiments import controller_matrix
 
 PULSE_FRAME_S = 20
 RATIO = 0.5

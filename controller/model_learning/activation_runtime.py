@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from collections import deque
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-import threading
-import time
 
 from common.model_evidence import (
+    ActivationLifecycleEvidence,
     CandidateAssessmentEvidence,
     ConfidenceDecisionEvidence,
-    ActivationLifecycleEvidence,
     EvidenceKind,
     FallbackEvidence,
     LearningFailureEvidence,
@@ -852,24 +852,24 @@ class ActivationRuntime:
                     continue
                 retired_ids.add(id(retired))
                 retirees.append((slot, retired))
+
+            def detach_retired(slot: str, retired: OwnedMpcPair) -> None:
+                if slot == "rollback" and self._rollback_pair is retired:
+                    self._rollback_pair = None
+                if slot == "pending" and self._pending is not None and self._pending.candidate_pair is retired:
+                    self._pending = None
+                if slot == "flight" and self._flight is not None and self._flight.pending.candidate_pair is retired:
+                    self._flight = None
+
             for slot, retired in retirees:
-
-                def detach_retired() -> None:
-                    if slot == "rollback" and self._rollback_pair is retired:
-                        self._rollback_pair = None
-                    if slot == "pending" and self._pending is not None and self._pending.candidate_pair is retired:
-                        self._pending = None
-                    if slot == "flight" and self._flight is not None and self._flight.pending.candidate_pair is retired:
-                        self._flight = None
-
                 try:
                     retired.close()
                 except BaseException as error:
                     if retired.closed:
-                        detach_retired()
+                        detach_retired(slot, retired)
                         self._retired_pairs.append(retired)
                     raise RuntimeError("could not retire displaced activation ownership") from error
-                detach_retired()
+                detach_retired(slot, retired)
 
             previous_rollback = self._rollback_pair
             previous_inert_record = self._inert_record

@@ -19,16 +19,18 @@ Description:
 ==============================================================================
 """
 
+import logging
+
 from flask import Flask, render_template
 from flask_mobility import Mobility
-from flask_socketio import SocketIO
 from flask_qrcode import QRcode
+from flask_socketio import SocketIO
 from werkzeug.exceptions import InternalServerError
+
 from common import datastore
 from common.common import ErrorKind, create_logger, log_path
 from common.persistence.runtime import flush_errors, read_settings
 from common.system import is_real_hardware
-import logging
 
 # First-boot migration: import existing settings.json / pelletdb.json into
 # SQLite if it hasn't happened yet. Must run before the first settings read
@@ -49,8 +51,8 @@ flush_errors(ErrorKind.WEB)
  Constants & Globals 
 ==============================================================================
 """
-from config import ProductionConfig  # ProductionConfig or DevelopmentConfig
 from common.server_status import set_server_status
+from config import ProductionConfig  # ProductionConfig or DevelopmentConfig
 
 app = Flask(__name__)
 # async_mode='threading' pins Flask-SocketIO to the threaded (gthread) server
@@ -72,13 +74,13 @@ app.config.from_object(ProductionConfig)
 
 """ Flask Blueprints """
 from blueprints.api import api_bp
-from blueprints.api_wizard import api_wizard_bp
-from blueprints.api_history import api_history_bp
-from blueprints.api_files import api_files_bp
 from blueprints.api_admin import api_admin_bp
+from blueprints.api_files import api_files_bp
+from blueprints.api_history import api_history_bp
 from blueprints.api_metrics import api_metrics_bp
 from blueprints.api_tuner import api_tuner_bp
 from blueprints.api_update import api_update_bp
+from blueprints.api_wizard import api_wizard_bp
 
 """ Register Flask Blueprints """
 app.register_blueprint(api_bp, url_prefix="/api")

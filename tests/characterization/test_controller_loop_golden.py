@@ -26,19 +26,19 @@ import pytest
 
 import controller.runtime.controller as controller_mod
 import controller.runtime.store as store_mod
-from controller.runtime.clock import ManualClock
-from distance.intervals import HOPPER_LEVEL_REFRESH_INTERVAL
 from common.common import ErrorKind
 from common.control_delta import control_delta
 from common.defaults import default_metrics
-from tests.characterization.fixtures import base_settings, base_control, base_pellet_db
+from controller.runtime.clock import ManualClock
+from distance.intervals import HOPPER_LEVEL_REFRESH_INTERVAL
 from tests.characterization._controller_harness import (
-    make_controller,
-    _spy_dispatch,
+    _FakeOs,
     _neutralize_externals,
     _RecordingDistance,
-    _FakeOs,
+    _spy_dispatch,
+    make_controller,
 )
+from tests.characterization.fixtures import base_control, base_pellet_db, base_settings
 from tests.fakes.grill import FakeGrillPlatform
 from tests.fakes.probes import FakeProbes
 

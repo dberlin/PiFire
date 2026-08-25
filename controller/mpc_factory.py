@@ -19,10 +19,10 @@ from controller.model_learning.activation import (
 )
 from controller.mpc_config import JsonValue, MpcConfig, model_is_identified, normalize_config
 from controller.mpc_core import (
+    CalibrationAdvance,
     Closable,
     EkfFactory,
     KfFactory,
-    CalibrationAdvance,
     ModelAuthority,
     MpcCore,
     MpcEstimator,
@@ -31,7 +31,6 @@ from controller.mpc_core import (
     SolverFactory,
 )
 from controller.runtime.model_fitting import TargetTimingEvidence
-
 
 _ESTIMATOR_CONFIGURATION_FIELDS = frozenset({"control_period", "est_q_temp", "est_q_dist", "est_r_meas"})
 _NATIVE_CONFIGURATION_FIELDS = frozenset(

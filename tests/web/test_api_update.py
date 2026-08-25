@@ -2,6 +2,7 @@ import json
 import subprocess
 
 import pytest
+
 from common.modes import Mode
 
 

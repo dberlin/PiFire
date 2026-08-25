@@ -17,7 +17,6 @@ from dataclasses import dataclass
 
 from common.control_trace import AllocationClampReason
 
-
 ALLOCATOR_REVISION = 2
 
 

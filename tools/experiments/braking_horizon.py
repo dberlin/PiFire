@@ -23,8 +23,8 @@ REPO = Path(__file__).resolve().parents[2]
 
 from controller.grill_sim import GrillSim, MAKGrillSim
 from controller.model_promotion import T_FLOOR_C, T_HAZARD_C, braking_distance
-from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.mpc_allocator import allocate
+from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.runtime.logic.pulse import PulseScheduler
 from grillplat.actuator_capabilities import AUGER_TIMING
 

@@ -21,7 +21,6 @@ from common.web_contracts.control import (
     WledPushProfilesRequest,
     WledTestProfileRequest,
 )
-
 from common.web_contracts.core import PelletSocketPayload
 
 COMMAND_REQUESTS = (

@@ -21,14 +21,15 @@ t_step=25 s cadence (consistent with how its Kalman filter is discretized). The
 plant integrates at dt=1 s.
 """
 
-import warnings, sys
+import sys
+import warnings
 from collections import deque
 
 warnings.filterwarnings("ignore")
 sys.path.insert(0, ".")
 import numpy as np
-from controller.mpc import Controller
 
+from controller.mpc import Controller
 from docs.superpowers.experiments import _pinned_two_lump  # noqa: F401,E402
 
 _pinned_two_lump.require_pinned_model(__name__)
@@ -115,26 +116,26 @@ class HiFiGrill:
 
 
 def run(enable_fan_input, fan_is_lever=True, fixed_fan=None, n_minutes=120, seed=0, deadtime=40):
-    cfg = dict(
-        n_horizon=20,
-        t_step=TS,
-        control_period=TS,
-        Q_w=1.0,
-        R_dQ=0.02,
-        Q_min=5.0,
-        Q_max=100.0,
-        C_f=60.0,
-        C_c=306.0,
-        h_fc=2.0,
-        h_amb=0.55,
-        T_amb=20.0,
-        fan_min_pct=40.0,
-        fan_max_pct=100.0,
-        enable_fan_input=enable_fan_input,
-        est_q_temp=1e-2,
-        est_q_dist=0.5,
-        est_r_meas=0.04,
-    )
+    cfg = {
+        "n_horizon": 20,
+        "t_step": TS,
+        "control_period": TS,
+        "Q_w": 1.0,
+        "R_dQ": 0.02,
+        "Q_min": 5.0,
+        "Q_max": 100.0,
+        "C_f": 60.0,
+        "C_c": 306.0,
+        "h_fc": 2.0,
+        "h_amb": 0.55,
+        "T_amb": 20.0,
+        "fan_min_pct": 40.0,
+        "fan_max_pct": 100.0,
+        "enable_fan_input": enable_fan_input,
+        "est_q_temp": 1e-2,
+        "est_q_dist": 0.5,
+        "est_r_meas": 0.04,
+    }
     c = Controller(dict(cfg), "C", dict(CYCLE))
     c.set_target(SETPOINT)
     plant = HiFiGrill(seed=seed, fan_is_lever=fan_is_lever, fixed_fan=fixed_fan, deadtime=deadtime)

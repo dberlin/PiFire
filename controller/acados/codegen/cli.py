@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import argparse
 import ctypes
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
 import math
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -23,7 +23,6 @@ from .manifest import (
     validate_environment,
     write_manifest,
 )
-
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 _SOLVER_NAMES = ("grey_box",)

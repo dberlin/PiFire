@@ -23,11 +23,10 @@ from adafruit_emc2101.emc2101_lut import EMC2101_LUT
 
 from common.i2c_bus import open_i2c_bus
 from common.i2c_bus_config import FT232HBus
+from grillplat.actuator_capabilities import AUGER_TIMING
 from grillplat.emc2301 import EMC2301
 from grillplat.ft232h import open_gpio as open_ft232h_gpio
 from grillplat.system_commands import SystemCommandsMixin
-from grillplat.actuator_capabilities import AUGER_TIMING
-
 
 # Default FT232H pin name per PiFire output.  The C-bank keeps the I2C pins
 # (D0=SCL, D1/D2=SDA) free for the EMC fan controller.

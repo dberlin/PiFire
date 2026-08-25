@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Stable regeneration entry point for promotion-signal evidence."""
 
-from pathlib import Path
 import sys
+from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[3]
 if str(_ROOT) not in sys.path:

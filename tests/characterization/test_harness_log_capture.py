@@ -10,8 +10,8 @@ after that migration, and fails if the harness stops capturing.
 
 import logging
 
+from tests.characterization.fixtures import base_control, base_pellet_db, base_settings
 from tests.characterization.harness import make_ctx, run_mode
-from tests.characterization.fixtures import base_settings, base_control, base_pellet_db
 from tests.fakes.probes import FakeProbes
 
 

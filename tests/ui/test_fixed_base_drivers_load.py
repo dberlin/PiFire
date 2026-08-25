@@ -42,7 +42,6 @@ from unittest import mock
 import pytest
 
 import display._base_fixed  # noqa: F401  pre-warm real PIL/qrcode/common imports; see module docstring
-
 from tests.conftest import REPO_BASE, load_wizard_manifest
 from tests.ui._driver_helpers import instantiate, load_driver
 
@@ -109,22 +108,22 @@ def _hardware_stubs(*, luma=False, st7789_pimoroni=False, gpiozero=False, pyky04
 
 # (short id, module path, resolution family, hardware-stub kwargs)
 DRIVERS = [
-    ("st7789e", "display.st7789e", "240x240", dict(luma=True, pyky040=True)),
-    ("ili9341", "display.ili9341", "240x320", dict(luma=True)),
-    ("ili9341b", "display.ili9341b", "240x320", dict(luma=True, gpiozero=True)),
-    ("ili9341e", "display.ili9341e", "240x320", dict(luma=True, pyky040=True)),
-    ("ili9341em", "display.ili9341em", "240x320", dict(luma=True, pyky040=True, spidev=True)),
-    ("pygame_240x320", "display.pygame_240x320", "240x320", dict()),
-    ("pygame_240x320b", "display.pygame_240x320b", "240x320", dict()),
-    ("st7789_240x320", "display.st7789_240x320", "240x320", dict(st7789_pimoroni=True)),
-    ("st7789_240x320b", "display.st7789_240x320b", "240x320", dict(st7789_pimoroni=True, gpiozero=True)),
-    ("st7789_240x320e", "display.st7789_240x320e", "240x320", dict(st7789_pimoroni=True, pyky040=True)),
-    ("st7789v_240x320", "display.st7789v_240x320", "240x320", dict(st7789_pimoroni=True)),
-    ("st7789v_240x320e", "display.st7789v_240x320e", "240x320", dict(st7789_pimoroni=True, pyky040=True)),
-    ("ili9488", "display.ili9488", "320x480", dict(luma=True)),
-    ("ili9488b", "display.ili9488b", "320x480", dict(luma=True, gpiozero=True)),
-    ("ili9488e", "display.ili9488e", "320x480", dict(luma=True, pyky040=True)),
-    ("ili9488em", "display.ili9488em", "320x480", dict(luma=True, pyky040=True, spidev=True)),
+    ("st7789e", "display.st7789e", "240x240", {"luma": True, "pyky040": True}),
+    ("ili9341", "display.ili9341", "240x320", {"luma": True}),
+    ("ili9341b", "display.ili9341b", "240x320", {"luma": True, "gpiozero": True}),
+    ("ili9341e", "display.ili9341e", "240x320", {"luma": True, "pyky040": True}),
+    ("ili9341em", "display.ili9341em", "240x320", {"luma": True, "pyky040": True, "spidev": True}),
+    ("pygame_240x320", "display.pygame_240x320", "240x320", {}),
+    ("pygame_240x320b", "display.pygame_240x320b", "240x320", {}),
+    ("st7789_240x320", "display.st7789_240x320", "240x320", {"st7789_pimoroni": True}),
+    ("st7789_240x320b", "display.st7789_240x320b", "240x320", {"st7789_pimoroni": True, "gpiozero": True}),
+    ("st7789_240x320e", "display.st7789_240x320e", "240x320", {"st7789_pimoroni": True, "pyky040": True}),
+    ("st7789v_240x320", "display.st7789v_240x320", "240x320", {"st7789_pimoroni": True}),
+    ("st7789v_240x320e", "display.st7789v_240x320e", "240x320", {"st7789_pimoroni": True, "pyky040": True}),
+    ("ili9488", "display.ili9488", "320x480", {"luma": True}),
+    ("ili9488b", "display.ili9488b", "320x480", {"luma": True, "gpiozero": True}),
+    ("ili9488e", "display.ili9488e", "320x480", {"luma": True, "pyky040": True}),
+    ("ili9488em", "display.ili9488em", "320x480", {"luma": True, "pyky040": True, "spidev": True}),
 ]
 
 assert len(DRIVERS) == 16, "expected exactly 16 fixed-base drivers (verified-facts inventory)"

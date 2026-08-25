@@ -143,8 +143,8 @@ from scipy.optimize import least_squares
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
-from controller.mpc_model import _erlang_coefficients, simulate_grey_box  # noqa: E402
 from controller.model_promotion import PROMOTION_BOUNDS, T_FLOOR_C, T_HAZARD_C, effective_tau  # noqa: E402
+from controller.mpc_model import _erlang_coefficients, simulate_grey_box  # noqa: E402
 
 OUT = "./docs/superpowers/experiments/_sigma_identifiability.json"
 
@@ -157,11 +157,11 @@ _KELVIN = 273.15
 #: starting 1.4e-9 and 3.3x below the PROMOTION_BOUNDS ceiling, so a sigma
 #: parked at its upper bound is visibly a failure rather than something that
 #: could be mistaken for success.
-TRUTH = dict(C_c=800.0, h_amb=0.35, K_Q=5.0, theta=80.0, n_delay=8, sigma=3.0e-9)
+TRUTH = {"C_c": 800.0, "h_amb": 0.35, "K_Q": 5.0, "theta": 80.0, "n_delay": 8, "sigma": 3.0e-9}
 
 #: Where the fit starts -- controller/mpc.py's _DEFAULTS. A gate that simply
 #: never frees sigma therefore scores zero here rather than looking perfect.
-INIT = dict(C_c=320.0, h_amb=0.50, K_Q=3.5, theta=50.0)
+INIT = {"C_c": 320.0, "h_amb": 0.50, "K_Q": 3.5, "theta": 50.0}
 INIT_SIGMA = 1.4e-9
 
 T_AMB = 20.0
@@ -307,14 +307,14 @@ def verify_twins(verbose=True):
     worst_batch = 0.0
     worst_jit = 0.0
     for _ in range(8):
-        p = dict(
-            C_c=float(rng.uniform(150.0, 3000.0)),
-            h_amb=float(rng.uniform(0.05, 1.0)),
-            K_Q=float(rng.uniform(1.0, 9.0)),
-            sigma=float(rng.uniform(0.0, 8e-9)),
-            theta=float(rng.uniform(0.0, 200.0)),
-            n_delay=int(rng.integers(0, 12)),
-        )
+        p = {
+            "C_c": float(rng.uniform(150.0, 3000.0)),
+            "h_amb": float(rng.uniform(0.05, 1.0)),
+            "K_Q": float(rng.uniform(1.0, 9.0)),
+            "sigma": float(rng.uniform(0.0, 8e-9)),
+            "theta": float(rng.uniform(0.0, 200.0)),
+            "n_delay": int(rng.integers(0, 12)),
+        }
         ref = simulate_grey_box(t, Q, T_amb=T_AMB, T0=25.0, max_dt=_MAX_DT, **p)
         got_batch = simulate_batch(t, Q, T_amb=T_AMB, T0=25.0, **p)[:, 0]
         worst_batch = max(worst_batch, float(np.max(np.abs(got_batch - ref))))
@@ -495,26 +495,26 @@ def _point(args):
             for T in (T_FLOOR_C, T_HAZARD_C)
         )
 
-    return dict(
-        t_cold=t_cold,
-        t_hot=t_hot,
-        seed=seed,
-        span=float(temp.max() - temp.min()),
-        dwell_span=float(np.diff(np.percentile(temp, [10, 90]))[0]),
-        hot=float(temp.max()),
-        rad_span=_rad_conductance_span(temp),
-        rad_dwell=_rad_conductance_span(temp, dwell=True),
-        sigma_true=TRUTH["sigma"],
-        sigma_ratio=free["sigma"] / TRUTH["sigma"],
-        sigma_ratio_pinned=pinned["sigma"] / TRUTH["sigma"],
-        rmse_free=free["rmse"],
-        rmse_held=held["rmse"],
-        rmse_pinned=pinned["rmse"],
-        tau_err_free=tau_err(free),
-        tau_err_held=tau_err(held),
-        tau_err_pinned=tau_err(pinned),
-        nfev_free=free["nfev"],
-    )
+    return {
+        "t_cold": t_cold,
+        "t_hot": t_hot,
+        "seed": seed,
+        "span": float(temp.max() - temp.min()),
+        "dwell_span": float(np.diff(np.percentile(temp, [10, 90]))[0]),
+        "hot": float(temp.max()),
+        "rad_span": _rad_conductance_span(temp),
+        "rad_dwell": _rad_conductance_span(temp, dwell=True),
+        "sigma_true": TRUTH["sigma"],
+        "sigma_ratio": free["sigma"] / TRUTH["sigma"],
+        "sigma_ratio_pinned": pinned["sigma"] / TRUTH["sigma"],
+        "rmse_free": free["rmse"],
+        "rmse_held": held["rmse"],
+        "rmse_pinned": pinned["rmse"],
+        "tau_err_free": tau_err(free),
+        "tau_err_held": tau_err(held),
+        "tau_err_pinned": tau_err(pinned),
+        "nfev_free": free["nfev"],
+    }
 
 
 def run_sweep(grid, seeds, workers):
@@ -562,17 +562,17 @@ def trade_off_surface(t_cold, t_hot, seed=0, n=61):
     best = int(np.argmin(rmse))
     # Everything within 2% RMSE of the best is data-indistinguishable from it.
     near = rmse <= rmse[best] * 1.02
-    return dict(
-        t_cold=t_cold,
-        t_hot=t_hot,
-        span=float(temp.max() - temp.min()),
-        best_sigma=float(S[best]),
-        best_h_amb=float(H[best]),
-        best_rmse=float(rmse[best]),
-        sigma_width=float(S[near].max() - S[near].min()),
-        sigma_width_ratio=float((S[near].max() - S[near].min()) / TRUTH["sigma"]),
-        n_near=int(near.sum()),
-    )
+    return {
+        "t_cold": t_cold,
+        "t_hot": t_hot,
+        "span": float(temp.max() - temp.min()),
+        "best_sigma": float(S[best]),
+        "best_h_amb": float(H[best]),
+        "best_rmse": float(rmse[best]),
+        "sigma_width": float(S[near].max() - S[near].min()),
+        "sigma_width_ratio": float((S[near].max() - S[near].min()) / TRUTH["sigma"]),
+        "n_near": int(near.sum()),
+    }
 
 
 def bench():
@@ -679,7 +679,7 @@ def main():
     print("  cold   hot   span dwell rad_span rad_dwl | median  worst | ok25% | tau err pin/held/free")
     for (cold, hot), rs in sorted(by_cell.items()):
         pin = np.array([r["sigma_ratio_pinned"] for r in rs])
-        med = lambda k: np.median([r[k] for r in rs])  # noqa: E731
+        med = lambda k, rs=rs: np.median([r[k] for r in rs])  # noqa: E731
         good = np.mean(np.abs(pin - 1.0) <= 0.25)
         worst = pin[np.argmax(np.abs(pin - 1.0))]
         print(

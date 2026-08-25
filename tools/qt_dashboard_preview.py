@@ -63,7 +63,7 @@ def main():
         spec = sys.argv[sys.argv.index("--size") + 1]
         view_w, view_h = (int(v) for v in spec.lower().split("x"))
 
-    from PySide6.QtCore import QUrl, QTimer
+    from PySide6.QtCore import QTimer, QUrl
     from PySide6.QtGui import QGuiApplication
     from PySide6.QtQml import QQmlApplicationEngine
     from PySide6.QtQuick import QQuickWindow  # noqa: F401 — registers the QQuickWindow wrapper

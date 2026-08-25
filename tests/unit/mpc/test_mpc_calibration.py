@@ -11,8 +11,8 @@ from common.control_trace import (
     ActuationMode,
     AllocationPayload,
     AppliedOutputPayload,
-    ControlTraceRecord,
     ControllerType,
+    ControlTraceRecord,
     FramedPulseFramePayload,
     InhibitReason,
     MpcFailureState,
@@ -25,10 +25,10 @@ from common.control_trace import (
 from common.persistence.control_trace import append_control_trace
 from controller.applied_output import OutputSource
 from controller.model_promotion import T_FLOOR_C, T_HAZARD_C, effective_tau
+from controller.mpc_allocator import ALLOCATOR_REVISION, allocate
 from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.mpc_model import simulate_grey_box
 from controller.update_mpc import CONFIG_KEYS, fit_params, fit_quality, load_trace_samples
-from controller.mpc_allocator import ALLOCATOR_REVISION, allocate
 
 #: The grill these tests fit: an order of magnitude slower than the shipped
 #: default, nearly ten times its gain, and twice its dead time.
@@ -41,7 +41,7 @@ from controller.mpc_allocator import ALLOCATOR_REVISION, allocate
 #: whether the fitter recovers what it is given, which needs a grill it can
 #: represent. The cost of that restriction is its own question, measured
 #: against a mismatched grill in tests/unit/mpc/test_model_promotion.py.
-TRUTH = dict(C_c=11000.0, h_amb=0.5, K_Q=3200.0, theta=110.0)
+TRUTH = {"C_c": 11000.0, "h_amb": 0.5, "K_Q": 3200.0, "theta": 110.0}
 T_AMB = 20.0
 N_DELAY = DEFAULT_MPC_CONFIG["n_delay"]
 SIGMA = 1.4e-9
@@ -65,7 +65,7 @@ def _dataset(seconds=6000.0):
 
 def _init():
     """The shipped starting point, exactly as controller/mpc.py's _REFIT_INIT."""
-    return dict(C_c=320.0, h_amb=0.5, K_Q=350.0, theta=50.0)
+    return {"C_c": 320.0, "h_amb": 0.5, "K_Q": 350.0, "theta": 50.0}
 
 
 @pytest.fixture(scope="module")
@@ -637,7 +637,7 @@ def test_a_fit_whose_simulation_goes_non_finite_without_raising_is_also_refused(
     something makes it fire.
     """
     t, Q, temp = _dataset()
-    quiet_nan = dict(sigma=1e300, n_delay=N_DELAY)
+    quiet_nan = {"sigma": 1e300, "n_delay": N_DELAY}
 
     # The premise, as a negative control: non-finite AND no exception. If a
     # future change made this raise instead, the test would still pass while
@@ -735,7 +735,7 @@ def test_a_fit_to_a_real_cook_lands_where_the_promotion_policy_can_accept_it():
 
     mak = pd.read_csv(os.path.join(os.path.dirname(__file__), "fixtures", "mak_cook_2026-08-02.csv"))
     t, temp, Q = mak["time_s"].values, mak["temp_c"].values, mak["Q"].values
-    kwargs = dict(T_amb=T_AMB, init=_init(), sigma=SIGMA, n_delay=N_DELAY)
+    kwargs = {"T_amb": T_AMB, "init": _init(), "sigma": SIGMA, "n_delay": N_DELAY}
 
     def outside(fitted):
         return [k for k, (lo, hi) in PROMOTION_BOUNDS.items() if k in fitted and not (lo <= fitted[k] <= hi)]

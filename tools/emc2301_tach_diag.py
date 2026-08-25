@@ -24,8 +24,8 @@ import sys
 
 from adafruit_bus_device.i2c_device import I2CDevice
 
-from common.persistence.runtime import read_settings
 from common.i2c_bus import open_i2c_bus
+from common.persistence.runtime import read_settings
 
 # EMC2301/2/3/5 registers (DS20006532A).
 _REGS = {

@@ -19,7 +19,6 @@ from common.settings_schema import SettingsSchema
 from .base import FiniteFloat, WireModel
 from .core import ApiEnvelope
 
-
 CONTROLLER_CATALOG_PATH = Path(__file__).resolve().parents[2] / "controller" / "controllers.json"
 ControllerScalar = FiniteFloat | int | bool | str
 

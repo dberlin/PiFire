@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import ctypes
 import math
-from numbers import Real
 import sys
 import threading
+import weakref
+from numbers import Real
 from types import TracebackType
 from typing import Any, Self
-import weakref
 
 import numpy as np
 import numpy.typing as npt
@@ -147,9 +147,9 @@ class AcadosGreyBoxMPC:
         self,
         state: npt.ArrayLike,
         *,
-        setpoint_c: float | int,
-        q_previous: float | int,
-        equilibrium_q: float | int,
+        setpoint_c: float,
+        q_previous: float,
+        equilibrium_q: float,
     ) -> GreyBoxSolve:
         state_values = _state_array(state)
         setpoint = _finite_scalar(setpoint_c, "setpoint_c")

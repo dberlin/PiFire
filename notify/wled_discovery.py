@@ -5,11 +5,12 @@ Discovers WLED devices on the network using mDNS/Bonjour and HTTP queries
 """
 
 import socket
-import requests
 import threading
 import time
+from typing import Dict, List
+
+import requests
 from zeroconf import ServiceBrowser, Zeroconf
-from typing import List, Dict
 
 
 class WLEDDeviceInfo:
@@ -44,7 +45,7 @@ class WLEDDiscovery:
 
     def __init__(self, discovery_timeout: int = 10):
         self.discovery_timeout = discovery_timeout
-        self.discovered_devices: List[WLEDDeviceInfo] = []
+        self.discovered_devices: list[WLEDDeviceInfo] = []
         self.zeroconf = None
         self.browser = None
 
@@ -110,11 +111,9 @@ class WLEDDiscovery:
 
     def remove_service(self, zeroconf: Zeroconf, type_: str, name: str) -> None:
         """Callback when a service is removed"""
-        pass
 
     def update_service(self, zeroconf: Zeroconf, type_: str, name: str) -> None:
         """Callback when a service is updated"""
-        pass
 
     def _get_device_info(self, device: WLEDDeviceInfo) -> None:
         """Get device information via HTTP/JSON API"""
@@ -171,7 +170,7 @@ class WLEDDiscovery:
             except:
                 pass
 
-    def discover_mdns_devices(self) -> List[WLEDDeviceInfo]:
+    def discover_mdns_devices(self) -> list[WLEDDeviceInfo]:
         """Discover WLED devices using mDNS/Bonjour"""
         print(f"Starting mDNS discovery for {self.discovery_timeout} seconds...")
 
@@ -191,7 +190,7 @@ class WLEDDiscovery:
         print(f"mDNS discovery completed. Found {len(self.discovered_devices)} WLED devices.")
         return self.discovered_devices.copy()
 
-    def discover_network_scan(self, network_range: str = "192.168.1.0/24") -> List[WLEDDeviceInfo]:
+    def discover_network_scan(self, network_range: str = "192.168.1.0/24") -> list[WLEDDeviceInfo]:
         """Discover WLED devices by scanning IP range (fallback method)"""
         print(f"Starting network scan for WLED devices in {network_range}...")
         devices = []
@@ -237,7 +236,7 @@ class WLEDDiscovery:
         print(f"Network scan completed. Found {len(devices)} WLED devices.")
         return devices
 
-    def discover_all(self) -> List[WLEDDeviceInfo]:
+    def discover_all(self) -> list[WLEDDeviceInfo]:
         """Discover WLED devices using all available methods"""
         all_devices = []
         device_ips = set()
@@ -268,7 +267,7 @@ class WLEDDiscovery:
         return all_devices
 
 
-def discover_wled_devices(timeout: int = 10) -> List[Dict]:
+def discover_wled_devices(timeout: int = 10) -> list[dict]:
     """
     Convenience function to discover WLED devices.
     Returns a list of device dictionaries suitable for JSON serialization.

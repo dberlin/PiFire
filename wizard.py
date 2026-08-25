@@ -14,38 +14,39 @@
 ==============================================================================
 """
 
+import argparse
+import logging
+import subprocess
+import sys
 import time
+import traceback
 
+from common import datastore
 from common.common import (  # Common Library for writing settings
     convert_settings_units,
-    set_nested_key_value,
-    read_wizard,
     create_logger,
     log_path,
+    read_wizard,
+    set_nested_key_value,
 )
-from common import datastore
 from common.control_delta import control_delta
+from common.defaults import set_probe_map
+from common.install_log import INSTALL_FAILED_PERCENT, RUN_MARKER, WIZARD_LOG_NAME
 from common.persistence.control import (
-    read_control,
     enqueue_control_delta,
+    read_control,
+)
+from common.persistence.install_state import (
+    load_wizard_install_info,
+    set_updater_install_status,
+    set_wizard_install_status,
 )
 from common.persistence.runtime import (
     read_settings,
     write_settings,
 )
-from common.persistence.install_state import (
-    set_wizard_install_status,
-    set_updater_install_status,
-    load_wizard_install_info,
-)
-from common.defaults import set_probe_map
-from common.install_log import INSTALL_FAILED_PERCENT, RUN_MARKER, WIZARD_LOG_NAME
 from common.settings_schema import coerce_setting_value
 from common.system import is_real_hardware
-import subprocess
-import argparse
-import logging
-import traceback
 
 #: Replaced by the file-backed logger under __main__. Named here so run_wizard()
 #: works when imported -- by the tests, and by anything else that drives an
@@ -147,7 +148,7 @@ def wizardInstallInfoExisting(settings, wizardData):
     for module in ["grillplatform", "display", "distance"]:
         selected = wizardInstallInfo["modules"][module]["profile_selected"][0]
         """ Error condition if the item in settings doesn't match the wizard manifest """
-        if selected not in wizardData["modules"][module].keys():
+        if selected not in wizardData["modules"][module]:
             if module == "grillplatform":
                 selected = "custom"
                 settings["platform"]["current"] = selected
@@ -161,7 +162,7 @@ def wizardInstallInfoExisting(settings, wizardData):
             dependency = wizardData["modules"][module][selected]["settings_dependencies"][setting]
             settingsLocation = dependency["settings"]
             settingsValue = settings.copy()
-            for index in range(0, len(settingsLocation)):
+            for index in range(len(settingsLocation)):
                 settingsValue = settingsValue[settingsLocation[index]]
             # A composite dependency (i2c_bus) is an object, not a scalar --
             # str()ing it would produce a Python repr the installer can never
@@ -588,15 +589,15 @@ if __name__ == "__main__":
         WizardInstallInfo = wizardInstallInfoExisting(settings, WizardData)
         if not WizardInstallInfo:
             print("No existing wizard install info found. Exiting.")
-            exit(1)
+            sys.exit(1)
         else:
             print("Found existing wizard install info.")
-            exit(run_wizard_reporting_failure(settings, WizardData, WizardInstallInfo))
+            sys.exit(run_wizard_reporting_failure(settings, WizardData, WizardInstallInfo))
     else:
         WizardInstallInfo = load_wizard_install_info()
         if WizardInstallInfo is None:
             print("No wizard install info found.  Exiting...")
-            exit(1)
+            sys.exit(1)
         else:
             print("Found existing wizard install info.")
-            exit(run_wizard_reporting_failure(settings, WizardData, WizardInstallInfo))
+            sys.exit(run_wizard_reporting_failure(settings, WizardData, WizardInstallInfo))

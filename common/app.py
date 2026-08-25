@@ -2,36 +2,38 @@
 Common PiFire WebApp Functions Shared Between Blueprints
 """
 
+import datetime
+import json
+import os
+import time
+
+from flask import current_app, render_template
+
+from common.api_commands import process_command
 from common.common import (
-    seconds_to_string,
     epoch_to_time,
-    guard_none_metric_field,
     # Re-exported, not redefined: this module used to carry a byte-identical
     # second copy of get_system_command_output, so a fix to one silently left
     # the other (used by blueprints/mobile/socket_io.py) broken.
     get_system_command_output,
+    guard_none_metric_field,
+    seconds_to_string,
 )
-from common.modes import Mode
 from common.control_delta import control_delta
+from common.defaults import metrics_items
+from common.modes import Mode
 from common.persistence.control import (
     enqueue_control_delta,
-)
-from common.persistence.runtime import (
-    read_settings,
-    write_settings,
 )
 from common.persistence.history import (
     read_all_metrics,
     read_history,
 )
-from common.defaults import metrics_items
-from common.api_commands import process_command
-from flask import current_app, render_template
+from common.persistence.runtime import (
+    read_settings,
+    write_settings,
+)
 from common.sqlite_queue import SqliteQueue
-import time
-import json
-import datetime
-import os
 
 # Reported when the control process does not answer a `check_alive` probe
 # within get_system_command_output()'s timeout. Both web-tier consumers put it
@@ -122,7 +124,7 @@ def prepare_annotations(displayed_starttime, metrics_data=[]):
         metrics_data = read_all_metrics()
     annotation_json = {}
     # Process Additional Metrics Information for Display
-    for index in range(0, len(metrics_data)):
+    for index in range(len(metrics_data)):
         # Guard against a poisoned row (None starttime) the same way
         # process_metrics does -- update_metrics' "amend last record" path can
         # leave a row with a None starttime, which crashes the `>` comparison
@@ -175,7 +177,7 @@ def prepare_annotations(displayed_starttime, metrics_data=[]):
 def prepare_event_totals(events):
     settings = read_settings()
     auger_time = 0
-    for index in range(0, len(events)):
+    for index in range(len(events)):
         auger_time += events[index]["augerontime"]
     auger_time = int(auger_time)
 
@@ -225,13 +227,13 @@ def prepare_metrics_csv(metrics_data, filename):
     if list_length > 0:
         # Build the header row
         writeline = ""
-        for item in range(0, len(metrics_items)):
+        for item in range(len(metrics_items)):
             writeline += f"{metrics_items[item][0]}, "
         writeline += "\n"
         csvfile.write(writeline)
-        for index in range(0, list_length):
+        for index in range(list_length):
             writeline = ""
-            for item in range(0, len(metrics_items)):
+            for item in range(len(metrics_items)):
                 writeline += f"{metrics_data[index][metrics_items[item][0]]}, "
             writeline += "\n"
             csvfile.write(writeline)
@@ -261,11 +263,11 @@ def prepare_csv(data=[], filename=""):
     list_length = len(data)
 
     if list_length > 0:
-        exd_data = True if "EXD" in data[0].keys() else False
+        exd_data = "EXD" in data[0]
 
         # Set Standard Labels
         labels = "Time, "
-        primary_key = list(data[0]["P"].keys())[0]
+        primary_key = next(iter(data[0]["P"].keys()))
         labels += f"{primary_key} Temp, {primary_key} Set Point, {primary_key} Notify Target"
         for key in data[0]["F"]:
             labels += f", {key} Temp, {key} Notify Target"
@@ -281,7 +283,7 @@ def prepare_csv(data=[], filename=""):
         writeline = labels
         csvfile.write(writeline)
 
-        for index in range(0, list_length):
+        for index in range(list_length):
             converted_dt = datetime.datetime.fromtimestamp(int(data[index]["T"]) / 1000)
             timestr = converted_dt.strftime("%Y-%m-%d %H:%M:%S")
             writeline = (

@@ -1,4 +1,5 @@
 from PIL import Image
+
 from display.flexobject import DutyPill, resolve_accent
 
 

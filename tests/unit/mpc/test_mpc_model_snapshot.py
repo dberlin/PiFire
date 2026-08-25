@@ -3,25 +3,23 @@
 from __future__ import annotations
 
 import copy
+import json
 import logging
 from dataclasses import replace
-import json
 from types import SimpleNamespace
 
 import pytest
+
 import controller.mpc as mpc_module
 import controller.mpc_core as mpc_core_module
-
 from common.controller_model_state import ControllerModelStore
+from controller.model_learning.activation import ActivationPhase, GreyControlPairDescriptor
 from controller.mpc import Controller
 from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.mpc_snapshot import GreySnapshotInvalid, migrate_grey_learning_snapshot
-from controller.model_learning.activation import ActivationPhase, GreyControlPairDescriptor
 from controller.runtime.context import EVENT_LOG_NAME
-
 from controller.runtime.model_fitting import TeardownRefitOutcome
 from tests.unit.runtime._persistence_helpers import _pair_phase_state
-
 
 CURRENT_SCHEMA = 4
 CYCLE = {"u_min": 0.1, "u_max": 0.9}

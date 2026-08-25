@@ -18,8 +18,8 @@ involved, so playwright buys nothing.
 import json
 
 import pytest
-from common.web_contracts.content import ContentErrorEnvelope, FileListing
 
+from common.web_contracts.content import ContentErrorEnvelope, FileListing
 from tests.web.archive_builders import write_cookfile, write_recipe
 
 

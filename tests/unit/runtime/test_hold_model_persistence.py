@@ -1,22 +1,16 @@
 """Hold restores a controller's model at setup and saves it as it changes."""
 
-from copy import deepcopy
 import itertools
+import threading
 import time
+from copy import deepcopy
 from types import SimpleNamespace
 
-import threading
 import pytest
 
+import controller.mpc_core as _mpc_core
 from common.control_trace import ActuationMode
 from common.controller_model_state import CheckpointSaveOutcome, ControllerModelStore
-from common.persistence.model_evidence import (
-    append_model_evidence,
-    commit_model_activation_phase,
-    commit_model_rollback,
-    read_model_activation,
-    read_model_evidence,
-)
 from common.model_evidence import (
     ActivationEvidence,
     ConfidenceDecisionEvidence,
@@ -25,25 +19,29 @@ from common.model_evidence import (
     ModelEvidenceRecord,
     RollbackEvidence,
 )
-
-from controller.applied_output import OutputSource
-from controller.runtime.model_persistence import ModelPersistenceWorker
-from controller.runtime.runner import (
-    ControllerUpdateResult,
-    ThreadedControllerRunner,
+from common.persistence.model_evidence import (
+    append_model_evidence,
+    commit_model_activation_phase,
+    commit_model_rollback,
+    read_model_activation,
+    read_model_evidence,
 )
+from controller.applied_output import OutputSource
 from controller.model_learning.activation import (
     ActivationPhase,
     PreparedActivationRecord,
 )
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
-from tests.unit.runtime._persistence_helpers import _pair_phase_state
 from controller.mpc import Controller as MpcController
 from controller.mpc_config import DEFAULT_MPC_CONFIG as MPC_DEFAULTS
-import controller.mpc_core as _mpc_core
 from controller.mpc_snapshot import migrate_grey_learning_snapshot
-
+from controller.runtime.model_persistence import ModelPersistenceWorker
+from controller.runtime.runner import (
+    ControllerUpdateResult,
+    ThreadedControllerRunner,
+)
 from tests.fakes.runner import FakeControllerRunner
+from tests.unit.runtime._persistence_helpers import _pair_phase_state
 from tests.unit.runtime.conftest import _off, _output
 
 
@@ -227,7 +225,7 @@ def test_setup_routes_new_prepared_pair_authority_without_legacy_activation_evid
 
     persisted, _record = _pair_phase_state(phase)
     monkeypatch.setattr(hold_learning_module, "read_model_activation", lambda: persisted)
-    monkeypatch.setattr(hold_learning_module, "read_model_evidence", lambda: [])
+    monkeypatch.setattr(hold_learning_module, "read_model_evidence", list)
     runner = FakeControllerRunner(period=0.01)
     hold = hold_cycle(runner, model_store=_FakeModelStore(), controller="mpc")
 

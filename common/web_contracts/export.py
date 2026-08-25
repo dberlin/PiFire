@@ -10,7 +10,7 @@ from pathlib import Path
 
 from pydantic.json_schema import models_json_schema
 
-from .registry import ContractBundle, RootContract, WEB_CONTRACT_BUNDLES, WEB_ROOT_CONTRACTS
+from .registry import WEB_CONTRACT_BUNDLES, WEB_ROOT_CONTRACTS, ContractBundle, RootContract
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SCHEMA_DIRECTORY = Path("web-react/schema/contracts")

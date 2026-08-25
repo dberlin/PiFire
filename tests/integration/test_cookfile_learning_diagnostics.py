@@ -8,14 +8,15 @@ from typing import Any, Literal, cast
 
 from pydantic import JsonValue
 
+import file_mgmt.cookfile as cookfile_mod
 from common.control_trace import (
     ActuationMode,
     AllocationClampReason,
     AllocationPayload,
     AppliedOutputPayload,
-    ControlTraceRecord,
     ControllerBranch,
     ControllerType,
+    ControlTraceRecord,
     FramedPulseFramePayload,
     InhibitReason,
     LearningSnapshotPayload,
@@ -36,7 +37,6 @@ from common.persistence.history import append_metric, write_history
 from common.persistence.model_evidence import append_model_evidence
 from controller.model_learning.report import build_learning_report
 from controller.pid_sp_learning import current_pid_sp_learning_report
-import file_mgmt.cookfile as cookfile_mod
 from file_mgmt.cookfile import create_cookfile, read_cookfile
 
 _COOK_ID = "cook-mixed-controller-7"

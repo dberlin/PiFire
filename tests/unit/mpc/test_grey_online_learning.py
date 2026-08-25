@@ -22,11 +22,10 @@ from controller.model_learning.contracts import (
     LearningStatus,
 )
 from controller.model_learning.evaluation import EvaluationConfig
-
 from controller.runtime.model_fitting import (
     CandidatePreparation,
-    GreyFitSuccess,
     FitSubmission,
+    GreyFitSuccess,
     GreyLearningOrchestrator,
     LiveLearningIdentity,
     PassiveGreyHistory,
@@ -46,31 +45,31 @@ _CONFIG = "3" * 64
 
 def _frame(sequence: int, **changes) -> FrameObservation:
     q = (0.15, 0.50, 0.85)[sequence % 3]
-    values: Any = dict(
-        frame_start_s=sequence * 25.0,
-        frame_end_s=(sequence + 1) * 25.0,
-        temp_c=75.0 + sequence,
-        setpoint_c=120.0,
-        ambient_c=20.0,
-        requested_q=q,
-        realized_q=q,
-        requested_auger_duty=q,
-        delivered_on_s=q * 25.0,
-        requested_fan_duty=0.5,
-        actual_fan_duty=0.5,
-        result_revision=sequence + 1,
-        output_source="controller",
-        lid_open=False,
-        safety_inhibited=False,
-        manual_override=False,
-        stale=False,
-        skipped=False,
-        reset=False,
-        continuous=True,
-        role_generation=4,
-        observation_sequence=sequence,
-        ambient_source=AmbientSource.CONFIGURED,
-    )
+    values: Any = {
+        "frame_start_s": sequence * 25.0,
+        "frame_end_s": (sequence + 1) * 25.0,
+        "temp_c": 75.0 + sequence,
+        "setpoint_c": 120.0,
+        "ambient_c": 20.0,
+        "requested_q": q,
+        "realized_q": q,
+        "requested_auger_duty": q,
+        "delivered_on_s": q * 25.0,
+        "requested_fan_duty": 0.5,
+        "actual_fan_duty": 0.5,
+        "result_revision": sequence + 1,
+        "output_source": "controller",
+        "lid_open": False,
+        "safety_inhibited": False,
+        "manual_override": False,
+        "stale": False,
+        "skipped": False,
+        "reset": False,
+        "continuous": True,
+        "role_generation": 4,
+        "observation_sequence": sequence,
+        "ambient_source": AmbientSource.CONFIGURED,
+    }
     values.update(changes)
     if "probe_q" in changes and "baseline_q" not in changes:
         values["baseline_q"] = values["requested_q"] - values["probe_q"]
@@ -78,15 +77,15 @@ def _frame(sequence: int, **changes) -> FrameObservation:
 
 
 def _window(**changes) -> FitWindowIdentity:
-    values: Any = dict(
-        session_id="session-a",
-        cook_id="cook-a",
-        first_observation_sequence=0,
-        last_observation_sequence=11,
-        configuration_digest=_CONFIG,
-        incumbent_digest=_INCUMBENT,
-        role_generation=4,
-    )
+    values: Any = {
+        "session_id": "session-a",
+        "cook_id": "cook-a",
+        "first_observation_sequence": 0,
+        "last_observation_sequence": 11,
+        "configuration_digest": _CONFIG,
+        "incumbent_digest": _INCUMBENT,
+        "role_generation": 4,
+    }
     values.update(changes)
     return FitWindowIdentity(**values)
 

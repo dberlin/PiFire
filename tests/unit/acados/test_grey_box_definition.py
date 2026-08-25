@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from types import SimpleNamespace
-import warnings
 
 import casadi as ca
 import numpy as np
@@ -13,7 +13,6 @@ from controller.acados.codegen.grey_box_ocp import (
     grey_box_discrete_map,
     grey_box_rhs,
 )
-
 
 DEFAULT_PARAMETERS = np.array(
     [

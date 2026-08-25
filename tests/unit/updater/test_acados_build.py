@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from pathlib import Path
-import subprocess
-import os
-from typing import Callable
 import logging
+import os
 import sqlite3
+import subprocess
+from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 

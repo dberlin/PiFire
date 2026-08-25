@@ -34,13 +34,14 @@
 
 import logging
 import subprocess
-from common.common import is_float
-from grillplat.system_commands import SystemCommandsMixin
-from gpiozero import OutputDevice
-from gpiozero import Button
+
+from gpiozero import Button, OutputDevice
 from gpiozero.threads import GPIOThread
 from rpi_hardware_pwm import HardwarePWM
+
+from common.common import is_float
 from grillplat.actuator_capabilities import AUGER_TIMING
+from grillplat.system_commands import SystemCommandsMixin
 
 """
 	==============================
@@ -68,7 +69,7 @@ class GrillPlatform(SystemCommandsMixin):
         else:
             self.selector = None
 
-        active_high = True if config.get("triggerlevel", "HIGH") == "HIGH" else False
+        active_high = config.get("triggerlevel", "HIGH") == "HIGH"
 
         if self.dc_fan:
             self.current_fan_speed_percent = 0  # Hardware PWM library does not have a mechanism to retrieve the current duty cycle - initialize a variable to track this. Fan is not commanded on at init, so report 0% (matches fan_off() and the other platforms).

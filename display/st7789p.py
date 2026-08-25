@@ -16,10 +16,12 @@ PiFire Display Interface Library
 """
  Imported Libraries
 """
-import time
 import threading
-import ST7789 as ST7789
+import time
+
+import ST7789
 from PIL import Image, ImageDraw, ImageFont
+
 from display._loggers import resolve_loggers
 
 """
@@ -182,7 +184,7 @@ class Display:
             font = ImageFont.truetype("trebuc.ttf", 128)
         else:
             font = ImageFont.truetype("trebuc.ttf", 80)
-        label = list(in_data["probe_history"]["primary"].keys())[0]
+        label = next(iter(in_data["probe_history"]["primary"].keys()))
         text = str(in_data["probe_history"]["primary"][label])[:5]
         font_bbox = font.getbbox(text)  # Grab the bounding box of the text
         font_width = font_bbox[2]
@@ -271,4 +273,3 @@ class Display:
         """
         - Display Network IP QR Code
         """
-        pass

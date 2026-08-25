@@ -20,12 +20,12 @@ touch controller.py's Shutdown->Stop os.system path (the only os.system call in
 the controller lives in controller.py, not in any mode file exercised here).
 """
 
-from tests.characterization.harness import run_mode
-from tests.characterization.fixtures import base_settings, base_control, base_pellet_db
-from tests.fakes.probes import FakeProbes
-from tests.fakes.grill import FakeGrillPlatform
-from tests.fakes.runner import FakeControllerRunner
 from controller.runtime.runner import ControllerUpdateResult
+from tests.characterization.fixtures import base_control, base_pellet_db, base_settings
+from tests.characterization.harness import run_mode
+from tests.fakes.grill import FakeGrillPlatform
+from tests.fakes.probes import FakeProbes
+from tests.fakes.runner import FakeControllerRunner
 
 
 class _SwitchOffGrill(FakeGrillPlatform):

@@ -37,12 +37,21 @@ from controller.grill_sim import DT, GrillSim, MAKGrillSim  # noqa: E402
 from controller.mpc_model import simulate_grey_box  # noqa: E402
 
 KELVIN = 273.15
-DEFAULTS = dict(C_f=9.0, C_c=320.0, h_fc=1.3, h_amb=0.50, T_amb=20.0, theta=50.0, K_Q=3.5, sigma=1.4e-9)
+DEFAULTS = {
+    "C_f": 9.0,
+    "C_c": 320.0,
+    "h_fc": 1.3,
+    "h_amb": 0.50,
+    "T_amb": 20.0,
+    "theta": 50.0,
+    "K_Q": 3.5,
+    "sigma": 1.4e-9,
+}
 
 
 @njit(cache=True)
 def _sim(t, Q, C_f, C_c, h_fc, h_amb, T_amb, T0, K_Q, sigma, theta, n_delay, two_state, max_dt):
-    n = n_delay if n_delay > 0 else 0
+    n = max(0, n_delay)
     lag_tau = (theta / n) if (n > 0 and theta > 0.0) else 0.0
     lags = np.zeros(n)
     nxt = np.zeros(n)
@@ -160,7 +169,7 @@ def run_plant(plant_name, scen, seed=0, T0=20.0, fan=1.0):
     rng = np.random.default_rng(1000 + hash(scen) % 997)
     duty, lid = _schedule(scen, rng)
     cls = GrillSim if plant_name == "generic" else MAKGrillSim
-    kw = dict(seed=seed, fixed_fan=fan)
+    kw = {"seed": seed, "fixed_fan": fan}
     if plant_name == "mak":
         kw["T0"] = T0
     s = cls(**kw)
@@ -174,7 +183,7 @@ def run_plant(plant_name, scen, seed=0, T0=20.0, fan=1.0):
         s.step(auger_on=float(duty[i]), fan_frac=fan, lid_open=bool(lid[i]))
         true[i] = s.true_Tc
         meas[i] = s.measured()
-    return dict(plant=plant_name, scen=scen, t=t, Q=duty * 100.0, true=true, meas=meas)
+    return {"plant": plant_name, "scen": scen, "t": t, "Q": duty * 100.0, "true": true, "meas": meas}
 
 
 def real_cook():
@@ -182,14 +191,14 @@ def real_cook():
 
     df = pd.read_csv(os.path.join(REPO, "tests/unit/mpc/fixtures/mak_cook_2026-08-02.csv"))
     t = df["time_s"].values.astype(float)
-    return dict(
-        plant="mak_real",
-        scen="real_cook",
-        t=t - t[0],
-        Q=df["Q"].values.astype(float),
-        true=df["temp_c"].values.astype(float),
-        meas=df["temp_c"].values.astype(float),
-    )
+    return {
+        "plant": "mak_real",
+        "scen": "real_cook",
+        "t": t - t[0],
+        "Q": df["Q"].values.astype(float),
+        "true": df["temp_c"].values.astype(float),
+        "meas": df["temp_c"].values.astype(float),
+    }
 
 
 # ------------------------------------------------------------------- fitter
@@ -321,9 +330,14 @@ def main():
             jn, pn, pern = fit_joint(recs_nolid, free, two_state=two)
             _, per_all = joint_rmse(recs, pn, two_state=two)
             dead, coast = model_dead_time_and_coast(pn, two_state=two)
-            row[label] = dict(
-                joint=j, joint_nolid=jn, worst_nolid=max(pern), dead=dead, coast=coast, params={k: pn[k] for k in free}
-            )
+            row[label] = {
+                "joint": j,
+                "joint_nolid": jn,
+                "worst_nolid": max(pern),
+                "dead": dead,
+                "coast": coast,
+                "params": {k: pn[k] for k in free},
+            }
             print(
                 f"  {label:5s} nfree={len(free)}  joint={j:.3f}  joint-nolid={jn:.3f}  "
                 f"worst(nolid)={max(pern):.3f}  dead={dead:.0f}s  coast={coast:.1f}C"

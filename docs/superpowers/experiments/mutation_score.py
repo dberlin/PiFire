@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Stable entry point for the MPC mutation-score driver."""
 
-from pathlib import Path
 import sys
+from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[3]
 if str(_ROOT) not in sys.path:

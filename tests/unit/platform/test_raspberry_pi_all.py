@@ -17,6 +17,7 @@ import types
 from unittest import mock
 
 import pytest
+
 from grillplat.actuator_capabilities import AUGER_TIMING
 
 # raspberry_pi_all imports `from rpi_hardware_pwm import HardwarePWM` at module
@@ -121,9 +122,8 @@ def test_init_standalone_false_creates_selector_button(hw):
 
 
 def test_init_config_parse_failure_is_logged_and_reraised(caplog):
-    with caplog.at_level(logging.ERROR, logger="control"):
-        with pytest.raises(AttributeError):
-            rpi.GrillPlatform(None)
+    with caplog.at_level(logging.ERROR, logger="control"), pytest.raises(AttributeError):
+        rpi.GrillPlatform(None)
     assert "Error parsing platform configuration" in caplog.text
 
 

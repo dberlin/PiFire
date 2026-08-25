@@ -10,7 +10,8 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass as std_dataclass, field as std_field
+from dataclasses import dataclass as std_dataclass
+from dataclasses import field as std_field
 from enum import StrEnum
 from typing import Annotated, ClassVar, Literal, TypeAlias
 
@@ -19,10 +20,10 @@ from pydantic import (
     BeforeValidator,
     ConfigDict,
     Field,
-    field_validator,
     StringConstraints,
     TypeAdapter,
     ValidationError,
+    field_validator,
     model_validator,
 )
 from pydantic.dataclasses import dataclass

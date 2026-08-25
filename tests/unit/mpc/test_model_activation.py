@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError, replace
 import json
 import threading
 import time
+from dataclasses import FrozenInstanceError, replace
 from types import SimpleNamespace
 
 import pytest
+
+import controller.mpc as mpc_module
+import controller.mpc_core as mpc_core_module
+import controller.runtime.model_persistence as model_persistence_module
 from common.model_evidence import (
     ConfidenceDecisionEvidence,
     EvidenceKind,
@@ -16,10 +20,9 @@ from common.model_evidence import (
     ModelEvidenceRecord,
     RollbackEvidence,
 )
-from common.web_contracts.learning import ModelActivationRequest
 from common.persistence.model_evidence import ModelActivationState
-import controller.runtime.model_persistence as model_persistence_module
-
+from common.web_contracts.learning import ModelActivationRequest
+from controller.acados import GreyBoxMPCConfig
 from controller.model_learning.activation import (
     ActivationDecision,
     ActivationManager,
@@ -30,25 +33,22 @@ from controller.model_learning.activation import (
     recover_startup_activation,
 )
 from controller.model_learning.activation_runtime import ActivationRuntime
-from controller.model_learning.grey_runtime import GreyLearningRuntime
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
-from controller.runtime.model_fitting import CandidatePair
+from controller.model_learning.grey_runtime import GreyLearningRuntime
 from controller.mpc import Controller as MpcController
-import controller.mpc as mpc_module
-import controller.mpc_core as mpc_core_module
+from controller.mpc_config import DEFAULT_MPC_CONFIG, MpcConfig
+from controller.mpc_core import MpcCore
+from controller.mpc_factory import MpcPairFactory, OwnedMpcPair
+from controller.runtime.model_fitting import CandidatePair
 from tests.unit.mpc._solver_fixtures import (
     CYCLE,
-    _config as _mpc_config,
     _Estimator,
     _Solver,
     inactive_calibration,
 )
-from controller.mpc_core import MpcCore
-from controller.acados import GreyBoxMPCConfig
-from controller.mpc_config import DEFAULT_MPC_CONFIG, MpcConfig
-from controller.mpc_factory import MpcPairFactory
-from controller.mpc_factory import OwnedMpcPair
-
+from tests.unit.mpc._solver_fixtures import (
+    _config as _mpc_config,
+)
 
 _INCUMBENT_CONFIG = {
     "schema": "pifire-grey-box-model/v4",

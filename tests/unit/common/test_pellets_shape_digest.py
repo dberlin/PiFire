@@ -1,8 +1,8 @@
 """The pellet database's shape gate -- see test_settings_shape_digest.py for
 why this exists at all."""
 
-from common.web_contracts.control import PelletDbSchema
 from common.schema_digest import shape_digest
+from common.web_contracts.control import PelletDbSchema
 
 #: Regenerate with:
 #:   uv run python -m common.schema_digest common.web_contracts.control:PelletDbSchema

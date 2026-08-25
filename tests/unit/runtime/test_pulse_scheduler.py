@@ -8,7 +8,6 @@ import pytest
 from controller.runtime.logic.pulse import PulseReason, PulseResetReason, PulseScheduler
 from grillplat.actuator_capabilities import AUGER_TIMING, AugerTiming
 
-
 ALLOCATOR_FIXED_LOADS = (0.008888888888888889, 0.02277777777777778, 0.045, 0.09, 0.225, 0.45, 0.675, 0.9)
 
 

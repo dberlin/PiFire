@@ -1,5 +1,5 @@
-from controller.runtime.store import InMemoryStore
 from controller.runtime.clock import ManualClock
+from controller.runtime.store import InMemoryStore
 from display_process import DisplayFeeder
 
 

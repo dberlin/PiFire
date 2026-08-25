@@ -4,8 +4,8 @@ from flask import jsonify, request
 
 from common.app import prepare_annotations
 from common.persistence.runtime import read_settings
-from file_mgmt.cookfile import prepare_chartdata
 from common.web_contracts.content import HistoryChartData, validated_content_json
+from file_mgmt.cookfile import prepare_chartdata
 
 from . import api_history_bp
 

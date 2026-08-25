@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from controller.applied_output import AppliedOutput, FrameFeedbackDisposition, OutputSource
 from controller.acados import GreyBoxMPCConfig
+from controller.applied_output import AppliedOutput, FrameFeedbackDisposition, OutputSource
 from controller.mpc import Controller
 from controller.mpc_calibration import CalibrationCommand
 from controller.mpc_factory import MpcPairFactory

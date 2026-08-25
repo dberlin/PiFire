@@ -7,7 +7,6 @@ import pytest
 from common.settings_migration import _apply_shape_migrations
 from common.settings_schema import SETTINGS_SCHEMA_VERSION
 
-
 RETIRED_MPC_KEYS = {
     "policy",
     "policy_net_path",

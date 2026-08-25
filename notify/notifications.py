@@ -17,25 +17,27 @@ Description: This library provides notification functions for
 ==============================================================================
 """
 import datetime
-import time
-import requests
 import json
-import apprise
 import logging
 import math
+import time
+
+import apprise
+import requests
+
 from common.common import create_logger
 from common.modes import Mode
 from common.persistence.control import (
-    write_control_snapshot,
     read_control,
-)
-from common.persistence.runtime import (
-    write_settings,
-    read_settings,
-    read_pellet_db,
+    write_control_snapshot,
 )
 from common.persistence.history import (
     read_history,
+)
+from common.persistence.runtime import (
+    read_pellet_db,
+    read_settings,
+    write_settings,
 )
 
 """
@@ -277,8 +279,10 @@ def _evt_test_notify(ctx):
 def _evt_control_stopped(ctx):
     return (
         "Control Process Stopped!",
-        "The control process has encountered an issue and has been stopped. "
-        "Check on your grill as soon as possible to prevent damage!",
+        (
+            "The control process has encountered an issue and has been stopped. "
+            "Check on your grill as soon as possible to prevent damage!"
+        ),
         "pifire_error_alerts",
         {"value1": "Control Process Stopped"},
     )
@@ -305,8 +309,10 @@ def _evt_thermocouple_fault_primary_observed(ctx):
 def _evt_thermocouple_fault_secondary(ctx):
     return (
         "Thermocouple Fault!",
-        "A food or auxiliary thermocouple fault was detected. The affected probe "
-        "is unavailable; grill control continues.",
+        (
+            "A food or auxiliary thermocouple fault was detected. The affected probe "
+            "is unavailable; grill control continues."
+        ),
         "pifire_error_alerts",
         {"value1": "Secondary thermocouple fault"},
     )
@@ -495,7 +501,7 @@ def _send_onesignal_notification(settings, title_message, body_message, channel)
     url = "https://onesignal.com/api/v1/notifications"
     player_ids = []
 
-    for key in devices.keys():
+    for key in devices:
         player_ids.append(key)
 
     if player_ids:
@@ -513,7 +519,7 @@ def _send_onesignal_notification(settings, title_message, body_message, channel)
         try:
             response = requests.post(url, headers=headers, data=json.dumps(payload))
 
-            if not response.status_code == 200:
+            if response.status_code != 200:
                 eventLogger.warning("OneSignal Notification Failed: " + title_message)
 
             eventLogger.debug("OneSignal Response: " + response.text)
@@ -706,7 +712,7 @@ def _estimate_eta(temperatures, target_temperature, interval_seconds=3, max_hist
 
         return int(predicted_time)
     except Exception as e:
-        eventLogger.debug(f"ETA: Error calculating ETA: {str(e)}")
+        eventLogger.debug(f"ETA: Error calculating ETA: {e!s}")
         return None
 
 

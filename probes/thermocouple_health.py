@@ -1,7 +1,7 @@
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Mapping
 
 
 def _freeze_detail(value: object) -> object:
@@ -78,7 +78,7 @@ class ThermocoupleHealthReport:
         return self.state is ThermocoupleHealthState.CONFIRMED
 
     @classmethod
-    def unmonitored(cls, now: float) -> "ThermocoupleHealthReport":
+    def unmonitored(cls, now: float) -> ThermocoupleHealthReport:
         return cls(state=ThermocoupleHealthState.UNMONITORED, observed_at=now)
 
     @classmethod
@@ -86,7 +86,7 @@ class ThermocoupleHealthReport:
         cls,
         now: float,
         evidence: tuple[ThermocoupleEvidence, ...] = (),
-    ) -> "ThermocoupleHealthReport":
+    ) -> ThermocoupleHealthReport:
         return cls(
             state=ThermocoupleHealthState.HEALTHY,
             evidence=evidence,
@@ -99,7 +99,7 @@ class ThermocoupleHealthReport:
         faults: tuple[ThermocoupleFault, ...],
         now: float,
         status: object,
-    ) -> "ThermocoupleHealthReport":
+    ) -> ThermocoupleHealthReport:
         return cls(
             state=ThermocoupleHealthState.CONFIRMED,
             faults=faults,

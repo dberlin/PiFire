@@ -4,7 +4,7 @@ from PySide6.QtCore import QObject, QUrl, qInstallMessageHandler
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 
-import display.qtapp as qtapp
+from display import qtapp
 from display.qtbackend import PiFireBackend
 
 QML_DIR = Path("display/qml").resolve()

@@ -24,7 +24,6 @@ from controller.model_learning.evaluation import (
     evaluate_forecasts,
 )
 
-
 _INCUMBENT = "1" * 64
 _CHALLENGER = "2" * 64
 

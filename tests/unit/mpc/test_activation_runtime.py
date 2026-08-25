@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import pytest
-from types import SimpleNamespace
 
 from common.model_evidence import (
     CandidateAssessmentEvidence,
     ConfidenceDecisionEvidence,
-    FallbackEvidence,
     EvidenceKind,
+    FallbackEvidence,
     ModelEvidenceRecord,
 )
-
+from controller.acados import GreyBoxMPCConfig
 from controller.model_learning.activation import (
     ActivationPhase,
     GreyControlPairDescriptor,
@@ -31,7 +31,6 @@ from controller.runtime.model_persistence import (
     EvidenceSubmission,
     ModelPersistenceWorker,
 )
-from controller.acados import GreyBoxMPCConfig
 from tests.unit.mpc._solver_fixtures import (
     CYCLE,
     _config,

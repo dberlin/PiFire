@@ -10,8 +10,8 @@ import logging
 import threading
 
 import pytest
-from common import datastore
 
+from common import datastore
 from common.controller_model_state import (
     MAX_SNAPSHOT_BYTES,
     MODEL_STATE_KEY,

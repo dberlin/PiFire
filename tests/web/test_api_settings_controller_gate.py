@@ -7,7 +7,6 @@ import pytest
 from common import controller_deps as cd
 from common.persistence.runtime import read_settings, write_settings
 
-
 REBUILD = "./rebuild-acados.sh --if-needed"
 
 

@@ -21,8 +21,8 @@ import time
 from common.common import write_log
 from common.control_delta import control_delta
 from common.persistence.control import enqueue_control_delta
-from common.persistence.runtime import read_settings
 from common.persistence.install_state import load_os_info, store_os_info
+from common.persistence.runtime import read_settings
 
 
 def is_real_hardware(settings=None):
@@ -34,7 +34,7 @@ def is_real_hardware(settings=None):
     if settings == None:
         settings = read_settings()
 
-    return True if settings["platform"]["real_hw"] else False
+    return bool(settings["platform"]["real_hw"])
 
 
 def restart_control():
@@ -199,7 +199,7 @@ def probe_os_info(loggername="events"):
         return os_info
 
     except Exception as e:
-        event = f"Error getting OS info: {str(e)}"
+        event = f"Error getting OS info: {e!s}"
         write_log(event, loggername=loggername)
         return os_info
 

@@ -16,11 +16,11 @@ Description: The queued-control-write payload that states a writer's INTENT
 """
 
 import copy
-import math
 import logging
+import math
+from collections.abc import Mapping
 
 from common.modes import Mode
-from collections.abc import Mapping
 
 CONTROL_DELTA_KEY = "__control_delta__"
 CONTROL_DELTA_VERSION = 1

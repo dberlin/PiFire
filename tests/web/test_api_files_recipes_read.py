@@ -1,6 +1,6 @@
 import pytest
-from common.web_contracts.content import RecipeDetail
 
+from common.web_contracts.content import RecipeDetail
 from tests.web.archive_builders import write_recipe
 
 pytestmark = pytest.mark.usefixtures("api_files_folders")

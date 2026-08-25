@@ -6,7 +6,6 @@ from pydantic import ConfigDict, Field, RootModel, StringConstraints, TypeAdapte
 
 from .base import ExtensibleWireModel, FiniteFloat, WireModel
 
-
 type FiniteNumber = int | FiniteFloat
 type JsonValue = None | bool | int | FiniteFloat | str | list[JsonValue] | dict[str, JsonValue]
 type GrillMode = Literal["startup", "smoke", "shutdown", "stop", "monitor", "reignite", "manual"]

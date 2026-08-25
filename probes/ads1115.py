@@ -31,9 +31,11 @@ Description:
 *****************************************
 """
 import logging
+
 import ADS1115
-from probes.base import ProbeInterface
+
 from common.i2c_bus_config import BasicBus, KernelBus, parse_i2c_bus
+from probes.base import ProbeInterface
 
 """
 *****************************************

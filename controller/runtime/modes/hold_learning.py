@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import Literal, Protocol, cast
 
 from common.control_trace import (
+    AllocationPayload,
     CalibrationEventType,
     CalibrationTracePayload,
-    AllocationPayload,
     ControlTracePayload,
     ModelEvaluationPayload,
     ModelEventPayload,
@@ -20,12 +20,6 @@ from common.control_trace import (
     TraceEventKind,
     TraceSetting,
 )
-from common.persistence.model_evidence import (
-    ModelActivationState,
-    read_model_activation,
-    read_model_evidence,
-)
-from common.persistence.protocols import JsonValue
 from common.model_evidence import (
     AllocationEvidence,
     CalibrationSummaryEvidence,
@@ -35,6 +29,12 @@ from common.model_evidence import (
     RecorderGapEvidence,
     RollbackEvidence,
 )
+from common.persistence.model_evidence import (
+    ModelActivationState,
+    read_model_activation,
+    read_model_evidence,
+)
+from common.persistence.protocols import JsonValue
 from controller.applied_output import (
     AppliedOutput,
     FrameFeedbackDisposition,
@@ -58,7 +58,6 @@ from controller.runtime.runner import (
     ObservationOutcomeDrain,
     ObservationSubmission,
 )
-
 
 type _FrameKey = tuple[int, int]
 type _OutcomeScalar = None | bool | int | float | str | ModelEvaluationPayload

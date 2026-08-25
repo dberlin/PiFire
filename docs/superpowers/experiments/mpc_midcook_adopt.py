@@ -51,7 +51,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirna
 import numpy as np  # noqa: E402
 
 from controller.mpc_config import MODEL_PARAMETER_KEYS  # noqa: E402
-
 from tools.experiments.controller_matrix import SCENARIOS, run_scenario  # noqa: E402
 
 PLANT = "MAKGrillSim"

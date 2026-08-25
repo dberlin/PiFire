@@ -17,14 +17,16 @@ PiFire Display Interface Library
 """
  Imported Libraries
 """
-import os
-import time
-import socket
-import qrcode
 import logging
+import os
+import socket
+import time
+
+import qrcode
 from PIL import Image, ImageDraw, ImageFont
-from common.modes import Mode
+
 from common.control_delta import control_delta
+from common.modes import Mode
 from common.persistence.control import enqueue_control_delta, read_control
 from display._loggers import resolve_loggers
 
@@ -107,7 +109,6 @@ class _DisplayBase:
         """
         Inheriting classes will override this function to init the display device and start the display thread.
         """
-        pass
 
     def _init_input(self):
         """
@@ -357,19 +358,16 @@ class _DisplayBase:
         """
         Inheriting classes will override this function.
         """
-        pass
 
     def _up_callback(self, held=False):
         """
         Inheriting classes will override this function to clear the display device.
         """
-        pass
 
     def _down_callback(self, held=False):
         """
         Inheriting classes will override this function to clear the display device.
         """
-        pass
 
     """
 	============== Graphics / Display / Draw Methods ============= 
@@ -675,13 +673,11 @@ class _DisplayBase:
         """
         Inheriting classes will override this function to clear the display device.
         """
-        pass
 
     def _display_canvas(self, canvas):
         """
         Inheriting classes will override this function to show the canvas on the display device.
         """
-        pass
 
     def _display_splash(self):
         # Create canvas
@@ -779,7 +775,7 @@ class _DisplayBase:
         bg_color = (50, 50, 50)  # Grey
         fg_color = (200, 0, 0)  # Red
 
-        label = list(in_data["probe_history"]["primary"].keys())[0]
+        label = next(iter(in_data["probe_history"]["primary"].keys()))
 
         # percents = [temperature, setpoint1, setpoint2]
         temps = [0, 0, 0]
@@ -931,9 +927,7 @@ class _DisplayBase:
             label_canvas = self._draw_text(
                 text, self.primary_font, 15, hopper_color, rect=True, outline_color=hopper_color, fill_color=(0, 0, 0)
             )
-            if self._SQUARE:
-                coords = self.WIDTH // 2 - (label_canvas.width // 2), self.HEIGHT - 28
-            elif self.WIDTH == 240:
+            if self._SQUARE or self.WIDTH == 240:
                 coords = self.WIDTH // 2 - (label_canvas.width // 2), self.HEIGHT - 28
             else:
                 coords = self.WIDTH // 2 - (label_canvas.width // 2), (self.HEIGHT // 2) + 50
@@ -1001,11 +995,7 @@ class _DisplayBase:
             else:
                 duration = status_data["shutdown_duration"]
 
-            countdown = (
-                int(duration - (time.time() - status_data["start_time"]))
-                if int(duration - (time.time() - status_data["start_time"])) > 0
-                else 0
-            )
+            countdown = max(0, int(duration - (time.time() - status_data["start_time"])))
             text = f"{countdown}s"
             label_canvas = self._draw_text(
                 text, self.primary_font, 26, (0, 200, 0), rect=True, outline_color=(0, 200, 0), fill_color=(0, 0, 0)
@@ -1019,11 +1009,7 @@ class _DisplayBase:
         # Lid open detection timer display
         if status_data["mode"] in [Mode.HOLD]:
             if status_data["lid_open_detected"]:
-                duration = (
-                    int(status_data["lid_open_endtime"] - time.time())
-                    if int(status_data["lid_open_endtime"] - time.time()) > 0
-                    else 0
-                )
+                duration = max(0, int(status_data["lid_open_endtime"] - time.time()))
                 text = f"Lid Pause {duration}s"
                 label_canvas = self._draw_text(
                     text, self.primary_font, 18, (0, 200, 0), rect=True, outline_color=(0, 200, 0), fill_color=(0, 0, 0)
@@ -1046,7 +1032,6 @@ class _DisplayBase:
         Called to detect input events from buttons, encoder, touch, etc.
         This function should be overriden by the inheriting class.
         """
-        pass
 
     def _menu_display(self, action):
         # If menu is not currently being displayed, check mode and draw menu
@@ -1243,9 +1228,7 @@ class _DisplayBase:
                     self.menu["current"]["mode"] = "prime_selection"
                     self.menu["current"]["option"] = 0
                 elif "Prime_" in selected:
-                    if "50" in selected:
-                        prime_amount = 25
-                    elif "25" in selected:
+                    if "50" in selected or "25" in selected:
                         prime_amount = 25
                     else:
                         prime_amount = 10

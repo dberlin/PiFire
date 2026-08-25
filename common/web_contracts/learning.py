@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Literal, TypeAliasType
 
 from pydantic import Field, RootModel, field_validator
-from typing_extensions import TypeAliasType
 
 from .base import FiniteFloat, WireModel
 from .core import ApiEnvelope, CommandResponseData
@@ -11,55 +10,34 @@ from .core import ApiEnvelope, CommandResponseData
 NonNegativeInt = Annotated[int, Field(ge=0, strict=True)]
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$", strict=True)]
 NonBlankString = Annotated[str, Field(min_length=1, strict=True)]
-FiniteNumber = TypeAliasType("FiniteNumber", int | FiniteFloat)
+type FiniteNumber = int | FiniteFloat
 
-CandidateOrigin = TypeAliasType(
-    "CandidateOrigin",
-    Literal["passive-online", "operator-calibration", "cook-refit"],
-)
-ActivationPolicy = TypeAliasType(
-    "ActivationPolicy",
-    Literal["passive-auto", "operator-reviewed", "cook-refit"],
-)
-ModelEvidenceStatus = TypeAliasType(
-    "ModelEvidenceStatus",
-    Literal[
-        "collecting",
-        "insufficient-excitation",
-        "fitting",
-        "evaluating",
-        "ready-for-review",
-        "activating",
-        "active",
-        "fallback",
-        "error",
-        "schema-invalidated",
-    ],
-)
-FitStatus = TypeAliasType(
-    "FitStatus",
-    Literal["idle", "queued", "running", "succeeded", "failed", "stale"],
-)
-CheckStatus = TypeAliasType(
-    "CheckStatus",
-    Literal["not-run", "pending", "passed", "failed"],
-)
-ActivationPhase = TypeAliasType(
-    "ActivationPhase",
-    Literal["prepared", "active", "aborted"],
-)
-CookRefitOutcome = TypeAliasType(
-    "CookRefitOutcome",
-    Literal[
-        "disabled",
-        "insufficient",
-        "rejected",
-        "failed",
-        "ready-for-review",
-        "accepted-next-cook",
-        "checkpoint-failure",
-    ],
-)
+type CandidateOrigin = Literal["passive-online", "operator-calibration", "cook-refit"]
+type ActivationPolicy = Literal["passive-auto", "operator-reviewed", "cook-refit"]
+type ModelEvidenceStatus = Literal[
+    "collecting",
+    "insufficient-excitation",
+    "fitting",
+    "evaluating",
+    "ready-for-review",
+    "activating",
+    "active",
+    "fallback",
+    "error",
+    "schema-invalidated",
+]
+type FitStatus = Literal["idle", "queued", "running", "succeeded", "failed", "stale"]
+type CheckStatus = Literal["not-run", "pending", "passed", "failed"]
+type ActivationPhase = Literal["prepared", "active", "aborted"]
+type CookRefitOutcome = Literal[
+    "disabled",
+    "insufficient",
+    "rejected",
+    "failed",
+    "ready-for-review",
+    "accepted-next-cook",
+    "checkpoint-failure",
+]
 CookRefitAuthorization = TypeAliasType(
     "CookRefitAuthorization",
     #: "not-run" is the absence of a verdict, not a refusal: no refit has
@@ -67,14 +45,8 @@ CookRefitAuthorization = TypeAliasType(
     #: nothing.
     Literal["not-run", "blocked", "operator-review", "next-cook"],
 )
-MpcCalibrationAction = TypeAliasType(
-    "MpcCalibrationAction",
-    Literal["start", "pause", "resume", "stop", "reset-progress"],
-)
-AmbientSource = TypeAliasType(
-    "AmbientSource",
-    Literal["measured", "manual", "weather", "configured"],
-)
+type MpcCalibrationAction = Literal["start", "pause", "resume", "stop", "reset-progress"]
+type AmbientSource = Literal["measured", "manual", "weather", "configured"]
 
 
 class EvidenceSummary(WireModel):
@@ -312,29 +284,23 @@ class MpcCalibrationCommandResponse(ApiEnvelope[MpcCalibrationCommandResponseDat
     pass
 
 
-PidSpLearningStatus = TypeAliasType(
-    "PidSpLearningStatus",
-    Literal[
-        "idle",
-        "collecting",
-        "insufficient-excitation",
-        "evaluating",
-        "active",
-        "fallback",
-        "error",
-    ],
-)
-PidSpLiveLearningStatus = TypeAliasType(
-    "PidSpLiveLearningStatus",
-    Literal[
-        "collecting",
-        "insufficient-excitation",
-        "evaluating",
-        "active",
-        "fallback",
-    ],
-)
-PidSpGateValue = TypeAliasType("PidSpGateValue", int | FiniteFloat | bool)
+type PidSpLearningStatus = Literal[
+    "idle",
+    "collecting",
+    "insufficient-excitation",
+    "evaluating",
+    "active",
+    "fallback",
+    "error",
+]
+type PidSpLiveLearningStatus = Literal[
+    "collecting",
+    "insufficient-excitation",
+    "evaluating",
+    "active",
+    "fallback",
+]
+type PidSpGateValue = int | FiniteFloat | bool
 
 
 class FopdtPidSpCheckpoint(WireModel):
@@ -355,13 +321,10 @@ class IpdtPidSpCheckpoint(WireModel):
     identified_at_f: FiniteFloat | None = None
 
 
-PidSpCheckpointModel = TypeAliasType(
-    "PidSpCheckpointModel",
-    Annotated[
-        FopdtPidSpCheckpoint | IpdtPidSpCheckpoint,
-        Field(discriminator="form"),
-    ],
-)
+type PidSpCheckpointModel = Annotated[
+    FopdtPidSpCheckpoint | IpdtPidSpCheckpoint,
+    Field(discriminator="form"),
+]
 
 
 class FopdtPidSpPredictor(WireModel):
@@ -378,13 +341,10 @@ class IpdtPidSpPredictor(WireModel):
     theta: FiniteFloat
 
 
-PidSpPredictorModel = TypeAliasType(
-    "PidSpPredictorModel",
-    Annotated[
-        FopdtPidSpPredictor | IpdtPidSpPredictor,
-        Field(discriminator="form"),
-    ],
-)
+type PidSpPredictorModel = Annotated[
+    FopdtPidSpPredictor | IpdtPidSpPredictor,
+    Field(discriminator="form"),
+]
 
 
 class PidSpLearningGate(WireModel):

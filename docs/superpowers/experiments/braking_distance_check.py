@@ -61,15 +61,15 @@ def numeric_coast(p, t_ref_c, *, q_full=100.0, dt=0.5):
 
 
 def sample(rng):
-    return dict(
-        C_c=float(np.exp(rng.uniform(np.log(50.0), np.log(50000.0)))),
-        h_amb=float(np.exp(rng.uniform(np.log(0.05), np.log(20.0)))),
-        K_Q=float(np.exp(rng.uniform(np.log(0.2), np.log(200.0)))),
-        theta=float(rng.uniform(0.0, 400.0)),
-        n_delay=int(rng.integers(0, 13)),
-        sigma=float(rng.uniform(0.0, 1e-8)),
-        T_amb=float(rng.uniform(-10.0, 40.0)),
-    )
+    return {
+        "C_c": float(np.exp(rng.uniform(np.log(50.0), np.log(50000.0)))),
+        "h_amb": float(np.exp(rng.uniform(np.log(0.05), np.log(20.0)))),
+        "K_Q": float(np.exp(rng.uniform(np.log(0.2), np.log(200.0)))),
+        "theta": float(rng.uniform(0.0, 400.0)),
+        "n_delay": int(rng.integers(0, 13)),
+        "sigma": float(rng.uniform(0.0, 1e-8)),
+        "T_amb": float(rng.uniform(-10.0, 40.0)),
+    }
 
 
 #: Integrated coasts below this are at the resolution of the integrator's own

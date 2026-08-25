@@ -2,10 +2,8 @@
 
 import logging
 
-from controller.mpc_calibration import CalibrationCommand
-
 from common.control_trace import ActuationMode
-
+from controller.mpc_calibration import CalibrationCommand
 from tests.fakes.runner import FakeControllerRunner
 
 

@@ -1,5 +1,5 @@
-from common.persistence.runtime import read_settings
 from common.i2c_bus_config import parse_i2c_bus
+from common.persistence.runtime import read_settings
 
 
 def parse_bt_device_info(bt_devices):
@@ -89,7 +89,7 @@ def wizardInstallInfoDefaults(wizardData, settings):
                     """ Populate all settings with default value """
                     dep = wizardData["modules"][component][module]["settings_dependencies"][setting]
                     if "options" in dep:
-                        default_value = list(dep["options"].keys())[0]
+                        default_value = next(iter(dep["options"].keys()))
                     else:
                         default_value = dep.get("default", "")
                     wizardInstallInfo["modules"][component]["settings"][setting] = default_value
@@ -126,7 +126,7 @@ def wizardInstallInfoExisting(wizardData, settings):
     for module in ["grillplatform", "display", "distance"]:
         selected = wizardInstallInfo["modules"][module]["profile_selected"][0]
         """ Error condition if the item in settings doesn't match the wizard manifest """
-        if selected not in wizardData["modules"][module].keys():
+        if selected not in wizardData["modules"][module]:
             if module == "grillplatform":
                 selected = "custom"
                 settings["platform"]["current"] = selected
@@ -140,7 +140,7 @@ def wizardInstallInfoExisting(wizardData, settings):
             dependency = wizardData["modules"][module][selected]["settings_dependencies"][setting]
             settingsLocation = dependency["settings"]
             settingsValue = settings.copy()
-            for index in range(0, len(settingsLocation)):
+            for index in range(len(settingsLocation)):
                 settingsValue = settingsValue[settingsLocation[index]]
             # A composite dependency (i2c_bus) is an object, not a scalar --
             # str()ing it would produce a Python repr the installer can never

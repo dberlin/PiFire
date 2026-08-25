@@ -1,4 +1,7 @@
 import pytest
+
+from common.defaults import default_notify, default_probe_config
+from common.modes import Mode
 from common.persistence.control import (
     execute_control_writes,
     read_control,
@@ -8,8 +11,6 @@ from common.persistence.runtime import (
     read_settings,
     write_settings_store,
 )
-from common.defaults import default_notify, default_probe_config
-from common.modes import Mode
 from common.web_contracts.wizard import (
     ProbeMap,
     ProbeMapApplyResponse,

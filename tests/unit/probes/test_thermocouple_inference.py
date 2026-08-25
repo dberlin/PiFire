@@ -11,9 +11,9 @@ from probes.thermocouple_health import (
 )
 from probes.thermocouple_inference import (
     ThermocoupleExcitationContext,
+    ThermocoupleInferenceEngine,
     ThermocoupleInferencePolicy,
     ThermocoupleJunctionSample,
-    ThermocoupleInferenceEngine,
     ThermocoupleWitnessSample,
     fuse_thermocouple_health,
 )
@@ -166,7 +166,7 @@ def test_immutable_inputs_own_witnesses_and_validate_finite_numbers():
         }
     )
     with pytest.raises(FrozenInstanceError):
-        setattr(sample, "hot_c", 31.0)
+        sample.hot_c = 31.0
 
     invalid_factories = (
         lambda: ThermocoupleJunctionSample(float("nan"), 1.0),

@@ -14,22 +14,24 @@ Description: This library provides functions that are common to
  Imported Modules
 ==============================================================================
 """
-import time
 import copy
 import datetime
-import os
 import json
-import uuid
-import random
 import logging
+import os
+import random
+import time
+import uuid
+from collections.abc import Mapping
 from enum import Enum
 from logging.handlers import RotatingFileHandler
-from collections.abc import Mapping
+
 from ratelimitingfilter import RateLimitingFilter
+
 from common import datastore
 from common.modes import Mode
-from common.sqlite_queue import SqliteQueue
 from common.sqlite_log_handler import SqliteLogHandler
+from common.sqlite_queue import SqliteQueue
 
 # *****************************************
 # Enums
@@ -164,7 +166,7 @@ def display_sleep_timeout(settings):
         value = int(settings["display"]["sleep_timeout"])
     except KeyError, TypeError, ValueError:
         return 300
-    return value if value > 0 else 0
+    return max(0, value)
 
 
 def get_probe_list(settings):
@@ -224,7 +226,7 @@ def _load_json_file(filename, default, retry_count=0, max_retries=None):
         data = json.loads(json_data_string)
         json_data_file.close()
         return data
-    except IOError, OSError:
+    except OSError:
         write_log(f"ERROR: Could not read from {filename}.")
         return default
     except ValueError:
@@ -252,7 +254,7 @@ def read_events(legacy=True):
             event_lines = event_file.readlines()
             event_file.close()
     # If file not found error, then create events.log file
-    except IOError, OSError:
+    except OSError:
         event_file = open(log_path("events.log"), "w")
         event_file.close()
         event_lines = []
@@ -269,7 +271,7 @@ def read_events(legacy=True):
 
         # Error handling if number of events is less than 10, fill array with empty
         if num_events < 10:
-            for line in range((10 - num_events)):
+            for line in range(10 - num_events):
                 event_list.append(["--------", "--:--:--", "---"])
             num_events = 10
     else:
@@ -287,7 +289,7 @@ def read_log_file(filepath):
             log_file_lines = log_file.readlines()
             log_file.close()
     # If file not found error, then log it
-    except IOError, OSError:
+    except OSError:
         event = f"Unable to open log file: {filepath}"
         write_log(event)
         return []
@@ -356,7 +358,7 @@ def read_events_records():
 def unpack_history(datalist):
     temp_dict = {}  # Create temporary dictionary to store all of the history data lists
     temp_struct = datalist[0]  # Load the initial history data into a temporary dictionary
-    for key in temp_struct.keys():  # Iterate each of the keys
+    for key in temp_struct:  # Iterate each of the keys
         if key in ["P", "F", "NT", "EXD", "AUX"]:
             temp_dict[key] = {}
             for subkey in temp_struct[key]:
@@ -368,7 +370,7 @@ def unpack_history(datalist):
         temp_struct = datalist[index]
         for key, value in temp_struct.items():
             if key in ["P", "F", "NT", "EXD", "AUX"]:
-                for subkey, subvalue in temp_struct[key].items():
+                for subkey, subvalue in value.items():
                     temp_dict[key][subkey].append(subvalue)
             else:
                 temp_dict[key].append(value)  # Append list for any other keys ('T', 'PSP')
@@ -427,7 +429,7 @@ def convert_settings_units(units, settings):
         settings["smoke_plus"]["max_temp"] = convert_temp(units, settings["smoke_plus"]["max_temp"])
         settings["smoke_plus"]["min_temp"] = convert_temp(units, settings["smoke_plus"]["min_temp"])
         settings["keep_warm"]["temp"] = convert_temp(units, settings["keep_warm"]["temp"])
-        for temp in range(0, len(settings["startup"]["smartstart"]["temp_range_list"])):
+        for temp in range(len(settings["startup"]["smartstart"]["temp_range_list"])):
             settings["startup"]["smartstart"]["temp_range_list"][temp] = convert_temp(
                 units, settings["startup"]["smartstart"]["temp_range_list"][temp]
             )
@@ -441,7 +443,7 @@ def convert_settings_units(units, settings):
         # temp_range_list above, an absolute-reading list, was). A delta
         # needs scale-only conversion (convert_temp_delta), never convert_temp's
         # +32 offset.
-        for temp in range(0, len(settings["pwm"]["temp_range_list"])):
+        for temp in range(len(settings["pwm"]["temp_range_list"])):
             settings["pwm"]["temp_range_list"][temp] = convert_temp_delta(
                 units, settings["pwm"]["temp_range_list"][temp]
             )
@@ -536,7 +538,7 @@ def guard_none_metric_field(metrics_data, index, field, caller, default=0):
 
 def process_metrics(metrics_data, augerrate=0.3):
     # Process Additional Metrics Information for Display
-    for index in range(0, len(metrics_data)):
+    for index in range(len(metrics_data)):
         # Convert Start Time
         starttime = guard_none_metric_field(metrics_data, index, "starttime", "process_metrics")
         metrics_data[index]["starttime_c"] = epoch_to_time(starttime / 1000)

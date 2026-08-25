@@ -1,23 +1,24 @@
 """Contracts for the normalized PID-SP live-learning projection."""
 
 import json
-from dataclasses import FrozenInstanceError
 from copy import deepcopy
+from dataclasses import FrozenInstanceError
 
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
-from common.web_contracts.learning import (
-    IpdtPidSpCheckpoint,
-    FopdtPidSpCheckpoint,
-    PidSpCheckpointModel,
-    PidSpLearningReport as WirePidSpLearningReport,
-    PidSpPredictorModel,
-)
-from controller import pid_sp_learning as learning
 from common import controller_model_state
 from common.persistence import runtime as runtime_persistence
-
+from common.web_contracts.learning import (
+    FopdtPidSpCheckpoint,
+    IpdtPidSpCheckpoint,
+    PidSpCheckpointModel,
+    PidSpPredictorModel,
+)
+from common.web_contracts.learning import (
+    PidSpLearningReport as WirePidSpLearningReport,
+)
+from controller import pid_sp_learning as learning
 from controller.fopdt_identifier import (
     CONFIRM_WINDOW,
     MIN_ACCEPTED,
@@ -482,7 +483,7 @@ def test_backend_report_uses_a_strict_checkpoint_load(monkeypatch):
             assert name == "pid_sp"
             raise ValueError("malformed stored snapshot for 'pid_sp'")
 
-    monkeypatch.setattr(runtime_persistence, "read_status", lambda: {})
+    monkeypatch.setattr(runtime_persistence, "read_status", dict)
     monkeypatch.setattr(
         controller_model_state,
         "ControllerModelStore",

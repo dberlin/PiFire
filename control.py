@@ -22,16 +22,17 @@ Description: This script starts at boot, initializes the datastore and
 ==============================================================================
 """
 
-import logging
 import atexit
-from common.common import ErrorKind, create_logger  # Common Module for WebUI and Control Program
+import logging
+
 from common import datastore
-from controller.runtime.context import ControllerContext
-from controller.runtime.devices import build_devices
-from controller.runtime.store import SqliteStore
+from common.common import ErrorKind, create_logger  # Common Module for WebUI and Control Program
 from controller.runtime.clock import RealClock
-from controller.runtime.notifier import LiveNotifier
+from controller.runtime.context import ControllerContext
 from controller.runtime.controller import Controller
+from controller.runtime.devices import build_devices
+from controller.runtime.notifier import LiveNotifier
+from controller.runtime.store import SqliteStore
 
 
 def _initialize_runtime_state(store):

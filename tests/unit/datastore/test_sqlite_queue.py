@@ -3,7 +3,7 @@ import sqlite3
 import pytest
 
 from common import datastore
-from common.sqlite_queue import SqliteQueue, SqliteMembershipList
+from common.sqlite_queue import SqliteMembershipList, SqliteQueue
 
 
 def test_fifo_roundtrip(ds):

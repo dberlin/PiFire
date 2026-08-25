@@ -15,10 +15,10 @@ module can be reloaded and exercised without real SPI hardware. Covers:
     the primary/food/aux group-assignment branches, in both F and C units.
 """
 
+import importlib
 import logging
 import sys
 import types
-import importlib
 
 import pytest
 

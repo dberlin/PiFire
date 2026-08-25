@@ -75,7 +75,6 @@ def test_no_test_fixture_stands_in_front_of_the_probe():
     its `loggername`. A harness that quietly reshapes production behaviour is
     exactly what this file exists to prevent."""
     import grillplat.system_commands as syscmds
-
     from common.system import probe_os_info, refresh_os_info
 
     assert system.probe_os_info is probe_os_info

@@ -48,13 +48,15 @@ Requirements:
 *****************************************
 """
 
-import threading
-import time
 import logging
 import struct
+import threading
+import time
+
+from bluepy import btle
 
 from probes.base import ProbeInterface
-from bluepy import btle
+
 # from icecream import ic  # For debugging
 
 # Seconds close() waits for each background thread. A thread parked in a
@@ -285,7 +287,7 @@ class Meater_Device:
 
         self.status = {
             "battery_percentage": self.battery_percentage,
-            "battery_charging": True if self.battery_percentage == 0 else False,
+            "battery_charging": self.battery_percentage == 0,
             "connected": self.device_setup,
             "hardware_id": self.hardware_id,
             "firmware_id": self.firmware_id,
@@ -484,8 +486,8 @@ class Meater_Device:
             self.status["battery_percentage"] = (
                 self.battery_percentage if (self.battery_percentage > 0 and self.device_setup) else None
             )
-            self.status["battery_charging"] = (
-                True if (self.battery_percentage == 0 and self.device_setup) else False
+            self.status["battery_charging"] = bool(
+                self.battery_percentage == 0 and self.device_setup
             )  # Reads zero when charging
         else:
             self.status["battery_percentage"] = self.battery_percentage

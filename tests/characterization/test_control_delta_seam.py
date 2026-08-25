@@ -6,8 +6,9 @@ import json
 import pytest
 
 from common import common as c
-from common.persistence import control as control_persistence
 from common.control_delta import CONTROL_DELTA_KEY, control_delta
+from common.defaults import default_settings
+from common.persistence import control as control_persistence
 from common.persistence.control import (
     default_control,
     read_control,
@@ -15,7 +16,6 @@ from common.persistence.control import (
 from common.persistence.runtime import (
     write_settings_store,
 )
-from common.defaults import default_settings
 
 NOW = 1_700_000_000.0
 
@@ -210,7 +210,7 @@ def sio(seeded):
     including its neutralization of every hazardous dispatch."""
     from unittest import mock
 
-    import blueprints.mobile.socket_io as socket_io
+    from blueprints.mobile import socket_io
 
     with (
         mock.patch.object(socket_io, "restart_control"),

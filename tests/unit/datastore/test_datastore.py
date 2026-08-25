@@ -45,10 +45,9 @@ def test_kv_check_rejects_non_json(ds):
 
 
 def test_transaction_rolls_back_on_error(ds):
-    with pytest.raises(RuntimeError):
-        with ds.transaction() as conn:
-            conn.execute("INSERT INTO kv(key,value) VALUES('a','1')")
-            raise RuntimeError("boom")
+    with pytest.raises(RuntimeError), ds.transaction() as conn:
+        conn.execute("INSERT INTO kv(key,value) VALUES('a','1')")
+        raise RuntimeError("boom")
     assert ds.connection().execute("SELECT COUNT(*) FROM kv WHERE key='a'").fetchone()[0] == 0
 
 

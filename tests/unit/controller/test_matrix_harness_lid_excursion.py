@@ -19,9 +19,9 @@ negative control below.
 
 import numpy as np
 
-import tools.experiments.controller_matrix as controller_matrix
 from common.defaults import default_settings
 from controller.grill_sim import GrillSim
+from tools.experiments import controller_matrix
 
 SCENARIO = controller_matrix.SCENARIOS["lid_open_225"]
 SETPOINT = SCENARIO.setpoints[0][1]

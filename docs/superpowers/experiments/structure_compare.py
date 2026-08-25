@@ -115,7 +115,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
-import tools.experiments.controller_matrix as controller_matrix  # noqa: E402
+from tools.experiments import controller_matrix  # noqa: E402
 from tools.experiments.controller_matrix import SCENARIOS, run_scenario  # noqa: E402
 
 SCENARIO = "steady_325"
@@ -289,7 +289,7 @@ def _render(shards):
                     v = sel[0]["refit"]
                     accepted.setdefault(arm, []).append(bool(v["accepted"]))
                     cand, inc = _fit_rmses(v)
-                    w(f"{plant:<13}{arm:<5}{seed:>5}{cook:>5}{cand:>8}{inc:>8}{str(v['accepted']):>10}  {v['reason']}")
+                    w(f"{plant:<13}{arm:<5}{seed:>5}{cook:>5}{cand:>8}{inc:>8}{v['accepted']!s:>10}  {v['reason']}")
     w("")
     for arm, flags in accepted.items():
         w(f"  {arm}: {sum(flags)} accepted of {len(flags)} refits ({100.0 * sum(flags) / len(flags):.0f}%)")

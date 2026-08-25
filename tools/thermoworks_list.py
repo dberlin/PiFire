@@ -28,7 +28,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from aiohttp import ClientSession  # noqa: E402
-from thermoworks_cloud import AuthFactory, AuthenticationError, ThermoworksCloud  # noqa: E402
+from thermoworks_cloud import AuthenticationError, AuthFactory, ThermoworksCloud  # noqa: E402
 
 from probes.thermoworks_cloud import _channel_to_celsius, discover_devices, poll_once  # noqa: E402
 

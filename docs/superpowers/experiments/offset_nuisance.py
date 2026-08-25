@@ -133,8 +133,8 @@ if REPO not in sys.path:
     sys.path.insert(0, REPO)
 
 from controller.model_learning.grey_runtime import _REFIT_INIT, _REFIT_MIN_SAMPLES  # noqa: E402
-from controller.mpc_model import simulate_grey_box  # noqa: E402
 from controller.model_promotion import _IDENTIFIABILITY_FLOOR  # noqa: E402
+from controller.mpc_model import simulate_grey_box  # noqa: E402
 from controller.update_mpc import _DIVERGED, _FREE, _LOWER_BOUND, _MAX_NFEV, _SIM_KEYS  # noqa: E402
 from tools.experiments import promotion_signal as ps  # noqa: E402
 
@@ -302,7 +302,7 @@ def measure(rec):
     """Every arm's numbers for one record. Runs in a worker process."""
     t, y, Q = rec["t"], rec["y"], rec["Q"]
     n = len(t)
-    out = dict(plant=rec["plant"], profile=rec["profile"], length_s=rec["length_s"], n=n)
+    out = {"plant": rec["plant"], "profile": rec["profile"], "length_s": rec["length_s"], "n": n}
     k = max(2, int(round(n * SPLIT_FRAC)))
     ts, ys = t[k:], y[k:]
     scorable = len(ts) >= 2
@@ -466,7 +466,7 @@ def main():
     say()
     say("--- harness self-checks ------------------------------------------------------------------")
     rc = real_rows[-1]
-    recorded = dict(C_c=3591.95, theta=111.32, K_Q=9.9208)
+    recorded = {"C_c": 3591.95, "theta": 111.32, "K_Q": 9.9208}
     a = rc["A_shipped"]["fit"]
     say(
         "1. arm A on the real cook reproduces tests/unit/mpc/test_model_promotion.REAL_MAK_FIT: "

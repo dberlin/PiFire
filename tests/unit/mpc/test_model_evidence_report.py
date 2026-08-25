@@ -1,12 +1,16 @@
 """Unified model-learning report vocabulary and authority contracts."""
 
 from __future__ import annotations
+
 import json
 from types import SimpleNamespace
 
-
 import pytest
 
+from common.control_trace import (
+    AmbientSource,
+)
+from common.controller_model_state import ControllerModelStore
 from common.model_evidence import (
     CandidateAssessmentEvidence,
     EvidenceKind,
@@ -14,26 +18,20 @@ from common.model_evidence import (
     RecorderGapEvidence,
     SchemaInvalidationEvidence,
 )
+from common.persistence.control_trace import read_control_trace_session
+from common.persistence.model_evidence import read_model_evidence
 from controller.model_learning import report as report_module
+from controller.model_learning.activation import (
+    GreyControlPairDescriptor,
+)
 from controller.model_learning.contracts import (
     CandidateOrigin,
-    FrameObservation,
     CheckStatus,
     FitRequest,
     FitStatus,
     FitWindowIdentity,
+    FrameObservation,
     LearningStatus,
-)
-from common.control_trace import (
-    AmbientSource,
-)
-from common.controller_model_state import ControllerModelStore
-from common.persistence.control_trace import read_control_trace_session
-from common.persistence.model_evidence import read_model_evidence
-from controller.mpc import Controller
-from controller.mpc_config import DEFAULT_MPC_CONFIG
-from controller.model_learning.activation import (
-    GreyControlPairDescriptor,
 )
 from controller.model_learning.report import (
     backend_learning_report,
@@ -41,6 +39,8 @@ from controller.model_learning.report import (
     build_learning_report,
     current_learning_report,
 )
+from controller.mpc import Controller
+from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.runtime.model_fitting import (
     CandidatePair,
     CandidatePreparation,
@@ -48,7 +48,6 @@ from controller.runtime.model_fitting import (
     TargetTimingEvidence,
     grey_config_digest,
 )
-
 
 _CANDIDATE = "b" * 64
 _INCUMBENT = "a" * 64

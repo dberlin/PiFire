@@ -16,9 +16,9 @@
 """
 
 import argparse
+import json
 import logging
 import os
-import json
 import subprocess
 
 from common.persistence.runtime import read_settings
@@ -299,7 +299,7 @@ def rpi_config_write(config_type, feature, add_config={}, pin=0, param="", pin_t
 
         """ Look for the configuration line if it exists already """
         found = False
-        for index in range(0, len(config_data)):
+        for index in range(len(config_data)):
             if config_type in config_data[index] and feature in config_data[index]:
                 found = True
                 # Check for leading hashtag and remove
@@ -327,7 +327,7 @@ def rpi_config_write(config_type, feature, add_config={}, pin=0, param="", pin_t
                         # Modify pin number
                         if pin > 0:
                             for noun in ["gpio-pin", "gpiopin", "gpio_pin", "pin"]:
-                                if noun in config_dict[feature].keys():
+                                if noun in config_dict[feature]:
                                     config_dict[feature].pop(noun, None)
                                     config_dict[feature][pin_type] = str(pin)
 
@@ -445,8 +445,7 @@ def create_file(filename, lines):
     result = f"\n - Attempting to write data to {filename}: "
     try:
         with open(filename, "w") as file:
-            for line in lines:
-                file.write(line)
+            file.writelines(lines)
         result += f" SUCCESS (creating file {filename}) "
     except:
         result += f" FAILED (creating file {filename}) "
@@ -469,8 +468,7 @@ def append_file(filename, lines):
 
         if missing_lines:
             with open(filename, "a+") as file:
-                for line in missing_lines:
-                    file.write(line)
+                file.writelines(missing_lines)
             changed = True
             result += f" SUCCESS (appending file {filename}) "
         else:

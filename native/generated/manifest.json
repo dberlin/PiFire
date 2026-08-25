@@ -47,7 +47,7 @@
     "grey_box/pifire_grey_model/pifire_grey_model.h": "bc03ca98470aa68fc3adc867c5ac767fcfb1facb400e36014b103e22ac48d004"
   },
   "model_definitions": {
-    "controller/acados/codegen/grey_box_ocp.py": "dca1029fe40d293ffe07419155ffbd8e8f14a540297b9e8d51ab7e3fdcec5044"
+    "controller/acados/codegen/grey_box_ocp.py": "471aaf100f0b8212fdf5fd7131e46ea3aa8665ad5496355f96b3ad90eaa21e21"
   },
   "python_generator_dependencies": {
     "Cython": "3.2.9",

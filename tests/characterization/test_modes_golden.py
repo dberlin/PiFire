@@ -16,15 +16,16 @@ Hold, Monitor, Manual) via the harness's capped-probe injection. No scenario
 here can loop indefinitely.
 """
 
-from common.control_delta import control_delta
-from controller.runtime.store import InMemoryStore
+import itertools
 
-from tests.characterization.harness import run_mode
-from tests.characterization.fixtures import base_settings, base_control, base_pellet_db
-from tests.fakes.probes import FakeProbes
-from tests.fakes.grill import FakeGrillPlatform
-from tests.fakes.runner import FakeControllerRunner
+from common.control_delta import control_delta
 from controller.runtime.runner import ControllerUpdateResult
+from controller.runtime.store import InMemoryStore
+from tests.characterization.fixtures import base_control, base_pellet_db, base_settings
+from tests.characterization.harness import run_mode
+from tests.fakes.grill import FakeGrillPlatform
+from tests.fakes.probes import FakeProbes
+from tests.fakes.runner import FakeControllerRunner
 
 
 def test_smoke_over_maxtemp_triggers_error_and_notifies():
@@ -207,7 +208,7 @@ def test_smoke_auger_cycles_on_and_off():
     assert names[0] == "auger_off"
     assert names[-1] == "auger_off"
     middle = names[1:-1]
-    for a, b in zip(middle, middle[1:]):
+    for a, b in itertools.pairwise(middle):
         assert a != b
     assert middle[0] == "auger_on"
     assert result.final_control["mode"] == "Smoke"
@@ -648,7 +649,7 @@ def test_smoke_plus_cycles_fan_on_and_off():
     assert fan_calls.count("fan_on") >= 3
     assert fan_calls.count("fan_off") >= 3
     # Strictly alternating (no double-on / double-off in a row).
-    for a, b in zip(fan_calls, fan_calls[1:]):
+    for a, b in itertools.pairwise(fan_calls):
         assert a != b
 
 

@@ -21,14 +21,19 @@ _DB_PATH = os.path.join(_TMP_DIR, "webapp_test.db")
 os.environ["PIFIRE_DB_PATH"] = _DB_PATH
 
 from common import datastore  # noqa: E402
+from common.defaults import default_control, default_pellets, default_settings  # noqa: E402
 from common.persistence.control import (
     write_control_snapshot,
 )
+from common.persistence.history import (
+    read_history,
+    write_history,
+)
 from common.persistence.runtime import (
+    init_status,
     read_connected_users,
     read_current,
     read_settings,
-    init_status,
     remove_connected_user,
     write_connected_user,
     write_current,
@@ -36,11 +41,6 @@ from common.persistence.runtime import (
     write_pellets_store,
     write_settings_store,
 )
-from common.persistence.history import (
-    read_history,
-    write_history,
-)
-from common.defaults import default_control, default_pellets, default_settings  # noqa: E402
 
 
 def _seed_database():

@@ -64,9 +64,11 @@ MUTATIONS = [
     (
         "M5 braking distance ignores the radiative loss",
         PROMOTION,
-        '    loss = float(params["h_amb"]) * (t_ref_c - t_amb) + float(params["sigma"]) * (\n'
-        "        (t_ref_c + _KELVIN) ** 4 - (t_amb + _KELVIN) ** 4\n"
-        "    )",
+        (
+            '    loss = float(params["h_amb"]) * (t_ref_c - t_amb) + float(params["sigma"]) * (\n'
+            "        (t_ref_c + _KELVIN) ** 4 - (t_amb + _KELVIN) ** 4\n"
+            "    )"
+        ),
         '    loss = float(params["h_amb"]) * (t_ref_c - t_amb)',
     ),
     (
@@ -96,10 +98,12 @@ MUTATIONS = [
     (
         "M13 a candidate that cannot hold temperature still demands a horizon",
         PROMOTION,
-        "    if ratio >= 1.0:\n"
-        "        # Full fire cannot even hold this temperature, so the chamber is not\n"
-        "        # rising and there is nothing to brake.\n"
-        "        return 0.0",
+        (
+            "    if ratio >= 1.0:\n"
+            "        # Full fire cannot even hold this temperature, so the chamber is not\n"
+            "        # rising and there is nothing to brake.\n"
+            "        return 0.0"
+        ),
         "    if ratio >= 1.0:\n        return 1e6",
     ),
     (
@@ -178,22 +182,30 @@ MUTATIONS = [
     (
         "M30 the Kalman state vector keeps the slot the firepot used to hold",
         MODEL,
-        "        n = n_delay + 2\n        iTc, iD = n_delay, n_delay + 1\n\n        A = np.zeros((n, n))\n"
-        "        if n_delay > 0:\n            tau_d = theta / n_delay\n            for i in range(n_delay):\n"
-        "                A[i, i] = -1.0 / tau_d\n                if i > 0:\n                    A[i, i - 1] = 1.0 / tau_d\n"
-        "            A[iTc, n_delay - 1] = K_Q / C_c  # last lag feeds the chamber (scaled by K_Q)",
-        "        n = n_delay + 3\n        iTc, iD = n_delay + 1, n_delay + 2\n\n        A = np.zeros((n, n))\n"
-        "        if n_delay > 0:\n            tau_d = theta / n_delay\n            for i in range(n_delay):\n"
-        "                A[i, i] = -1.0 / tau_d\n                if i > 0:\n                    A[i, i - 1] = 1.0 / tau_d\n"
-        "            A[iTc, n_delay - 1] = K_Q / C_c  # last lag feeds the chamber (scaled by K_Q)",
+        (
+            "        n = n_delay + 2\n        iTc, iD = n_delay, n_delay + 1\n\n        A = np.zeros((n, n))\n"
+            "        if n_delay > 0:\n            tau_d = theta / n_delay\n            for i in range(n_delay):\n"
+            "                A[i, i] = -1.0 / tau_d\n                if i > 0:\n                    A[i, i - 1] = 1.0 / tau_d\n"
+            "            A[iTc, n_delay - 1] = K_Q / C_c  # last lag feeds the chamber (scaled by K_Q)"
+        ),
+        (
+            "        n = n_delay + 3\n        iTc, iD = n_delay + 1, n_delay + 2\n\n        A = np.zeros((n, n))\n"
+            "        if n_delay > 0:\n            tau_d = theta / n_delay\n            for i in range(n_delay):\n"
+            "                A[i, i] = -1.0 / tau_d\n                if i > 0:\n                    A[i, i - 1] = 1.0 / tau_d\n"
+            "            A[iTc, n_delay - 1] = K_Q / C_c  # last lag feeds the chamber (scaled by K_Q)"
+        ),
     ),
     (
         "M31 the Kalman default state seeds the wrong slot with ambient",
         MODEL,
-        "            x0 = [0.0] * n_delay + [T_amb, 0.0]\n        self.x = np.array(x0, dtype=float)\n"
-        "        self.P = np.eye(n) * 5.0\n        self.n = n",
-        "            x0 = [0.0] * n_delay + [0.0, T_amb]\n        self.x = np.array(x0, dtype=float)\n"
-        "        self.P = np.eye(n) * 5.0\n        self.n = n",
+        (
+            "            x0 = [0.0] * n_delay + [T_amb, 0.0]\n        self.x = np.array(x0, dtype=float)\n"
+            "        self.P = np.eye(n) * 5.0\n        self.n = n"
+        ),
+        (
+            "            x0 = [0.0] * n_delay + [0.0, T_amb]\n        self.x = np.array(x0, dtype=float)\n"
+            "        self.P = np.eye(n) * 5.0\n        self.n = n"
+        ),
     ),
     (
         "M32 the EKF measures a lag state instead of the chamber",
@@ -217,11 +229,13 @@ MUTATIONS = [
     (
         "M35 restore_model refuses an old snapshot without saying so",
         GREY_RUNTIME,
-        "            self._logger.warning(\n"
-        '                f"[mpc] discarding a version {version!r} model snapshot: runtime restore "\n'
-        '                f"accepts only grey schema {self.MODEL_SCHEMA}; version 3 is migration input only."\n'
-        "            )\n"
-        "            return False",
+        (
+            "            self._logger.warning(\n"
+            '                f"[mpc] discarding a version {version!r} model snapshot: runtime restore "\n'
+            '                f"accepts only grey schema {self.MODEL_SCHEMA}; version 3 is migration input only."\n'
+            "            )\n"
+            "            return False"
+        ),
         "            return False",
     ),
     # ---- retired settings keys --------------------------------------------
@@ -265,15 +279,19 @@ MUTATIONS = [
     (
         "M47 the counter never clears, so a healthy policy reads as frozen",
         MPC_CORE,
-        "            if self._consecutive_policy_failures:\n"
-        "                self._logger.info(\n"
-        '                    f"[mpc] native solver recovered after {self._consecutive_policy_failures} failed step(s)"\n'
-        "                )\n"
-        "            self._consecutive_policy_failures = 0",
-        "            if self._consecutive_policy_failures:\n"
-        "                self._logger.info(\n"
-        '                    f"[mpc] native solver recovered after {self._consecutive_policy_failures} failed step(s)"\n'
-        "                )",
+        (
+            "            if self._consecutive_policy_failures:\n"
+            "                self._logger.info(\n"
+            '                    f"[mpc] native solver recovered after {self._consecutive_policy_failures} failed step(s)"\n'
+            "                )\n"
+            "            self._consecutive_policy_failures = 0"
+        ),
+        (
+            "            if self._consecutive_policy_failures:\n"
+            "                self._logger.info(\n"
+            '                    f"[mpc] native solver recovered after {self._consecutive_policy_failures} failed step(s)"\n'
+            "                )"
+        ),
     ),
     # ---- the deadtime chain length ----------------------------------------
     (

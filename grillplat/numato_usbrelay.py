@@ -46,7 +46,6 @@ import threading
 
 import serial
 
-
 """
 *****************************************
  Constants
@@ -72,13 +71,9 @@ _PROMPT = b">"
 class NumatoError(Exception):
     """Base exception for the Numato relay driver."""
 
-    pass
-
 
 class NumatoResponseError(NumatoError):
     """Raised when the board returns an unexpected or unparseable response."""
-
-    pass
 
 
 class NumatoIdentifyError(NumatoError):
@@ -91,8 +86,6 @@ class NumatoIdentifyError(NumatoError):
     timeout instead, which on a grill meant a whole second per relay operation
     and several seconds per mode change, with nothing anywhere saying why.
     """
-
-    pass
 
 
 """

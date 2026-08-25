@@ -11,8 +11,8 @@ Harness rationale: see tests/web/test_api_files_listing.py's docstring.
 import zipfile
 
 import pytest
-from common.web_contracts.content import CookFileComment
 
+from common.web_contracts.content import CookFileComment
 from tests.web.archive_builders import write_cookfile
 
 URL = "/api/files/cookfiles/comments"

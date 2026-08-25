@@ -59,8 +59,8 @@ def build_engine(config, backend):
 
 def build_backend(config):
     """Construct the backend wired to the framework's data + command layer."""
-    from display.qtquick_flex import Display
     from common.common import display_sleep_timeout
+    from display.qtquick_flex import Display
 
     def _accent_fn():
         try:

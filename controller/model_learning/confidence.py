@@ -19,6 +19,7 @@ from common.model_evidence import (
     RecorderGapEvidence,
     TimingDistributionEvidence,
 )
+
 from .contracts import CandidateOrigin, LearningStatus
 
 _REQUIRED_HORIZONS = (3, 15, 45, 90, 180)
@@ -310,7 +311,7 @@ def _origins(records: Sequence[ModelEvidenceRecord]) -> tuple[tuple[_Origin, ...
 
 def _newest_payload(
     records: Sequence[ModelEvidenceRecord],
-    payload_type: type[CandidateAssessmentEvidence] | type[TimingDistributionEvidence],
+    payload_type: type[CandidateAssessmentEvidence | TimingDistributionEvidence],
 ) -> CandidateAssessmentEvidence | TimingDistributionEvidence | None:
     matches = [record for record in records if isinstance(record.payload, payload_type)]
     return max(matches, key=lambda record: (record.timestamp_ms, record.evidence_id)).payload if matches else None

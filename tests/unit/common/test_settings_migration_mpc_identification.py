@@ -6,7 +6,6 @@ from common.defaults import default_settings
 from common.settings_migration import _apply_shape_migrations, _clear_mpc_identification_choice
 from common.settings_schema import SETTINGS_SCHEMA_VERSION
 
-
 #: A completed fit -- update_mpc's free set, all moved together. The surviving
 #: neighbour has to be one, because v10 returns anything less to the defaults,
 #: and a neighbour whose expected value IS the default could not tell a

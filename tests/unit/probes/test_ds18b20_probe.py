@@ -14,10 +14,10 @@ its own read_all_ports override (including the "no reading yet" None branch
 and the primary/food/aux group-assignment branches).
 """
 
-import sys
-import types
 import importlib
 import logging
+import sys
+import types
 
 import pytest
 

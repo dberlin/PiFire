@@ -204,8 +204,7 @@ def max_interpolation_error(values, indices, times=None):
             # segment is vertical, so every sample on it sits at y0.
             approx = y0 if span == 0 else y0 + (y1 - y0) * (((i if times is None else times[i]) - x0) / span)
             err = abs(approx - value)
-            if err > worst:
-                worst = err
+            worst = max(worst, err)
     return worst
 
 

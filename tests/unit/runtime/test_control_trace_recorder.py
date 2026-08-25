@@ -8,8 +8,8 @@ from pydantic import ValidationError
 
 from common.control_trace import (
     TRACE_SCHEMA_VERSION,
-    ControlTraceRecord,
     ControllerType,
+    ControlTraceRecord,
     InhibitReason,
     RecorderGapPayload,
     SafetyEventPayload,
@@ -46,12 +46,10 @@ def _no_prune(before_ms: int, *, limit: int) -> int:
 
 def _no_warning(message: str) -> None:
     _ = message
-    return None
 
 
 def _append_nothing(batch: tuple[ControlTraceRecord, ...]) -> None:
     _ = batch
-    return None
 
 
 class _Clock:

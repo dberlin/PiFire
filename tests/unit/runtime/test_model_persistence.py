@@ -5,17 +5,12 @@ import threading
 
 import pytest
 
+from common.control_trace import AmbientSource
 from common.controller_model_state import (
     MAX_SNAPSHOT_BYTES,
     CheckpointSaveOutcome,
     ControllerModelStore,
 )
-from common.persistence.model_evidence import (
-    append_model_evidence,
-    commit_model_activation_phase,
-    read_model_activation,
-)
-from common.control_trace import AmbientSource
 from common.model_evidence import (
     ActivationEvidence,
     CandidateAssessmentEvidence,
@@ -25,18 +20,23 @@ from common.model_evidence import (
     ModelEvidenceRecord,
     RefreshDiagnosticsEvidence,
 )
+from common.persistence.model_evidence import (
+    append_model_evidence,
+    commit_model_activation_phase,
+    read_model_activation,
+)
 from controller.model_learning.activation import (
     ActivationPhase,
     PreparedActivationRecord,
     recover_startup_activation,
 )
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
-from tests.unit.runtime._persistence_helpers import _current_pair_descriptor
 from controller.runtime.model_persistence import (
     DurableActivationReceipt,
     EvidenceSubmission,
     ModelPersistenceWorker,
 )
+from tests.unit.runtime._persistence_helpers import _current_pair_descriptor
 
 _DIGEST = "a" * 64
 _OTHER_DIGEST = "b" * 64

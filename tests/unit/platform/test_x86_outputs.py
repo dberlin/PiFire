@@ -1,5 +1,7 @@
-import pytest
 from unittest import mock
+
+import pytest
+
 from grillplat.actuator_capabilities import AUGER_TIMING
 
 

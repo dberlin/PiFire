@@ -18,7 +18,6 @@ the real Menus.js via a small QML harness so there is no Python copy to drift).
 import json
 
 import pytest
-
 from PySide6.QtCore import QUrl
 from PySide6.QtQml import QQmlComponent
 

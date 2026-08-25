@@ -6,11 +6,11 @@ mutates runtime state, or substitutes today's configuration for a recording.
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from os import PathLike
-import sqlite3
 from typing import Protocol, cast
 
 from common.control_trace import (
@@ -18,17 +18,17 @@ from common.control_trace import (
     ActuationMode,
     AllocationPayload,
     AppliedOutputPayload,
-    ControlTraceRecord,
     ControllerType,
+    ControlTraceRecord,
     FramedPulseFramePayload,
     InhibitReason,
     ModelEvaluationPayload,
     ModelObservationPayload,
     MpcUpdatePayload,
-    ResultStaleState,
     PidSpUpdatePayload,
     PidUpdatePayload,
     RecorderGapPayload,
+    ResultStaleState,
     SafetyEventPayload,
     SafetyEventType,
     SessionPayload,

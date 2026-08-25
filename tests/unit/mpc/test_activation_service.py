@@ -1,5 +1,5 @@
-from dataclasses import FrozenInstanceError, replace
 import json
+from dataclasses import FrozenInstanceError, replace
 from types import SimpleNamespace
 
 import pytest
@@ -9,8 +9,8 @@ from common.persistence.model_evidence import (
     ModelActivationState,
     ModelRollbackCommitOutcome,
 )
-from controller.model_learning import activation_service as activation_service_module
 from common.web_contracts.learning import ModelActivationRequest, ModelRollbackRequest
+from controller.model_learning import activation_service as activation_service_module
 from controller.model_learning.activation import (
     GreyControlPairDescriptor,
     canonical_snapshot_digest,
@@ -26,7 +26,6 @@ from controller.model_learning.activation_service import (
 )
 from controller.model_learning.contracts import ActivationPolicy
 from tests.unit.mpc._solver_fixtures import owned_pair
-
 
 _NOW_MS = 1_725_000_123_456
 _DECISION_ID = "decision-service-grey"

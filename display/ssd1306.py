@@ -16,13 +16,15 @@ PiFire Display Interface Library
 """
  Imported Libraries
 """
-import time
-import threading
 import socket
+import threading
+import time
+
 from luma.core.interface.serial import i2c
 from luma.core.render import canvas
 from luma.oled.device import ssd1306
 from PIL import Image, ImageFont
+
 from display._loggers import resolve_loggers
 
 """
@@ -152,7 +154,7 @@ class Display:
                 font = ImageFont.truetype("impact.ttf", 42)
             else:
                 font = ImageFont.truetype("impact.ttf", 38)
-            label = list(in_data["probe_history"]["primary"].keys())[0]
+            label = next(iter(in_data["probe_history"]["primary"].keys()))
             text = str(in_data["probe_history"]["primary"][label])[:5]
             font_bbox = font.getbbox(str(text))  # Grab the bounding box of the text
             font_width = font_bbox[2]

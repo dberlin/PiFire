@@ -14,14 +14,16 @@
 #
 # *****************************************
 
-import paho.mqtt.client as mqtt
 import json
 import logging
 import time
 from socket import getfqdn
+
+import paho.mqtt.client as mqtt
+import psutil
+
 from common.common import create_logger
 from common.modes import Mode
-import psutil
 
 
 def _connack_text(reason_code):

@@ -19,8 +19,8 @@ import time
 
 from common.common import generate_uuid, read_generic_json, read_updater_manifest
 from common.modes import Mode, StatusState
-from common.web_contracts.control import PELLETDB_SCHEMA_VERSION
 from common.settings_schema import SETTINGS_SCHEMA_VERSION
+from common.web_contracts.control import PELLETDB_SCHEMA_VERSION
 
 # Set of default colors for charts.  Contains list of tuples (primary color, secondary color).
 COLOR_LIST = [
@@ -326,7 +326,7 @@ def default_probe_config(settings):
         if probe["type"] in ["Primary", "Food"]:
             label = probe["label"]
             # Check if the label exists in settings already.
-            if label in settings["history_page"]["probe_config"].keys():
+            if label in settings["history_page"]["probe_config"]:
                 probe_config[label] = settings["history_page"]["probe_config"][label]
             else:
                 probe_config[label] = {
@@ -676,7 +676,7 @@ METRIC_COLUMNS = [k for k, _ in metrics_items]
 def default_metrics():
     metrics = {}
 
-    for index in range(0, len(metrics_items)):
+    for index in range(len(metrics_items)):
         metrics[metrics_items[index][0]] = metrics_items[index][1]
 
     return metrics

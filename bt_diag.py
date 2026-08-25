@@ -5,9 +5,9 @@ Run this on the Raspberry Pi to identify why BLE scanning may not be working.
 Usage: sudo python3 bt_diag.py   (or with venv: sudo /path/to/.venv/bin/python3 bt_diag.py)
 """
 
+import os
 import subprocess
 import sys
-import os
 
 SCAN_TIMEOUT = 5  # seconds
 
@@ -116,6 +116,7 @@ print(out or "(no output)")
 section(f"11. bleak scan ({SCAN_TIMEOUT}s)")
 try:
     import asyncio
+
     from bleak import BleakScanner
 
     async def _scan():
@@ -125,7 +126,7 @@ try:
 
     found = asyncio.run(_scan())
     print(f"  Scan completed. Found {len(found)} device(s):")
-    for addr, (dev, adv) in found.items():
+    for dev, adv in found.values():
         print(f"    {dev.name or 'Unknown'} ({dev.address}) rssi={adv.rssi}")
     if not found:
         print("  !! No devices found.")

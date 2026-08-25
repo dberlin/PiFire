@@ -183,9 +183,7 @@ def parse_i2c_bus(data: I2CBus | dict[str, object]) -> I2CBus:
         value = data[name]
         if name == "bus_num":
             try:
-                if isinstance(value, (str, bytes, bytearray)):
-                    bus_num = int(value)
-                elif isinstance(value, (int, float)):
+                if isinstance(value, (str, bytes, bytearray, int, float)):
                     bus_num = int(value)
                 else:
                     raise I2CBusConfigError(f"A kernel bus_num must be a number, got {value!r}.")

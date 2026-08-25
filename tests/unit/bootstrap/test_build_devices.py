@@ -36,7 +36,7 @@ def test_build_devices_prototype_platform_headless():
     assert devices.dist_device is not None
     from probes.thermocouple_inference import ThermocoupleInferencePolicy
 
-    assert getattr(devices.probe_complex, "thermocouple_inference_policy") is ThermocoupleInferencePolicy.OBSERVE
+    assert devices.probe_complex.thermocouple_inference_policy is ThermocoupleInferencePolicy.OBSERVE
 
 
 def test_build_devices_disabled_probe_fallback_observes_with_legacy_settings(monkeypatch):
@@ -64,7 +64,7 @@ def test_build_devices_disabled_probe_fallback_observes_with_legacy_settings(mon
     devices, errors = build_devices(_proto_settings(), errors=[], event_log=_FakeLogger(), control_log=_FakeLogger())
 
     assert calls == [(False, "observe"), (True, "observe")]
-    assert getattr(devices.probe_complex, "thermocouple_inference_policy") is ThermocoupleInferencePolicy.OBSERVE
+    assert devices.probe_complex.thermocouple_inference_policy is ThermocoupleInferencePolicy.OBSERVE
 
 
 def test_build_display_prototype_none():

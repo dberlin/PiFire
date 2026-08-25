@@ -1,9 +1,9 @@
-import sys
-import types
-import importlib
 import asyncio
+import importlib
+import sys
 import time
-from datetime import datetime, timedelta, timezone
+import types
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
@@ -122,7 +122,7 @@ def test_get_channel_celsius_returns_fresh_value_and_none_when_stale(monkeypatch
         email="a@b.com", password="pw", device_serial="SN1", num_probes=2, poll_interval=10
     )
 
-    fresh_time = datetime.now(timezone.utc)
+    fresh_time = datetime.now(UTC)
     stale_time = fresh_time - timedelta(seconds=1000)
     device._cache[1] = (55.5, fresh_time)
     device._cache[2] = (60.0, stale_time)
@@ -188,7 +188,7 @@ def test_main_populates_cache_on_success(monkeypatch):
     async def run_briefly():
         try:
             await asyncio.wait_for(device._main(), timeout=0.2)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
 
     asyncio.run(run_briefly())
@@ -231,7 +231,7 @@ def test_main_sets_disconnected_status_on_auth_failure(monkeypatch):
     async def run_briefly():
         try:
             await asyncio.wait_for(device._main(), timeout=0.05)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
 
     asyncio.run(run_briefly())

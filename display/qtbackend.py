@@ -11,22 +11,22 @@ PiFire Qt Quick Display — Backend Bridge
 *****************************************
 """
 
-from collections.abc import Mapping
 import math
 import time
+from collections.abc import Mapping
 
+from pydantic import ValidationError
 from PySide6.QtCore import (
+    Property,
     QAbstractListModel,
     QByteArray,
     QModelIndex,
     QObject,
-    Property,
     QPersistentModelIndex,
     Qt,
     Signal,
     Slot,
 )
-from pydantic import ValidationError
 
 from common.modes import Mode
 from common.persistence.runtime import CONTROL_HEARTBEAT_STALE_AFTER
@@ -614,9 +614,7 @@ class PiFireBackend(QObject):
         # The screen never sleeps during an active cook; in Stop it sleeps after
         # TIMEOUT seconds of no interaction. TIMEOUT <= 0 disables sleeping and
         # wakes an already-asleep screen. Leaving Stop auto-wakes.
-        if mode != Mode.STOP:
-            self._set("_asleep", False, self.asleepChanged)
-        elif self.TIMEOUT <= 0:
+        if mode != Mode.STOP or self.TIMEOUT <= 0:
             self._set("_asleep", False, self.asleepChanged)
         elif now - self._last_interaction > self.TIMEOUT:
             self._set("_asleep", True, self.asleepChanged)

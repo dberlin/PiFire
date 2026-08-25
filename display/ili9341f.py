@@ -12,18 +12,18 @@ PiFire Display Interface Library
 """
  Imported Libraries
 """
-import time
-
 # import multiprocessing
 import threading
-# from pygame import image as PyImage
+import time
 
+from gpiozero import Button
+
+# from pygame import image as PyImage
 from luma.core.interface.serial import spi
 from luma.lcd.device import ili9341
-from gpiozero import Button
+from PIL import ImageFilter
 from pyky040 import pyky040
 
-from PIL import ImageFilter
 from display._base_flex import DisplayBase
 
 """

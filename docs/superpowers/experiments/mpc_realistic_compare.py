@@ -12,14 +12,18 @@ Steady band (RMS / max|e| / bias) at 110/190/220 C and a 225->275 F setpoint ste
 (overshoot / rise). Same seeds; auger-only, fan held 100% for every controller.
 """
 
-import warnings, sys, json, importlib
+import importlib
+import json
+import sys
+import warnings
 
 warnings.filterwarnings("ignore")
 sys.path.insert(0, ".")
 import numpy as np
+
+from controller.grill_sim import GrillSim
 from controller.mpc import Controller as MPCController
 from controller.mpc_config import DEFAULT_MPC_CONFIG
-from controller.grill_sim import GrillSim
 
 CYCLE = {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25}
 TS = 25.0

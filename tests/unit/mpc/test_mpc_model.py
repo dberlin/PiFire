@@ -1,10 +1,10 @@
 import numpy as np
 import pytest
 
-import controller.mpc_model as mpc_model
+from controller import mpc_model
 from controller.mpc_model import GreyBoxKF, simulate_grey_box
 
-PARAMS = dict(C_c=306.0, h_amb=0.55, T_amb=20.0)
+PARAMS = {"C_c": 306.0, "h_amb": 0.55, "T_amb": 20.0}
 
 
 def test_kf_rejects_an_applied_load_outside_the_normalized_domain():
@@ -48,7 +48,7 @@ def test_kf_tracks_measured_temperature():
     assert abs(x[0] - 110.0) < 1.0
 
 
-_P = dict(C_c=320.0, h_amb=0.5, T_amb=20.0, K_Q=350.0)
+_P = {"C_c": 320.0, "h_amb": 0.5, "T_amb": 20.0, "K_Q": 350.0}
 
 
 def test_output_starts_at_t0_and_is_aligned_with_the_time_grid():
@@ -151,7 +151,7 @@ def test_the_delay_chain_carries_no_discretization_error_of_its_own():
 
 
 def test_steady_combustion_load_is_closed_form_and_disturbance_is_offset_free():
-    params = dict(C_c=306.0, h_amb=0.5, T_amb=20.0, K_Q=100.0, sigma=0.0)
+    params = {"C_c": 306.0, "h_amb": 0.5, "T_amb": 20.0, "K_Q": 100.0, "sigma": 0.0}
 
     assert mpc_model.steady_combustion_load(params, 20.0) == pytest.approx(0.0)
     assert mpc_model.steady_combustion_load(params, 120.0) == pytest.approx(0.5)
@@ -162,12 +162,20 @@ def test_steady_combustion_load_is_closed_form_and_disturbance_is_offset_free():
 @pytest.mark.parametrize(
     ("params", "setpoint", "disturbance"),
     [
-        (dict(C_c=306.0, h_amb=0.5, T_amb=20.0, K_Q=100.0, sigma=0.0), 20.0, 0.0),
-        (dict(C_c=306.0, h_amb=0.5, T_amb=20.0, K_Q=100.0, sigma=0.0), 120.0, 10.0),
-        (dict(C_c=306.0, h_amb=0.5, T_amb=20.0, K_Q=350.0, sigma=1.4e-9), 240.0, -8.0),
-        (dict(C_c=306.0, h_amb=0.0, T_amb=20.0, K_Q=100.0, sigma=1.4e-9), 240.0, -8.0),
+        ({"C_c": 306.0, "h_amb": 0.5, "T_amb": 20.0, "K_Q": 100.0, "sigma": 0.0}, 20.0, 0.0),
+        ({"C_c": 306.0, "h_amb": 0.5, "T_amb": 20.0, "K_Q": 100.0, "sigma": 0.0}, 120.0, 10.0),
+        ({"C_c": 306.0, "h_amb": 0.5, "T_amb": 20.0, "K_Q": 350.0, "sigma": 1.4e-9}, 240.0, -8.0),
+        ({"C_c": 306.0, "h_amb": 0.0, "T_amb": 20.0, "K_Q": 100.0, "sigma": 1.4e-9}, 240.0, -8.0),
         (
-            dict(C_c=3591.95, h_amb=0.5, T_amb=20.0, theta=111.32, n_delay=8, K_Q=992.08, sigma=1.4e-9),
+            {
+                "C_c": 3591.95,
+                "h_amb": 0.5,
+                "T_amb": 20.0,
+                "theta": 111.32,
+                "n_delay": 8,
+                "K_Q": 992.08,
+                "sigma": 1.4e-9,
+            },
             232.2222222222,
             12.5,
         ),
@@ -184,9 +192,9 @@ def test_steady_temperature_inverts_the_shared_equilibrium_load(params, setpoint
     [
         None,
         {},
-        dict(C_c=306.0, h_amb=0.5, T_amb=20.0, K_Q=0.0, sigma=0.0),
-        dict(C_c=306.0, h_amb=float("nan"), T_amb=20.0, K_Q=100.0, sigma=0.0),
-        dict(C_c=306.0, h_amb=0.0, T_amb=20.0, K_Q=100.0, sigma=0.0),
+        {"C_c": 306.0, "h_amb": 0.5, "T_amb": 20.0, "K_Q": 0.0, "sigma": 0.0},
+        {"C_c": 306.0, "h_amb": float("nan"), "T_amb": 20.0, "K_Q": 100.0, "sigma": 0.0},
+        {"C_c": 306.0, "h_amb": 0.0, "T_amb": 20.0, "K_Q": 100.0, "sigma": 0.0},
     ],
 )
 def test_equilibrium_primitives_reject_absent_or_nonphysical_models(params):

@@ -7,9 +7,9 @@ from pydantic import JsonValue
 
 from common.control_trace import (
     ActuationMode,
-    ControlTraceRecord,
     ControllerBranch,
     ControllerType,
+    ControlTraceRecord,
     InhibitReason,
     MpcFailureState,
     MpcUpdatePayload,
@@ -25,7 +25,6 @@ from common.cook_diagnostics import (
     collect_cook_learning_diagnostics,
 )
 from common.model_evidence import ConfidenceDecisionEvidence, EvidenceKind, ModelEvidenceRecord
-
 
 type _TraceSchemaVersion = Literal[2, 3, 4, 5, 6]
 type _EvidenceSchemaVersion = Literal[1, 2, 3]

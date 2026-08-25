@@ -8,13 +8,13 @@ import pytest
 
 from common.control_trace import (
     ActuationMode,
-    AmbientSource,
-    AmbientUncertainty,
     AllocationClampReason,
     AllocationPayload,
+    AmbientSource,
+    AmbientUncertainty,
     AppliedOutputPayload,
-    ControlTraceRecord,
     ControllerType,
+    ControlTraceRecord,
     FramedPulseFramePayload,
     InhibitReason,
     ModelObservationPayload,
@@ -28,7 +28,6 @@ from common.control_trace import (
 from controller.applied_output import OutputSource
 from controller.model_learning.trace import TraceSelectionError, calibration_samples, learning_observations
 from controller.mpc_allocator import AllocationResult
-
 
 _SESSION_ID = "learning-session"
 

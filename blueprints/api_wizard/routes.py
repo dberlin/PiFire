@@ -4,6 +4,7 @@ import os
 
 from flask import jsonify, request
 from pydantic import ValidationError
+from thermoworks_cloud import AuthenticationError
 
 from blueprints.wizard.wizard import (
     get_settings_dependencies_values,
@@ -14,21 +15,6 @@ from blueprints.wizard.wizard import (
 )
 from common.app import get_supported_cmds, get_system_command_output, process_command
 from common.common import read_wizard, write_log
-from common.persistence.control import (
-    read_control,
-)
-from common.persistence.runtime import (
-    read_settings,
-    write_settings,
-)
-from common.persistence.install_state import (
-    delete_wizard_install_info,
-    get_wizard_install_status,
-    load_wizard_install_info,
-    set_wizard_install_status,
-    store_wizard_install_info,
-)
-from common.install_log import read_install_log
 from common.i2c_bus import (
     I2CBusConfigError,
     configured_bus_kinds,
@@ -37,29 +23,43 @@ from common.i2c_bus import (
     discover_mcp2221_devices,
     validate_bus_kinds,
 )
+from common.install_log import read_install_log
 from common.modes import Mode
+from common.persistence.control import (
+    read_control,
+)
+from common.persistence.install_state import (
+    delete_wizard_install_info,
+    get_wizard_install_status,
+    load_wizard_install_info,
+    set_wizard_install_status,
+    store_wizard_install_info,
+)
+from common.persistence.runtime import (
+    read_settings,
+    write_settings,
+)
 from common.usb_serial import discover_usb_serial_devices
-from probes.thermoworks_cloud import discover as _thermoworks_discover_impl
-from thermoworks_cloud import AuthenticationError
-
 from common.web_contracts.wizard import (
+    BtRowsResult,
     BusKindsValidationRequest,
     BusKindsValidationResponse,
-    BtRowsResult,
+    EmptyWizardRequest,
     InstallLog,
     InstallStatus,
     ModuleValues,
     ModuleValuesRequest,
     ScanRequest,
     ScanResult,
+    ThermoworksRequest,
     ThermoworksRowsResult,
+    WizardActionResponse,
     WizardDraftRequest,
     WizardFinishRequest,
     WizardState,
-    WizardActionResponse,
-    EmptyWizardRequest,
-    ThermoworksRequest,
 )
+from probes.thermoworks_cloud import discover as _thermoworks_discover_impl
+
 from . import api_wizard_bp
 
 _SECTIONS = ["grillplatform", "display", "distance", "probes"]

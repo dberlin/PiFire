@@ -22,8 +22,8 @@ def backup_dir():
     imports the module-level constant. Patching one and not the other writes
     into the real checkout.
     """
-    from app import app as flask_app
     import common.backups as backups_module
+    from app import app as flask_app
 
     tmp_dir = tempfile.mkdtemp(prefix="pifire_test_admin_state_")
     path = tmp_dir + os.sep
@@ -152,7 +152,7 @@ def test_clear_events_does_not_shell_out(client, tmp_path, monkeypatch):
     every later event into an orphaned inode. See
     tests/web/test_api_admin_clear_events.py.
     """
-    import blueprints.api_admin.admin_api as admin_api
+    from blueprints.api_admin import admin_api
 
     log_dir = tmp_path / "logs"
     log_dir.mkdir()
@@ -169,7 +169,7 @@ def test_clear_events_does_not_shell_out(client, tmp_path, monkeypatch):
 
 def test_clear_events_tolerates_a_missing_log(client, tmp_path, monkeypatch):
     """`rm` on a missing file is an error Flask swallowed; here it is success."""
-    import blueprints.api_admin.admin_api as admin_api
+    from blueprints.api_admin import admin_api
 
     log_dir = tmp_path / "logs"
     log_dir.mkdir()
@@ -255,8 +255,8 @@ def test_admin_maintenance_or_settings_rejects_bad_input(client, endpoint, paylo
 
 def test_a_missing_backup_folder_is_an_empty_list_not_a_500(client):
     """A fresh install has no ./backups until something writes one."""
-    from app import app as flask_app
     import common.backups as backups_module
+    from app import app as flask_app
 
     missing = os.path.join(tempfile.gettempdir(), "pifire_absent_backups_dir") + os.sep
     saved = (flask_app.config["BACKUP_PATH"], backups_module.BACKUP_PATH)

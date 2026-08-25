@@ -22,10 +22,11 @@ Description: This class object can be generated to both generate heartbeats
  Imported Modules
 ==============================================================================
 """
-import time
-import threading
-import subprocess
 import logging
+import subprocess
+import threading
+import time
+
 from common.common import create_logger, log_path
 from common.modes import Mode
 from common.persistence.control import read_control, write_control_snapshot

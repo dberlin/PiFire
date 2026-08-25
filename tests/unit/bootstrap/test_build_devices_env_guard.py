@@ -4,7 +4,7 @@ from common.i2c_bus import I2CBusConfigError
 
 
 def test_build_devices_rejects_board_forcing_env(monkeypatch):
-    import controller.runtime.devices as devices
+    from controller.runtime import devices
 
     monkeypatch.setenv("BLINKA_FT232H", "1")
     with pytest.raises(I2CBusConfigError):

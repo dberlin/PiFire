@@ -14,8 +14,8 @@ Harness rationale: see tests/web/test_api_files_listing.py's docstring.
 import zipfile
 
 import pytest
-from common.web_contracts.content import CookFileChartData, CookFileDetail
 
+from common.web_contracts.content import CookFileChartData, CookFileDetail
 from tests.web.archive_builders import write_cookfile
 
 DIAGNOSTICS_BYTES = (

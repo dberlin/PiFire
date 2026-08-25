@@ -1,7 +1,6 @@
 import pytest
 
 from common.persistence.runtime import CONTROL_HEARTBEAT_STALE_AFTER
-
 from display.qtbackend import PiFireBackend, ProbeHealthModel, project_thermocouple_health
 
 PROBE_INFO = {"primary": {"name": "Grill", "max_temp": 600}, "food": [{"name": "Probe 1", "max_temp": 300}], "aux": []}
@@ -901,7 +900,7 @@ def test_qt_health_transport_omits_missing_and_malformed_data(settings, device_i
 
 
 def test_qtapp_health_fetch_reads_and_projects_the_generic_blob_once(monkeypatch):
-    import display.qtapp as qtapp
+    from display import qtapp
 
     reads = []
     monkeypatch.setattr(

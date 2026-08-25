@@ -21,24 +21,24 @@ covers it; no separate Reignite test is needed.
 
 import copy
 
-from controller.runtime.context import ControllerContext, Devices
-from controller.runtime.store import InMemoryStore
 from controller.runtime.clock import ManualClock
-from controller.runtime.state import WorkCycleState
-from controller.runtime.modes.startup import StartupMode
-from controller.runtime.modes.smoke import SmokeMode
+from controller.runtime.context import ControllerContext, Devices
 from controller.runtime.logic.cycle import smoke_cycle_times
 from controller.runtime.logic.smartstart import profile_cycle
-from tests.fakes.grill import FakeGrillPlatform
-from tests.fakes.distance import FakeDistance
-from tests.fakes.notifier import FakeNotifier
-from tests.fakes.probes import FakeProbes
-from tests.characterization.fixtures import base_settings, base_control, base_pellet_db
+from controller.runtime.modes.smoke import SmokeMode
+from controller.runtime.modes.startup import StartupMode
+from controller.runtime.state import WorkCycleState
+from controller.runtime.store import InMemoryStore
 from tests.characterization._controller_harness import (
     _neutralize_externals,
     _spy_dispatch,
     make_controller,
 )
+from tests.characterization.fixtures import base_control, base_pellet_db, base_settings
+from tests.fakes.distance import FakeDistance
+from tests.fakes.grill import FakeGrillPlatform
+from tests.fakes.notifier import FakeNotifier
+from tests.fakes.probes import FakeProbes
 
 
 def _make_mode(mode_cls, control_mode_name, settings):

@@ -5,8 +5,9 @@ from threading import Barrier, Event
 import pytest
 
 from common import api_commands
-from common.persistence import control as control_persistence
 from common.control_delta import ControlDeltaError, control_delta
+from common.modes import Mode
+from common.persistence import control as control_persistence
 from common.persistence.control import (
     execute_control_writes,
     mpc_calibration_command_state,
@@ -14,7 +15,6 @@ from common.persistence.control import (
     read_control,
     read_pending_control_writes,
 )
-from common.modes import Mode
 
 
 def _control():

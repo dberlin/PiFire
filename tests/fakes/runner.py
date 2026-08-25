@@ -1,15 +1,14 @@
+from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any
 
-from collections.abc import Sequence
-
+from common.control_trace import ActuationMode, ControllerType
 from common.model_evidence import ModelEvidenceRecord
 from common.persistence.model_evidence import ModelActivationState
-from common.control_trace import ActuationMode, ControllerType
 from controller.model_learning.contracts import FrameObservation
-from controller.runtime.observation_buffer import ObservationOutcomeBuffer
 from controller.runtime.model_fitting import TeardownRefitOutcome
 from controller.runtime.model_persistence import DurableActivationReceipt
+from controller.runtime.observation_buffer import ObservationOutcomeBuffer
 from controller.runtime.runner import (
     ObservationOutcomeEnvelope,
     ObservationSubmission,

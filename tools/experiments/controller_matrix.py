@@ -186,8 +186,8 @@ def _observe_frame(core, frame, *, sequence, temp_c, setpoint_c, fan_frac, lid_o
     history = getattr(core, "_teardown_history", None)
     if observe is None or history is None:
         return
-    from controller.mpc_allocator import normalized_load_from_auger_duty
     from controller.model_learning.contracts import FrameObservation
+    from controller.mpc_allocator import normalized_load_from_auger_duty
 
     duration_s = frame.ended_at_s - frame.nominal_start_s
     realized_auger_duty = frame.delivered_on_s / duration_s if duration_s > 0 else 0.0

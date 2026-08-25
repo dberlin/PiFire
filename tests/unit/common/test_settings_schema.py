@@ -17,8 +17,8 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from common import datastore
-from common.persistence import runtime as runtime_persistence
 from common.defaults import default_settings
+from common.persistence import runtime as runtime_persistence
 from common.settings_migration import read_settings_file
 from common.settings_schema import (
     LastUpdated,
@@ -29,13 +29,13 @@ from common.settings_schema import (
     Versions,
 )
 from common.web_contracts.export import SCHEMA_DIRECTORY, render_contract_artifacts
+from common.web_contracts.registry import WEB_ROOT_CONTRACTS
 from common.web_contracts.settings import (
     ModeResponse,
     SettingsResponse,
     SettingsUpdateRequest,
     SettingsUpdateResponse,
 )
-from common.web_contracts.registry import WEB_ROOT_CONTRACTS
 
 
 def assert_parity(settings: dict) -> None:
@@ -424,9 +424,11 @@ def test_documented_extras_allowlist_migrated_ancient(_migration_env):
 MASKED_PATHS = [
     (
         "versions",
-        "dummy required values supplied for construction; real values are read "
-        "live from updater/updater_manifest.json on every default_settings() "
-        "call, not a static per-model default",
+        (
+            "dummy required values supplied for construction; real values are read "
+            "live from updater/updater_manifest.json on every default_settings() "
+            "call, not a static per-model default"
+        ),
     ),
     (
         "server_info.uuid",
@@ -442,8 +444,10 @@ MASKED_PATHS = [
     ),
     (
         "controller.config",
-        "dynamic: populated per-controller from controller/controllers.json "
-        "manifest option defaults, not a static per-model default",
+        (
+            "dynamic: populated per-controller from controller/controllers.json "
+            "manifest option defaults, not a static per-model default"
+        ),
     ),
     (
         "dashboard.dashboards",

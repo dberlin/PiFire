@@ -3,8 +3,6 @@ the control process reads it. Both ends are pinned here."""
 
 import pytest
 
-from common.persistence import control as control_persistence
-from common.sqlite_queue import SqliteQueue
 from common.control_delta import (
     CONTROL_DELTA_KEY,
     CONTROL_DELTA_VERSION,
@@ -14,6 +12,8 @@ from common.control_delta import (
     notify_ops_from_post,
     validate_control_delta,
 )
+from common.persistence import control as control_persistence
+from common.sqlite_queue import SqliteQueue
 
 
 def test_enqueue_control_delta_validates_and_copies_before_queueing(ds):

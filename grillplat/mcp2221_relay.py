@@ -19,7 +19,6 @@ from grillplat.emc2301 import EMC2301
 from grillplat.mcp2221 import open_gpio as open_mcp2221_gpio
 from grillplat.system_commands import SystemCommandsMixin
 
-
 _DEFAULT_OUTPUTS = {"power": "GP0", "igniter": "GP1", "auger": "GP2", "fan": "GP3"}
 
 

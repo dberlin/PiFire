@@ -14,9 +14,9 @@ import logging
 
 from common import datastore
 from common.common import ErrorKind, create_logger
+from controller.runtime.clock import RealClock
 from controller.runtime.devices import build_display
 from controller.runtime.store import SqliteStore
-from controller.runtime.clock import RealClock
 
 
 class DisplayFeeder:

@@ -31,13 +31,12 @@ are fully isolated and hermetic -- no shared server, no residue to restore.
 """
 
 import pytest
+
 from common.persistence import runtime as runtime_persistence
-
-
+from tests.characterization.fixtures import base_control, base_pellet_db, base_settings
 from tests.characterization.harness import run_mode
-from tests.characterization.fixtures import base_settings, base_control, base_pellet_db
-from tests.fakes.probes import FakeProbes
 from tests.fakes.grill import FakeGrillPlatform
+from tests.fakes.probes import FakeProbes
 
 
 @pytest.fixture

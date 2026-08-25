@@ -9,10 +9,9 @@ the fixed 25-second, eight-delay generated map.
 
 from __future__ import annotations
 
-
-from collections.abc import Sequence
 import copy
 import logging
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 import numpy as np

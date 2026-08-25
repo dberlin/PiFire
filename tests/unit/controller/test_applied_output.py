@@ -11,7 +11,6 @@ from controller.applied_output import (
     seed_output,
 )
 
-
 PRECEDENCE_CASES = [
     (False, False, OutputSource.CONTROLLER),
     (True, False, OutputSource.LID_OPEN),

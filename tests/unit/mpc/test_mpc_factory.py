@@ -19,11 +19,10 @@ from controller.model_learning.activation import (
     canonical_snapshot_digest,
     recover_startup_activation,
 )
-from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
 from controller.model_learning.calibration import CalibrationDecision, CalibrationProgress
+from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
 from controller.mpc_config import DEFAULT_MPC_CONFIG, JsonValue, normalize_config
 from controller.mpc_factory import MpcPairConfiguration, MpcPairFactory, NativeTiming, OwnedMpcPair
-
 
 CYCLE: dict[str, JsonValue] = {"u_min": 0.1, "u_max": 0.9}
 

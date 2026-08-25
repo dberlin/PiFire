@@ -24,7 +24,7 @@ import logging
 
 import pytest
 
-import probes.base as base
+from probes import base
 from probes.base import FakeDevice, ProbeInterface, resolve_spi_bus
 from probes.kalman import TempKalman
 

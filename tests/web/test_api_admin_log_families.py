@@ -13,8 +13,7 @@ development machine that hid 5 of 15 files, including the three largest.
 import pytest
 
 from app import app as flask_app
-
-import blueprints.api_admin.admin_api as admin_api
+from blueprints.api_admin import admin_api
 
 
 @pytest.fixture

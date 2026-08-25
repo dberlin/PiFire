@@ -17,9 +17,10 @@ PiFire Display Interface Library
  Imported Libraries
 """
 from luma.lcd.device import ili9341
+
 from display._base_240x320 import DisplayBase
-from display._luma_panel import LumaPanelMixin
 from display._encoder_input import EncoderInputMixin
+from display._luma_panel import LumaPanelMixin
 
 """
 Display class definition

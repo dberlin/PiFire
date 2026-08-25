@@ -1,6 +1,6 @@
 from common.modes import Mode
-from controller.runtime.modes.base import ControlMode
 from controller.runtime.logic.cycle import prime_cycle_times
+from controller.runtime.modes.base import ControlMode
 
 
 class PrimeMode(ControlMode):

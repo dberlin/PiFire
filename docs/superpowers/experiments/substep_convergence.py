@@ -58,7 +58,7 @@ FIXTURE = "tests/unit/mpc/fixtures/mak_cook_2026-08-02.csv"
 
 #: The shipped utility's own fit of that cook at n_delay=8. Held fixed here so
 #: the comparison is between integrators and not between two different fits.
-FIT = dict(C_c=3589.447, h_amb=0.5, T_amb=20.0, K_Q=9.9159, sigma=1.4e-9)
+FIT = {"C_c": 3589.447, "h_amb": 0.5, "T_amb": 20.0, "K_Q": 9.9159, "sigma": 1.4e-9}
 
 #: theta from a third of the shortest fitted deadtime seen on any record to
 #: well past the longest, crossed with every n_delay the settings surface
@@ -195,12 +195,11 @@ def main():
 
     print()
     print("=== 5b. cost: wall clock for a real-cook fit, which is the inner loop ===")
-    from controller.update_mpc import fit_params  # noqa: PLC0415
-
     import controller.mpc_model as mm  # noqa: PLC0415
     import controller.update_mpc as um  # noqa: PLC0415
+    from controller.update_mpc import fit_params  # noqa: PLC0415
 
-    init = dict(C_c=320.0, h_amb=0.5, K_Q=3.5, theta=50.0)
+    init = {"C_c": 320.0, "h_amb": 0.5, "K_Q": 3.5, "theta": 50.0}
     real = mm.simulate_grey_box
     for label, fn in (
         ("euler chain, max_dt=1.0 (was)", lambda *a, **k: euler_chain(*a, **dict(k, max_dt=1.0))),
@@ -224,7 +223,7 @@ def main():
         for nd in (8, 20):
             tt = np.arange(0.0, 1800.0, 5.0)
             QQ = np.where(tt < 600.0, 100.0, 40.0)
-            truth = dict(C_c=320.0, h_amb=0.5, K_Q=3.5, sigma=1.4e-9, theta=true_theta)
+            truth = {"C_c": 320.0, "h_amb": 0.5, "K_Q": 3.5, "sigma": 1.4e-9, "theta": true_theta}
             y = simulate_grey_box(tt, QQ, T_amb=20.0, T0=25.0, n_delay=nd, max_dt=0.002, **truth)
             got_exact = fit_params(tt, y, QQ, T_amb=20.0, init=init, sigma=1.4e-9, n_delay=nd)
             try:

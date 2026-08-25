@@ -6,7 +6,6 @@ import pytest
 
 from controller.acados import AcadosGreyBoxMPC, GreyBoxMPCConfig
 
-
 _FIXTURE = Path(__file__).with_name("fixtures") / "do_mpc_decision_parity.json"
 
 

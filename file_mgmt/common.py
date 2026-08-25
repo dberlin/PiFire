@@ -11,11 +11,11 @@ This file contains common functions for various file formats (i.e. Cookfile and 
 Imported Modules
 ================
 """
-import zipfile
-import os
 import json
-import tempfile
+import os
 import shutil
+import tempfile
+import zipfile
 
 from pydantic import JsonValue
 
@@ -61,7 +61,7 @@ def read_json_file_data(filename, jsonfile, unpackassets=True):
                 metadata = json.loads(json_string)
                 parent_id = metadata["id"]  # Get parent id for this file and store all images in parent_id folder
 
-                for asset in range(0, len(dictionary)):
+                for asset in range(len(dictionary)):
                     #  Get asset file information
                     mediafile = dictionary[asset]["filename"]
                     id = dictionary[asset]["id"]
@@ -136,12 +136,11 @@ def update_json_file_data(filedata, filename, jsonfile):
     os.close(tmpfd)
     try:
         # Create a temp copy of the archive without filename
-        with zipfile.ZipFile(filename, "r") as zin:
-            with zipfile.ZipFile(tmpname, "w") as zout:
-                zout.comment = zin.comment  # Preserve the zip metadata comment
-                for item in zin.infolist():
-                    if item.filename != jsonfilename:
-                        zout.writestr(item, zin.read(item.filename))
+        with zipfile.ZipFile(filename, "r") as zin, zipfile.ZipFile(tmpname, "w") as zout:
+            zout.comment = zin.comment  # Preserve the zip metadata comment
+            for item in zin.infolist():
+                if item.filename != jsonfilename:
+                    zout.writestr(item, zin.read(item.filename))
         # Replace original with the temp archive
         os.remove(filename)
         os.rename(tmpname, filename)
@@ -167,11 +166,7 @@ def fixup_assets(filename, jsondata):
     with zipfile.ZipFile(filename, mode="r") as archive:
         for item in archive.infolist():
             if "assets" in item.filename:
-                if item.filename == "assets/":
-                    pass
-                elif item.filename == "assets.json":
-                    pass
-                elif item.filename == "assets/thumbs/":
+                if item.filename == "assets/" or item.filename == "assets.json" or item.filename == "assets/thumbs/":
                     pass
                 elif "thumbs" in item.filename:
                     thumblist.append(item.filename.replace("assets/thumbs/", ""))
@@ -240,7 +235,7 @@ def remove_assets(filename, assetlist, filetype="cookfile"):
     for index, comment in enumerate(comments):
         for asset in comment["assets"]:
             if asset in assetlist:
-                comments[index]["assets"].remove(asset)
+                comment["assets"].remove(asset)
                 modified = True
     if modified:
         update_json_file_data(comments, filename, "comments")

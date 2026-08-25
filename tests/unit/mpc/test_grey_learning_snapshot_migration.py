@@ -10,13 +10,12 @@ import pytest
 from common import datastore
 from common.controller_model_state import MODEL_STATE_KEY, SCHEMA_VERSION
 from common.persistence.model_evidence import read_model_activation, read_model_evidence
-from controller.model_learning.migration import migrate_mpc_learning_authority
-from controller.mpc_snapshot import GreySnapshotInvalid, migrate_grey_learning_snapshot
-from controller.mpc_model import MODEL_SCHEMA
 from controller.model_learning.activation import GreyControlPairDescriptor, canonical_snapshot_digest
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
+from controller.model_learning.migration import migrate_mpc_learning_authority
 from controller.model_learning.report import backend_learning_report
-
+from controller.mpc_model import MODEL_SCHEMA
+from controller.mpc_snapshot import GreySnapshotInvalid, migrate_grey_learning_snapshot
 
 PARAMS = {
     "C_c": 2520.0,
@@ -160,7 +159,8 @@ def test_real_activation_singleton_rolls_back_to_compatible_grey_atomically(ds):
     _seed_controller(_v3(theta=47.0))
     rollback_config = {
         "schema": "pifire-grey-box-model/v4",
-        **{**PARAMS, "theta": 36.0},
+        **PARAMS,
+        "theta": 36.0,
     }
     rollback = GreyControlPairDescriptor(
         model_digest=canonical_snapshot_digest(rollback_config),
@@ -210,7 +210,7 @@ def test_real_activation_singleton_rolls_back_to_compatible_grey_atomically(ds):
 
 def test_active_source_rewrites_snapshot_pointer_without_losing_singleton_identity(ds):
     _seed_controller(_v3(theta=47.0))
-    active_config = {"schema": "pifire-grey-box-model/v4", **{**PARAMS, "theta": 31.0}}
+    active_config = {"schema": "pifire-grey-box-model/v4", **PARAMS, "theta": 31.0}
     active = GreyControlPairDescriptor(
         model_digest=canonical_snapshot_digest(active_config),
         configuration=active_config,
@@ -475,7 +475,9 @@ def test_invalid_active_pair_configuration_yields_to_valid_rollback_pair(ds):
     _seed_controller(_v3(params={**PARAMS, "theta": 47.0}))
     invalid_config = {
         "schema": "pifire-grey-box-model/v4",
-        **{**PARAMS, "theta": 31.0, "n_delay": 7},
+        **PARAMS,
+        "theta": 31.0,
+        "n_delay": 7,
     }
     invalid_active = GreyControlPairDescriptor(
         model_digest=canonical_snapshot_digest(invalid_config),
@@ -487,7 +489,8 @@ def test_invalid_active_pair_configuration_yields_to_valid_rollback_pair(ds):
     )
     rollback_config = {
         "schema": "pifire-grey-box-model/v4",
-        **{**PARAMS, "theta": 36.0},
+        **PARAMS,
+        "theta": 36.0,
     }
     rollback = GreyControlPairDescriptor(
         model_digest=canonical_snapshot_digest(rollback_config),
@@ -556,7 +559,8 @@ def test_rejected_rollback_pointer_update_rolls_back_controller_and_singleton(ds
     _seed_controller(original)
     rollback_config = {
         "schema": "pifire-grey-box-model/v4",
-        **{**PARAMS, "theta": 36.0},
+        **PARAMS,
+        "theta": 36.0,
     }
     rollback = GreyControlPairDescriptor(
         model_digest=canonical_snapshot_digest(rollback_config),

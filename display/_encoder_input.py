@@ -26,8 +26,9 @@ PiFire Display Interface Library
 """
  Imported Libraries
 """
-import time
 import threading
+import time
+
 from pyky040 import pyky040
 
 """

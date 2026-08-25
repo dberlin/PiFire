@@ -1,29 +1,28 @@
 from __future__ import annotations
 
 import ctypes
-from collections.abc import Iterator
-from concurrent.futures import ThreadPoolExecutor
 import gc
 import hashlib
 import json
-from pathlib import Path
 import shutil
 import threading
-from typing import Any
 import weakref
+from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
 
+import controller.acados._library as library_module
 from controller.acados import (
     AcadosGreyBoxMPC,
     GreyBoxMPCConfig,
     SolverDiagnostics,
     SolverError,
+    _ffi,
 )
-from controller.acados import _ffi
-import controller.acados._library as library_module
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 

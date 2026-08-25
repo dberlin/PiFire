@@ -46,10 +46,10 @@
 """
 
 import json
-from copy import deepcopy
-from enum import Enum
 import logging
 import threading
+from copy import deepcopy
+from enum import Enum
 
 from common import datastore
 from common.persistence.runtime import read_generic_key, write_generic_key

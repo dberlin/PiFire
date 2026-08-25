@@ -2,7 +2,6 @@
 
 from common import controller_deps as cd
 
-
 # --- detection -------------------------------------------------------------
 
 

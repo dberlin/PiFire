@@ -12,14 +12,16 @@ Two subtleties learned the hard way:
     reference-ramp feature would do).
 """
 
-import warnings, sys
+import sys
+import warnings
 
 warnings.filterwarnings("ignore")
 sys.path.insert(0, ".")
 import numpy as np
+
+from controller.grill_sim import GrillSim
 from controller.mpc import Controller
 from controller.mpc_config import DEFAULT_MPC_CONFIG
-from controller.grill_sim import GrillSim
 
 CYCLE = {"u_min": 0.1, "u_max": 0.9, "HoldCycleTime": 25}
 C2F = lambda c: c * 9 / 5 + 32

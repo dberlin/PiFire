@@ -155,6 +155,7 @@ def _seed_fresh_db(db_path, grill_name):
     init_status baseline every live_server needs before app.py can even be
     imported (app.py reads settings at import time for log-level setup)."""
     from common import datastore
+    from common.defaults import default_control, default_pellets, default_settings
     from common.persistence.control import (
         write_control_snapshot,
     )
@@ -163,7 +164,6 @@ def _seed_fresh_db(db_path, grill_name):
         write_pellets_store,
         write_settings_store,
     )
-    from common.defaults import default_control, default_pellets, default_settings
 
     os.environ["PIFIRE_DB_PATH"] = db_path
     datastore._reset_for_tests(db_path)
@@ -317,10 +317,10 @@ def api_files_folders():
     file_mgmt.recipes each define separately. Missing any one of them makes a
     test write into the real repo checkout.
     """
-    from app import app as flask_app
     import file_mgmt.common as common_mod
     import file_mgmt.cookfile as cookfile_mod
     import file_mgmt.recipes as recipes_mod
+    from app import app as flask_app
 
     tmp_dir = tempfile.mkdtemp(prefix="pifire_test_files_")
     history_dir = os.path.join(tmp_dir, "history") + "/"

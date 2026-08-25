@@ -2,23 +2,23 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
 import copy
 import hashlib
 import json
-import math
-from dataclasses import asdict
 import logging
+import math
 import threading
 import time
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import asdict
 from typing import Literal
 
 import numpy as np
 
 from common.control_trace import (
     CompletedOriginPayload,
-    ControlTraceRecord,
     ControllerType,
+    ControlTraceRecord,
     GreyActivationLifecyclePayload,
     GreyCandidateAssessmentPayload,
     GreyFitLifecyclePayload,
@@ -26,7 +26,7 @@ from common.control_trace import (
     ModelEvaluationPayload,
     TraceEventKind,
 )
-from common.controller_model_state import ControllerModelStore, MAX_SNAPSHOT_BYTES
+from common.controller_model_state import MAX_SNAPSHOT_BYTES, ControllerModelStore
 from common.model_evidence import (
     ActivationLifecycleEvidence,
     CandidateAssessmentEvidence,
@@ -58,13 +58,13 @@ from controller.model_learning.contracts import (
 from controller.model_learning.evaluation import EvaluationDecision
 from controller.model_promotion import Verdict as _Verdict
 from controller.mpc_config import DEFAULT_MPC_CONFIG, JsonValue, MpcConfig, warn_about_model
-from controller.runtime.context import EVENT_LOG_NAME
 from controller.mpc_factory import MpcPairFactory, OwnedMpcPair
 from controller.mpc_model import MODEL_SCHEMA
+from controller.runtime.context import EVENT_LOG_NAME
 from controller.runtime.model_fitting import (
+    CandidateOwnershipTransferredError,
     CandidatePair,
     CandidatePreparation,
-    CandidateOwnershipTransferredError,
     FitSubmission,
     GreyFitError,
     GreyFitJob,
@@ -1272,11 +1272,7 @@ class GreyLearningRuntime:
             if candidate is None and prepared is not None:
                 candidate_config = prepared.candidate.config
                 candidate_parameters = {
-                    key: (
-                        getattr(candidate_config, "delay_states")
-                        if key == "n_delay"
-                        else getattr(candidate_config, key)
-                    )
+                    key: (candidate_config.delay_states if key == "n_delay" else getattr(candidate_config, key))
                     for key in self.MODEL_PARAM_KEYS
                 }
                 snapshot["challenger"] = {

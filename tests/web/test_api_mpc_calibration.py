@@ -1,5 +1,6 @@
 import pytest
 
+from common.modes import Mode
 from common.persistence.control import (
     execute_control_writes,
     read_control,
@@ -9,7 +10,6 @@ from common.persistence.runtime import (
     read_settings,
     write_settings,
 )
-from common.modes import Mode
 
 
 def _command(**overrides):

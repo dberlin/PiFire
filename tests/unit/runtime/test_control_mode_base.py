@@ -14,12 +14,12 @@ import json
 import pytest
 
 import controller.runtime.modes.base as base_mode
-from controller.runtime.context import ControllerContext, Devices
-from controller.runtime.store import InMemoryStore
 from controller.runtime.clock import ManualClock
+from controller.runtime.context import ControllerContext, Devices
 from controller.runtime.modes.base import ControlMode
 from controller.runtime.modes.startup import StartupMode
 from controller.runtime.state import WorkCycleState
+from controller.runtime.store import InMemoryStore
 from probes.thermocouple_health import (
     ThermocoupleEvidence,
     ThermocoupleFault,
@@ -30,11 +30,11 @@ from probes.thermocouple_inference import (
     ThermocoupleInferencePolicy,
     fuse_thermocouple_health,
 )
-from tests.fakes.grill import FakeGrillPlatform
+from tests.characterization.fixtures import base_control, base_pellet_db, base_settings
 from tests.fakes.distance import FakeDistance
+from tests.fakes.grill import FakeGrillPlatform
 from tests.fakes.notifier import FakeNotifier
 from tests.fakes.probes import FakeProbes
-from tests.characterization.fixtures import base_settings, base_control, base_pellet_db
 
 
 class _RecordingMode(ControlMode):

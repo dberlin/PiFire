@@ -16,19 +16,18 @@ Description:
 *****************************************
 """
 
-from collections.abc import Mapping
-
+import logging
 import math
 import os
 import time
-import logging
-from probes.kalman import TempKalman
-from probes.thermocouple_health import ThermocoupleHealthReport
-from probes.thermocouple_inference import ThermocoupleJunctionSample
+from collections.abc import Mapping
 
 # find_i2c_bus lives in the shared factory; re-export so existing
 # `from probes.base import find_i2c_bus` imports keep working.
 from common.i2c_bus import find_i2c_bus  # noqa: F401  # public re-export
+from probes.kalman import TempKalman
+from probes.thermocouple_health import ThermocoupleHealthReport
+from probes.thermocouple_inference import ThermocoupleJunctionSample
 
 #: Per-reading Kalman tracing, OFF even at DEBUG. The dedup in apply_filters
 #: only suppresses an unchanged line, and a live probe changes every tick, so
@@ -419,7 +418,7 @@ class ProbeInterface:
         never finished initializing; the caller isolates failures, but a probe
         that cannot be closed still leaks.
         """
-        return None
+        return
 
     def update_units(self, units):
         self.units = "C" if units == "C" else "F"

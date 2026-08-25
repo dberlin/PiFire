@@ -1,16 +1,16 @@
 """SQLite-backed thermocouple fault scenarios through the production work cycle."""
 
-from dataclasses import dataclass
 import json
 import logging
+from dataclasses import dataclass
 
 import pytest
 
+import controller.runtime.controller as controller_mod
 from common.persistence import runtime as runtime_persistence
 from controller.runtime.clock import ManualClock
 from controller.runtime.context import ControllerContext, Devices
 from controller.runtime.store import SqliteStore
-import controller.runtime.controller as controller_mod
 from probes.main import ProbesMain
 from probes.thermocouple_inference import (
     ThermocoupleInferencePolicy,
@@ -20,7 +20,6 @@ from tests.characterization.fixtures import base_control, base_pellet_db, base_s
 from tests.fakes.distance import FakeDistance
 from tests.fakes.grill import FakeGrillPlatform
 from tests.fakes.notifier import FakeNotifier
-
 
 _DEVICE = "simulated_tc"
 _PORT = "TC0"

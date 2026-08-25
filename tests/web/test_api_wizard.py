@@ -2,6 +2,7 @@ import copy
 import json
 
 import pytest
+
 from common.persistence.runtime import read_settings, write_settings_store
 from common.web_contracts.wizard import (
     BusKindsValidationResponse,
@@ -9,8 +10,8 @@ from common.web_contracts.wizard import (
     InstallStatus,
     ModuleValues,
     RowsResult,
-    WizardActionResponse,
     ScanResult,
+    WizardActionResponse,
     WizardDraftRequest,
     WizardState,
 )
@@ -692,7 +693,7 @@ def test_scan_bluetooth_returns_rows(ds, client, monkeypatch):
 def test_scan_bluetooth_unsupported_is_friendly_error(ds, client, monkeypatch):
     import blueprints.api_wizard.routes as wr
 
-    monkeypatch.setattr(wr, "get_supported_cmds", lambda: [])
+    monkeypatch.setattr(wr, "get_supported_cmds", list)
     resp = client.post("/api/wizard/scan/bluetooth", data=json.dumps({}), content_type="application/json")
     body = resp.get_json()
     assert body["rows"] == []
@@ -700,9 +701,10 @@ def test_scan_bluetooth_unsupported_is_friendly_error(ds, client, monkeypatch):
 
 
 def test_scan_thermoworks_auth_error(ds, client, monkeypatch):
-    import blueprints.api_wizard.routes as wr
     from thermoworks_cloud import AuthenticationError
     from thermoworks_cloud.auth import AuthenticationErrorReason
+
+    import blueprints.api_wizard.routes as wr
 
     def _boom(*a, **k):
         # Real signature is (message, reason, details). A single-arg

@@ -15,8 +15,8 @@ import pytest
 
 import wizard
 from common import datastore, defaults
-from common.persistence import runtime as runtime_persistence
 from common.common import read_wizard
+from common.persistence import runtime as runtime_persistence
 
 
 @pytest.fixture

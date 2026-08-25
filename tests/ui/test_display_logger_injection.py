@@ -27,7 +27,6 @@ import pytest
 import display._base_flex as base_flex
 from tests.ui._driver_helpers import RecordingLogger
 
-
 _DISPLAY_ROOT = pathlib.Path(__file__).resolve().parents[2] / "display"
 
 FULL_DEV_PINS = {

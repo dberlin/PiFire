@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError, replace
 from collections.abc import Mapping, Sequence
+from dataclasses import FrozenInstanceError, replace
 from typing import cast
 
 import pytest
@@ -11,6 +11,7 @@ from common.control_trace import (
     CalibrationEventType,
     CalibrationTracePayload,
     ControllerType,
+    ControlTraceRecord,
     HorizonScorePayload,
     InhibitReason,
     ModelEvaluationPayload,
@@ -20,13 +21,12 @@ from common.control_trace import (
     RecorderGapPayload,
     TraceEventKind,
     TraceSetting,
-    ControlTraceRecord,
 )
 from common.model_evidence import (
-    ConfidenceDecisionEvidence,
     CalibrationSummaryEvidence,
-    FallbackEvidence,
+    ConfidenceDecisionEvidence,
     EvidenceKind,
+    FallbackEvidence,
     ModelEvidenceRecord,
     RecorderGapEvidence,
     RollbackEvidence,
@@ -59,13 +59,13 @@ from controller.runtime.modes.hold_learning import (
     HoldLearningRuntime,
     HoldRefitResult,
 )
-from controller.runtime.state import ControllerState
 from controller.runtime.runner import (
     ObservationOutcomeDrain,
     ObservationOutcomeEnvelope,
     ObservationSubmission,
     ObservationTerminalDrop,
 )
+from controller.runtime.state import ControllerState
 from grillplat.actuator_capabilities import AugerTiming
 from tests.unit.runtime._persistence_helpers import _pair_phase_state
 
@@ -242,7 +242,6 @@ class _Runner:
 class _NoSubmissionRunner(_Runner):
     def observe_frame(self, observation: FrameObservation) -> None:
         self.submissions.append(observation)
-        return None
 
 
 class _LifecycleRunner(_Runner):
@@ -1099,7 +1098,7 @@ def test_calibration_handoff_returns_immutable_frame_projection() -> None:
     assert handoff.completed_stages == ("low",)
     assert isinstance(handoff.completed_stages, tuple)
     with pytest.raises(FrozenInstanceError):
-        setattr(handoff, "status", "cancelled")
+        handoff.status = "cancelled"
 
 
 def test_calibration_handoff_records_known_events_in_order_and_ignores_unknown() -> None:
@@ -2017,7 +2016,7 @@ def test_refit_once_returns_immutable_typed_outcome_and_never_repeats(
     assert first.verdict is verdict
     assert runner.refit_calls == int(enabled)
     with pytest.raises(FrozenInstanceError):
-        setattr(first, "outcome", TeardownRefitOutcome.FAILED)
+        first.outcome = TeardownRefitOutcome.FAILED
     if not enabled:
         assert logger.infos == ["Model refit skipped at cook end: Learn This Grill is disabled."]
     else:

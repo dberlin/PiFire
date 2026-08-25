@@ -28,7 +28,6 @@ from tests.unit.mpc._solver_fixtures import (
 )
 from tests.unit.runtime._persistence_helpers import _pair_phase_state
 
-
 _CONFIG = {
     "control_period": 2.0,
     "n_horizon": 5,

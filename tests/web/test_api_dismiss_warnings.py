@@ -1,4 +1,5 @@
 import pytest
+
 from common.persistence.runtime import read_warnings_snapshot, write_warning
 
 

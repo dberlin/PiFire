@@ -1,11 +1,10 @@
 """Control-process startup preserves unfinished cook state across routine restarts."""
 
 from common.defaults import default_control, default_metrics
-from common.persistence.history import append_metric, read_all_metrics, read_history, write_history
 from common.persistence.control import write_control_snapshot
+from common.persistence.history import append_metric, read_all_metrics, read_history, write_history
 from control import _initialize_runtime_state
 from controller.runtime.store import SqliteStore
-
 
 _HISTORY_ROW = {
     "probe_history": {"primary": {"Grill": 225}, "food": {}, "aux": {}},

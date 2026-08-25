@@ -16,14 +16,14 @@ tempF=193.74864976188468, Tr=8427 ohms).
 The Adafruit adapters share one parameterized public-module contract.
 """
 
-import sys
-import types
 import importlib
 import logging
+import sys
+import types
 
 import pytest
-from common.i2c_bus_config import BasicBus, FT232HBus
 
+from common.i2c_bus_config import BasicBus, FT232HBus
 
 # --- Reference thermistor profile (real values) + expected math, matching
 # tests/unit/probes/test_base.py so results are independently cross-checked. ---
@@ -284,7 +284,7 @@ def _install_fake_adafruit_ads1x15(
                 raise OSError("simulated I2C read failure")
             return voltages_by_channel[self.channel]
 
-    setattr(analog_in_mod, "AnalogIn", FakeAnalogIn)
+    analog_in_mod.AnalogIn = FakeAnalogIn
 
     setattr(pkg, submodule_name, sub)
     monkeypatch.setitem(sys.modules, "adafruit_ads1x15", pkg)

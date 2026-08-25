@@ -19,12 +19,12 @@ completed one still does. Both re-patch os through the recorder first and
 assert on what it recorded, which is the only way to test a halt at all.
 """
 
-from tests.characterization.fixtures import base_settings, base_control, base_pellet_db
 from tests.characterization._controller_harness import (
-    make_controller,
     _neutralize_externals,
     _spy_dispatch,
+    make_controller,
 )
+from tests.characterization.fixtures import base_control, base_pellet_db, base_settings
 
 
 def build_controller(monkeypatch, *, mode="Stop", settings=None, control_over=None):

@@ -20,6 +20,8 @@
 *****************************************
 """
 
+import itertools
+
 import numpy as np
 
 #: Dead-time candidates, seconds.
@@ -109,7 +111,7 @@ class DutyHistory:
         edges.extend(t for t in self._t if t_start < t < t_end)
         edges.append(t_end)
         out = []
-        for lo, hi in zip(edges[:-1], edges[1:]):
+        for lo, hi in itertools.pairwise(edges):
             if hi <= lo:
                 continue
             idx = max(int(np.searchsorted(self._ta, lo, side="right")) - 1, 0)

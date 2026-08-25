@@ -2,7 +2,7 @@ from common.modes import Mode
 from controller.runtime.logic.cycle import smoke_cycle_times
 from controller.runtime.logic.fan import start_fan
 from controller.runtime.logic.safety import startup_temp_bounds
-from controller.runtime.logic.smartstart import select_profile, profile_cycle
+from controller.runtime.logic.smartstart import profile_cycle, select_profile
 from controller.runtime.modes.base import ControlMode
 
 
@@ -151,10 +151,7 @@ class StartupMode(ControlMode):
         if (now - self.state.timers.start_time) > startup_timer:
             return True
 
-        if (exit_temp != 0) and (ptemp >= exit_temp):
-            return True
-
-        return False
+        return bool(exit_temp != 0 and ptemp >= exit_temp)
 
     def teardown(self, ptemp):
         self.control["safety"]["afterstarttemp"] = ptemp

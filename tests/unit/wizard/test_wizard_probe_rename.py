@@ -25,9 +25,9 @@ import pytest
 
 import wizard
 from common import defaults
+from common.common import read_wizard
 from common.persistence import control as control_persistence
 from common.persistence import runtime as runtime_persistence
-from common.common import read_wizard
 
 
 @pytest.fixture

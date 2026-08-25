@@ -12,8 +12,8 @@ Description: The /api command processor -- process_command() and the
 ==============================================================================
 """
 
-import math
 import json
+import math
 import time
 
 from common import server_revision
@@ -28,10 +28,10 @@ from common.common import (
 from common.control_delta import ControlDeltaError, control_delta, validated_mpc_calibration_command
 from common.modes import Mode
 from common.persistence.control import (
+    enqueue_control_delta,
     mpc_calibration_command_revision,
     queue_mpc_calibration_command,
     read_control,
-    enqueue_control_delta,
 )
 from common.persistence.runtime import (
     read_current,

@@ -112,6 +112,7 @@
 
 import numpy as np
 from scipy.linalg import expm
+
 # Runtime estimators depend only on NumPy/SciPy. Native solver generation owns
 # CasADi and acados-template in the isolated codegen dependency group.
 

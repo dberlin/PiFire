@@ -69,7 +69,7 @@ def _compact(row):
 
 def _chain(job):
     arm, plant, seed = job
-    import controller.mpc_core as mpc_core
+    from controller import mpc_core
 
     production_weight = mpc_core._LEARNED_RESIDUAL_WEIGHT
     if arm == "baseline":
@@ -210,8 +210,10 @@ def main(argv=None):
             "residual_weight": RESIDUAL_WEIGHT,
             "baseline_seams": [
                 "controller.mpc_core._LEARNED_RESIDUAL_WEIGHT=0",
-                "controller.mpc_core.MpcCore._equilibrium_load"
-                "(target, disturbance, identified)=0 via Controller.active_control_pair.core",
+                (
+                    "controller.mpc_core.MpcCore._equilibrium_load"
+                    "(target, disturbance, identified)=0 via Controller.active_control_pair.core"
+                ),
             ],
             "command": ".venv/bin/python docs/superpowers/experiments/residual_mpc_compare.py",
         },

@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
-import subprocess
-
 
 ACADOS_BUILD_RUN_MARKER = "=== acados native rebuild started ==="
 ACADOS_BUILD_OK_MARKER = "=== acados native rebuild finished ==="
@@ -29,8 +28,7 @@ def _stream_process(command: tuple[str, ...], on_line: LineCallback) -> int:
     for raw_line in process.stdout:
         if raw_line.endswith("\n"):
             raw_line = raw_line[:-1]
-            if raw_line.endswith("\r"):
-                raw_line = raw_line[:-1]
+            raw_line = raw_line.removesuffix("\r")
         on_line(raw_line)
     return process.wait()
 

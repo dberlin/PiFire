@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
-from importlib import metadata as importlib_metadata
 import json
 import os
-from pathlib import Path
 import subprocess
-from typing import Any, Mapping
-
+from collections.abc import Mapping
+from copy import deepcopy
+from importlib import metadata as importlib_metadata
+from pathlib import Path
+from typing import Any
 
 SCHEMA_VERSION = 1
 PINNED_ENVIRONMENT: dict[str, Any] = {

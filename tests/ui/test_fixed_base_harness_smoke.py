@@ -2,10 +2,10 @@ import pytest
 
 from tests.ui.fixed_base_harness import (
     FONT_AVAILABLE,
-    make_base,
-    render,
     SAMPLE_IN_DATA,
     SAMPLE_STATUS_DATA,
+    make_base,
+    render,
 )
 
 pytestmark = pytest.mark.skipif(not FONT_AVAILABLE, reason="trebuc.ttf not installed")

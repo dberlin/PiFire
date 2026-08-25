@@ -35,7 +35,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-import notify.wled_profiles as wled_profiles
+from notify import wled_profiles
 from notify.wled_profiles import (
     DEFAULT_PROFILE_NUMBERS,
     WLED_PROFILE_DEFINITIONS,

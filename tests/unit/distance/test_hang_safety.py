@@ -31,12 +31,11 @@ import contextlib
 import importlib
 import sys
 import threading
+import time as _real_time
 import types
 from unittest import mock
 
 import pytest
-
-import time as _real_time
 
 import distance._sampled_base as sampled_base
 from distance._sampled_base import SampledHopperLevel, SensorOpenTimeout
@@ -834,7 +833,7 @@ def test_a_run_of_failures_is_logged_once_and_so_is_the_recovery(stack):
             for _step in range(4):
                 cycles = hopper.sample_count
                 clock.advance(hopper.backoff_cap_seconds)
-                _poll_until(lambda: hopper.sample_count > cycles, "another failed cycle")
+                _poll_until(lambda cycles=cycles: hopper.sample_count > cycles, "another failed cycle")
 
             assert fake.logger.error.call_count == 1, "a sensor that keeps failing logged once per cycle"
             assert fake.logger.info.call_count == 0

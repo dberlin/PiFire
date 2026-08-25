@@ -2,14 +2,13 @@ import json
 
 import pytest
 
+from common import datastore, defaults
+from common.common import ErrorKind, flush_events_records, read_events_records
+from common.control_delta import control_delta
 from common.persistence import control as control_persistence
-from common.persistence import runtime as runtime_persistence
 from common.persistence import history as history_persistence
 from common.persistence import install_state as install_persistence
-from common import defaults
-from common.common import ErrorKind, read_events_records, flush_events_records
-from common import datastore
-from common.control_delta import control_delta
+from common.persistence import runtime as runtime_persistence
 
 
 def test_default_control_manual_has_only_change_and_pwm_keys():

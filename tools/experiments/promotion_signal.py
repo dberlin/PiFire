@@ -108,9 +108,9 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 from controller import model_promotion as promo  # noqa: E402
 from controller.grill_sim import DT, GrillSim, MAKGrillSim  # noqa: E402
 from controller.model_learning.grey_runtime import (
-    GreyLearningRuntime,
     _REFIT_INIT,
     _REFIT_MIN_SAMPLES,
+    GreyLearningRuntime,
 )  # noqa: E402
 from controller.mpc import Controller  # noqa: E402
 from controller.mpc_config import DEFAULT_MPC_CONFIG  # noqa: E402
@@ -246,7 +246,7 @@ def plant_record(plant, profile, seed=0):
     duty, warm_duty, warm_s = profiles()[profile]
     t, true, meas = _drive(plant, duty, warm_duty, warm_s, seed=seed)
     k = slice(None, None, LOG_STRIDE)
-    return dict(plant=plant, profile=profile, t=t[k], y=meas[k], true=true[k], Q=duty[k])
+    return {"plant": plant, "profile": profile, "t": t[k], "y": meas[k], "true": true[k], "Q": duty[k]}
 
 
 def flat_synthetic(sigma_c, seed=0):
@@ -264,7 +264,7 @@ def flat_synthetic(sigma_c, seed=0):
     n = 400
     t = np.arange(n, dtype=float) * LOG_PERIOD_S
     y = 100.0 + rng.normal(0.0, sigma_c, size=n)
-    return dict(plant=None, profile=f"flat_synth_{sigma_c:g}", t=t, y=y, true=None, Q=np.full(n, 0.5))
+    return {"plant": None, "profile": f"flat_synth_{sigma_c:g}", "t": t, "y": y, "true": None, "Q": np.full(n, 0.5)}
 
 
 def real_cook():
@@ -272,14 +272,14 @@ def real_cook():
 
     df = pd.read_csv(os.path.join(REPO, "tests/unit/mpc/fixtures/mak_cook_2026-08-02.csv"))
     t = df["time_s"].values.astype(float)
-    return dict(
-        plant=None,
-        profile="real_mak_cook",
-        t=t - t[0],
-        y=df["temp_c"].values.astype(float),
-        true=None,
-        Q=df["Q"].values.astype(float) / 100.0,
-    )
+    return {
+        "plant": None,
+        "profile": "real_mak_cook",
+        "t": t - t[0],
+        "y": df["temp_c"].values.astype(float),
+        "true": None,
+        "Q": df["Q"].values.astype(float) / 100.0,
+    }
 
 
 # ------------------------------------------------------------------- fitting
@@ -424,7 +424,13 @@ def measure(rec, incumbents):
     """
     t, y, Q = rec["t"], rec["y"], rec["Q"]
     n = len(t)
-    out = dict(plant=rec["plant"], profile=rec["profile"], length_s=rec["length_s"], n=n, dur_s=float(t[-1] - t[0]))
+    out = {
+        "plant": rec["plant"],
+        "profile": rec["profile"],
+        "length_s": rec["length_s"],
+        "n": n,
+        "dur_s": float(t[-1] - t[0]),
+    }
 
     fitted = shipped_fit(t, y, Q)
     out["converged"] = bool(fitted["converged"])
@@ -680,7 +686,7 @@ def main():
     #: tests/unit/mpc/test_model_promotion.py REAL_MAK_FIT, transcribed. If this
     #: harness cannot reproduce the repo's own recorded fit of this record, it
     #: is not measuring the shipped fitter and nothing below means anything.
-    recorded = dict(C_c=3591.95, theta=111.32, K_Q=992.08)
+    recorded = {"C_c": 3591.95, "theta": 111.32, "K_Q": 992.08}
     say(
         "real-cook fit vs test_model_promotion.REAL_MAK_FIT: "
         + " ".join(f"{k}={rc_fit[k]:.5g} (recorded {v:g})" for k, v in recorded.items())
@@ -806,7 +812,7 @@ def main():
     say("-" * len(hdr))
     for r in sorted(all_rows, key=lambda r: (str(r["plant"]), r["profile"], -r["length_s"])):
         say(
-            f"{str(r['plant']):8s} {r['profile']:15s} {r['length_s']:>6d} {r['n']:>4d} "
+            f"{r['plant']!s:8s} {r['profile']:15s} {r['length_s']:>6d} {r['n']:>4d} "
             f"{('y' if in_scope(r) else '-'):>3s} {('y' if r['converged'] else 'N'):>3s} "
             f"{fmt(r['insample']['cand'])} {fmt(r['insample']['shipped'])} "
             f"{fmt(r['cold'].get('cand'), 9)} {fmt(r['cold'].get('shipped'), 9)} "
@@ -835,7 +841,7 @@ def main():
     say("-" * len(hdr))
     for r in sorted(all_rows, key=lambda r: (str(r["plant"]), r["profile"], -r["length_s"])):
         say(
-            f"{str(r['plant']):8s} {r['profile']:15s} {r['length_s']:>6d} {('y' if in_scope(r) else '-'):>3s} "
+            f"{r['plant']!s:8s} {r['profile']:15s} {r['length_s']:>6d} {('y' if in_scope(r) else '-'):>3s} "
             f"{fmt(r['s_min'], 11, 6)} {fmt(r.get('s_min_shipped'), 11, 6)} {fmt(r['inv_cond'], 9, 5)} "
             f"{fmt(r['split_disagree'], 10, 3)} {fmt(r['split_tau_ratio'], 10, 3)} "
             f"{fmt(r['pre_fit']['C_c'], 10, 1)} {fmt(r['suf_fit']['C_c'], 10, 1)} "
@@ -1015,7 +1021,7 @@ def main():
         if k in ("other", "real") and not (math.isfinite(r["s_min"]) and r["s_min"] < 1.0):
             continue
         say(
-            f"{k:9s} {str(r['plant']):8s} {r['profile']:15s} {r['length_s']:>6d} "
+            f"{k:9s} {r['plant']!s:8s} {r['profile']:15s} {r['length_s']:>6d} "
             f"{fmt(r['s_min'], 10, 6)} {fmt(r['cond'], 9, 1)} {fmt(r['len_over_tau'], 6, 2)} "
             f"{fmt(r['insample']['cand'], 7, 2)} {fmt(r['truth_cand'], 8, 2)} {fmt(r['coast_err'], 7, 2)} "
             f"{fmt(r['fit']['theta'], 7, 1)}"
@@ -1078,7 +1084,7 @@ def main():
     ):
         acc, _ = gate_verdict(r, SHIPPED, r["insample"]["cand"], r["insample"]["shipped"])
         say(
-            f"{str(r['plant']):8s} {r['profile']:15s} {r['length_s']:>6d} {('y' if in_scope(r) else '-'):>3s} "
+            f"{r['plant']!s:8s} {r['profile']:15s} {r['length_s']:>6d} {('y' if in_scope(r) else '-'):>3s} "
             f"{fmt(r['insample']['cand'], 8, 4)} {fmt(r['s_min'], 11, 7)} {fmt(r['cond'], 10, 1)} "
             f"{fmt(r['fit']['theta'], 8, 2)} {fmt(r['fit']['C_c'], 9, 1)} {fmt(r['truth_cand'])} "
             f"{fmt(r['coast_err'], 7, 2)} {('ACCEPT' if acc else 'refuse'):>11s}"
@@ -1196,17 +1202,17 @@ def main():
                 inc_c = inc_coast_of[inc_name][r["plant"]]
                 shorter = math.isfinite(r["coast_err"]) and math.isfinite(inc_c) and r["coast_err"] < inc_c
                 recs.append(
-                    dict(
-                        row=r,
-                        ok=ok,
-                        justified=r["truth_cand"] < inc_truth_of[inc_name][r["plant"]],
-                        danger=shorter and r["plant"] == "mak",
-                        danger_gen=shorter and r["plant"] != "mak",
-                        c_excess=(r["coast_err"] - inc_c)
+                    {
+                        "row": r,
+                        "ok": ok,
+                        "justified": r["truth_cand"] < inc_truth_of[inc_name][r["plant"]],
+                        "danger": shorter and r["plant"] == "mak",
+                        "danger_gen": shorter and r["plant"] != "mak",
+                        "c_excess": (r["coast_err"] - inc_c)
                         if math.isfinite(r["coast_err"]) and math.isfinite(inc_c)
                         else 0.0,
-                        t_excess=r["truth_cand"] - inc_truth_of[inc_name][r["plant"]],
-                    )
+                        "t_excess": r["truth_cand"] - inc_truth_of[inc_name][r["plant"]],
+                    }
                 )
             base[(inc_name, sig_key)] = recs
 
@@ -1307,7 +1313,7 @@ def main():
         key=lambda r: (str(r["plant"]), r["profile"], -r["length_s"]),
     ):
         say(
-            f"{str(r['plant']):8s} {r['profile']:15s} {r['length_s']:>6d} {('y' if in_scope(r) else '-'):>3s} "
+            f"{r['plant']!s:8s} {r['profile']:15s} {r['length_s']:>6d} {('y' if in_scope(r) else '-'):>3s} "
             + " ".join(f"{fmt(g(r, 'shipped'), 18, 5)}" for _, g, _ in STATS[:-1])
         )
 

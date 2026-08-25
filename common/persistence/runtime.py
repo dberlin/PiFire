@@ -10,8 +10,8 @@ from common import datastore
 from common.common import ErrorKind
 from common.current_schema import dump_legacy, load_current, snapshot_from, zeroed_current
 from common.defaults import default_pellets, default_settings
-from common.persistence.transforms import current_snapshot, initial_status
 from common.pellets_schema import validate_pellet_db
+from common.persistence.transforms import current_snapshot, initial_status
 from common.settings_schema import validate_settings_tree
 from common.sqlite_queue import SqliteMembershipList, SqliteQueue
 

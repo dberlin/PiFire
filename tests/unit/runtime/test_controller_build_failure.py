@@ -2,13 +2,12 @@ import math
 
 import pytest
 
-import tests.characterization.harness as harness  # noqa: F401
-import common.controller_deps as controller_deps
 import controller.mpc as mpc_module
 import controller.mpc_core as mpc_core_module
+from common import controller_deps
 from controller.runtime.runner import SyncControllerRunner, _build_core, build_runner
+from tests.characterization import harness  # noqa: F401
 from tests.characterization.fixtures import base_settings
-
 
 _REBUILD = "./rebuild-acados.sh --if-needed"
 

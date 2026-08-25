@@ -25,13 +25,13 @@ import json
 import os
 
 from common.common import BACKUP_PATH, read_generic_json, write_generic_json, write_log
+from common.defaults import default_pellets
 from common.persistence.runtime import (
     read_pellet_db,
     read_settings,
     write_pellet_db,
     write_warning,
 )
-from common.defaults import default_pellets
 
 
 def backup_settings():
@@ -81,7 +81,7 @@ def read_pellet_db_file(filename="pelletdb.json", retry_count=0):
         json_data_string = json_data_file.read()
         pelletdb_struct = json.loads(json_data_string)
         json_data_file.close()
-    except IOError, OSError:
+    except OSError:
         # File not found, return default pellet database
         return pelletdb
     except:
@@ -95,8 +95,8 @@ def read_pellet_db_file(filename="pelletdb.json", retry_count=0):
 
     # Overlay the read values over the top of the default values
     #  This ensures that any NEW fields are captured.
-    for key in pelletdb.keys():
-        if key in pelletdb_struct.keys():
+    for key in pelletdb:
+        if key in pelletdb_struct:
             value = pelletdb_struct[key]
             pelletdb[key] = value.copy() if hasattr(value, "copy") else value
 

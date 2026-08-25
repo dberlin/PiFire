@@ -171,11 +171,10 @@ from unittest import mock
 
 import pytest
 
-import common.api_commands as api_commands
 import common.common as c
 import common.persistence.control as control_persistence
 import common.persistence.runtime as runtime_persistence
-import common.defaults as defaults
+from common import api_commands, defaults
 from common.control_delta import is_control_delta
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "process_command_golden.json")

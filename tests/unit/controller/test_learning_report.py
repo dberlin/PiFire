@@ -4,6 +4,7 @@ import sys
 from types import ModuleType, SimpleNamespace
 
 import pytest
+
 from common.cook_diagnostics import ControllerLearningReport
 from common.web_contracts.learning import (
     ModelActionRejected,
@@ -15,7 +16,6 @@ from common.web_contracts.learning import (
     MpcCalibrationCommand,
 )
 from controller.model_learning.report import build_learning_report
-
 
 _PROVIDER_MODULES = {
     "mpc": "controller.model_learning.report",

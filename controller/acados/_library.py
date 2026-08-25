@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import ctypes
-from functools import cache
 import hashlib
 import json
-from pathlib import Path
 import sys
+from functools import cache
+from pathlib import Path
 from typing import Any
 
 _EXPECTED_ABI_VERSION = 2

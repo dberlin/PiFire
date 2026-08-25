@@ -14,20 +14,20 @@ and history publication.
 
 import json
 import logging
+from functools import partial
 
 from common.modes import Mode, StatusState
 from common.process_mon import Process_Monitor
-from distance.intervals import HOPPER_LEVEL_REFRESH_INTERVAL
 from controller.runtime.heartbeat import stamp_control_heartbeat
 from controller.runtime.logic.cycle import smoke_cycle_times
 from controller.runtime.logic.fan import start_fan
 from controller.runtime.logic.pwm import ramp_params
 from controller.runtime.logic.smartstart import profile_cycle
 from controller.runtime.system_commands import process_system_commands
-from controller.runtime.transitions import request_transition, evaluate_phase, TransitionKind
+from controller.runtime.transitions import TransitionKind, evaluate_phase, request_transition
+from distance.intervals import HOPPER_LEVEL_REFRESH_INTERVAL
 from probes.thermocouple_health import ThermocoupleEvidence
 from probes.thermocouple_inference import ThermocoupleExcitationContext
-
 
 _ACTIVE_THERMOCOUPLE_INFERENCE_MODES = frozenset(
     {
@@ -626,7 +626,7 @@ class ControlMode:
                     self.settings["platform"]["dc_fan"]
                     and control["manual"]["change"] == "pwm"
                     and current_output_status["fan"]
-                    and not control["manual"]["pwm"] == current_output_status["pwm"]
+                    and control["manual"]["pwm"] != current_output_status["pwm"]
                 ):
                     speed = control["manual"]["pwm"]
                     self.ctx.event_log.debug("PWM Speed: " + str(speed) + "%")
@@ -654,11 +654,11 @@ class ControlMode:
         status_data["notify_data"] = control["notify_data"]
         status_data["timer"] = control["timer"]
         status_data["s_plus"] = control["s_plus"]
-        status_data["hopper_level_enabled"] = False if self.settings["modules"]["dist"] == "none" else True
+        status_data["hopper_level_enabled"] = self.settings["modules"]["dist"] != "none"
         status_data["hopper_level"] = pelletdb["current"]["hopper_level"]
         status_data["units"] = self.settings["globals"]["units"]
         status_data["mode"] = mode
-        status_data["recipe"] = True if control["mode"] == Mode.RECIPE else False
+        status_data["recipe"] = control["mode"] == Mode.RECIPE
         status_data["start_time"] = start_time
         status_data["start_duration"] = self.state.startup.timer
         status_data["shutdown_duration"] = self.settings["shutdown"]["shutdown_duration"]
@@ -669,10 +669,8 @@ class ControlMode:
         status_data["p_mode"] = self.state.metrics.get("p_mode", None)
         status_data["startup_timestamp"] = control["startup_timestamp"]
         if control["mode"] == Mode.RECIPE:
-            status_data["recipe_paused"] = (
-                True
-                if control["recipe"]["step_data"]["triggered"] and control["recipe"]["step_data"]["pause"]
-                else False
+            status_data["recipe_paused"] = bool(
+                control["recipe"]["step_data"]["triggered"] and control["recipe"]["step_data"]["pause"]
             )
         else:
             status_data["recipe_paused"] = False
@@ -816,7 +814,7 @@ class ControlMode:
         if self.settings["platform"]["dc_fan"]:
             pwm_frequency = self.settings["pwm"]["frequency"]
             frequency_status = grill_platform.get_output_status()
-            if not pwm_frequency == frequency_status["frequency"]:
+            if pwm_frequency != frequency_status["frequency"]:
                 grill_platform.set_pwm_frequency(pwm_frequency)
 
         # Set Starting Configuration for Igniter, Fan, Auger
@@ -847,7 +845,7 @@ class ControlMode:
 
         # Get initial probe sensor data, temperatures
         sensor_data, _ = self._read_probes_with_excitation()
-        ptemp = list(sensor_data["primary"].values())[0]  # Primary Temperature or the Pit Temperature
+        ptemp = next(iter(sensor_data["primary"].values()))  # Primary Temperature or the Pit Temperature
 
         # ---- thermocouple health precedes mode-specific numeric safety ----
         if self._process_thermocouple_health(sensor_data):
@@ -910,7 +908,7 @@ class ControlMode:
 
             control = process_system_commands(
                 ctx,
-                clear_history=lambda: self._handle_history_clear(now=now),
+                clear_history=partial(self._handle_history_clear, now=now),
             )
             self.control = control
 
@@ -933,7 +931,7 @@ class ControlMode:
 
             # ---- SENSE: single fresh probe read for the whole tick ----
             sensor_data, current_output_status = self._read_probes_with_excitation(now)
-            ptemp = list(sensor_data["primary"].values())[0]  # Primary Temperature or the Pit Temperature
+            ptemp = next(iter(sensor_data["primary"].values()))  # Primary Temperature or the Pit Temperature
 
             in_data["probe_history"] = sensor_data
             in_data["primary_setpoint"] = control["primary_setpoint"] if mode == Mode.HOLD else 0
@@ -1007,7 +1005,7 @@ class ControlMode:
             # Write History & Issue Heartbeat after 3 seconds has passed
             if (now - self.state.timers.temp_toggle) > 3:
                 self.state.timers.temp_toggle = ctx.clock.now()
-                ext_data = True if self.settings["globals"]["ext_data"] else False
+                ext_data = bool(self.settings["globals"]["ext_data"])
                 ctx.store.write_history(in_data, ext_data=ext_data)
                 monitor.heartbeat()
 

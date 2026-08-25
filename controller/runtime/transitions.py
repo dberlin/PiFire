@@ -19,12 +19,13 @@ A mode absent from ALLOWED_EXITS skips the legality check entirely (a no-op
 passthrough).
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Callable, Optional
+from typing import Optional
 
 from common.modes import Mode, StatusState
-from controller.runtime.logic.safety import evaluate_flameout, over_max_temp, SafetyVerdict
+from controller.runtime.logic.safety import SafetyVerdict, evaluate_flameout, over_max_temp
 
 _UNSET = object()
 
@@ -188,8 +189,8 @@ class Edge:
     guard: Callable  # (mode_obj, ctx, control, ptemp, now) -> bool
     to: Mode
     kind: TransitionKind
-    notify: Optional[str] = None
-    display: Optional[tuple] = None
+    notify: str | None = None
+    display: tuple | None = None
     reignite_from_self: bool = False
 
 

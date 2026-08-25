@@ -6,12 +6,12 @@ import types
 from pathlib import Path
 
 import pytest
+
 from probes.thermocouple_health import (
     ThermocoupleFault,
     ThermocoupleHealthState,
 )
 from probes.thermocouple_inference import ThermocoupleJunctionSample
-
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EXPECTED_NOTE = (
@@ -50,7 +50,7 @@ def _install_fakes(monkeypatch):
                 raise self.ambient_c
             return self.ambient_c
 
-    setattr(mcp_mod, "MCP9600", FakeMCP9600)
+    mcp_mod.MCP9600 = FakeMCP9600
     monkeypatch.setitem(sys.modules, "adafruit_mcp9600", mcp_mod)
 
     register_pkg = types.ModuleType("adafruit_register")
@@ -69,28 +69,28 @@ def _install_fakes(monkeypatch):
                 raise instance.status_value
             return instance.status_value
 
-    setattr(struct_mod, "ROUnaryStruct", FakeROUnaryStruct)
-    setattr(register_pkg, "i2c_struct", struct_mod)
+    struct_mod.ROUnaryStruct = FakeROUnaryStruct
+    register_pkg.i2c_struct = struct_mod
     monkeypatch.setitem(sys.modules, "adafruit_register", register_pkg)
     monkeypatch.setitem(sys.modules, "adafruit_register.i2c_struct", struct_mod)
 
     board_mod = types.ModuleType("board")
-    setattr(board_mod, "SCL", "SCL")
-    setattr(board_mod, "SDA", "SDA")
+    board_mod.SCL = "SCL"
+    board_mod.SDA = "SDA"
     monkeypatch.setitem(sys.modules, "board", board_mod)
 
     busio_mod = types.ModuleType("busio")
-    setattr(busio_mod, "I2C", lambda scl, sda: ("I2C", scl, sda))
+    busio_mod.I2C = lambda scl, sda: ("I2C", scl, sda)
     monkeypatch.setitem(sys.modules, "busio", busio_mod)
 
     ext_mod = types.ModuleType("adafruit_extended_bus")
-    setattr(ext_mod, "ExtendedI2C", lambda bus: ("ExtI2C", bus))
+    ext_mod.ExtendedI2C = lambda bus: ("ExtI2C", bus)
     monkeypatch.setitem(sys.modules, "adafruit_extended_bus", ext_mod)
 
     busdev_pkg = types.ModuleType("adafruit_bus_device")
     i2cdev_mod = types.ModuleType("adafruit_bus_device.i2c_device")
-    setattr(i2cdev_mod, "I2CDevice", object)
-    setattr(busdev_pkg, "i2c_device", i2cdev_mod)
+    i2cdev_mod.I2CDevice = object
+    busdev_pkg.i2c_device = i2cdev_mod
     monkeypatch.setitem(sys.modules, "adafruit_bus_device", busdev_pkg)
     monkeypatch.setitem(sys.modules, "adafruit_bus_device.i2c_device", i2cdev_mod)
 
@@ -576,9 +576,8 @@ def test_init_device_propagates_constructor_exception_unchanged(
     obj = _new_read_probes(probe, config={})
     obj.logger = logging.getLogger("test_mcp9601_init")
 
-    with caplog.at_level(logging.ERROR, logger="test_mcp9601_init"):
-        with pytest.raises(OSError) as caught:
-            obj._init_device()
+    with caplog.at_level(logging.ERROR, logger="test_mcp9601_init"), pytest.raises(OSError) as caught:
+        obj._init_device()
 
     assert caught.value is init_error
     assert "address=0x61" in caplog.text

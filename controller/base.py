@@ -18,15 +18,14 @@ import logging
 import math
 import time
 from collections.abc import Mapping
-
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING, TypeAlias, cast
 
 from common.control_trace import ActuationMode, ControllerBranch, MpcFailureState, ResultStaleState
-from controller.runtime.context import EVENT_LOG_NAME
-from controller.mpc_allocator import AllocationResult
 from common.persistence.protocols import JsonValue
+from controller.mpc_allocator import AllocationResult
+from controller.runtime.context import EVENT_LOG_NAME
 
 if TYPE_CHECKING:
     from controller.model_promotion import FeasibilityReport
@@ -146,7 +145,7 @@ class MpcTraceDiagnostics:
     consecutive_deadline_miss_count: int = 0
     stale_state: ResultStaleState = ResultStaleState.FRESH
     recovered: bool = False
-    feasibility: "FeasibilityReport | None" = None
+    feasibility: FeasibilityReport | None = None
     model_lifecycle: Mapping[str, object] | None = None
 
 
@@ -198,7 +197,7 @@ class ControllerBase:
         to Hold's framed duration. Controllers that run faster than the auger
         pulse frame (e.g. MPC) return a fixed period such as 5.0.
         """
-        return None
+        return
 
     def actuation_mode(self) -> ActuationMode:
         """Use framed pulses for every controller request."""
@@ -266,7 +265,7 @@ class ControllerBase:
         Must carry an integer `revision` that increases whenever the model
         changes; the store uses it to skip writes that would learn nothing.
         """
-        return None
+        return
 
     def restore_model(self, snapshot):
         """Adopt a persisted snapshot. True when it was adopted.

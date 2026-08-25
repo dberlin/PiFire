@@ -12,10 +12,11 @@ Imported Modules
 """
 import os
 import zipfile
-from common.common import generate_uuid
-from file_mgmt.common import update_json_file_data, read_json_file_data, get_asset_tmp_base
-from PIL import Image, ExifTags
 
+from PIL import ExifTags, Image
+
+from common.common import generate_uuid
+from file_mgmt.common import get_asset_tmp_base, read_json_file_data, update_json_file_data
 
 """
 Functions
@@ -72,7 +73,7 @@ def _rotate_image(filepath, asset_id, filetype):
         imagefile = f"{filepath}/{asset_id}.{filetype}"
         image = Image.open(imagefile)
 
-        for orientation in ExifTags.TAGS.keys():
+        for orientation in ExifTags.TAGS:
             if ExifTags.TAGS[orientation] == "Orientation":
                 break
 

@@ -27,7 +27,6 @@ is covered by the Startup cases.
 """
 
 import controller.runtime.store as store_mod
-
 from common.defaults import default_metrics
 from controller.runtime.store import InMemoryStore
 from tests.characterization.fixtures import base_control, base_pellet_db, base_settings

@@ -22,11 +22,10 @@ Description: Reading a settings JSON FILE and migrating its contents across
 ==============================================================================
 """
 
-from collections.abc import MutableMapping
-
 import copy
 import json
 import os
+from collections.abc import MutableMapping
 
 from common.backups import backup_settings
 from common.common import (
@@ -38,8 +37,8 @@ from common.common import (
     write_generic_json,
     write_log,
 )
-from common.persistence.runtime import write_settings_store, write_warning
 from common.defaults import default_probe_config, default_settings
+from common.persistence.runtime import write_settings_store, write_warning
 from controller.mpc_config import DEFAULT_MPC_CONFIG, FITTED_PARAMETER_KEYS, model_is_identified
 
 
@@ -80,7 +79,7 @@ def read_settings_file(filename="settings.json", init=False, retry_count=0):
         settings = json.loads(json_data_string)
         json_data_file.close()
 
-    except IOError, OSError:
+    except OSError:
         """ Settings file not found, return default settings """
         settings = default_settings()
         return settings
@@ -106,11 +105,11 @@ def read_settings_file(filename="settings.json", init=False, retry_count=0):
         #  This ensures that any NEW fields are captured.
 
         # Prevent the wizard from popping up on existing installations
-        if "first_time_setup" not in settings["globals"].keys():
+        if "first_time_setup" not in settings["globals"]:
             settings["globals"]["first_time_setup"] = False
 
         # If default version is different from what is currently saved, update version in saved settings
-        if "versions" not in settings.keys():
+        if "versions" not in settings:
             """ Upgrading from extremely old version """
             settings["versions"] = settings_default["versions"]
         elif semantic_ver_is_lower(settings["versions"]["server"], settings_default["versions"]["server"]):
@@ -512,7 +511,7 @@ def upgrade_settings(prev_ver, settings, settings_default):
         settings["dashboard"] = settings_default["dashboard"]
         # Move Notification Settings
         settings["notify_services"] = {}
-        for key in settings_default["notify_services"].keys():
+        for key in settings_default["notify_services"]:
             settings["notify_services"][key] = settings[key]
             settings.pop(key, None)
         settings["probe_settings"].pop("probe_options")
@@ -521,7 +520,7 @@ def upgrade_settings(prev_ver, settings, settings_default):
         settings["modules"].pop("adc")
         # Add ID to probe_profiles
         for profile in settings["probe_settings"]["probe_profiles"]:
-            if "id" not in settings["probe_settings"]["probe_profiles"][profile].keys():
+            if "id" not in settings["probe_settings"]["probe_profiles"][profile]:
                 settings["probe_settings"]["probe_profiles"][profile]["id"] = profile
     if prev_ver[0] <= 1 and prev_ver[1] <= 5:
         # if moving from v1.5 to v1.6, force a first-time setup to drive changes to the probe device setup
@@ -610,7 +609,7 @@ def upgrade_settings(prev_ver, settings, settings_default):
             settings["platform"]["system_type"] = "prototype"
         else:
             settings["platform"]["system_type"] = "raspberry_pi_all"
-            settings["modules"]["grillplat"] == "raspberry_pi_all"
+            settings["modules"]["grillplat"] = "raspberry_pi_all"
 
     """ Check if upgrading from v1.9.0 build 32 """
     if prev_ver[0] == 1 and prev_ver[1] == 9 and settings["versions"].get("build", 0) <= 32:

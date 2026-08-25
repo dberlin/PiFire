@@ -1,6 +1,6 @@
+import operator
 from dataclasses import FrozenInstanceError, dataclass, replace
 from types import MappingProxyType
-import operator
 
 import numpy as np
 import pytest
@@ -487,9 +487,9 @@ def test_command_decision_and_status_are_immutable_owned_state() -> None:
     status = runtime.status()
 
     with pytest.raises(FrozenInstanceError):
-        setattr(command, "seed", 4)
+        command.seed = 4
     with pytest.raises(FrozenInstanceError):
-        setattr(decision, "probe_q", 0.0)
+        decision.probe_q = 0.0
     with pytest.raises(TypeError):
         operator.setitem(status, "generation", 99)
 

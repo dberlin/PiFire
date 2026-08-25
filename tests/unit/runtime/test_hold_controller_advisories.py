@@ -1,14 +1,13 @@
 import copy
 
 from common.control_trace import ActuationMode, MpcUpdatePayload
+from controller import model_promotion
 from controller.base import MpcFailureState, MpcTraceDiagnostics
-import controller.model_promotion as model_promotion
 from controller.mpc_allocator import allocate
 from controller.runtime.runner import ControllerUpdateResult
 from tests.fakes.runner import FakeControllerRunner
 
-
-_MODEL = dict(C_c=306.0, h_amb=0.5, T_amb=20.0, theta=0.0, n_delay=0, K_Q=100.0, sigma=0.0)
+_MODEL = {"C_c": 306.0, "h_amb": 0.5, "T_amb": 20.0, "theta": 0.0, "n_delay": 0, "K_Q": 100.0, "sigma": 0.0}
 
 
 def _report(target, revision=1, provenance="mak-fit"):

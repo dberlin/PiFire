@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 import pytest
-
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 _PLATFORM_MODULE = _REPOSITORY_ROOT / "cmake" / "AcadosPifirePlatform.cmake"

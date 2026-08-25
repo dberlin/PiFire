@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from typing import Annotated, Literal, TypeVar
+from typing import Annotated, Literal, TypeAliasType, TypeVar
 
 from pydantic import BaseModel, Field
-from typing_extensions import TypeAliasType
 
 from .base import ExtensibleWireModel, FiniteFloat, WireModel
 
-FiniteNumber = TypeAliasType("FiniteNumber", int | FiniteFloat)
+type FiniteNumber = int | FiniteFloat
 NonNegativeInt = Annotated[int, Field(ge=0, strict=True)]
 PositiveInt = Annotated[int, Field(gt=0, strict=True)]
 TWire = TypeVar("TWire", bound=BaseModel)

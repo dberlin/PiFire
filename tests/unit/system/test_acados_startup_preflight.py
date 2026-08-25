@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import pytest
 
@@ -109,6 +109,7 @@ def test_startup_waits_for_real_update_transaction_through_dependency_cursor(
     tmp_path: Path, monkeypatch, flow_name: str
 ) -> None:
     import threading
+
     import updater
 
     repo, marker = _startup_tree(

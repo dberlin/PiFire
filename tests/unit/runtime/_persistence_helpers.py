@@ -14,8 +14,8 @@ from controller.model_learning.activation import (
     GreyControlPairDescriptor,
     PreparedActivationRecord,
 )
-from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
 from controller.model_learning.calibration import CalibrationDecision, CalibrationProgress
+from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
 from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.mpc_factory import MpcPairFactory
 

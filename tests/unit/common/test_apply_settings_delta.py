@@ -1,8 +1,8 @@
 import copy
 
-from common.defaults import default_settings
 import pytest
 
+from common.defaults import default_settings
 from common.settings_schema import (
     SettingsDeltaError,
     apply_settings_delta,

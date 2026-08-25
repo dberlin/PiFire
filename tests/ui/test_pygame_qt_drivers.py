@@ -59,9 +59,9 @@ from PIL import ImageDraw
 from PySide6.QtGui import QGuiApplication
 
 import display._base_dsi as dsi_mod
+import display.pygame_64x128 as mod_64
 import display.pygame_240x320 as mod_320
 import display.pygame_240x320b as mod_320b
-import display.pygame_64x128 as mod_64
 import display.qtapp as qtapp_mod
 from common.modes import Mode
 from display.qtbackend import PiFireBackend
@@ -179,7 +179,7 @@ def _fixed_driver_guarded(mod, **overrides):
     letting it expire before the real risk (menu navigation) happens is
     avoidance-by-design, not a guard. Use `instantiate` (tests/ui/_driver_helpers.py)
     instead for tests that never touch `_event_detect`/`_display_loop`/menu state."""
-    kwargs = dict(dev_pins=FULL_DEV_PINS, buttonslevel="HIGH", rotation=0, units="F", config={})
+    kwargs = {"dev_pins": FULL_DEV_PINS, "buttonslevel": "HIGH", "rotation": 0, "units": "F", "config": {}}
     kwargs.update(overrides)
     with (
         mock.patch.object(threading, "Thread") as mock_thread,

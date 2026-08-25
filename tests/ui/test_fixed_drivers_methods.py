@@ -83,7 +83,6 @@ import pytest
 from PIL import Image, ImageFont
 
 import display._base_fixed  # noqa: F401  pre-warm real PIL/qrcode/common imports; see module docstring
-
 from common.modes import Mode
 from tests.ui._driver_helpers import RecordingLogger
 from tests.ui._menu_walk import build_dash_menu_input_touch_steps, run_menu_walk

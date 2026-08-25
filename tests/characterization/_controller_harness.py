@@ -9,14 +9,14 @@ collection side effects, and couples the two files together).
 import logging
 
 import controller.runtime.controller as controller_mod
-from controller.runtime.controller import Controller
-from controller.runtime.context import ControllerContext, Devices
-from controller.runtime.store import InMemoryStore
 from controller.runtime.clock import ManualClock
-from tests.fakes.grill import FakeGrillPlatform
-from tests.fakes.probes import FakeProbes
+from controller.runtime.context import ControllerContext, Devices
+from controller.runtime.controller import Controller
+from controller.runtime.store import InMemoryStore
 from tests.fakes.distance import FakeDistance
+from tests.fakes.grill import FakeGrillPlatform
 from tests.fakes.notifier import FakeNotifier
+from tests.fakes.probes import FakeProbes
 
 
 class _RecordingDistance(FakeDistance):

@@ -9,8 +9,8 @@ from common import datastore
 from common.control_trace import (
     TRACE_SCHEMA_VERSION,
     ActuationMode,
-    ControlTraceRecord,
     ControllerType,
+    ControlTraceRecord,
     InhibitReason,
     LearningSnapshotPayload,
     PidUpdatePayload,

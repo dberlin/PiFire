@@ -1,14 +1,17 @@
-from dataclasses import replace
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+
 from blueprints.api import routes
-from common.persistence.runtime import (
-    read_status,
-    write_status,
-    read_settings,
-    write_settings,
+from common.controller_model_state import ControllerModelStore
+from common.model_evidence import (
+    CandidateAssessmentEvidence,
+    ConfidenceDecisionEvidence,
+    EvidenceKind,
+    ModelEvidenceRecord,
+    RollbackEvidence,
 )
 from common.persistence.model_evidence import (
     append_model_evidence,
@@ -16,12 +19,11 @@ from common.persistence.model_evidence import (
     read_model_activation,
     read_model_evidence,
 )
-from common.model_evidence import (
-    CandidateAssessmentEvidence,
-    ConfidenceDecisionEvidence,
-    EvidenceKind,
-    ModelEvidenceRecord,
-    RollbackEvidence,
+from common.persistence.runtime import (
+    read_settings,
+    read_status,
+    write_settings,
+    write_status,
 )
 from controller.model_learning.activation import (
     ActivationPhase,
@@ -43,8 +45,6 @@ from controller.model_learning.contracts import (
     FitRequest,
     FitWindowIdentity,
 )
-from common.controller_model_state import ControllerModelStore
-
 from controller.mpc import Controller
 from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.mpc_core import MpcCore

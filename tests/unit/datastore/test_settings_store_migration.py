@@ -9,8 +9,8 @@ models -- which the write-time repair strips, silently, on the next save.
 import copy
 
 from common import datastore
-from common.persistence.runtime import read_settings_store, write_settings_store
 from common.defaults import default_settings
+from common.persistence.runtime import read_settings_store, write_settings_store
 
 
 def _legacy_stored_settings(ds):

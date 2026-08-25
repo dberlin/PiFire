@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from common.control_trace import ActuationMode, ResultStaleState
+from common.model_evidence import SessionSummaryEvidence
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.base import ControllerLearningDiagnostics
 from controller.model_learning.contracts import FrameObservation
@@ -16,8 +18,6 @@ from controller.runtime.runner import (
     _capture_completed_result,
     build_runner,
 )
-from common.control_trace import ActuationMode, ResultStaleState
-from common.model_evidence import SessionSummaryEvidence
 from tests.fakes.runner import FakeControllerRunner
 
 

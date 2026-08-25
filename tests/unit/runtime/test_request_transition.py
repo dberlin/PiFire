@@ -5,8 +5,8 @@ display pushes. Asserts the resulting persisted control VALUES + side effects
 (the observable contract) -- not intra-write field order.
 """
 
-from controller.runtime.transitions import request_transition, TransitionError
 import controller.runtime.transitions as transitions_mod
+from controller.runtime.transitions import TransitionError, request_transition
 
 
 class _FakeDisplay:

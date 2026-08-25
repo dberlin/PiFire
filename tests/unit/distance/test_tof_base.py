@@ -1,8 +1,7 @@
+import time as _real_time
 from unittest import mock
 
 import pytest
-
-import time as _real_time
 
 import distance._sampled_base as sampled_base
 from tests.unit.distance._sampling_helpers import await_sample

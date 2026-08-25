@@ -1,9 +1,10 @@
 import numpy as np
 import pytest
-from controller.mpc import Controller
-from controller.mpc_config import DEFAULT_MPC_CONFIG
+
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.grill_sim import GrillSim
+from controller.mpc import Controller
+from controller.mpc_config import DEFAULT_MPC_CONFIG
 
 # Exercises the PRODUCTION defaults (nonlinear radiative model + EKF) against the
 # realistic plant (pellet pulses, ~20s deadtime, fan lever, light wind, sensor lag).

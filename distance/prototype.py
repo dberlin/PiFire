@@ -9,8 +9,9 @@
 #
 # *****************************************
 
-from common.common import write_log
 import random
+
+from common.common import write_log
 
 
 class HopperLevel:

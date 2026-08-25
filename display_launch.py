@@ -14,13 +14,13 @@ nothing from display/, preserving the invariant that PySide6 is never loaded in
 the display parent process.
 """
 
-from collections.abc import Iterable
 import logging
 import os
 import re
 import shlex
 import subprocess
 import sys
+from collections.abc import Iterable
 from typing import TextIO
 
 from common import datastore

@@ -2,7 +2,6 @@
 
 from types import SimpleNamespace
 
-
 import numpy as np
 import pytest
 
@@ -10,22 +9,22 @@ from controller.applied_output import AppliedOutput, OutputSource
 from controller.model_learning.grey_runtime import _HISTORY_MAX
 from controller.mpc import Controller
 
-CONFIG = dict(
-    n_horizon=20,
-    t_step=25.0,
-    control_period=1.0,
-    Q_w=1.0,
-    R_dQ=0.02,
-    C_c=306.0,
-    h_amb=0.55,
-    T_amb=20.0,
-    enable_fan_input=True,
-    fan_min_pct=40.0,
-    fan_max_pct=100.0,
-    est_q_temp=1e-2,
-    est_q_dist=0.5,
-    est_r_meas=0.04,
-)
+CONFIG = {
+    "n_horizon": 20,
+    "t_step": 25.0,
+    "control_period": 1.0,
+    "Q_w": 1.0,
+    "R_dQ": 0.02,
+    "C_c": 306.0,
+    "h_amb": 0.55,
+    "T_amb": 20.0,
+    "enable_fan_input": True,
+    "fan_min_pct": 40.0,
+    "fan_max_pct": 100.0,
+    "est_q_temp": 1e-2,
+    "est_q_dist": 0.5,
+    "est_r_meas": 0.04,
+}
 CYCLE = {"u_min": 0.1, "u_max": 0.9}
 
 

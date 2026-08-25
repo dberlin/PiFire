@@ -39,13 +39,15 @@ Requirements:
  Imported Libraries
 *****************************************
 """
-import simplepyble
-import threading
-import time
 import logging
 import struct
+import threading
+import time
+
+import simplepyble
 
 from probes.base import ProbeInterface
+
 # from icecream import ic  # For debugging
 
 # Seconds close() waits for each background thread. A thread parked in a
@@ -486,7 +488,6 @@ class MeaterProbeHandler:
                 # ic("Failed to connect to probe ")
                 logger_msg = f"(Meater) Failed to connect to probe {self.peripheral.identifier()}"
                 self.logger.debug(logger_msg)
-                pass
         logger_msg = "(Meater) Meater probe not found"
         self.logger.debug(logger_msg)
 

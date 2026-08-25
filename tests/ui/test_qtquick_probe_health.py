@@ -6,11 +6,11 @@ import time
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QObject, QPointF, QMetaObject, Qt, QUrl, qInstallMessageHandler
+from PySide6.QtCore import QMetaObject, QObject, QPointF, Qt, QUrl, qInstallMessageHandler
 from PySide6.QtGui import QAccessible, QAccessibleActionInterface, QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
-from PySide6.QtTest import QTest
 from PySide6.QtQuick import QQuickItem, QQuickWindow
+from PySide6.QtTest import QTest
 
 from display.qtbackend import PiFireBackend
 

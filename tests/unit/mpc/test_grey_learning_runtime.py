@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
+import threading
 from dataclasses import dataclass, replace
 from types import SimpleNamespace
-import threading
-import pytest
-from common.controller_model_state import CheckpointSaveOutcome
 
+import pytest
+
+from common.controller_model_state import CheckpointSaveOutcome
 from controller.acados import GreyBoxMPCConfig
 from controller.model_learning.activation import GreyControlPairDescriptor, canonical_snapshot_digest
 from controller.model_learning.activation_runtime import ActivationRuntime
@@ -36,11 +37,11 @@ from controller.runtime.model_fitting import (
     GreyFitError,
     GreyFitSuccess,
     GreyFitWorker,
-    TargetTimingEvidence,
     GreyLearningOrchestrator,
     LiveLearningIdentity,
-    TriggerConfig,
+    TargetTimingEvidence,
     TeardownRefitOutcome,
+    TriggerConfig,
 )
 from controller.runtime.model_persistence import DurableActivationReceipt, ModelPersistenceWorker
 from tests.unit.mpc._solver_fixtures import CYCLE, _config, _Estimator, _Solver, inactive_calibration
@@ -1153,7 +1154,6 @@ def test_learning_status_projects_queued_running_preparing_and_handoff_states(
         def poll_fit_off_path(self, **_kwargs):
             entered.set()
             assert release.wait(2.0)
-            return None
 
         def evaluate_ready_off_path(self):
             return None
@@ -1721,7 +1721,6 @@ def test_restore_stages_identity_from_exact_restored_full_configuration(
 
         def poll_fit_off_path(self, *, live_identity, **_kwargs):
             self.poll_identities.append(live_identity)
-            return None
 
         def evaluate_ready_off_path(self):
             return None

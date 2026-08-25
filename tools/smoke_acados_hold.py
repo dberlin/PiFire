@@ -10,12 +10,12 @@ _REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _REPO not in sys.path:
     sys.path.insert(0, _REPO)
 
+import controller.runtime.runner as runner_module
 from common.controller_model_state import ControllerModelStore
 from controller.mpc import Controller
 from controller.runtime.modes.hold import HoldMode
 from controller.runtime.runner import SyncControllerRunner
 from controller.runtime.state import WorkCycleState
-import controller.runtime.runner as runner_module
 from tests.characterization.fixtures import base_control, base_pellet_db, base_settings
 from tests.characterization.harness import make_ctx
 from tests.fakes.probes import FakeProbes

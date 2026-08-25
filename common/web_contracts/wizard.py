@@ -8,7 +8,6 @@ from common.settings_schema import I2CBusConfig
 
 from .base import FiniteFloat, WireModel
 
-
 type WireScalar = FiniteFloat | int | bool | str
 type WizardSection = Literal["grillplatform", "display", "distance", "probes"]
 type ProbeType = Literal["Primary", "Food", "Aux"]

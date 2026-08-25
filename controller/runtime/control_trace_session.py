@@ -12,13 +12,13 @@ from common.control_trace import (
     ActuationMode,
     AllocationPayload,
     AppliedOutputPayload,
+    ControllerType,
     ControlTracePayload,
     ControlTraceRecord,
-    ControllerType,
     FramedPulseFramePayload,
     InhibitReason,
-    ModelEventPayload,
     LearningSnapshotPayload,
+    ModelEventPayload,
     ModelEventType,
     MpcUpdatePayload,
     PidSpUpdatePayload,
@@ -26,9 +26,9 @@ from common.control_trace import (
     ResultStaleState,
     SafetyEventPayload,
     SafetyEventType,
+    SessionPayload,
     TraceEventKind,
     TraceSetting,
-    SessionPayload,
 )
 from common.persistence.protocols import JsonValue
 from controller.applied_output import (

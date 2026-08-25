@@ -23,8 +23,8 @@ def write_cookfile(history_dir, title, *, version=None, comments=None, assets=No
     ("12:00:00") that upgrade_cookfile's old path and hand-built files can
     still carry -- the case the chart adapter has to survive.
     """
-    from common.persistence.runtime import read_settings
     from common.defaults import default_metrics
+    from common.persistence.runtime import read_settings
 
     if version is None:
         version = read_settings()["versions"]["cookfile"]

@@ -15,12 +15,14 @@ PiFire Display Interface Library
 """
  Imported Libraries
 """
-import time
 import socket
-import qrcode
 import threading
+import time
+
 import pygame
+import qrcode
 from PIL import Image, ImageDraw, ImageFont
+
 from display._loggers import resolve_loggers
 
 """
@@ -230,7 +232,7 @@ class Display:
             font = ImageFont.truetype("impact.ttf", 42)
         else:
             font = ImageFont.truetype("impact.ttf", 38)
-        label = list(in_data["probe_history"]["primary"].keys())[0]
+        label = next(iter(in_data["probe_history"]["primary"].keys()))
         text = str(in_data["probe_history"]["primary"][label])[:5]
         # (font_width, font_height) = font.getsize(text)
         font_bbox = font.getbbox(str(text))  # Grab the bounding box of the text

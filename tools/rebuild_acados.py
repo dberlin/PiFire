@@ -3,18 +3,13 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import contextmanager
 import ctypes
-from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
-from enum import Enum
 import fcntl
 import hashlib
+import itertools
 import json
 import math
 import os
-from pathlib import Path
 import platform
 import re
 import shutil
@@ -22,6 +17,12 @@ import sqlite3
 import subprocess
 import sys
 import time
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
+from enum import Enum
+from pathlib import Path
 from typing import Any, Protocol
 from uuid import uuid4
 
@@ -105,7 +106,7 @@ class BuildPaths:
     build_root: Path
 
     @classmethod
-    def for_repository(cls, value: str | Path) -> "BuildPaths":
+    def for_repository(cls, value: str | Path) -> BuildPaths:
         root = Path(value).resolve()
         generated = root / "native/generated"
         runtime = root / "controller/_native"
@@ -280,7 +281,7 @@ def validate_timing_gate(
         failures = [i for i, s in enumerate(samples) if s.status != 0]
         if len(failures) > 5:
             raise TimingGateError(f"horizon {horizon} permits at most five failures")
-        consecutive = sum(b == a + 1 for a, b in zip(failures, failures[1:], strict=False))
+        consecutive = sum(b == a + 1 for a, b in itertools.pairwise(failures))
         if consecutive:
             raise TimingGateError(f"horizon {horizon} has consecutive failures")
         for index in failures:

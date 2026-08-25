@@ -1,4 +1,5 @@
 import struct
+
 from grillplat.mcp2210 import _protocol as p
 
 

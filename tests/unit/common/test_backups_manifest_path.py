@@ -1,6 +1,6 @@
 import os
 
-import common.backups as backups
+from common import backups
 
 # The real repo's ./backups/ directory is gitignored but NOT test-isolated --
 # it is a real path relative to the process cwd (repo root under normal test

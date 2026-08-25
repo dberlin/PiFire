@@ -14,7 +14,7 @@ from unittest import mock
 
 import pytest
 
-import blueprints.api_admin.admin_api as admin_api
+from blueprints.api_admin import admin_api
 
 
 @pytest.fixture

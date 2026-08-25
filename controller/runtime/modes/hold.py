@@ -1,14 +1,11 @@
-from collections.abc import Mapping
-from math import isfinite
-
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from enum import IntEnum
+from math import isfinite
 from typing import Literal, cast
 
-from common.controller_model_state import ControllerModelStore
-from controller.model_learning.migration import migrate_mpc_learning_authority
-from common.modes import Mode
+import controller.runtime.runner as _runner_mod
 from common.control_trace import (
     ActuationMode,
     AllocationClampReason,
@@ -19,6 +16,8 @@ from common.control_trace import (
     SafetyEventType,
     TraceEventKind,
 )
+from common.controller_model_state import ControllerModelStore
+from common.modes import Mode
 from common.persistence.protocols import JsonValue
 from controller.applied_output import (
     AppliedOutput,
@@ -27,22 +26,11 @@ from controller.applied_output import (
     classify_output_source,
     seed_output,
 )
-from controller.runtime.modes.hold_learning import (
-    CalibrationHandoff,
-    HoldLearningRuntime,
-    parse_model_lifecycle_payload,
-)
+from controller.base import MpcTraceDiagnostics
+from controller.model_learning.migration import migrate_mpc_learning_authority
+from controller.model_promotion import ReachabilityState
 from controller.mpc_calibration import CalibrationCommand
-from controller.runtime.framed_pulse import (
-    FramedPulseCompletion,
-    FramedPulseFeedback,
-    FramedPulseResult,
-    FramedPulseRuntime,
-    FramedPulseSample,
-    PulseControllerState,
-)
-from controller.runtime.logic.pulse import PulseResetReason
-
+from controller.runtime.control_trace_recorder import ControlTraceRecorder
 from controller.runtime.control_trace_session import (
     ControlTraceSession,
     TraceAppliedIntervalContext,
@@ -53,14 +41,24 @@ from controller.runtime.control_trace_session import (
     TraceSessionContext,
     TraceUpdateContext,
 )
-from controller.runtime.control_trace_recorder import ControlTraceRecorder
-from controller.runtime.model_persistence import ModelPersistenceWorker
-from controller.base import MpcTraceDiagnostics
-from controller.model_promotion import ReachabilityState
+from controller.runtime.framed_pulse import (
+    FramedPulseCompletion,
+    FramedPulseFeedback,
+    FramedPulseResult,
+    FramedPulseRuntime,
+    FramedPulseSample,
+    PulseControllerState,
+)
 from controller.runtime.logic.fan import controller_fan_authority, start_fan
+from controller.runtime.logic.pulse import PulseResetReason
 from controller.runtime.logic.pwm import hold_duty_cycle
+from controller.runtime.model_persistence import ModelPersistenceWorker
 from controller.runtime.modes.base import ControlMode
-import controller.runtime.runner as _runner_mod
+from controller.runtime.modes.hold_learning import (
+    CalibrationHandoff,
+    HoldLearningRuntime,
+    parse_model_lifecycle_payload,
+)
 
 
 @dataclass(frozen=True, slots=True)

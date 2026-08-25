@@ -35,16 +35,15 @@ Other pitfalls handled here:
 import logging
 from dataclasses import dataclass, field
 
+import controller.runtime.controller as controller_mod
+import controller.runtime.runner
+from common.control_delta import control_delta
+from controller.runtime.clock import ManualClock
 from controller.runtime.context import ControllerContext, Devices
 from controller.runtime.store import InMemoryStore
-from controller.runtime.clock import ManualClock
-from common.control_delta import control_delta
-from tests.fakes.grill import FakeGrillPlatform
 from tests.fakes.distance import FakeDistance
+from tests.fakes.grill import FakeGrillPlatform
 from tests.fakes.notifier import FakeNotifier
-import controller.runtime.runner
-import controller.runtime.controller as controller_mod
-
 
 #: Pitfall 1. The logger every captured run is redirected to. Handed to
 #: `ControllerContext` by `make_ctx` below; add a handler to it to read back

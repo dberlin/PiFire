@@ -12,7 +12,6 @@ import pytest
 from controller.grey_box import GreyBoxPredictionAdapter
 from controller.mpc_model import GreyBoxEKF, GreyBoxKF
 
-
 _CONFIG = {
     "C_c": 320.0,
     "h_amb": 0.5,

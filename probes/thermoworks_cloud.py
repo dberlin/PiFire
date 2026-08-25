@@ -31,14 +31,18 @@ Requirements:
         A ThermoWorks Cloud account (email/password) with at least one connected device.
 """
 
-from thermoworks_cloud import AuthFactory, ThermoworksCloud, ResourceNotFoundError
-from thermoworks_cloud import AuthenticationError  # noqa: F401  # public re-export (probe.AuthenticationError used by callers/tests)
-from aiohttp import ClientSession
-
 import asyncio
 import logging
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
+
+from aiohttp import ClientSession
+from thermoworks_cloud import (
+    AuthenticationError,  # noqa: F401  # public re-export (probe.AuthenticationError used by callers/tests)
+    AuthFactory,
+    ResourceNotFoundError,
+    ThermoworksCloud,
+)
 
 from probes.base import ProbeInterface
 
@@ -124,7 +128,7 @@ class ThermoworksCloudDevice:
         if entry is None:
             return None
         celsius, fetched_at = entry
-        age = (datetime.now(timezone.utc) - fetched_at).total_seconds()
+        age = (datetime.now(UTC) - fetched_at).total_seconds()
         if age > self.poll_interval * _STALE_MULTIPLIER:
             return None
         return celsius
@@ -162,7 +166,7 @@ class ThermoworksCloudDevice:
                     self.status["last_error"] = None
                     while not self._stopped:
                         channels = await poll_once(client, self.device_serial, self.num_probes)
-                        now = datetime.now(timezone.utc)
+                        now = datetime.now(UTC)
                         with self._lock:
                             for channel, data in channels.items():
                                 if data is not None:

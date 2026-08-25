@@ -3,30 +3,18 @@ import math
 import time
 from typing import get_args
 
-from pydantic import ValidationError
 from flask import Response, abort, jsonify, request
-from common.common import write_log, read_generic_json, read_wizard
-from common.control_delta import ControlDeltaError, control_delta, notify_ops_from_post
-from common.persistence.control import (
-    read_control,
-    enqueue_control_delta,
-)
-from common.persistence.runtime import (
-    read_settings,
-    write_settings,
-    read_pellet_db,
-    read_current,
-    read_status,
-    read_probe_status,
-    clear_warnings_through,
-)
-from common.api_commands import mpc_calibration_command_revision, process_command
-from common.app import get_system_command_output, create_ui_hash, save_settings_and_flag_update, api_response
-from common.pellets_actions import dispatch_pellet_action
+from pydantic import ValidationError
+
 from blueprints.api.probe_map_actions import (
     module_requires_install,
     unsupported_new_modules,
 )
+from common.api_commands import mpc_calibration_command_revision, process_command
+from common.app import api_response, create_ui_hash, get_system_command_output, save_settings_and_flag_update
+from common.common import read_generic_json, read_wizard, write_log
+from common.control_delta import ControlDeltaError, control_delta, notify_ops_from_post
+from common.controller_deps import guard_controller_selection
 from common.defaults import set_probe_map
 from common.i2c_bus import (
     I2CBusConfigError,
@@ -34,6 +22,20 @@ from common.i2c_bus import (
     validate_bus_kinds,
 )
 from common.modes import Mode
+from common.pellets_actions import dispatch_pellet_action
+from common.persistence.control import (
+    enqueue_control_delta,
+    read_control,
+)
+from common.persistence.runtime import (
+    clear_warnings_through,
+    read_current,
+    read_pellet_db,
+    read_probe_status,
+    read_settings,
+    read_status,
+    write_settings,
+)
 from common.server_status import get_server_status
 from common.settings_schema import (
     SettingsValidationError,
@@ -41,12 +43,11 @@ from common.settings_schema import (
     format_validation_pairs,
     validate_partial_settings_pairs,
 )
-from common.controller_deps import guard_controller_selection
 from common.web_contracts.control import (
     ControlPatchRequest,
     ControlPatchResponse,
-    PelletRestResponse,
     NotifyListResponse,
+    PelletRestResponse,
     WledActionResponse,
     WledDiscoverResponse,
     WledPushProfilesRequest,
@@ -65,24 +66,24 @@ from common.web_contracts.learning import (
     ModelEvidenceReport,
     ModelRollbackAccepted,
     ModelRollbackRequest,
-    PidSpLearningReport,
     MpcCalibrationCommand,
     MpcCalibrationCommandResponse,
+    PidSpLearningReport,
 )
 from common.web_contracts.settings import (
     ControllerCatalog,
     ModeResponse,
-    SettingsResponse,
     SettingsFlag,
+    SettingsResponse,
     SettingsUpdateRequest,
     SettingsUpdateResponse,
 )
 from common.web_contracts.wizard import (
-    ProbeModuleCatalog,
     ProbeMapApplyData,
     ProbeMapApplyResponse,
     ProbeMapErrorResponse,
     ProbeMapRequest,
+    ProbeModuleCatalog,
 )
 from controller.model_learning.activation_service import (
     ActivationAccepted,
@@ -95,6 +96,7 @@ from controller.model_learning.activation_service import (
 )
 from controller.model_learning.report import backend_learning_report, build_learning_artifact
 from controller.pid_sp_learning import backend_pid_sp_learning_report
+
 from . import api_bp
 
 
@@ -209,7 +211,7 @@ def _api_get_wled_discover(settings, server_status):
     except Exception as e:
         payload = WledDiscoverResponse(
             result="error",
-            message=f"WLED discovery failed: {str(e)}",
+            message=f"WLED discovery failed: {e!s}",
             devices=[],
         )
         return jsonify(payload.model_dump(mode="json", by_alias=True, exclude_unset=True)), 500
@@ -627,7 +629,7 @@ def _api_post_wled_push_profiles(settings, request_json):
         return jsonify(payload.model_dump(mode="json", exclude_unset=True)), 500
 
     except Exception as e:
-        payload = WledActionResponse(result="error", message=f"Failed to push profiles: {str(e)}")
+        payload = WledActionResponse(result="error", message=f"Failed to push profiles: {e!s}")
         return jsonify(payload.model_dump(mode="json", exclude_unset=True)), 500
 
 
@@ -667,11 +669,11 @@ def _api_post_wled_test_profile(settings, request_json):
     except requests.RequestException as e:
         payload = WledActionResponse(
             result="error",
-            message=f"Failed to communicate with WLED device: {str(e)}",
+            message=f"Failed to communicate with WLED device: {e!s}",
         )
         return jsonify(payload.model_dump(mode="json", exclude_unset=True)), 500
     except Exception as e:
-        payload = WledActionResponse(result="error", message=f"Failed to test profile: {str(e)}")
+        payload = WledActionResponse(result="error", message=f"Failed to test profile: {e!s}")
         return jsonify(payload.model_dump(mode="json", exclude_unset=True)), 500
 
 

@@ -30,8 +30,8 @@ _base_dsi test appends its own family-specific tail (touch-coordinate
 rotation transforms) after calling this, since ili9341f has no equivalent.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable
 
 import pygame
 

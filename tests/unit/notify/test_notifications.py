@@ -572,7 +572,7 @@ def _gating_settings(**enabled_overrides):
             "wled": {"device_address": "", "enabled": False},
         },
     }
-    for key, value in enabled_overrides.items():
+    for key in enabled_overrides:
         settings["notify_services"][key]["enabled"] = True
     return settings
 

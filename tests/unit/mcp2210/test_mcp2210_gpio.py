@@ -1,8 +1,11 @@
 # tests/unit/mcp2210/test_mcp2210_gpio.py
 import struct
+
 import pytest
+
+from grillplat.mcp2210 import MCP2210, DigitalInOut, Pin
+from grillplat.mcp2210 import _protocol as p
 from tests._fake_hid import FakeHID
-from grillplat.mcp2210 import MCP2210, Pin, DigitalInOut, _protocol as p
 
 
 def make():

@@ -10,6 +10,7 @@ import hashlib
 import os
 
 import pytest
+
 from blueprints.spa import routes as spa_routes
 from common.web_contracts.core import WebUiBuildResponse
 

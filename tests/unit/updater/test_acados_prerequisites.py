@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import shutil
 import sqlite3
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
-
 
 REPOSITORY = Path(__file__).resolve().parents[3]
 MIGRATION = REPOSITORY / "updater" / "install-acados-prerequisites.sh"

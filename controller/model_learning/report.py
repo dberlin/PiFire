@@ -563,10 +563,10 @@ def backend_learning_report() -> tuple[LearningReport, tuple[ModelEvidenceRecord
     from common.persistence.control import (
         mpc_calibration_command_revision,
     )
+    from common.persistence.model_evidence import read_model_activation, read_model_evidence
     from common.persistence.runtime import (
         read_status,
     )
-    from common.persistence.model_evidence import read_model_activation, read_model_evidence
 
     records = tuple(read_model_evidence())
     status = read_status()

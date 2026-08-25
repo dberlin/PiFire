@@ -1,4 +1,4 @@
-from controller.runtime.logic.safety import startup_temp_bounds, evaluate_flameout, over_max_temp, SafetyVerdict
+from controller.runtime.logic.safety import SafetyVerdict, evaluate_flameout, over_max_temp, startup_temp_bounds
 
 
 def test_startup_temp_bounds_clamps_to_min_and_max():

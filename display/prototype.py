@@ -119,7 +119,7 @@ class Display:
         self.screen.addstr(0, title_col, title, title_color)
         splash_str_start = (num_cols // 2) - (len(splash_str[7]) // 2)
         splash_color = curses.color_pair(2)
-        for line in range(0, len(splash_str)):
+        for line in range(len(splash_str)):
             self.screen.addstr(line + 3, splash_str_start, splash_str[line], splash_color)
         self.screen.refresh()
         time.sleep(1)

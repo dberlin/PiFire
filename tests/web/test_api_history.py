@@ -1,4 +1,5 @@
 import pytest
+
 from common.web_contracts.content import HistoryChartData
 
 

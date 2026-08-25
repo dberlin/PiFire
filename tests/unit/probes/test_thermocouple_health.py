@@ -1,5 +1,4 @@
 import json
-
 from dataclasses import FrozenInstanceError
 from typing import Any
 
@@ -51,7 +50,7 @@ def test_report_owns_detail_and_returns_a_fresh_mutable_copy():
     with pytest.raises(TypeError):
         frozen_detail["status"] = 0
     with pytest.raises(FrozenInstanceError):
-        setattr(report, "observed_at", 9.0)
+        report.observed_at = 9.0
 
 
 def test_report_recursively_owns_and_freezes_nested_detail():

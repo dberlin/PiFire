@@ -11,18 +11,17 @@ one's whole-list write erases the other's banners."""
 import importlib
 
 from common.common import ErrorKind, get_probe_info
+from common.i2c_bus import assert_clean_blinka_env
 from common.persistence.control import (
     read_control,
     write_control_snapshot,
 )
 from common.persistence.runtime import (
     read_pellet_db,
-    write_pellet_db,
     write_errors,
     write_generic_key,
+    write_pellet_db,
 )
-from common.i2c_bus import assert_clean_blinka_env
-
 from controller.runtime.context import Devices
 
 

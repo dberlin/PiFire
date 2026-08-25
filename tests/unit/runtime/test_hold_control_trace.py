@@ -6,41 +6,44 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
-from common.controller_model_state import CheckpointSaveOutcome
 
-
+from common import datastore
 from common.control_trace import (
     ActuationMode,
-    AppliedOutputPayload,
     AmbientSource,
     AmbientUncertainty,
+    AppliedOutputPayload,
     ControllerBranch,
     ControllerType,
     InhibitReason,
-    ModelObservationPayload,
     ModelEvaluationPayload,
-    RecorderGapPayload,
+    ModelObservationPayload,
     PidSpUpdatePayload,
+    RecorderGapPayload,
     ResultStaleState,
     SafetyEventType,
     TraceEventKind,
 )
+from common.controller_model_state import CheckpointSaveOutcome
 from common.model_evidence import ForecastOriginEvidence, ModelEvidenceRecord, RecorderGapEvidence
 from common.persistence.control_trace import read_control_trace_session
-from common import datastore
 from controller.applied_output import AppliedOutput, FrameFeedbackDisposition, OutputSource
 from controller.base import MpcFailureState, MpcTraceDiagnostics, PidSpTraceDiagnostics, PidTraceDiagnostics
 from controller.control_trace_replay import ReplayIssueCode, validate_records
-from controller.mpc_allocator import allocate
+from controller.model_learning.contracts import CandidateOrigin, FrameObservation
 from controller.mpc import Controller
-from tests.characterization.fixtures import base_control, base_settings
+from controller.mpc_allocator import allocate
 from controller.runtime.control_trace_recorder import ControlTraceRecorder
-from controller.runtime.framed_pulse import FramedPulseRuntime
 from controller.runtime.control_trace_session import (
     TraceAppliedIntervalContext,
     TraceOutputContext,
     TraceUpdateContext,
 )
+from controller.runtime.framed_pulse import FramedPulseRuntime
+from controller.runtime.model_fitting import TeardownRefitResult
+from controller.runtime.model_persistence import EvidenceSubmission
+from controller.runtime.modes.hold import HoldMode
+from controller.runtime.modes.hold_learning import parse_model_lifecycle_payload
 from controller.runtime.runner import (
     ControllerUpdateResult,
     ObservationOutcomeEnvelope,
@@ -48,15 +51,9 @@ from controller.runtime.runner import (
     ThreadedControllerRunner,
     build_runner,
 )
-
-from controller.model_learning.contracts import CandidateOrigin
-from controller.model_learning.contracts import FrameObservation
-from controller.runtime.model_persistence import EvidenceSubmission
-from controller.runtime.model_fitting import TeardownRefitResult
-from controller.runtime.modes.hold import HoldMode
-from controller.runtime.modes.hold_learning import parse_model_lifecycle_payload
-from tests.fakes.runner import FakeControllerRunner
 from controller.update_mpc import load_trace_samples
+from tests.characterization.fixtures import base_control, base_settings
+from tests.fakes.runner import FakeControllerRunner
 
 
 def _runtime(mode) -> FramedPulseRuntime:
@@ -885,7 +882,7 @@ def test_reconfigure_finishes_the_old_pid_session_before_opening_coherent_mpc_se
     assert new_session.session_id != old_session_id
     assert new_session.controller is ControllerType.MPC
     assert new_session.payload.fan_authority is True
-    assert dict((setting.key, setting.value) for setting in new_session.payload.controller_config)["trace_marker"] == (
+    assert {setting.key: setting.value for setting in new_session.payload.controller_config}["trace_marker"] == (
         "new-mpc-session"
     )
     old_incomplete = [

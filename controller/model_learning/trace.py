@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import math
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -12,8 +13,8 @@ from common.control_trace import (
     ActuationMode,
     AllocationPayload,
     AppliedOutputPayload,
-    ControlTraceRecord,
     ControllerType,
+    ControlTraceRecord,
     FramedPulseFramePayload,
     InhibitReason,
     ModelObservationPayload,
@@ -96,7 +97,7 @@ def _validate_session(records: tuple[ControlTraceRecord, ...]) -> SessionPayload
         raise TraceSelectionError("selected control trace contains a recorder gap")
     if len({record.session_id for record in records}) != 1:
         raise TraceSelectionError("selected records contain more than one control session")
-    if any(right.ts_ms < left.ts_ms for left, right in zip(records, records[1:])):
+    if any(right.ts_ms < left.ts_ms for left, right in itertools.pairwise(records)):
         raise TraceSelectionError("selected control trace timestamps are not ordered")
     sessions = tuple(record.payload for record in records if isinstance(record.payload, SessionPayload))
     if len(sessions) != 1 or sessions[0].controller is not ControllerType.MPC:

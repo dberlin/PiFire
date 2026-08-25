@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import itertools
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from math import isfinite
 from types import MappingProxyType
-from typing import Callable, Mapping
 
 _DWELL_COUNTS = (2, 3, 5, 4, 3, 2)
 _STAGES = ("low", "middle", "high")
@@ -60,7 +61,7 @@ class CalibrationConfig:
 
     def __post_init__(self) -> None:
         centers = tuple(_finite(value, "band_centers_c") for value in self.band_centers_c)
-        if len(centers) != 3 or any(right <= left for left, right in zip(centers, centers[1:])):
+        if len(centers) != 3 or any(right <= left for left, right in itertools.pairwise(centers)):
             raise ValueError("band_centers_c must contain three increasing finite values")
         probe = _finite(self.max_probe_q, "max_probe_q")
         if not 0.0 < probe <= 1.0:

@@ -13,23 +13,21 @@ import os
 import shlex
 
 from flask import Response, jsonify, request
-
 from pydantic import ValidationError
 
 from common.app import api_response
+from common.modes import Mode
 from common.persistence.control import (
     read_control,
-)
-from common.persistence.runtime import (
-    read_settings,
 )
 from common.persistence.install_state import (
     get_updater_install_status,
     set_updater_install_status,
 )
-from common.modes import Mode
+from common.persistence.runtime import (
+    read_settings,
+)
 from common.system import is_real_hardware
-from common.web_ui_build import last_build_failed, read_build_log, web_ui_needs_rebuild
 from common.web_contracts.operations import (
     BuildLog,
     EmptyOperationRequest,
@@ -42,6 +40,7 @@ from common.web_contracts.operations import (
     dump_error_data,
     dump_wire,
 )
+from common.web_ui_build import last_build_failed, read_build_log, web_ui_needs_rebuild
 from updater import (
     REPO_ROOT,
     detached_head,

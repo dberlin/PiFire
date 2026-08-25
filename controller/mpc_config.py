@@ -9,7 +9,6 @@ from typing import Literal, overload
 
 from controller.runtime.context import EVENT_LOG_NAME
 
-
 type JsonValue = None | bool | int | float | str | list[JsonValue] | dict[str, JsonValue]
 type FloatConfigKey = Literal[
     "control_period",
@@ -171,7 +170,7 @@ def to_celsius(value: float, units: str) -> float:
     return (value - 32.0) * 5.0 / 9.0 if units == "F" else value
 
 
-def finite_float(value: bool | int | float | str) -> float | None:
+def finite_float(value: bool | float | str) -> float | None:
     """Cast to float, returning ``None`` when the result is not finite."""
 
     normalized = float(value)

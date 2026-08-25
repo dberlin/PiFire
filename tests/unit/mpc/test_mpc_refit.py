@@ -8,10 +8,10 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-import controller.update_mpc as update_mpc
 from common.controller_model_state import ControllerModelStore
+from controller import update_mpc
+from controller.model_learning.grey_runtime import _HISTORY_MAX, _REFIT_INIT, GreyLearningRuntime
 from controller.model_promotion import _IDENTIFIABILITY_FLOOR, PROMOTION_BOUNDS, evaluate
-from controller.model_learning.grey_runtime import GreyLearningRuntime, _HISTORY_MAX, _REFIT_INIT
 from controller.mpc import Controller
 from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.mpc_model import simulate_grey_box
@@ -22,7 +22,7 @@ CYCLE = {"u_min": 0.1, "u_max": 0.9}
 #: holds h_amb and sigma both, so a cook whose sigma/h_amb differs from the
 #: fitter's is one the fitter cannot represent, and the refit would be judged
 #: on a target outside its reach. Everything else here is far from the default.
-TRUTH = dict(C_c=11000.0, h_amb=0.5, K_Q=3200.0, theta=110.0)
+TRUTH = {"C_c": 11000.0, "h_amb": 0.5, "K_Q": 3200.0, "theta": 110.0}
 
 # The fitted free parameters, plus the held ones a refit's starting point
 # supplies alongside them -- see update_mpc._FREE.
@@ -420,7 +420,7 @@ def test_a_simulation_that_overflows_is_unmeasurable_rather_than_an_exception():
     non-positive guard or the NaN guard on its way.
     """
     t, temp, Q = _heatup_only(240)
-    runaway = dict(C_c=1e-9, h_amb=0.5, K_Q=1e12, T_amb=20.0, sigma=1e3, theta=110.0, n_delay=8)
+    runaway = {"C_c": 1e-9, "h_amb": 0.5, "K_Q": 1e12, "T_amb": 20.0, "sigma": 1e3, "theta": 110.0, "n_delay": 8}
 
     # Every free parameter is a positive finite scale, so the first guard does
     # not fire and the simulation is actually attempted.

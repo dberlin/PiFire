@@ -35,7 +35,6 @@ Description:
 """
 from probes._mcp960x_adafruit import MCP960xDevice, MCP960xProbe
 
-
 """
 *****************************************
  Class Definitions 

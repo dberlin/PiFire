@@ -50,9 +50,11 @@ Required settings format:
 
 import logging
 import time
+
 import requests
+
 from common.modes import Mode
-from notify.wled_profiles import WLEDProfileManager, WLED_COLORS, WLED_EFFECTS
+from notify.wled_profiles import WLED_COLORS, WLED_EFFECTS, WLEDProfileManager
 
 
 class WLEDNotificationHandler:

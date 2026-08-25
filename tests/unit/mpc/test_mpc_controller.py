@@ -1,5 +1,5 @@
-from dataclasses import replace
 import threading
+from dataclasses import replace
 from types import SimpleNamespace
 
 import numpy as np
@@ -19,7 +19,6 @@ from controller.model_learning.evaluation import (
     ForecastOrigin,
     HorizonScore,
 )
-
 from controller.runtime.model_fitting import (
     CandidatePair,
     FitSubmission,
@@ -88,27 +87,27 @@ class FakeSolver:
 
 
 def _diagnostics(**overrides):
-    values = dict(
-        status=0,
-        backend_status=0,
-        iterations=2,
-        solve_time_s=0.001,
-        objective=3.0,
-        kkt_residual=1e-7,
-        constraint_residual=0.0,
-        warm_started=True,
-    )
+    values = {
+        "status": 0,
+        "backend_status": 0,
+        "iterations": 2,
+        "solve_time_s": 0.001,
+        "objective": 3.0,
+        "kkt_residual": 1e-7,
+        "constraint_residual": 0.0,
+        "warm_started": True,
+    }
     values.update(overrides)
     return SimpleNamespace(**values)
 
 
 def _solve(length, first, **overrides):
-    values = dict(
-        sequence_q=np.array([first] + [first / 2.0] * (length - 1), dtype=float),
-        sequence_residual=np.zeros(length, dtype=float),
-        objective=3.0,
-        diagnostics=_diagnostics(),
-    )
+    values = {
+        "sequence_q": np.array([first] + [first / 2.0] * (length - 1), dtype=float),
+        "sequence_residual": np.zeros(length, dtype=float),
+        "objective": 3.0,
+        "diagnostics": _diagnostics(),
+    }
     values.update(overrides)
     return SimpleNamespace(**values)
 
@@ -424,7 +423,6 @@ def test_slow_candidate_preparation_does_not_block_live_observation(monkeypatch)
     def slow_poll(**_kwargs):
         preparing.set()
         assert release.wait(2.0)
-        return None
 
     controller._grey_learning_runtime._learning = SimpleNamespace(
         poll_fit_off_path=slow_poll,

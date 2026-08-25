@@ -1,19 +1,20 @@
 import numpy as np
-from controller.mpc_model import GreyBoxKF, GreyBoxEKF
+
+from controller.mpc_model import GreyBoxEKF, GreyBoxKF
 
 # Shared grey-box params (a representative calibration).
-P = dict(
-    C_c=320.0,
-    h_amb=0.50,
-    T_amb=20.0,
-    t_step=25.0,
-    q_temp=1e-2,
-    q_dist=0.5,
-    r_meas=0.04,
-    theta=50.0,
-    n_delay=4,
-    K_Q=350.0,
-)
+P = {
+    "C_c": 320.0,
+    "h_amb": 0.50,
+    "T_amb": 20.0,
+    "t_step": 25.0,
+    "q_temp": 1e-2,
+    "q_dist": 0.5,
+    "r_meas": 0.04,
+    "theta": 50.0,
+    "n_delay": 4,
+    "K_Q": 350.0,
+}
 
 
 def test_ekf_reduces_to_kf_when_sigma_zero():

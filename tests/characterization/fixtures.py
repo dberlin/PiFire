@@ -9,7 +9,7 @@ here. Individual tests may override further, but should not make things
 via the probe-cap technique described in harness.py).
 """
 
-from common.defaults import default_settings, default_control, default_pellets
+from common.defaults import default_control, default_pellets, default_settings
 
 
 def base_settings():

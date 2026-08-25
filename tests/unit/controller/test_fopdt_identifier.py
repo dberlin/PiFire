@@ -18,6 +18,9 @@ from controller.fopdt_identifier import (
     DISTRUST_RATIO,
     DISTRUST_WINDOW,
     EW_ALPHA,
+    FORM_FOPDT,
+    FORM_IPDT,
+    FORM_PARAMS,
     GAIN_MAX,
     GAIN_MIN,
     LAM,
@@ -26,15 +29,12 @@ from controller.fopdt_identifier import (
     MIN_DUTY_STD,
     MIN_TEMP_SPAN_F,
     P0,
+    RESTORE_BOUNDS,
     T_REF,
     T_SCALE,
     TAU_MAX,
     TAU_MIN,
     DutyHistory,
-    FORM_FOPDT,
-    FORM_IPDT,
-    FORM_PARAMS,
-    RESTORE_BOUNDS,
     FOPDTIdentifier,
     RLSBank,
     gate_mask,
@@ -42,7 +42,6 @@ from controller.fopdt_identifier import (
     recover_parameters,
     relative_standard_errors,
 )
-
 
 # ---------------------------------------------------------------- scalar oracle
 

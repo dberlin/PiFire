@@ -2,7 +2,6 @@ from dataclasses import replace
 
 import pytest
 
-from common.controller_model_state import CheckpointSaveOutcome
 from common.control_trace import (
     InhibitReason,
     ResultStaleState,
@@ -10,15 +9,15 @@ from common.control_trace import (
     SafetyEventType,
     TraceEventKind,
 )
+from common.controller_model_state import CheckpointSaveOutcome
 from common.model_evidence import EvidenceKind
+from controller.applied_output import FrameFeedbackDisposition, OutputSource
 from controller.model_learning.calibration import CalibrationDecision, CalibrationProgress
 from controller.mpc_allocator import allocate
+from controller.runtime.framed_pulse import FramedPulseRuntime
 from controller.runtime.model_persistence import EvidenceSubmission
 from controller.runtime.modes.hold_learning import HoldLearningRuntime
 from controller.runtime.runner import ControllerUpdateResult
-from controller.runtime.framed_pulse import FramedPulseRuntime
-from controller.applied_output import FrameFeedbackDisposition, OutputSource
-
 from tests.fakes.runner import FakeControllerRunner
 
 

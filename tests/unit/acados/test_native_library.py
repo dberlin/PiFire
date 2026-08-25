@@ -1,20 +1,19 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
 import hashlib
 import json
-from pathlib import Path
 import shutil
 import subprocess
 import sys
+from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
 
-from controller.acados import _ffi
 import controller.acados._library as library_module
+from controller.acados import _ffi
 from controller.acados._library import load_native
-
 
 REBUILD_COMMAND = "./rebuild-acados.sh --if-needed"
 PROJECT_ROOT = Path(__file__).resolve().parents[3]

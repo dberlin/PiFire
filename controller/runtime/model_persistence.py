@@ -9,11 +9,6 @@ from threading import Condition, Thread
 from typing import Protocol
 
 from common.controller_model_state import CheckpointSaveOutcome, copy_valid_snapshot
-from common.persistence.model_evidence import (
-    append_model_evidence,
-    commit_model_activation,
-    commit_model_activation_phase,
-)
 from common.model_evidence import (
     CandidateAssessmentEvidence,
     ConfidenceDecisionEvidence,
@@ -21,6 +16,11 @@ from common.model_evidence import (
     ModelEvidenceRecord,
     RecorderGapEvidence,
     RefreshDiagnosticsEvidence,
+)
+from common.persistence.model_evidence import (
+    append_model_evidence,
+    commit_model_activation,
+    commit_model_activation_phase,
 )
 from controller.model_learning.activation import ActivationPhase, PreparedActivationRecord
 

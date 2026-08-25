@@ -12,31 +12,31 @@ Imported Modules
 ================
 """
 import datetime
-import os
 import json
+import os
+import pathlib
 import shutil
 import zipfile
-import pathlib
 
 from common.common import (
+    create_logger,
     generate_uuid,
     log_path,
     process_metrics,
     semantic_ver_is_lower,
     semantic_ver_to_list,
     unpack_history,
-    create_logger,
 )
 from common.cook_diagnostics import LearningReportProvider, collect_cook_learning_diagnostics
+from common.defaults import default_probe_config
+from common.persistence.history import (
+    flush_history,
+    read_all_metrics,
+    read_history,
+)
 from common.persistence.runtime import (
     read_settings,
 )
-from common.persistence.history import (
-    read_history,
-    flush_history,
-    read_all_metrics,
-)
-from common.defaults import default_probe_config
 from file_mgmt.common import read_json_file_data, read_optional_json_file_data, update_json_file_data
 from file_mgmt.downsample import select_indices
 
@@ -245,7 +245,7 @@ def upgrade_cookfile(cookfilename, repair=False):
             list_length = len(graph_data["time_labels"])
             jsondata = []
             # Build out Raw Data Set
-            for index in range(0, list_length):
+            for index in range(list_length):
                 list_item = {
                     "T": graph_data["time_labels"][index],
                     "P": {"grill1": graph_data["grill1_temp"][index]},
@@ -270,7 +270,7 @@ def upgrade_cookfile(cookfilename, repair=False):
         elif jsonfile == "comments":
             # Add assets list to each comment v1.0 -> v1.0.1+
             for index, comment in enumerate(jsondata):
-                if not "assets" in comment.keys():
+                if not "assets" in comment:
                     jsondata[index]["assets"] = []
             cookfilestruct[jsonfile] = jsondata
         elif jsonfile == "assets" and jsondata == {}:

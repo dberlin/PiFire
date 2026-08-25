@@ -41,12 +41,11 @@ import os
 import zlib
 from concurrent.futures import ProcessPoolExecutor
 
-import numpy as np
-
 # Ahead of the `controller` imports, not after them: the guard puts the repo
 # root on sys.path itself, so importing it first is what makes this refuse with
 # the reason rather than with a ModuleNotFoundError for `controller`.
 import _pinned_two_lump  # noqa: F401,E402
+import numpy as np
 
 _pinned_two_lump.require_pinned_model(__name__)
 
@@ -55,7 +54,17 @@ from controller.mpc_model import simulate_grey_box  # noqa: E402
 from controller.update_mpc import _sim_kwargs, fit_params, fit_quality  # noqa: E402
 
 #: Shipped grey-box defaults -- the point a calibration actually starts from.
-DEFAULTS = dict(C_f=9.0, C_c=320.0, h_fc=1.3, h_amb=0.50, T_amb=20.0, theta=50.0, n_delay=4, K_Q=3.5, sigma=1.4e-9)
+DEFAULTS = {
+    "C_f": 9.0,
+    "C_c": 320.0,
+    "h_fc": 1.3,
+    "h_amb": 0.50,
+    "T_amb": 20.0,
+    "theta": 50.0,
+    "n_delay": 4,
+    "K_Q": 3.5,
+    "sigma": 1.4e-9,
+}
 
 Q_MIN, Q_MAX = 5.0, 100.0
 U_MIN, U_MAX = 0.15, 0.9
@@ -138,7 +147,7 @@ def integrate(p, *, q, T_c0, T_f0, lags0, dt=1.0):
         dT_c = (h_fc * (T_f - T_c) - h_amb * (T_c - T_amb) - rad) / C_c
         T_f += dt * dT_f
         T_c += dt * dT_c
-    return out, dict(T_c=T_c, T_f=T_f, lags=lags)
+    return out, {"T_c": T_c, "T_f": T_f, "lags": lags}
 
 
 def same_as_simulate_grey_box(p):
@@ -160,7 +169,7 @@ def _model_hot_state(p, *, q, t_ref_c, cap=40000):
         T_c, T_f, lags = st["T_c"], st["T_f"], st["lags"]
         if T_c >= t_ref_c:
             return st
-    return dict(T_c=T_c, T_f=T_f, lags=lags)
+    return {"T_c": T_c, "T_f": T_f, "lags": lags}
 
 
 def model_coast(p, *, t_ref_c=T_REF_C, span=20000):
@@ -173,7 +182,7 @@ def model_coast(p, *, t_ref_c=T_REF_C, span=20000):
 def model_dead_time(p, *, t_ref_c=T_REF_C, span=3000):
     """Seconds before the model's chamber notices a step up in firing demand."""
     st = _model_hot_state(p, q=Q_LO, t_ref_c=t_ref_c)
-    kw = dict(T_c0=st["T_c"], T_f0=st["T_f"], lags0=st["lags"])
+    kw = {"T_c0": st["T_c"], "T_f0": st["T_f"], "lags0": st["lags"]}
     held, _ = integrate(p, q=np.full(span, Q_LO), **kw)
     stepped, _ = integrate(p, q=np.full(span, Q_HI), **kw)
     moved = np.flatnonzero(stepped - held > MOVE_C)
@@ -312,23 +321,23 @@ def _one_fit(job):
     p = {k: float(fitted[k]) for k in ("C_f", "C_c", "h_fc", "h_amb", "K_Q", "sigma", "theta")}
     p["n_delay"] = int(fitted["n_delay"])
     p["T_amb"] = float(T_amb)
-    return dict(
-        free="+".join(free),
-        log=log_name,
-        restart=restart,
-        rmse=rmse,
-        converged=bool(fitted["converged"]),
-        in_bounds=_in_bounds(p),
-        C_c=p["C_c"],
-        h_amb=p["h_amb"],
-        K_Q=p["K_Q"],
-        h_fc=p["h_fc"],
-        sigma=p["sigma"],
-        tau=p["C_c"] / p["h_amb"],
-        theta=p["theta"],
-        dead=model_dead_time(p),
-        coast=model_coast(p),
-    )
+    return {
+        "free": "+".join(free),
+        "log": log_name,
+        "restart": restart,
+        "rmse": rmse,
+        "converged": bool(fitted["converged"]),
+        "in_bounds": _in_bounds(p),
+        "C_c": p["C_c"],
+        "h_amb": p["h_amb"],
+        "K_Q": p["K_Q"],
+        "h_fc": p["h_fc"],
+        "sigma": p["sigma"],
+        "tau": p["C_c"] / p["h_amb"],
+        "theta": p["theta"],
+        "dead": model_dead_time(p),
+        "coast": model_coast(p),
+    }
 
 
 def main():
@@ -344,7 +353,7 @@ def main():
     print("\n=== plant truth, measured on the plant itself ===")
     truth = {}
     for pname, mk in plants.items():
-        truth[pname] = dict(dead=plant_dead_time(mk), coast=plant_coast(mk))
+        truth[pname] = {"dead": plant_dead_time(mk), "coast": plant_coast(mk)}
         print(f"{pname:9s} dead={truth[pname]['dead']:.0f} s  coast={truth[pname]['coast']:.0f} s")
         for scen in SCENARIOS:
             t, temp, Q = synth_log(mk, scen)

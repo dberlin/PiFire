@@ -1,5 +1,4 @@
 import pytest
-
 from PySide6.QtCore import QUrl
 from PySide6.QtQml import QQmlComponent
 

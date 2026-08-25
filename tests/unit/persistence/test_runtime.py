@@ -11,7 +11,6 @@ from common.pellets_schema import PelletDbValidationError
 from common.persistence import runtime
 from common.settings_schema import SettingsValidationError
 
-
 PROBE_INFO = [
     {"label": "PitProbe", "name": "Pit", "type": "Primary", "enabled": True},
     {"label": "PinkProbe", "name": "Pink", "type": "Food", "enabled": True},

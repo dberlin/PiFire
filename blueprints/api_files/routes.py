@@ -24,20 +24,20 @@ from werkzeug.exceptions import BadRequest
 
 from common.app import api_response
 from common.control_delta import control_delta
-from common.persistence.control import enqueue_control_delta, read_control
 from common.file_browser import browse_files, resolve_managed_file
 from common.modes import Mode
+from common.persistence.control import enqueue_control_delta, read_control
 from common.web_contracts.content import (
     AssetNamesData,
     ContentErrorEnvelope,
     CookFileAsset,
     CookFileAssetsData,
     CookFileChartData,
+    CookFileComment,
     CookFileCommentAddRequest,
     CookFileCommentAssetsRequest,
     CookFileCommentDeleteRequest,
     CookFileCommentUpdateRequest,
-    CookFileComment,
     CookFileDetail,
     CookFileLabelData,
     CookFileLabelRequest,
@@ -46,13 +46,13 @@ from common.web_contracts.content import (
     CookFileTitleRequest,
     EmptyContentRequest,
     FileAssetsRequest,
-    FileRequest,
     FileListing,
     FilenameData,
+    FileRequest,
     RecipeAsset,
     RecipeAssetsData,
-    RecipeIndexedAssetAssignmentRequest,
     RecipeDetail,
+    RecipeIndexedAssetAssignmentRequest,
     RecipeIngredientAddRequest,
     RecipeIngredientDeleteRequest,
     RecipeIngredientUpdateRequest,

@@ -7,7 +7,6 @@ common/__init__.py's ``from common.common import *``, are both gone).
 
 import importlib
 
-
 NEW_MODULES = (
     "common.common",
     "common.defaults",
@@ -33,21 +32,21 @@ def test_new_modules_import_standalone():
 
 def test_public_names_resolve_from_new_homes():
     from common.api_commands import process_command  # noqa: F401
+    from common.backups import backup_settings, read_pellet_db_file  # noqa: F401
+    from common.defaults import default_control, default_settings  # noqa: F401
     from common.persistence.control import (
+        enqueue_control_delta,
         read_control,
         write_control_snapshot,
-        enqueue_control_delta,
     )
+    from common.persistence.history import read_all_metrics, read_history  # noqa: F401
+    from common.persistence.install_state import get_wizard_install_status, load_os_info  # noqa: F401
     from common.persistence.runtime import (
-        read_settings,
         read_probe_status,
+        read_settings,
     )
-    from common.persistence.history import read_history, read_all_metrics  # noqa: F401
-    from common.persistence.install_state import load_os_info, get_wizard_install_status  # noqa: F401
-    from common.defaults import default_settings, default_control  # noqa: F401
-    from common.system import is_real_hardware, get_wifi_quality  # noqa: F401
     from common.settings_migration import read_settings_file, upgrade_settings  # noqa: F401
-    from common.backups import backup_settings, read_pellet_db_file  # noqa: F401
+    from common.system import get_wifi_quality, is_real_hardware  # noqa: F401
 
 
 def test_common_common_no_longer_re_exports_moved_names():
@@ -78,10 +77,10 @@ def test_common_package_has_no_star_facade():
 def test_residual_utilities_still_live_in_common_common():
     """The bottom utility layer stayed in common.common."""
     from common.common import (  # noqa: F401
-        write_log,
+        create_logger,
+        deep_update,
+        generate_uuid,
         read_generic_json,
         write_generic_json,
-        generate_uuid,
-        deep_update,
-        create_logger,
+        write_log,
     )

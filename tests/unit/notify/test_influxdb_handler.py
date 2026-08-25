@@ -67,7 +67,6 @@ import pytest
 
 import notify.influxdb_handler as IH
 
-
 # ---------------------------------------------------------------------------
 # Fake InfluxDB client -- the mocked network boundary
 # ---------------------------------------------------------------------------

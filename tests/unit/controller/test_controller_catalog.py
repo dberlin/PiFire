@@ -4,12 +4,12 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from common.web_contracts.registry import WEB_CONTRACT_BUNDLES
 from common.web_contracts.settings import (
     CONTROLLER_CONFIG_MODELS,
     ControllerCatalog,
     ControllerConfigs,
 )
-from common.web_contracts.registry import WEB_CONTRACT_BUNDLES
 
 CATALOG = Path(__file__).resolve().parents[3] / "controller" / "controllers.json"
 FIXTURE = Path(__file__).resolve().parents[3] / "web-react" / "tests" / "e2e" / "fixtures" / "controller-metadata.json"

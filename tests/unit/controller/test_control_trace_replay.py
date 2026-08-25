@@ -1,7 +1,7 @@
 """Contracts for pure, typed control-trace replay validation."""
 
-from dataclasses import replace
 import sqlite3
+from dataclasses import replace
 from typing import Any, TypedDict, cast
 
 import pytest
@@ -11,19 +11,19 @@ from common.control_trace import (
     ActuationMode,
     AllocationPayload,
     AppliedOutputPayload,
-    ControlTraceRecord,
     ControllerBranch,
     ControllerType,
+    ControlTraceRecord,
     FramedPulseFramePayload,
     InhibitReason,
-    MpcFailureState,
-    MpcUpdatePayload,
-    ResultStaleState,
     ModelEventPayload,
     ModelEventType,
+    MpcFailureState,
+    MpcUpdatePayload,
     PidSpUpdatePayload,
     PidUpdatePayload,
     RecorderGapPayload,
+    ResultStaleState,
     SafetyEventPayload,
     SafetyEventType,
     SessionPayload,

@@ -14,31 +14,37 @@
 ==============================================================================
 """
 
+import argparse
+import fcntl
 import json
+import logging
+import os
+import subprocess
+import sys
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
-
+from common import datastore
+from common.acados_build import run_acados_build
 from common.common import (
-    write_log,
-    read_updater_manifest,
-    semantic_ver_is_lower,
     create_logger,
     log_path,
+    read_updater_manifest,
+    semantic_ver_is_lower,
     write_generic_json,
+    write_log,
 )
-from common import datastore
 from common.install_log import INSTALL_FAILED_PERCENT
-from common.acados_build import run_acados_build
-from common.persistence.runtime import (
-    read_settings,
-    write_settings,
-)
 from common.persistence.install_state import (
     set_updater_install_status,
     set_wizard_install_status,
+)
+from common.persistence.runtime import (
+    read_settings,
+    write_settings,
 )
 from common.web_ui_build import (
     BUILD_FAIL_MARKER,
@@ -48,14 +54,6 @@ from common.web_ui_build import (
     rebuild_web_ui,
     web_ui_needs_rebuild,
 )
-from importlib.metadata import version, PackageNotFoundError
-
-import fcntl
-import os
-import subprocess
-import sys
-import argparse
-import logging
 
 #: This file sits at the repo root, beside web-react/ and updater/.
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))

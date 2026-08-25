@@ -7,13 +7,13 @@ software fan ramp, input status, get_output_status, and cleanup.
 """
 
 import logging
-
-import pytest
 from unittest import mock
 
+import pytest
+
 import grillplat.prototype as proto
-from grillplat.prototype import GrillPlatform
 from grillplat.actuator_capabilities import AUGER_TIMING
+from grillplat.prototype import GrillPlatform
 
 
 def _config(dc_fan=False, frequency=100, standalone=True):
@@ -76,9 +76,8 @@ def test_init_config_parse_failure_is_logged_and_reraised(caplog):
     AttributeError ('GrillPlatform' object has no attribute 'dc_fan') instead
     of the original, more informative error.
     """
-    with caplog.at_level(logging.ERROR, logger="control"):
-        with pytest.raises(AttributeError, match="NoneType"):
-            GrillPlatform(None)
+    with caplog.at_level(logging.ERROR, logger="control"), pytest.raises(AttributeError, match="NoneType"):
+        GrillPlatform(None)
     assert "Error parsing platform configuration" in caplog.text
 
 

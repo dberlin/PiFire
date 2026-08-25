@@ -28,11 +28,10 @@ from adafruit_emc2101.emc2101_lut import EMC2101_LUT
 
 from common.i2c_bus import open_i2c_bus
 from common.i2c_bus_config import parse_i2c_bus
-from grillplat.numato_usbrelay import NumatoUSBRelay
-from grillplat.emc2301 import EMC2301
-from grillplat.system_commands import SystemCommandsMixin
 from grillplat.actuator_capabilities import AUGER_TIMING
-
+from grillplat.emc2301 import EMC2301
+from grillplat.numato_usbrelay import NumatoUSBRelay
+from grillplat.system_commands import SystemCommandsMixin
 
 """
 	==============================

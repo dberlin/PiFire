@@ -6,7 +6,6 @@ from collections.abc import Mapping, Sequence
 from os import PathLike
 from typing import TYPE_CHECKING, Protocol, TypeAlias
 
-
 if TYPE_CHECKING:
     from common.common import ErrorKind
     from common.control_trace import ControlTraceRecord

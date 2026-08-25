@@ -98,4 +98,3 @@ class ToFHopperLevel(SampledHopperLevel):
 
     def _close_sensor(self):
         """Stop ranging / release the sensor. Optional; no-op by default."""
-        pass

@@ -893,7 +893,7 @@ def test_notify_system_context_without_cpu_thermal_key(patched_client, monkeypat
 
     monkeypatch.setattr(MH.psutil, "cpu_percent", lambda interval=None: 1.0)
     monkeypatch.setattr(MH.psutil, "virtual_memory", lambda: SimpleNamespace(available=1, free=2))
-    monkeypatch.setattr(MH.psutil, "sensors_temperatures", lambda: {})
+    monkeypatch.setattr(MH.psutil, "sensors_temperatures", dict)
 
     handler.notify("system", {})
 

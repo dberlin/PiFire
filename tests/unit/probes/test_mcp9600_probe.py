@@ -1,8 +1,8 @@
+import importlib
 import json
 import os
 import sys
 import types
-import importlib
 
 import pytest
 
@@ -233,6 +233,7 @@ def test_manifest_mcp9600_entry():
 
 def test_kttdevice_opens_bus_via_factory(monkeypatch):
     from unittest import mock
+
     from common.i2c_bus_config import FT232HBus
 
     probe = _load_probe(monkeypatch)

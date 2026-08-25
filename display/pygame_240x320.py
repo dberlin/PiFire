@@ -17,10 +17,12 @@ PiFire Display Interface Library
 """
  Imported Libraries
 """
-import time
-import threading
 import socket
+import threading
+import time
+
 import pygame
+
 from display._base_240x320 import DisplayBase
 
 """

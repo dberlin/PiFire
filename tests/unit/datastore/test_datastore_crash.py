@@ -6,7 +6,6 @@ import pytest
 
 from common import datastore
 
-
 #: A key no migration owns. The claim under test is that a committed write
 #: survives a hard kill, which holds for any key -- and `settings:general` is
 #: brought forward and restamped by init(), so a sentinel stored there would

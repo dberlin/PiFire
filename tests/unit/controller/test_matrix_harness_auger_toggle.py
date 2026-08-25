@@ -11,7 +11,7 @@ import types
 
 import pytest
 
-import tools.experiments.controller_matrix as controller_matrix
+from tools.experiments import controller_matrix
 
 PULSE_FRAME_S = 20
 PULSE_S = 2

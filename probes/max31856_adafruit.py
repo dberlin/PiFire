@@ -35,6 +35,7 @@ Description:
 from collections.abc import Mapping
 
 import adafruit_max31856
+
 from probes.base import ProbeInterface, resolve_spi_bus
 from probes.thermocouple_inference import ThermocoupleJunctionSample
 

@@ -45,9 +45,11 @@ Description:
 *****************************************
 """
 import logging
-import time
 import threading
-from w1thermsensor import W1ThermSensor, Sensor
+import time
+
+from w1thermsensor import Sensor, W1ThermSensor
+
 from probes.base import ProbeInterface
 
 """

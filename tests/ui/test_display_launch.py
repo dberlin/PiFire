@@ -57,10 +57,14 @@ def test_build_launch_argv_does_not_mutate_env():
 @pytest.mark.parametrize(
     "line",
     [
-        "00:00:55.148 [ERROR] [wlr] [backend/drm/atomic.c:81] connector DP-1: "
-        "Atomic commit failed: Device or resource busy\n",
-        "00:00:55.148 [ERROR] [wlr] [backend/drm/atomic.c:912] connector HDMI-A-1: "
-        "Atomic commit failed: Device or resource busy\n",
+        (
+            "00:00:55.148 [ERROR] [wlr] [backend/drm/atomic.c:81] connector DP-1: "
+            "Atomic commit failed: Device or resource busy\n"
+        ),
+        (
+            "00:00:55.148 [ERROR] [wlr] [backend/drm/atomic.c:912] connector HDMI-A-1: "
+            "Atomic commit failed: Device or resource busy\n"
+        ),
         "00:00:55.148 [ERROR] [sway/desktop/output.c:300] Page-flip failed on output DP-1\n",
         "00:00:55.148 [ERROR] [sway/desktop/output.c:411] Page-flip failed on output HDMI-A-1\n",
     ],

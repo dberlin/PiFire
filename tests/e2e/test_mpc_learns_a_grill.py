@@ -66,12 +66,11 @@ simulation and take minutes, not seconds.
 
 import pytest
 
-import tools.experiments.controller_matrix as controller_matrix
 from common.defaults import default_settings
 from controller.mpc import Controller
 from controller.mpc_config import DEFAULT_MPC_CONFIG, MODEL_PARAMETER_KEYS
 from grillplat.actuator_capabilities import AUGER_TIMING
-
+from tools.experiments import controller_matrix
 
 SCENARIO = controller_matrix.SCENARIOS["steady_450"]
 SETPOINT_F = SCENARIO.setpoints[0][1]

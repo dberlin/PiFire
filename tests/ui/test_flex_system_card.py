@@ -1,3 +1,5 @@
+import itertools
+
 from PIL import Image
 
 from display.flexobject import SystemCard, resolve_accent
@@ -41,7 +43,7 @@ def test_system_card_touch_rows_are_stacked_and_map_to_button_list():
     # Rows are stacked top-to-bottom without overlap, starting at the card's y origin
     assert areas[0].top == 40
     assert areas[0].top < areas[1].top < areas[2].top
-    for a, b in zip(areas, areas[1:]):
+    for a, b in itertools.pairwise(areas):
         assert a.top + a.height <= b.top
 
 

@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtCore import QObject, QUrl, Property, Slot
+from PySide6.QtCore import Property, QObject, QUrl, Slot
 from PySide6.QtQml import QQmlComponent
 
 from tests.conftest import QML_DIR

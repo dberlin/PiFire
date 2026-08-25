@@ -1,6 +1,7 @@
 """The predictor's two branches are exact first-order trajectories, and the
 correction between them starts at exactly zero."""
 
+import itertools
 import math
 
 import pytest
@@ -450,7 +451,7 @@ def test_a_legitimate_fast_temperature_change_does_not_trip_the_envelope():
         measurements.append(measured)
         p.temperature(measured, t)
 
-    deltas = [b - a for a, b in zip(measurements, measurements[1:])]
+    deltas = [b - a for a, b in itertools.pairwise(measurements)]
     assert _longest_run([d > MAX_RESIDUAL_F for d in deltas]) >= MAX_RESIDUAL_STREAK
     assert max(measurements) < TEMP_MAX_F  # a residual test, not a band test
 

@@ -1,5 +1,5 @@
-from tests.ft232h_helpers import make_ft232h_platform
 from grillplat.actuator_capabilities import AUGER_TIMING
+from tests.ft232h_helpers import make_ft232h_platform
 
 
 def _relay_config(**overrides):

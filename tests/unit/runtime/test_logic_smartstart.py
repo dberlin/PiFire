@@ -1,7 +1,7 @@
 import pytest
 
 from controller.runtime.logic.cycle import CycleTimes
-from controller.runtime.logic.smartstart import select_profile, profile_cycle
+from controller.runtime.logic.smartstart import profile_cycle, select_profile
 
 
 @pytest.mark.parametrize(

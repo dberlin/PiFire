@@ -36,9 +36,11 @@ Description:
 *****************************************
 """
 import logging
-import spidev
-import time
 import math
+import time
+
+import spidev
+
 from probes.base import ProbeInterface
 
 """

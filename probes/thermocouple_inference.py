@@ -1,3 +1,4 @@
+import itertools
 from collections import deque
 from dataclasses import dataclass, replace
 from enum import StrEnum
@@ -88,15 +89,15 @@ class _FastArm:
 
 class ThermocoupleInferenceEngine:
     __slots__ = (
+        "_confirmation_path",
+        "_fast_arm",
         "_history",
         "_last_admitted_at",
         "_last_observed_at",
         "_pending_heat_on_s",
-        "_fast_arm",
-        "_confirmation_path",
         "_primary_latched",
-        "_recovery_since",
         "_recovery_last_at",
+        "_recovery_since",
         "_report",
     )
 
@@ -288,7 +289,7 @@ class ThermocoupleInferenceEngine:
     ) -> dict[str, object]:
         first = history[0]
         last = history[-1]
-        gaps = tuple(current.now - previous.now for previous, current in zip(history, history[1:], strict=False))
+        gaps = tuple(current.now - previous.now for previous, current in itertools.pairwise(history))
         hot_values = tuple(entry.hot_c for entry in history)
         cold_values = tuple(entry.cold_c for entry in history)
         delta_values = tuple(entry.delta_c for entry in history)
@@ -368,7 +369,7 @@ def _evaluate_slow_channels(
 ) -> _SlowEvaluation:
     first = history[0]
     last = history[-1]
-    gaps = (current.now - previous.now for previous, current in zip(history, history[1:], strict=False))
+    gaps = (current.now - previous.now for previous, current in itertools.pairwise(history))
     temporal_eligible = last.now - first.now >= 240.0 and max(gaps, default=0.0) <= 30.0
     if not temporal_eligible:
         return _SlowEvaluation(

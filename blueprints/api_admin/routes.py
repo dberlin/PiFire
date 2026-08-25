@@ -15,43 +15,42 @@ import io
 import os
 
 from flask import current_app, jsonify, request, send_file
-from werkzeug.utils import secure_filename
-
 from pydantic import ValidationError
+from werkzeug.utils import secure_filename
 
 from common.app import api_response
 from common.backups import backup_pellet_db, backup_settings, read_pellet_db_file
 from common.common import write_log
 from common.control_delta import control_delta
+from common.defaults import default_control, default_settings
 from common.file_browser import resolve_managed_file
-from common.settings_migration import read_settings_file
+from common.modes import Mode
+from common.pellets_actions import clear_pellet_db
 from common.pellets_schema import PelletDbValidationError
-from common.settings_schema import SettingsValidationError
 from common.persistence.control import (
+    enqueue_control_delta,
     flush_control,
     read_control,
-    enqueue_control_delta,
 )
+from common.persistence.history import flush_history, request_history_clear
 from common.persistence.runtime import (
     read_pellet_db,
     read_settings,
     write_pellet_db,
     write_settings,
 )
-from common.persistence.history import flush_history, request_history_clear
-from common.defaults import default_control, default_settings
-from common.modes import Mode
-from common.pellets_actions import clear_pellet_db
 from common.server_status import set_server_status
+from common.settings_migration import read_settings_file
+from common.settings_schema import SettingsValidationError
 from common.system import reboot_system, restart_scripts, shutdown_system
 from common.web_contracts.operations import (
     AdminSettingsUpdate,
     AdminState,
-    BackupCreateRequest,
     BackupCreated,
+    BackupCreateRequest,
     BackupListing,
-    BackupRestoreRequest,
     BackupRestored,
+    BackupRestoreRequest,
     EmptyOperationRequest,
     FactoryResetResponse,
     LogsDeleted,

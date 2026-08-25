@@ -24,15 +24,16 @@
 #
 # *****************************************
 
-import threading
 import logging
+import threading
 import time
 
 # The watchdog binds these directly instead of going through the `time` module
 # attribute the sampling loop reads. It has to measure elapsed real time on a
 # clock that cannot be stepped backwards by a clock adjustment, and it has to
 # keep its own pacing whatever the sampling loop's clock is doing.
-from time import monotonic as _monotonic, sleep as _sleep
+from time import monotonic as _monotonic
+from time import sleep as _sleep
 
 from distance.intervals import (
     SENSOR_BACKOFF_BASE,

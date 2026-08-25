@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirna
 
 from controller.grill_sim import GrillSim, MAKGrillSim  # noqa: E402
 from controller.mpc_config import DEFAULT_MPC_CONFIG, model_is_identified  # noqa: E402
-import tools.experiments.controller_matrix as controller_matrix  # noqa: E402
+from tools.experiments import controller_matrix  # noqa: E402
 from tools.experiments.controller_matrix import SCENARIOS, run_scenario  # noqa: E402
 
 

@@ -11,8 +11,8 @@ from pathlib import Path
 import pytest
 
 from common import datastore, pellets_schema
-from common.persistence.runtime import read_pellets_store, write_pellets_store
 from common.defaults import default_pellets
+from common.persistence.runtime import read_pellets_store, write_pellets_store
 from common.web_contracts.control import PELLETDB_SCHEMA_VERSION
 
 LIVE_FIXTURE = Path(__file__).resolve().parents[2] / "fixtures" / "pelletdb_live.json"

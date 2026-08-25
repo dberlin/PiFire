@@ -4,9 +4,7 @@ import sqlite3
 import pytest
 
 from common.defaults import METRIC_COLUMNS, default_metrics
-from common.persistence import history
-from common.persistence import control
-
+from common.persistence import control, history
 
 SAMPLE_HISTORY = {
     "probe_history": {

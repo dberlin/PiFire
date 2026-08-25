@@ -19,9 +19,9 @@ from common.web_contracts.content import (
     RecipeInstructionUpdateRequest,
     RecipeMetadataUpdateRequest,
     RecipeSplashAssetAssignmentRequest,
-    RecipeStepRequest,
     RecipeStepDeleteRequest,
     RecipeStepInsertRequest,
+    RecipeStepRequest,
     RecipeStepUpdateRequest,
 )
 

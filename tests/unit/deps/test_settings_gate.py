@@ -4,10 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from common.control_trace import ControllerType
 from common import controller_deps as cd
+from common.control_trace import ControllerType
 from controller.runtime import runner as runner_module
-
 
 REBUILD = "./rebuild-acados.sh --if-needed"
 

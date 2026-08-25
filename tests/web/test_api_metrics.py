@@ -58,8 +58,8 @@ def seed(mode="Smoke", augerontime=100, duration_ms=60_000):
     with update_metrics, which amends the last row in place. Seeding them in
     the dict handed to append_metric looks like it works and does nothing.
     """
-    from common.persistence.history import append_metric, update_metrics
     from common.defaults import default_metrics
+    from common.persistence.history import append_metric, update_metrics
 
     row = default_metrics()
     row["mode"] = mode
@@ -139,8 +139,8 @@ def test_listing_carries_units_and_auger_rate(ds, client):
 
 
 def test_estimates_use_the_configured_auger_rate(ds, client):
-    from common.persistence.runtime import read_settings, write_settings
     from common.persistence.history import flush_metrics
+    from common.persistence.runtime import read_settings, write_settings
 
     flush_metrics()
     settings = read_settings()

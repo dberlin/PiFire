@@ -8,7 +8,7 @@ not, so anything the Qt renderer logged went nowhere at all.
 
 import logging
 
-import display.qtquick_flex as qtquick_flex
+from display import qtquick_flex
 
 
 def _detach(name):
@@ -49,7 +49,7 @@ def test_the_child_entry_point_configures_before_it_renders():
 
     original_configure = qtquick_flex._configure_child_logging
     qtquick_flex._configure_child_logging = _fake_configure
-    import display.qtapp as qtapp
+    from display import qtapp
 
     original_run_app = qtapp.run_app
     qtapp.run_app = _fake_run_app

@@ -60,14 +60,13 @@ if REPO not in sys.path:
     sys.path.insert(0, REPO)
 
 from controller.grill_sim import DT, GrillSim, MAKGrillSim  # noqa: E402
-from controller.mpc_config import DEFAULT_MPC_CONFIG  # noqa: E402
 
 # The MODEL's own reading, not the public `braking_distance` -- that one already
 # carries `_COAST_BOUND`, which is the number this script exists to derive, so
 # importing it would measure the factor against itself and report that whatever
 # is currently shipped is exactly right.
 from controller.model_promotion import _model_coast  # noqa: E402
-
+from controller.mpc_config import DEFAULT_MPC_CONFIG  # noqa: E402
 from docs.superpowers.experiments.ndelay_sweep_plants import (  # noqa: E402
     LUMP_FREE,
     NORMAL,
@@ -111,7 +110,7 @@ def plant_braking_time(plant_name, t_ref_c, *, fan=1.0, cut_fan=None, max_s=2000
     because the bound has to cover the slower one.
     """
     cls = GrillSim if plant_name == "generic" else MAKGrillSim
-    kw = dict(seed=0, fixed_fan=fan)
+    kw = {"seed": 0, "fixed_fan": fan}
     if plant_name == "mak":
         kw["T0"] = 20.0
     s = cls(**kw)

@@ -11,11 +11,9 @@ from common.control_trace import (
     TraceEventKind,
 )
 from controller.applied_output import FrameFeedbackDisposition
-from controller.runtime.logic.pulse import PulseResetReason
-from controller.runtime.runner import ControllerUpdateResult
-from controller.runtime.logic.pulse import PulseFrameResult
 from controller.runtime.framed_pulse import FramedPulseRuntime
-
+from controller.runtime.logic.pulse import PulseFrameResult, PulseResetReason
+from controller.runtime.runner import ControllerUpdateResult
 from tests.fakes.runner import FakeControllerRunner
 
 

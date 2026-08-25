@@ -1,9 +1,9 @@
 """SQLite persistence for control snapshots and versioned delta intents."""
 
-from collections.abc import Mapping
 import copy
 import json
 import logging
+from collections.abc import Mapping
 
 from common import datastore
 from common.common import generate_uuid

@@ -6,7 +6,6 @@ import pytest
 import common.system as cc
 from common.system import get_wifi_quality
 
-
 IWCONFIG_OUTPUT = b"""wlan0     IEEE 802.11  ESSID:"MyNet"
           Mode:Managed  Frequency:5.18 GHz  Access Point: AA:BB:CC:DD:EE:FF
           Bit Rate=433 Mb/s   Tx-Power=22 dBm
@@ -22,7 +21,7 @@ def _iw_output(dbm):
         "\tfreq: 5180\n"
         f"\tsignal: {dbm} dBm\n"
         "\ttx bitrate: 433.3 MBit/s\n"
-    ).encode("utf-8")
+    ).encode()
 
 
 def test_iwconfig_present_parses_link_quality():

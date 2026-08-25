@@ -58,6 +58,7 @@ PiFire Display Interface Library
  Imported Libraries
 """
 import threading
+
 from luma.core.interface.serial import spi
 
 """

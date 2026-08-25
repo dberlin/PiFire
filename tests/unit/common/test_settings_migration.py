@@ -34,8 +34,8 @@ import os
 import pytest
 
 from common import datastore
-from common.persistence import runtime as runtime_persistence
 from common.defaults import default_settings
+from common.persistence import runtime as runtime_persistence
 from common.settings_migration import (
     downgrade_settings,
     read_settings_file,
@@ -100,7 +100,7 @@ def test_upgrade_settings_v1_4_cascade_migrates_notify_probe_and_platform():
     old["startup"] = {"start_to_mode": {}}
     old["start_to_mode"] = {"grill1_setpoint": 225}
     old["dashboard"] = {"sentinel_old_dash": True}
-    for key in d["notify_services"].keys():
+    for key in d["notify_services"]:
         old[key] = {"legacy_marker": key}
     del old["notify_services"]
     old["probe_settings"]["probe_options"] = {"x": 1}
@@ -121,7 +121,7 @@ def test_upgrade_settings_v1_4_cascade_migrates_notify_probe_and_platform():
     result = upgrade_settings([1, 4, 0], old, d)
 
     # Notification settings moved from top-level keys into notify_services.
-    for key in d["notify_services"].keys():
+    for key in d["notify_services"]:
         assert result["notify_services"][key] == {"legacy_marker": key}
         # ...and the legacy top-level copy is popped, not left behind as a
         # stray extra key (common/settings_migration.py:135-138).
@@ -193,7 +193,7 @@ def test_upgrade_settings_v1_4_cascade_preserves_start_to_mode():
     old["versions"] = {"server": "1.4.0", "build": 0}
     old["startup"] = {"start_to_mode": {}}
     old["start_to_mode"] = {"grill1_setpoint": 225}
-    for key in d["notify_services"].keys():
+    for key in d["notify_services"]:
         old[key] = {}
     del old["notify_services"]
     old["probe_settings"]["probe_options"] = {}

@@ -1,18 +1,19 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import subprocess
+import threading
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import replace
-import hashlib
-import json
 from pathlib import Path
-import subprocess
-import threading
-from typing import Any, Callable, Iterator, Mapping
+from typing import Any
 
 import pytest
-import tools.rebuild_acados as rebuild_module
 
+import tools.rebuild_acados as rebuild_module
 from tools.rebuild_acados import (
     BuildInputIdentity,
     BuildMode,
@@ -31,7 +32,6 @@ from tools.rebuild_acados import (
     run_rebuild,
     validate_timing_gate,
 )
-
 
 LIBRARY_DIGEST = "ab" * 32
 RUNTIME_GATES = (
@@ -823,14 +823,7 @@ def test_configured_compiler_identity_comes_from_cmake_cache(
     compiler_file = tmp_path / "CMakeFiles/3.31/CMakeCCompiler.cmake"
     compiler_file.parent.mkdir(parents=True)
     compiler_file.write_text(
-        "\n".join(
-            (
-                'set(CMAKE_C_COMPILER "/usr/bin/cc")',
-                'set(CMAKE_C_COMPILER_ID "GNU")',
-                'set(CMAKE_C_COMPILER_VERSION "14.2.1")',
-                'set(CMAKE_C_COMPILER_TARGET "")',
-            )
-        )
+        'set(CMAKE_C_COMPILER "/usr/bin/cc")\nset(CMAKE_C_COMPILER_ID "GNU")\nset(CMAKE_C_COMPILER_VERSION "14.2.1")\nset(CMAKE_C_COMPILER_TARGET "")'
     )
     monkeypatch.setattr(
         rebuild_module,
@@ -857,14 +850,7 @@ def test_configured_appleclang_identity_uses_the_executable_version(
     compiler_file = tmp_path / "CMakeFiles/4.2/CMakeCCompiler.cmake"
     compiler_file.parent.mkdir(parents=True)
     compiler_file.write_text(
-        "\n".join(
-            (
-                'set(CMAKE_C_COMPILER "/usr/bin/cc")',
-                'set(CMAKE_C_COMPILER_ID "AppleClang")',
-                'set(CMAKE_C_COMPILER_VERSION "21.0.0.21000330")',
-                'set(CMAKE_C_COMPILER_TARGET "")',
-            )
-        )
+        'set(CMAKE_C_COMPILER "/usr/bin/cc")\nset(CMAKE_C_COMPILER_ID "AppleClang")\nset(CMAKE_C_COMPILER_VERSION "21.0.0.21000330")\nset(CMAKE_C_COMPILER_TARGET "")'
     )
     command_identity = {
         "id": "Clang",

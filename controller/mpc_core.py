@@ -12,6 +12,7 @@ from typing import Protocol, runtime_checkable
 
 import numpy as np
 import numpy.typing as npt
+
 from controller.acados import (
     AcadosGreyBoxMPC,
     GreyBoxMPCConfig,
@@ -19,22 +20,21 @@ from controller.acados import (
     SolverError,
 )
 from controller.applied_output import AppliedOutput
-from controller.runtime.context import EVENT_LOG_NAME
-from controller.model_learning.calibration import CalibrationDecision, CalibrationProgress
 from controller.base import MpcFailureState, MpcTraceDiagnostics
+from controller.model_learning.calibration import CalibrationDecision, CalibrationProgress
 from controller.model_promotion import FeasibilityReport, feasibility_report
 from controller.mpc_allocator import AllocationResult, allocate, normalized_load_from_auger_duty
 from controller.mpc_calibration import TemperatureForecast
 from controller.mpc_config import (
-    JsonValue,
     MODEL_PARAMETER_KEYS,
+    JsonValue,
     ModelMetadata,
     model_is_identified,
     normalize_config,
     to_celsius,
 )
 from controller.mpc_model import GreyBoxEKF, GreyBoxKF, steady_combustion_load
-
+from controller.runtime.context import EVENT_LOG_NAME
 
 _NATIVE_BOUND_TOLERANCE = 1e-6
 _HISTORY_MAX = 8640
@@ -98,9 +98,9 @@ class MpcSolver(Protocol):
         self,
         state: npt.ArrayLike,
         *,
-        setpoint_c: float | int,
-        q_previous: float | int,
-        equilibrium_q: float | int,
+        setpoint_c: float,
+        q_previous: float,
+        equilibrium_q: float,
     ) -> NativeSolve: ...
 
 

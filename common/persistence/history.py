@@ -9,7 +9,6 @@ from common.defaults import METRIC_COLUMNS, default_metrics
 from common.persistence.transforms import history_row_to_dict
 from common.sqlite_queue import SqliteQueue
 
-
 _HISTORY_SELECT = "SELECT ts,psp,primary_temps,food_temps,aux_temps,notify_targets,ext_data FROM history ORDER BY id"
 _AUTOTUNE_QUEUE = "queue_autotune"
 

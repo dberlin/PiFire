@@ -18,8 +18,8 @@ import tempfile
 import zipfile
 
 import pytest
-from common.web_contracts.content import CookFileAsset
 
+from common.web_contracts.content import CookFileAsset
 from tests.web._asset_helpers import make_static_img_tmp_cleanup, png_bytes, read_member, upload
 from tests.web.archive_builders import write_cookfile
 
@@ -86,7 +86,7 @@ def test_asset_upload_runs_the_real_pillow_pipeline(client, folders, monkeypatch
     """add_asset rotates, thumbnails and resizes with real Pillow
     (file_mgmt/media.py:26-61). Not mocked -- a mocked pipeline would not catch
     a thumbnail that never lands in the archive."""
-    import blueprints.api_files.cookfile_api as cookfile_api
+    from blueprints.api_files import cookfile_api
 
     history_dir, _ = folders
     name = write_cookfile(history_dir, "AssetUp-Cook")

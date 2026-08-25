@@ -22,8 +22,9 @@ Profile Mapping:
 
 import copy
 import logging
-import requests
 import time
+
+import requests
 
 # Color definitions for WLED profiles (RGB values)
 WLED_COLORS = {

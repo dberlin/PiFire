@@ -1,14 +1,28 @@
 """Behavioral contracts for the durable compact model-evidence ledger."""
 
+import sqlite3
 from dataclasses import replace
 from types import SimpleNamespace
-
-import sqlite3
 
 import pytest
 from pydantic import ValidationError
 
 from common.control_trace import AllocationClampReason, AmbientSource
+from common.model_evidence import (
+    MODEL_EVIDENCE_SCHEMA_VERSION,
+    ActivationEvidence,
+    AllocationEvidence,
+    CalibrationSummaryEvidence,
+    CandidateAssessmentEvidence,
+    ConfidenceDecisionEvidence,
+    EvidenceKind,
+    FallbackEvidence,
+    FitLifecycleEvidence,
+    ForecastOriginEvidence,
+    ModelEvidenceRecord,
+    RollbackEvidence,
+    TimingDistributionEvidence,
+)
 from common.persistence.model_evidence import (
     ModelActivationPair,
     append_model_evidence,
@@ -20,21 +34,6 @@ from common.persistence.model_evidence import (
     read_model_evidence,
     reset_model_evidence,
 )
-from common.model_evidence import (
-    ActivationEvidence,
-    AllocationEvidence,
-    CandidateAssessmentEvidence,
-    CalibrationSummaryEvidence,
-    ConfidenceDecisionEvidence,
-    EvidenceKind,
-    FallbackEvidence,
-    FitLifecycleEvidence,
-    ForecastOriginEvidence,
-    ModelEvidenceRecord,
-    RollbackEvidence,
-    TimingDistributionEvidence,
-)
-from common.model_evidence import MODEL_EVIDENCE_SCHEMA_VERSION
 
 _DIGEST = "a" * 64
 _OTHER_DIGEST = "b" * 64
@@ -299,8 +298,8 @@ def test_append_only_identity_insertion_order_and_batch_atomicity(ds):
 
 
 def test_raw_trace_pruning_cannot_delete_durable_evidence(ds):
+    from common.control_trace import ControllerType, ControlTraceRecord, SessionPayload, TraceEventKind, TraceSetting
     from common.persistence.control_trace import append_control_trace, prune_control_trace
-    from common.control_trace import ControlTraceRecord, ControllerType, SessionPayload, TraceEventKind, TraceSetting
 
     evidence = _forecast("forecast-a", 100)
     trace = ControlTraceRecord(
@@ -522,9 +521,11 @@ def test_activation_snapshot_rejects_nonstandard_json_constants(constant):
             "generations must be non-negative integers",
         ),
         (
-            '{"configuration":{},"candidate_generation":0,"role_generation":0,'
-            '"model_digest":"","estimator_kind":"grey","solver_kind":"native",'
-            '"ownership_digest":"owner"}',
+            (
+                '{"configuration":{},"candidate_generation":0,"role_generation":0,'
+                '"model_digest":"","estimator_kind":"grey","solver_kind":"native",'
+                '"ownership_digest":"owner"}'
+            ),
             "identity fields must be non-blank strings",
         ),
     ],

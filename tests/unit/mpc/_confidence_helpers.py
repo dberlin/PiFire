@@ -16,12 +16,11 @@ from common.model_evidence import (
     CandidateAssessmentEvidence,
     EvidenceKind,
     ForecastOriginEvidence,
-    ModelEvidenceRecord,
     ModelEvidencePayload,
+    ModelEvidenceRecord,
     TimingDistributionEvidence,
 )
 from controller.model_learning.contracts import CandidateOrigin, LearningStatus
-
 
 _CANDIDATE = sha256(b"candidate").hexdigest()
 _INCUMBENT = sha256(b"incumbent").hexdigest()

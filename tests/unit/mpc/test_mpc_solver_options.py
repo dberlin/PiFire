@@ -6,8 +6,8 @@ import pytest
 
 import controller.mpc as mpc_module
 import controller.mpc_core as mpc_core_module
-from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.acados import GreyBoxMPCConfig
+from controller.mpc_config import DEFAULT_MPC_CONFIG
 from tests.unit.mpc._solver_fixtures import CYCLE, _config, _Estimator, _Solver
 
 

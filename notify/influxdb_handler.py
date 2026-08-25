@@ -28,8 +28,6 @@ class InfluxNotificationHandler:
     def publishing_thread(self, url, token, org, bucket):
         from influxdb_client import InfluxDBClient
 
-        bucket = bucket
-
         client = InfluxDBClient(url=url, token=token, org=org)
 
         from influxdb_client import WriteOptions
@@ -83,7 +81,7 @@ class InfluxNotificationHandler:
                 return data[k]
             return default
 
-        PrimaryKey = list(in_data["probe_history"]["primary"].keys())[0]
+        PrimaryKey = next(iter(in_data["probe_history"]["primary"].keys()))
         # Grills may be configured with 0, 1, or 2+ food probes -- don't
         # assume >=2 are present. Missing probes degrade to 0.0 rather than
         # raising IndexError (which had no handler anywhere up the call

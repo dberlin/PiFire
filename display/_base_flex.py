@@ -15,60 +15,62 @@ PiFire Flexible Display Interface Library
 """
  Imported Libraries
 """
-import time
 import logging
-import socket
 import os
+import socket
+import time
+
 import requests
+from PIL import Image, ImageFilter
+
+from common.common import display_sleep_timeout, read_generic_json
+from common.control_delta import control_delta
+from common.modes import Mode
+from common.persistence.control import (
+    enqueue_control_delta,
+    read_control,
+)
+from common.persistence.runtime import (
+    read_current,
+    read_settings,
+    read_status,
+    write_settings,
+)
+from common.system import is_real_hardware
+from display._loggers import resolve_loggers
 
 # The widget classes below are never referenced by literal name in this file;
 # _build_objects() resolves them dynamically via
 # globals()[FlexObject_TypeMap[object_data["type"]]], so every class named as
 # a FlexObject_TypeMap value must be present in this module's globals().
 from display.flexobject import (
+    AlertMessage,  # noqa: F401  # dynamic-dispatch
+    ButtonRow,  # noqa: F401  # dynamic-dispatch
+    ControlPanel,  # noqa: F401  # dynamic-dispatch
+    CookTimeBar,  # noqa: F401  # dynamic-dispatch
+    DutyPill,  # noqa: F401  # dynamic-dispatch
+    FlexButton,  # noqa: F401  # dynamic-dispatch
     FlexObject_TypeMap,
-    resolve_accent,
     GaugeCircle,  # noqa: F401  # dynamic-dispatch
     GaugeCompact,  # noqa: F401  # dynamic-dispatch
-    ModeBar,  # noqa: F401  # dynamic-dispatch
-    ControlPanel,  # noqa: F401  # dynamic-dispatch
-    StatusIcon,  # noqa: F401  # dynamic-dispatch
-    MenuIcon,  # noqa: F401  # dynamic-dispatch
-    MenuGeneric,  # noqa: F401  # dynamic-dispatch
-    MenuQRCode,  # noqa: F401  # dynamic-dispatch
+    GaugeEmber,  # noqa: F401  # dynamic-dispatch
+    HeaderBar,  # noqa: F401  # dynamic-dispatch
+    HopperStatus,  # noqa: F401  # dynamic-dispatch
+    HopperVertical,  # noqa: F401  # dynamic-dispatch
     InputNumber,  # noqa: F401  # dynamic-dispatch
     InputNumberSimple,  # noqa: F401  # dynamic-dispatch
-    TimerStatus,  # noqa: F401  # dynamic-dispatch
-    AlertMessage,  # noqa: F401  # dynamic-dispatch
-    FlexButton,  # noqa: F401  # dynamic-dispatch
-    SPlusStatus,  # noqa: F401  # dynamic-dispatch
+    MenuGeneric,  # noqa: F401  # dynamic-dispatch
+    MenuIcon,  # noqa: F401  # dynamic-dispatch
+    MenuQRCode,  # noqa: F401  # dynamic-dispatch
+    ModeBar,  # noqa: F401  # dynamic-dispatch
     PModeStatus,  # noqa: F401  # dynamic-dispatch
-    HopperStatus,  # noqa: F401  # dynamic-dispatch
     ProbeCard,  # noqa: F401  # dynamic-dispatch
-    GaugeEmber,  # noqa: F401  # dynamic-dispatch
+    SPlusStatus,  # noqa: F401  # dynamic-dispatch
+    StatusIcon,  # noqa: F401  # dynamic-dispatch
     SystemCard,  # noqa: F401  # dynamic-dispatch
-    DutyPill,  # noqa: F401  # dynamic-dispatch
-    CookTimeBar,  # noqa: F401  # dynamic-dispatch
-    HopperVertical,  # noqa: F401  # dynamic-dispatch
-    HeaderBar,  # noqa: F401  # dynamic-dispatch
-    ButtonRow,  # noqa: F401  # dynamic-dispatch
+    TimerStatus,  # noqa: F401  # dynamic-dispatch
+    resolve_accent,
 )
-from PIL import Image, ImageFilter
-from common.common import read_generic_json, display_sleep_timeout
-from common.modes import Mode
-from common.control_delta import control_delta
-from common.persistence.control import (
-    read_control,
-    enqueue_control_delta,
-)
-from common.persistence.runtime import (
-    read_settings,
-    write_settings,
-    read_status,
-    read_current,
-)
-from common.system import is_real_hardware
-from display._loggers import resolve_loggers
 from display.staleness import resolve_reading
 
 """
@@ -111,9 +113,9 @@ class DisplayBase:
 
         self.input_enabled = False
         self.input_origin = None
-        self.input_button = True if "button" in self.config.get("input_types_supported", []) else False
-        self.input_encoder = True if "encoder" in self.config.get("input_types_supported", []) else False
-        self.input_touch = True if "touch" in self.config.get("input_types_supported", []) else False
+        self.input_button = "button" in self.config.get("input_types_supported", [])
+        self.input_encoder = "encoder" in self.config.get("input_types_supported", [])
+        self.input_touch = "touch" in self.config.get("input_types_supported", [])
 
         self.display_active = None
         self.display_timeout = None
@@ -121,7 +123,7 @@ class DisplayBase:
         self.command = "splash"
         self.command_data = None
 
-        self.real_hardware = True if is_real_hardware() else False
+        self.real_hardware = bool(is_real_hardware())
         # Attempt to set the log level of PIL so that it does not pollute the logs
         logging.getLogger("PIL").setLevel(logging.CRITICAL + 1)
 
@@ -253,7 +255,6 @@ class DisplayBase:
         """
         Inheriting classes will override this function to init the display device and start the display thread.
         """
-        pass
 
     def _init_display_canvas(self):
         """
@@ -313,19 +314,16 @@ class DisplayBase:
         """
         Inheriting classes will override this function.
         """
-        pass
 
     def _up_callback(self, held=False):
         """
         Inheriting classes will override this function to clear the display device.
         """
-        pass
 
     def _down_callback(self, held=False):
         """
         Inheriting classes will override this function to clear the display device.
         """
-        pass
 
     """
     ============== Graphics / Display / Draw Methods ============= 
@@ -360,13 +358,11 @@ class DisplayBase:
         """
         Inheriting classes will override this function to wake the display device.
         """
-        pass
 
     def _sleep_display(self):
         """
         Inheriting classes will override this function to sleep the display device.
         """
-        pass
 
     def _display_clear(self):
         self.display_canvas.paste((0, 0, 0, 255), (0, 0, self.WIDTH, self.HEIGHT))
@@ -375,7 +371,6 @@ class DisplayBase:
         """
         Inheriting classes will override this function to show the canvas on the display device.
         """
-        pass
 
     def _display_splash(self):
         width, height = self.splash.size
@@ -386,13 +381,11 @@ class DisplayBase:
         """
         Inheriting classes will override this function to display the stored background image.
         """
-        pass
 
     def _display_menu_background(self):
         """
         Inheriting classes will override this function to display menu background
         """
-        pass
 
     def _build_objects(self, background=None):
         """
@@ -665,7 +658,7 @@ class DisplayBase:
 
     def _update_mode_bar(self):
         """Mode Bar Update"""
-        if "mode_bar" in self.dash_map.keys():
+        if "mode_bar" in self.dash_map:
             object_data = self.display_object_list[self.dash_map["mode_bar"]].get_object_data()
 
             if self.status_data["recipe"] and self.status_data["mode"] != Mode.SHUTDOWN:
@@ -676,7 +669,7 @@ class DisplayBase:
 
     def _update_control_panel(self):
         """Control Panel Update"""
-        if "control_panel" in self.dash_map.keys():
+        if "control_panel" in self.dash_map:
             object_data = self.display_object_list[self.dash_map["control_panel"]].get_object_data()
             object_data["button_active"] = self.status_data["mode"]
             if self.status_data["recipe"]:
@@ -712,7 +705,7 @@ class DisplayBase:
 
     def _update_button_row(self):
         """Button Row Update (ember dash)"""
-        if "button_row" in self.dash_map.keys():
+        if "button_row" in self.dash_map:
             object_data = self.display_object_list[self.dash_map["button_row"]].get_object_data()
             button_type, button_list, button_active = self._button_row_for_mode(
                 self.status_data["mode"], self.status_data["recipe"], self.status_data["recipe_paused"]
@@ -724,7 +717,7 @@ class DisplayBase:
 
     def _update_primary_gauge_mode_label(self):
         """Primary Gauge Mode Label Update (ember dash - gauge_ember)"""
-        if "primary_gauge" in self.dash_map.keys():
+        if "primary_gauge" in self.dash_map:
             object_data = self.display_object_list[self.dash_map["primary_gauge"]].get_object_data()
             object_data.setdefault("data", {})
             object_data["data"]["mode_label"] = self.status_data["mode"].upper()
@@ -732,7 +725,7 @@ class DisplayBase:
 
     def _update_lid_open_button_mode(self):
         """Lid Open Button Update"""
-        if "lid_open_button" in self.dash_map.keys() and self.status_data["mode"] == Mode.HOLD:
+        if "lid_open_button" in self.dash_map and self.status_data["mode"] == Mode.HOLD:
             object_data = self.display_object_list[self.dash_map["lid_open_button"]].get_object_data()
             if self.status_data.get("lid_open_detected", False):
                 object_data["active"] = True
@@ -742,7 +735,7 @@ class DisplayBase:
 
     def _update_header_bar(self):
         """Header Bar Update (ember dash) - clock/IP/live-cooking-dot, independent of mode change"""
-        if "header_bar" in self.dash_map.keys():
+        if "header_bar" in self.dash_map:
             object_data = self.display_object_list[self.dash_map["header_bar"]].get_object_data()
             object_data.setdefault("data", {})
             new_clock = time.strftime("%H:%M")
@@ -778,7 +771,7 @@ class DisplayBase:
         that stays unavailable reports the same thing every frame while its
         age keeps climbing.
         """
-        primary_key = list(self.in_data["P"].keys())[0]  # Get the key for the primary gauge
+        primary_key = next(iter(self.in_data["P"].keys()))  # Get the key for the primary gauge
         now_ms = int(time.time() * 1000)
         temp, has_temp, stale = resolve_reading(
             self.in_data["P"][primary_key], self.in_data.get("LAST", {}).get(primary_key), now_ms
@@ -805,7 +798,7 @@ class DisplayBase:
         """Update Food Probe Gauges and Values"""
         food_gauge_keys = list(self.food_probe_label_map.keys())
         for gauge in food_gauge_keys:
-            if gauge not in self.dash_map.keys():
+            if gauge not in self.dash_map:
                 # Layouts built entirely around probe_card_N (ember dash) have no
                 # food_probe_gauge_N objects at all - nothing to update here.
                 continue
@@ -834,7 +827,7 @@ class DisplayBase:
         now_ms = int(time.time() * 1000)
         last_readings = self.in_data.get("LAST", {})
         for card in list(self.probe_card_label_map.keys()):
-            if card not in self.dash_map.keys():
+            if card not in self.dash_map:
                 continue
             key = self.probe_card_label_map[card]
             temp, has_temp, stale = resolve_reading(self.in_data["F"][key], last_readings.get(key), now_ms)
@@ -862,29 +855,25 @@ class DisplayBase:
         if self.last_status_data.get("outpins") is None:
             self.last_status_data["outpins"] = self.status_data["outpins"].copy()
             for output in self.last_status_data["outpins"]:
-                self.last_status_data["outpins"][output] = (
-                    True if self.status_data["outpins"][output] == False else False
-                )
+                self.last_status_data["outpins"][output] = self.status_data["outpins"][output] == False
         for output in self.status_data["outpins"]:
             if self.status_data["outpins"][output] != self.last_status_data["outpins"].get(output):
-                if output == "auger" and "auger_status" in self.dash_map.keys():
+                if output == "auger" and "auger_status" in self.dash_map:
                     self._update_output_icon("auger_status", output)
-                if output == "fan" and "fan_status" in self.dash_map.keys():
+                if output == "fan" and "fan_status" in self.dash_map:
                     self._update_output_icon("fan_status", output)
-                if output == "igniter" and "igniter_status" in self.dash_map.keys():
+                if output == "igniter" and "igniter_status" in self.dash_map:
                     self._update_output_icon("igniter_status", output)
 
     def _update_output_icon(self, dash_key, output):
         object_data = self.display_object_list[self.dash_map[dash_key]].get_object_data()
-        object_data["animation_enabled"] = True if self.status_data["outpins"][output] else False
-        object_data["active"] = True if self.status_data["outpins"][output] else False
+        object_data["animation_enabled"] = bool(self.status_data["outpins"][output])
+        object_data["active"] = bool(self.status_data["outpins"][output])
         self.display_object_list[self.dash_map[dash_key]].update_object_data(object_data)
 
     def _update_system_card(self):
         """Update System Card (ember dash - fan/auger/igniter combined)"""
-        if "system_card" in self.dash_map.keys() and self.status_data["outpins"] != self.last_status_data.get(
-            "outpins"
-        ):
+        if "system_card" in self.dash_map and self.status_data["outpins"] != self.last_status_data.get("outpins"):
             object_data = self.display_object_list[self.dash_map["system_card"]].get_object_data()
             object_data["data"] = {
                 "fan": bool(self.status_data["outpins"].get("fan", False)),
@@ -903,20 +892,12 @@ class DisplayBase:
             else:
                 duration = self.status_data["shutdown_duration"]
 
-            countdown = (
-                int(duration - (time.time() - self.status_data["start_time"]))
-                if int(duration - (time.time() - self.status_data["start_time"])) > 0
-                else 0
-            )
+            countdown = max(0, int(duration - (time.time() - self.status_data["start_time"])))
             self._set_timer_object(countdown, "Timer")
 
         elif self.status_data["mode"] in [Mode.HOLD] and self.status_data["lid_open_detected"]:
             """ In Hold Mode, use timer for lid open detection """
-            countdown = (
-                int(self.status_data["lid_open_endtime"] - time.time())
-                if int(self.status_data["lid_open_endtime"] - time.time()) > 0
-                else 0
-            )
+            countdown = max(0, int(self.status_data["lid_open_endtime"] - time.time()))
             self._set_timer_object(countdown, "Lid Pause")
 
         else:
@@ -924,7 +905,7 @@ class DisplayBase:
             self._set_timer_object(0, None)
 
     def _set_timer_object(self, countdown, label):
-        if "timer" in self.dash_map.keys():
+        if "timer" in self.dash_map:
             object_data = self.display_object_list[self.dash_map["timer"]].get_object_data()
             if countdown != object_data["data"]["seconds"]:
                 object_data["data"]["seconds"] = countdown
@@ -934,7 +915,7 @@ class DisplayBase:
 
     def _update_cook_time(self):
         """Update Cook Time (ember dash) - active countdown, else elapsed cook time"""
-        if "cook_time" in self.dash_map.keys():
+        if "cook_time" in self.dash_map:
             object_data = self.display_object_list[self.dash_map["cook_time"]].get_object_data()
             new_data = self._cook_time_data(self.status_data, time.time())
             if object_data.get("data") != new_data:
@@ -949,7 +930,7 @@ class DisplayBase:
         if (
             self.status_data["mode"] in [Mode.HOLD]
             and self.last_status_data["lid_open_detected"] != self.status_data["lid_open_detected"]
-            and "lid_indicator" in self.dash_map.keys()
+            and "lid_indicator" in self.dash_map
         ):
             object_data = self.display_object_list[self.dash_map["lid_indicator"]].get_object_data()
             if self.status_data["lid_open_detected"]:
@@ -960,7 +941,7 @@ class DisplayBase:
 
     def _update_lid_alert(self):
         """Lid Alert Update (ember dash) - active only while lid_open_detected, mirrors lid_indicator"""
-        if "lid_alert" in self.dash_map.keys():
+        if "lid_alert" in self.dash_map:
             object_data = self.display_object_list[self.dash_map["lid_alert"]].get_object_data()
             new_active = bool(self.status_data.get("lid_open_detected", False))
             if object_data.get("active") != new_active:
@@ -972,7 +953,7 @@ class DisplayBase:
         if (
             self.status_data["mode"] in [Mode.HOLD]
             and self.last_status_data["lid_open_detected"] != self.status_data["lid_open_detected"]
-            and "lid_open_button" in self.dash_map.keys()
+            and "lid_open_button" in self.dash_map
         ):
             object_data = self.display_object_list[self.dash_map["lid_open_button"]].get_object_data()
             if self.status_data["lid_open_detected"]:
@@ -989,24 +970,21 @@ class DisplayBase:
                 (self.status_data["mode"] != self.last_status_data.get("mode", "None"))
                 or (self.status_data["p_mode"] != self.last_status_data.get("p_mode", "None"))
             )
-            and "p_mode" in self.dash_map.keys()
+            and "p_mode" in self.dash_map
         ):
             object_data = self.display_object_list[self.dash_map["p_mode"]].get_object_data()
             object_data["active"] = True
             object_data["data"]["pmode"] = self.status_data["p_mode"]
             self.display_object_list[self.dash_map["p_mode"]].update_object_data(object_data)
 
-        elif self.status_data["mode"] != self.last_status_data.get("mode", "None") and "p_mode" in self.dash_map.keys():
+        elif self.status_data["mode"] != self.last_status_data.get("mode", "None") and "p_mode" in self.dash_map:
             object_data = self.display_object_list[self.dash_map["p_mode"]].get_object_data()
             object_data["active"] = False
             self.display_object_list[self.dash_map["p_mode"]].update_object_data(object_data)
 
     def _update_smoke_plus(self):
         """Update Smoke Plus"""
-        if (
-            self.status_data["s_plus"] != self.last_status_data.get("s_plus", None)
-            and "smoke_plus" in self.dash_map.keys()
-        ):
+        if self.status_data["s_plus"] != self.last_status_data.get("s_plus", None) and "smoke_plus" in self.dash_map:
             object_data = self.display_object_list[self.dash_map["smoke_plus"]].get_object_data()
 
             object_data["active"] = self.status_data["s_plus"]
@@ -1018,7 +996,7 @@ class DisplayBase:
         """Update Hopper Info"""
         if (
             self.status_data["hopper_level"] != self.last_status_data.get("hopper_level", None)
-            and "hopper" in self.dash_map.keys()
+            and "hopper" in self.dash_map
         ):
             object_data = self.display_object_list[self.dash_map["hopper"]].get_object_data()
             object_data["data"]["level"] = max(self.status_data["hopper_level"], 0)
@@ -1031,7 +1009,7 @@ class DisplayBase:
         when hopper_level_enabled is False (see _build_objects), so this naturally no-ops then."""
         if (
             self.status_data["hopper_level"] != self.last_status_data.get("hopper_level", None)
-            and "hopper_vertical" in self.dash_map.keys()
+            and "hopper_vertical" in self.dash_map
         ):
             object_data = self.display_object_list[self.dash_map["hopper_vertical"]].get_object_data()
             object_data.setdefault("data", {})
@@ -1041,14 +1019,14 @@ class DisplayBase:
 
     def _update_duty_pills(self):
         """Update Duty Pills (ember dash) - P-MODE/SMOKE+ in Smoke, else AUGER/FAN DUTY"""
-        if "duty_pill_left" in self.dash_map.keys() or "duty_pill_right" in self.dash_map.keys():
+        if "duty_pill_left" in self.dash_map or "duty_pill_right" in self.dash_map:
             left_data, right_data = self._duty_pills(self.status_data)
-            if "duty_pill_left" in self.dash_map.keys():
+            if "duty_pill_left" in self.dash_map:
                 object_data = self.display_object_list[self.dash_map["duty_pill_left"]].get_object_data()
                 if object_data.get("data") != left_data:
                     object_data["data"] = left_data
                     self.display_object_list[self.dash_map["duty_pill_left"]].update_object_data(object_data)
-            if "duty_pill_right" in self.dash_map.keys():
+            if "duty_pill_right" in self.dash_map:
                 object_data = self.display_object_list[self.dash_map["duty_pill_right"]].get_object_data()
                 if object_data.get("data") != right_data:
                     object_data["data"] = right_data
@@ -1404,7 +1382,7 @@ class DisplayBase:
                                     "type": notify_source["type"],
                                     "fields": {
                                         "target": notify_target,
-                                        "req": True if notify_target else False,
+                                        "req": bool(notify_target),
                                     },
                                 }
                             ]
@@ -1434,7 +1412,7 @@ class DisplayBase:
             self.display_timeout = time.time() + self.TIMEOUT
 
         if "splus" in self.command:
-            toggle = False if self.last_status_data.get("s_plus", False) else True
+            toggle = not self.last_status_data.get("s_plus", False)
             data = {"s_plus": toggle}
             enqueue_control_delta(control_delta(set_values=data), origin="display")
             self.display_active = "dash"
@@ -1570,14 +1548,12 @@ class DisplayBase:
         """
         Stub from legacy implementation
         """
-        pass
 
     def display_splash(self):
         """
         - Calls Splash Screen
         This function is currently unused and is only provided to maintain compatibility.
         """
-        pass
 
     def clear_display(self):
         """
@@ -1585,7 +1561,6 @@ class DisplayBase:
         This function is currently unused and is only provided to maintain compatibility.
         """
         # print('Clear Display Requested.')
-        pass
 
     def display_text(self, text):
         """
@@ -1593,11 +1568,9 @@ class DisplayBase:
         This function is currently unused and is only provided to maintain compatibility.
         """
         # print(f'Display Text: {text}')
-        pass
 
     def display_network(self):
         """
         - Display Network IP QR Code
         This function is currently unused and is only provided to maintain compatibility.
         """
-        pass

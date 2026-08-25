@@ -8,9 +8,9 @@ import importlib
 
 import pytest
 
+from common.control_trace import ActuationMode
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.base import ControllerBase, ControllerLearningDiagnostics
-from common.control_trace import ActuationMode
 
 # Controllers with no optional dependency, so this runs on every install.
 PLAIN_CONTROLLERS = ["pid", "pid_sp"]

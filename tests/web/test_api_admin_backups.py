@@ -172,8 +172,8 @@ def test_a_malformed_pellet_backup_is_refused_and_the_store_is_untouched(env):
 
 
 def test_a_well_formed_pellet_backup_still_restores(env):
-    from common.persistence.runtime import read_pellets_store
     from common.defaults import default_pellets
+    from common.persistence.runtime import read_pellets_store
 
     payload = default_pellets()
     payload["brands"] = ["Generic", "Custom", "Restored Brand"]

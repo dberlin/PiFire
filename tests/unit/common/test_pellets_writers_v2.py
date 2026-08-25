@@ -8,8 +8,8 @@ second collided on the key and one entry was silently lost.
 import pytest
 
 from common import pellets_actions
-from common.persistence.runtime import read_pellets_store, write_pellets_store
 from common.defaults import default_pellets
+from common.persistence.runtime import read_pellets_store, write_pellets_store
 
 
 @pytest.fixture

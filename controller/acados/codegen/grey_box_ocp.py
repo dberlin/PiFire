@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-from importlib import import_module
 import os
 import re
 import sys
+from collections.abc import Callable
+from importlib import import_module
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -21,7 +22,6 @@ from controller.acados.contracts import (
     GREY_TIMESTEP_S,
     GreyBoxMPCConfig,
 )
-
 
 FloatArray = npt.NDArray[np.float64]
 GREY_RK4_SUBSTEPS = 8

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import numpy as np
-
 from dataclasses import replace
+
+import numpy as np
 
 from common.model_evidence import EvidenceKind, ForecastOriginEvidence
 from controller.model_learning.confidence import ConfidenceConfig, evaluate_confidence
