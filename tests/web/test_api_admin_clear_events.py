@@ -36,8 +36,40 @@ def logdir(ds, tmp_path, monkeypatch):
 
 
 def test_clears_the_whole_events_family(logdir):
+    """The live member is emptied in place and the rotated ones are removed.
+
+    This asserted that `events.log` itself was gone, which was the bug: the
+    running process still holds that file open through a RotatingFileHandler,
+    so unlinking it sent every later event into an orphaned inode instead of
+    into the file the viewer reads. See
+    test_clearing_keeps_open_handlers_writing_where_the_viewer_looks below.
+    """
     admin_api.clear_events_log()
-    assert sorted(p.name for p in logdir.iterdir()) == ["mqtt.log"]
+    assert sorted(p.name for p in logdir.iterdir()) == ["events.log", "mqtt.log"]
+    assert (logdir / "events.log").read_text() == ""
+
+
+def test_clearing_keeps_open_handlers_writing_where_the_viewer_looks(logdir):
+    """Same defect as the admin Delete All, reached through Clear Events.
+
+    control.py and display_process.py hold their own handlers on this file and
+    the web process cannot reopen them, so the clear has to work through the
+    inode all three share.
+    """
+    from logging.handlers import RotatingFileHandler
+
+    path = logdir / "events.log"
+    handler = RotatingFileHandler(str(path))
+    try:
+        admin_api.clear_events_log()
+
+        handler.stream.write("after clear\n")
+        handler.stream.flush()
+
+        assert path.exists()
+        assert path.read_text() == "after clear\n"
+    finally:
+        handler.close()
 
 
 def test_leaves_other_families_alone(logdir):

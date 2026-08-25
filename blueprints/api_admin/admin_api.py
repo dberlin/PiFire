@@ -179,6 +179,43 @@ def state_payload(settings, control, backup_folder):
     }
 
 
+def _clear_family(folder, members):
+    """Empty one log family; return the member names that were handled.
+
+    The live member is TRUNCATED, never unlinked. create_logger gives every
+    logger a RotatingFileHandler, and on POSIX os.remove only drops the
+    directory entry: the handler's descriptor stays valid and goes on appending
+    to an orphaned inode. Unlinking therefore looks like it worked and is not --
+    the file the viewer reads never fills again, and the bytes are not reclaimed
+    until the process exits. control.py and display_process.py hold their own
+    handlers on these same files and this process cannot reopen them, so the
+    only clear that reaches all three is one through the inode they share.
+
+    Truncating is safe for those handlers because they append: once the file is
+    empty the next write lands at offset 0 rather than leaving a sparse hole
+    where the old bytes were.
+
+    Rotated members are unlinked. Nothing holds them open, and truncating them
+    would leave empty files sitting in the folder forever.
+    """
+    handled = []
+    for name in members:
+        path = os.path.join(folder, name)
+        match = _LOG_MEMBER.match(name)
+        try:
+            if match and match["index"]:
+                os.remove(path)
+            else:
+                #  "r+b", not "w": "w" would CREATE the file when none exists,
+                #  manufacturing an empty log for a process that never wrote one.
+                with open(path, "r+b") as handle:
+                    handle.truncate(0)
+            handled.append(name)
+        except OSError:
+            continue
+    return handled
+
+
 def clear_events_log(folder=None):
     """Empty the event log in BOTH stores.
 
@@ -186,13 +223,16 @@ def clear_events_log(folder=None):
     here rather than handed to a shell -- no interpolation, no shell, and a
     missing file is success rather than a silently swallowed `rm` error.
 
-    Two things that single `rm` misses:
+    Three things that single `rm` misses:
 
     - Rotated members. `events.log.1` and its siblings hold most of the history,
       so removing only `events.log` leaves the bulk of it on disk.
     - The database. Every logger create_logger builds writes to a
       RotatingFileHandler AND a SqliteLogHandler, so clearing one sink alone
       leaves the other holding what the user asked to be rid of.
+    - The open descriptor. `rm` unlinks a file the running process still holds
+      open, so events written afterwards vanish into an orphaned inode. See
+      _clear_family, which truncates the live member instead.
 
     Returns True: _MAINTENANCE_ACTIONS dispatches this and the admin page's
     MaintenanceCard is built against the resulting response shape.
@@ -200,37 +240,33 @@ def clear_events_log(folder=None):
     `folder` resolves at call time; see list_logs.
     """
     folder = folder or LOG_FOLDER
-    for name in list_log_families(folder).get("events", []):
-        try:
-            os.remove(os.path.join(folder, name))
-        except OSError:
-            continue
+    _clear_family(folder, list_log_families(folder).get("events", []))
     datastore.clear_log("events")
     return True
 
 
 def delete_logs(folder=None):
-    """Delete every member of every log family, reporting what went.
+    """Clear every member of every log family, reporting what was handled.
 
     Flask runs `os.system("rm logs/*.log")` inside a bare `except:`, so a
     failure is indistinguishable from success. This enumerates server-side and
-    names what it removed.
+    names what it cleared.
 
     Rotated members are included. Deleting only `*.log` left the backups on
     disk, so the log viewer still had content to show after a "Delete All" --
     the operation reported success while the user could see it had not worked.
+
+    "Cleared", not "removed", for the live member of each family: it is
+    truncated in place so that handlers already holding it open keep writing
+    where the viewer looks. _clear_family has the full reasoning. The reported
+    list still names it -- the user asked for that log to be empty, and it is.
 
     `folder` resolves at call time; see list_logs.
     """
     folder = folder or LOG_FOLDER
     removed = []
     for members in list_log_families(folder).values():
-        for name in members:
-            try:
-                os.remove(os.path.join(folder, name))
-                removed.append(name)
-            except OSError:
-                continue
+        removed.extend(_clear_family(folder, members))
     return sorted(removed)
 
 

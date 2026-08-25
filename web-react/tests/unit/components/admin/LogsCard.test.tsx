@@ -84,7 +84,7 @@ describe("LogsCard delete", () => {
     fireEvent.click(screen.getByRole("button", { name: "Delete All Logs" }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
 
-    expect((await screen.findByRole("status")).textContent).toBe("Deleted events.log.");
+    expect((await screen.findByRole("status")).textContent).toBe("Cleared events.log.");
   });
 
   it("distinguishes an empty sweep from a successful one", async () => {
@@ -93,7 +93,19 @@ describe("LogsCard delete", () => {
     fireEvent.click(screen.getByRole("button", { name: "Delete All Logs" }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
 
-    expect((await screen.findByRole("status")).textContent).toBe("There was nothing to delete.");
+    expect((await screen.findByRole("status")).textContent).toBe("There was nothing to clear.");
+  });
+
+  it("does not promise the log files disappear", async () => {
+    //  They deliberately stay: the running processes hold them open, so the
+    //  server empties them in place rather than unlinking. Copy that said they
+    //  were removed described the bug, not the behaviour.
+    mount(["events.log"]);
+    fireEvent.click(screen.getByRole("button", { name: "Delete All Logs" }));
+
+    const message = (await screen.findByText(/logs start again from empty/i)).textContent ?? "";
+    expect(message).not.toMatch(/removed from the server/i);
+    expect(message).toMatch(/emptied/i);
   });
 
   it("refetches so the list matches the server", async () => {

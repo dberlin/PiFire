@@ -482,7 +482,7 @@ def admin_logs_delete():
         return invalid
 
     removed = admin_api.delete_logs()
-    write_log(f"Admin: deleted {len(removed)} log file(s) via /api/admin/logs/delete")
+    write_log(f"Admin: cleared {len(removed)} log file(s) via /api/admin/logs/delete")
     return jsonify(api_response("OK", None, dump_wire(LogsDeleted, {"removed": removed}))), 200
 
 

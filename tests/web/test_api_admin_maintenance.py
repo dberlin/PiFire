@@ -146,7 +146,12 @@ def test_inactive_clear_history_is_accepted_and_durable_while_control_is_down(cl
 
 def test_clear_events_does_not_shell_out(client, tmp_path, monkeypatch):
     """Flask runs `os.system("rm ./logs/events.log")`. This surface builds the
-    path server-side and calls os.remove, so no shell is ever involved."""
+    path server-side and truncates it, so no shell is ever involved.
+
+    The file stays: unlinking one a RotatingFileHandler still holds open sends
+    every later event into an orphaned inode. See
+    tests/web/test_api_admin_clear_events.py.
+    """
     import blueprints.api_admin.admin_api as admin_api
 
     log_dir = tmp_path / "logs"
@@ -158,7 +163,7 @@ def test_clear_events_does_not_shell_out(client, tmp_path, monkeypatch):
         resp = client.post("/api/admin/maintenance", json={"action": "clear_events"})
 
     assert resp.status_code == 200
-    assert not (log_dir / "events.log").exists()
+    assert (log_dir / "events.log").read_text() == ""
     m_system.assert_not_called()
 
 

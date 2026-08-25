@@ -31,7 +31,7 @@ export function LogsCard({
     if (result.ok) {
       const removed = result.data?.removed ?? [];
       setNotice(
-        removed.length === 0 ? "There was nothing to delete." : `Deleted ${removed.join(", ")}.`,
+        removed.length === 0 ? "There was nothing to clear." : `Cleared ${removed.join(", ")}.`,
       );
       setError(null);
       await onChanged();
@@ -89,7 +89,7 @@ export function LogsCard({
       <ConfirmAction
         open={confirming}
         title="Delete every log file?"
-        message="All .log files are removed from the server. Nothing else in the logs folder is touched, and the logs start again from empty."
+        message="Every .log file is emptied, and rotated backups are removed. The live files stay in place so the running processes keep writing to them. Nothing else in the logs folder is touched, and the logs start again from empty."
         onConfirm={() => void remove()}
         onCancel={() => setConfirming(false)}
       />
