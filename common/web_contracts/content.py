@@ -381,6 +381,13 @@ class HistoryDataset(ExtensibleWireModel):
     pointStyle: str = "line"
     spanGaps: bool = False
     hidden: bool = False
+    #: Which y-axis this series is drawn against. Temperatures share the
+    #: chart's original axis; duty is a 0-100% control signal on a second one.
+    #: Defaulted so a cook file written before duty existed still validates,
+    #: but `prepare_chartdata` stamps it explicitly on every dataset it builds
+    #: -- the wire payload is serialized with `exclude_unset=True`, which drops
+    #: a field the producer never set even when a default is declared here.
+    axis: Literal["temp", "duty"] = "temp"
 
 
 class HistoryProbeMapper(ExtensibleWireModel):

@@ -52,7 +52,7 @@ describe("toCookChartInput", () => {
     ).toBeNull();
   });
 
-  test("drops datasets the user switched off, as the history adapter does", () => {
+  test("keeps a dataset the user switched off, marked not visible", () => {
     const input = toCookChartInput(
       payload({
         chart_data: [
@@ -69,7 +69,11 @@ describe("toCookChartInput", () => {
         ],
       }),
     );
-    expect(input?.series.map((s) => s.label)).toEqual(["Grill"]);
+    // Carried through rather than discarded, exactly as the history adapter
+    // does -- a probe disabled in Settings still has recorded history, and
+    // dropping it here is what used to make that history unreachable.
+    expect(input?.series.map((s) => s.label)).toEqual(["Grill", "Probe 1"]);
+    expect(input?.series.map((s) => s.visible)).toEqual([true, false]);
   });
 });
 

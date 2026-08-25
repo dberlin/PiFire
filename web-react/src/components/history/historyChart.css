@@ -12,17 +12,6 @@
   @apply relative w-full;
 }
 
-/* The font shorthand is kept RAW, not split into @apply utilities. It resets
-   line-height to `normal` as part of its own expansion, and the equivalent
-   Tailwind named size (text-xs) would set a line-height of its own instead --
-   two different reflows of the same box. */
-.pf-history-chart .u-legend {
-  @apply text-text-dim;
-  font:
-    600 12px "Barlow",
-    system-ui,
-    sans-serif;
-}
 
 .pf-history-tip {
   @apply pointer-events-none absolute z-10 rounded-[10px] bg-card px-[10px] py-[8px] text-text;
@@ -56,4 +45,47 @@
 .pf-history-tip .r b {
   @apply font-bold text-text;
   margin-left: auto;
+}
+
+/* Series chips above the chart. Sized for touch (PiFire runs on kitchen and
+   garage tablets), which is the reason they exist rather than uPlot's own
+   legend -- that is already clickable but reads as a caption, and its ~12px
+   text is not a usable target with a thumb. */
+.pf-chart-toggles {
+  @apply mb-[12px] flex flex-wrap gap-[7px];
+}
+
+.pf-chart-toggle {
+  @apply inline-flex min-h-[36px] cursor-pointer items-center gap-[7px] rounded-[2px] border border-card-border bg-inset px-[11px] text-[13px] font-semibold text-text-dim;
+  letter-spacing: 0.02em;
+  transition:
+    color 0.12s,
+    border-color 0.12s;
+}
+
+.pf-chart-toggle:hover {
+  @apply text-text;
+}
+
+/* aria-pressed is the state, so it is also the selector -- there is no
+   separate class to drift out of step with what a screen reader is told. */
+.pf-chart-toggle[aria-pressed="true"] {
+  @apply text-text;
+}
+
+.pf-chart-toggle-swatch {
+  @apply inline-block size-[11px] shrink-0 rounded-[2px];
+}
+
+/* Off reads as a dimmed swatch rather than a dimmed chip: the label has to
+   stay legible, because it is the thing you are looking for when you go to
+   switch a series back on. */
+.pf-chart-toggle[aria-pressed="false"] .pf-chart-toggle-swatch {
+  opacity: 0.25;
+}
+
+/* Marks the series that read against the right-hand percent axis, so a duty
+   chip is distinguishable from a probe at a glance. */
+.pf-chart-toggle-unit {
+  @apply text-[11px] text-label;
 }

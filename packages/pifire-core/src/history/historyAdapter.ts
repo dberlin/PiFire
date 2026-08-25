@@ -24,6 +24,24 @@ export interface ChartSeries {
   label: string;
   color: string;
   values: (number | null)[];
+  /**
+   * Which y-axis this series belongs to. Temperatures share the chart's
+   * original axis; `duty` is a 0-100% control signal that would be pinned flat
+   * to the floor if it shared a scale with a 225-degree trace.
+   *
+   * A consumer with only one axis (mobile's SVG chart) filters to `temp`
+   * rather than silently plotting a percentage against degrees.
+   */
+  axis: "temp" | "duty";
+  /**
+   * Whether the series starts drawn. `false` means "off, but reachable from
+   * the chart's own controls" -- NOT "discard".
+   *
+   * This is the flag that used to make a dataset disappear entirely: a probe
+   * disabled in Settings had its history dropped here with no way to see it.
+   * Duty uses the same flag to stay out of the way until asked for.
+   */
+  visible: boolean;
 }
 
 export interface ChartInput {
@@ -62,21 +80,29 @@ function valuesFor(dataset: HistoryDataset, length: number): (number | null)[] {
 /**
  * Reshapes a `/api/history/chart` payload into a chart's props.
  *
- * Datasets flagged `hidden` are dropped: the flag mirrors
- * `not probe_config[probe]["enabled"]`, i.e. a probe the user switched off in
- * Settings, and the chart has no per-series visibility toggle to defer the
- * decision to.
+ * Datasets flagged `hidden` are carried through as `visible: false` rather
+ * than dropped. That flag means two different things upstream -- a probe the
+ * user switched off in Settings (`not probe_config[probe]["enabled"]`), and a
+ * duty series that stays out of the way until asked for -- and both want the
+ * same treatment: present, off, and reachable from the chart's own controls.
+ *
+ * It used to drop them, because the chart had no per-series toggle to defer
+ * the decision to. The consequence was that a disabled probe's recorded
+ * history became unreachable: nothing on the page would draw it, and nothing
+ * said it existed.
  */
 export function toChartInput(
   data: Pick<HistoryChartData, "time_labels" | "chart_data">,
 ): ChartInput {
   const times = data.time_labels.map((ms) => ms / MS_PER_SECOND);
-  const series = data.chart_data
-    .filter((ds) => !ds.hidden)
-    .map((ds) => ({
-      label: ds.label,
-      color: ds.borderColor || FALLBACK_COLOR,
-      values: valuesFor(ds, times.length),
-    }));
+  const series = data.chart_data.map((ds) => ({
+    label: ds.label,
+    color: ds.borderColor || FALLBACK_COLOR,
+    values: valuesFor(ds, times.length),
+    // Defaulted rather than required: a cook file written before duty existed
+    // has no `axis` on its datasets, and every series in one is a temperature.
+    axis: ds.axis ?? "temp",
+    visible: !ds.hidden,
+  }));
   return { times, series };
 }

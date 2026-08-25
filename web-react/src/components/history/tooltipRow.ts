@@ -31,6 +31,7 @@ export function createTooltipRow(
   label: string,
   color: string,
   value: number | null,
+  axis: "temp" | "duty" = "temp",
 ): HTMLDivElement {
   const row = document.createElement("div");
   row.className = "r";
@@ -42,7 +43,7 @@ export function createTooltipRow(
   row.appendChild(document.createTextNode(label));
 
   const b = document.createElement("b");
-  b.textContent = formatTooltipValue(value);
+  b.textContent = formatTooltipValue(value, axis);
   row.appendChild(b);
 
   return row;

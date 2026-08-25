@@ -8,6 +8,7 @@ import { useSettings } from "../../helpers/settings/useSettings";
 import { CookFileList } from "../cookfiles/CookFileList";
 import { NumberField } from "../settings/fields/NumberField";
 import { HistoryChart } from "./HistoryChart";
+import { SeriesToggles } from "./SeriesToggles";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";
 
@@ -36,6 +37,17 @@ export function HistoryPage() {
   const [minutes, setMinutes] = useState<number | undefined>(undefined);
   // Bumped by Reset zoom to remount the chart -- see chartKey below.
   const [resetNonce, setResetNonce] = useState(0);
+
+  //  Which series the user has explicitly switched on or off, by label.
+  //  Deliberately OVERRIDES rather than the visibility itself: the server
+  //  decides each series' default (probes on, a probe disabled in Settings
+  //  off, duty off), and a series that appears mid-session -- the first time a
+  //  window includes duty, say -- has to pick up that default rather than
+  //  whatever a snapshot of the earlier series list happened to hold.
+  //
+  //  Keyed by label because that is what survives a refetch: `chart.series` is
+  //  a fresh array on every 5s poll and on every window change.
+  const [seriesOverrides, setSeriesOverrides] = useState<Record<string, boolean>>({});
 
   //  The auto-refresh preference. This route has no loader (see App.tsx) and
   //  GET /api/history/chart answers with chart data only, so a settings read
@@ -77,6 +89,20 @@ export function HistoryPage() {
   // autoscales to whatever it is built with. Reset zoom rides the same
   // mechanism as an explicit escape hatch.
   const chartKey = `${shownMinutes}-${resetNonce}`;
+
+  //  Applied here rather than inside HistoryChart so the chart keeps taking a
+  //  plain list of series and stays unaware of who decided what is drawn.
+  const shownSeries = chart?.series.map((s) => ({
+    ...s,
+    visible: seriesOverrides[s.label] ?? s.visible,
+  }));
+
+  const toggleSeries = (label: string) =>
+    setSeriesOverrides((current) => {
+      const target = chart?.series.find((s) => s.label === label);
+      const showing = current[label] ?? target?.visible ?? true;
+      return { ...current, [label]: !showing };
+    });
 
   return (
     <div className="pf-settings">
@@ -121,7 +147,16 @@ export function HistoryPage() {
               </div>
             )}
             {loading && <p className="pf-settings-hint">Loading history…</p>}
-            {chart && <HistoryChart key={chartKey} times={chart.times} series={chart.series} />}
+            {chart && shownSeries && (
+              <>
+                <SeriesToggles
+                  series={chart.series}
+                  overrides={seriesOverrides}
+                  onToggle={toggleSeries}
+                />
+                <HistoryChart key={chartKey} times={chart.times} series={shownSeries} />
+              </>
+            )}
             {data && !chart && (
               <p className="pf-settings-hint">No history yet — start a cook to see the chart.</p>
             )}

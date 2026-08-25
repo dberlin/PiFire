@@ -38,7 +38,11 @@ export interface HistoryChartProps {
  * (already deps-tracked) string, so `key` is the only thing referenced.
  */
 function useStableSeriesShape(series: ChartSeries[]): SeriesShape[] {
-  const key = JSON.stringify(series.map((s) => ({ label: s.label, color: s.color })));
+  // `visible` is deliberately NOT part of the shape. Toggling a series must
+  // not rebuild the plot -- a rebuild drops whatever the user zoomed to -- so
+  // visibility is pushed onto the live instance with setSeries instead. See
+  // the effect below.
+  const key = JSON.stringify(series.map((s) => ({ label: s.label, color: s.color, axis: s.axis })));
   return useMemo(() => JSON.parse(key) as SeriesShape[], [key]);
 }
 
@@ -121,24 +125,70 @@ export function HistoryChart({ times, series, height = 360, annotations }: Histo
     if (rebuild) {
       existing?.destroy();
 
+      const hasDuty = seriesShape.some((s) => s.axis === "duty");
+
       const opts: uPlot.Options = {
         width: host.clientWidth || 800,
         height,
         series: [
           {},
-          ...seriesShape.map((s) => ({
+          ...seriesShape.map((s, i) => ({
             label: s.label,
             stroke: s.color,
-            width: 1.5,
+            // Thinner and slightly faded: duty sits underneath the
+            // temperatures as a control signal rather than competing with
+            // them for the reader's attention.
+            width: s.axis === "duty" ? 1.2 : 1.5,
+            alpha: s.axis === "duty" ? 0.85 : 1,
+            // Only duty gets a named scale. Temperatures stay on uPlot's
+            // default "y", which is what `axes[1]` below addresses -- moving
+            // them to a scale of their own leaves that axis with no series and
+            // silently unlabelled.
+            ...(s.axis === "duty" ? { scale: "duty" } : {}),
+            // Duty is a step function -- a commanded ratio that holds until
+            // the controller re-solves. Interpolating between samples draws
+            // ramps that never happened, and the server relies on this: it
+            // reduces duty by keeping its transitions, which is exact ONLY
+            // under stepped rendering.
+            ...(s.axis === "duty" ? { paths: uPlot.paths.stepped?.({ align: 1 }) } : {}),
             points: { show: false },
+            show: series[i]?.visible ?? true,
           })),
         ],
+        scales: {
+          // Pinned rather than autoscaled, so a line's height means the same
+          // thing in every window and every cook: half-way up is 50% duty,
+          // full stop. An autoscaled duty axis would silently re-zoom itself
+          // whenever the grill settled into a narrow band.
+          ...(hasDuty ? { duty: { range: [0, 100] as [number, number], auto: false } } : {}),
+        },
         axes: [
           { stroke: "#9aa3ad", grid: { stroke: "rgba(255,255,255,0.07)" } },
           { stroke: "#9aa3ad", grid: { stroke: "rgba(255,255,255,0.07)" } },
+          // The duty axis draws on the right and paints NO gridlines: the
+          // temperature axis already rules the plot, and a second set at
+          // different intervals reads as a moiré rather than as information.
+          ...(hasDuty
+            ? [
+                {
+                  scale: "duty",
+                  side: 1 as const,
+                  stroke: "#9aa3ad",
+                  grid: { show: false },
+                  values: (_u: uPlot, splits: number[]) => splits.map((v) => `${v}%`),
+                },
+              ]
+            : []),
         ],
         cursor: { drag: { x: true, y: false } }, // drag-to-zoom
-        legend: { live: true },
+        // uPlot's own legend is off: the chip row above the chart replaces it.
+        // Leaving it on gives the same series TWO controls -- uPlot toggles
+        // `show` directly on the instance when a legend entry is clicked, which
+        // the chips know nothing about, so the two would disagree until some
+        // unrelated change resynced them. Its live value readout is redundant
+        // too; tooltipPlugin exists because that readout renders as a table
+        // rather than at the cursor.
+        legend: { show: false },
         plugins: [
           tooltipPlugin(seriesShape),
           //  Omitted entirely when the prop is absent, so /history builds the
@@ -167,6 +217,28 @@ export function HistoryChart({ times, series, height = 360, annotations }: Histo
     // Runs on every shape/height change (rebuild) AND on every data tick
     // (setData) -- see the branch above for which happens.
   }, [height, seriesShape, stableAnnotations, times, series]);
+
+  // Visibility, pushed onto the LIVE instance.
+  //
+  // This is the whole reason `visible` is kept out of the series shape above.
+  // Adding or removing entries in the `series` array changes the shape, which
+  // forces the effect above to destroy and rebuild the plot -- and a fresh
+  // uPlot autoscales, so the user loses whatever they had zoomed to. Every
+  // series is therefore always constructed, and only `show` changes.
+  //
+  // `visibility` is a plain string rather than the array, so this effect
+  // reruns when the toggles change and not on every data tick.
+  const visibility = series.map((s) => (s.visible ? "1" : "0")).join("");
+  useEffect(() => {
+    const plot = plotRef.current;
+    if (!plot) return;
+    for (let i = 0; i < visibility.length; i += 1) {
+      const show = visibility[i] === "1";
+      if (plot.series[i + 1] && plot.series[i + 1].show !== show) {
+        plot.setSeries(i + 1, { show });
+      }
+    }
+  }, [visibility]);
 
   return <div ref={hostRef} className="pf-history-chart" style={{ height }} />;
 }

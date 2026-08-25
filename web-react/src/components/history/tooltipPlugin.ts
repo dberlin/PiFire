@@ -5,6 +5,8 @@ import { createTooltipRow } from "./tooltipRow";
 export interface SeriesShape {
   label: string;
   color: string;
+  /** Selects the value's unit in the tooltip, and the scale it is drawn on. */
+  axis: "temp" | "duty";
 }
 
 /**
@@ -54,9 +56,15 @@ export function tooltipPlugin(seriesShape: SeriesShape[]): uPlot.Plugin {
         const header = document.createElement("div");
         header.className = "t";
         header.textContent = when.toLocaleTimeString();
-        const rows = seriesShape.map((s, i) => {
+        // Only series that are actually drawn. Visibility is toggled on the
+        // live uPlot instance (never by rebuilding the series array, which
+        // would drop the user's zoom), so `show` is the authority here --
+        // seriesShape lists every series the plot was built with, including
+        // the ones currently switched off.
+        const rows = seriesShape.flatMap((s, i) => {
+          if (u.series?.[i + 1]?.show === false) return [];
           const v = u.data[i + 1][idx] as number | null;
-          return createTooltipRow(s.label, s.color, v);
+          return [createTooltipRow(s.label, s.color, v, s.axis)];
         });
         el.replaceChildren(header, ...rows);
         el.style.display = "block";

@@ -1041,6 +1041,15 @@
     "HistoryDataset": {
       "additionalProperties": true,
       "properties": {
+        "axis": {
+          "default": "temp",
+          "enum": [
+            "temp",
+            "duty"
+          ],
+          "title": "Axis",
+          "type": "string"
+        },
         "backgroundColor": {
           "default": "",
           "title": "Backgroundcolor",

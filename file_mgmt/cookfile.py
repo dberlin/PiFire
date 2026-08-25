@@ -338,6 +338,75 @@ def upgrade_cookfile(cookfilename, repair=False):
     return (cookfilestruct, status)
 
 
+#: Which y-axis a dataset belongs to. Temperatures share the chart's original
+#: axis; duty is a 0-100% control signal that cannot share a scale with a
+#: 225-degree trace without being pinned flat to the floor.
+#:
+#: Stamped onto every dataset rather than left to a model default: the wire
+#: payload is serialized with `exclude_unset=True`, so a field the producer
+#: never set is dropped even when the model declares a default for it.
+TEMP_AXIS = "temp"
+DUTY_AXIS = "duty"
+
+#: Duty series, in the order they are appended after the probe datasets.
+#: Each entry is (history key, label, line colour, scale to percent).
+#:
+#: Colours are fixed here rather than read from probe_config -- duty is not a
+#: probe and has no per-probe configuration -- and are chosen to read as what
+#: they drive: ember for the auger (fuel), ice for the fan (air), amber for the
+#: request the auger did not get. They mirror --color-accent-ember /
+#: --color-accent-ice / --color-warn in web-react/src/theme.css. A canvas
+#: stroke cannot read a CSS custom property, so the value travels with the data
+#: exactly as every probe's line_color already does.
+#:
+#: CR (commanded cycle ratio) and RCR (realized cycle ratio -- what actually
+#: reached the auger) are stored as a 0.0-1.0 ratio and converted to percent
+#: HERE, so all three series arrive in one unit against one axis and no client
+#: has to know which of them needed scaling.
+#:
+#: "Auger Delivered" is deliberately not called a duty: the point of drawing it
+#: beside "Auger Duty" is the GAP between them, which is where a clamp acted --
+#: the duty floor lifting a request too small to pulse, u_max capping one too
+#: large, a lid-open pause pinning the auger off. Amber rather than ember so it
+#: reads as a qualifier on the auger line rather than as a second one.
+_DUTY_SERIES = (
+    ("CR", "Auger Duty", "#ff8a2b", 100.0),
+    ("RCR", "Auger Delivered", "#ffb020", 100.0),
+    ("FD", "Fan Duty", "#3cc7d0", 1.0),
+)
+
+#: The same scales, keyed for the per-sample lookup in the row loop.
+_DUTY_SCALES = {key: scale for key, _label, _color, scale in _DUTY_SERIES}
+
+
+def _duty_change_indices(history, window_start, list_length):
+    """Absolute indices where any duty series changes value, plus the endpoints.
+
+    Under stepped rendering these are the only samples that carry information:
+    every other one repeats the value already being drawn. Endpoints are
+    included so a window that opens or closes mid-plateau still starts and ends
+    at the right height.
+
+    None participates as a value of its own, so the boundaries of a gap survive
+    -- the transition from "recorded" to "not recorded" is exactly where the
+    line has to stop.
+    """
+    changes = set()
+    for source_key in _DUTY_SCALES:
+        values = history.get(source_key) or []
+        if not values:
+            continue
+        window = values[window_start:list_length]
+        if not window:
+            continue
+        changes.add(window_start)
+        changes.add(window_start + len(window) - 1)
+        changes.update(
+            window_start + offset for offset in range(1, len(window)) if window[offset] != window[offset - 1]
+        )
+    return changes
+
+
 def prepare_chartdata(
     probe_config,
     chart_info=None,
@@ -376,6 +445,7 @@ def prepare_chartdata(
             "data": [],
             "spanGaps": False,
             "hidden": False,
+            "axis": TEMP_AXIS,
         }
 
     index = 0
@@ -448,6 +518,44 @@ def prepare_chartdata(
     if num_items == 0:
         num_items = list_length
 
+    # Duty datasets, appended AFTER every probe dataset so probe_mapper's
+    # indices -- built above from the probe loop's own counter -- keep pointing
+    # at the same slots they always have.
+    #
+    # Built here rather than up with the probe datasets because the decision
+    # needs the data: a column that is entirely None has nothing to draw, and
+    # offering an empty toggle for it is worse than not offering one. That is
+    # the normal state for a cook recorded before duty existed (no key at all),
+    # and for `RCR` until the Hold path reports the pre-clamp request.
+    #
+    # Gated on list_length because an empty read leaves `history` as the bare
+    # `[]` read_history returned, never the unpacked dict -- there is nothing
+    # to ask for a duty column on.
+    duty_slots = []
+    for source_key, label, color, _scale in _DUTY_SERIES if list_length > 0 else ():
+        values = history.get(source_key) or []
+        if not any(value is not None for value in values):
+            continue
+        chart_obj = chart_info.copy()
+        chart_obj["label"] = label
+        chart_obj["backgroundColor"] = color
+        chart_obj["borderColor"] = color
+        # Reassigned, not inherited: chart_info.copy() is shallow, so every
+        # dataset would otherwise share one list object with the template.
+        chart_obj["borderDash"] = []
+        chart_obj["pointBorderColor"] = color
+        chart_obj["pointHoverBackgroundColor"] = color
+        chart_obj["pointHoverBorderColor"] = color
+        chart_obj["axis"] = DUTY_AXIS
+        # Off by default. Duty is a diagnostic overlay on a chart people open
+        # to read temperatures, so it appears when asked for and the chart is
+        # unchanged until then.
+        chart_obj["hidden"] = True
+        chart_obj["data"] = []
+        chart_data.append(chart_obj)
+        duty_slots.append((source_key, index))
+        index += 1
+
     time_labels = []
 
     if list_length > 0:
@@ -473,6 +581,33 @@ def prepare_chartdata(
             times = [float(t) for t in history["T"][window_start:list_length]]
             chosen = select_indices(series, times, tolerance=tolerance, min_points=data_points, max_points=max_points)
             window = [window_start + i for i in chosen]
+
+            # Duty is kept by its TRANSITIONS rather than by joining the
+            # fidelity check above, because that check's error model does not
+            # describe how duty is drawn.
+            #
+            # select_indices measures how far the drawn line strays from the
+            # samples under LINEAR interpolation. Duty is a step function that
+            # the chart draws as steps, so between two kept samples the drawn
+            # value is the earlier one held flat -- which means keeping every
+            # index where duty changes reproduces it EXACTLY, and keeping
+            # anything else adds nothing.
+            #
+            # Handing it to the tolerance check instead is both less accurate
+            # and far more expensive, because that check chases an error that
+            # only exists under an interpolation the chart never performs.
+            # Measured over a 30,000-sample window against a 55%-to-12% duty
+            # step on a thermally flat hold -- the duty-floor case this series
+            # exists to show: duty omitted keeps 1,000 points and misdraws the
+            # step by 27 percentage points; duty added to the fidelity check
+            # draws it perfectly but keeps all 30,000; duty transitions draw it
+            # perfectly and keep 1,002.
+            #
+            # Skipped when `max_points` is set: that is an explicit instruction
+            # to accept degradation for a hard ceiling, and no production caller
+            # sets it.
+            if max_points is None:
+                window = sorted(set(window) | _duty_change_indices(history, window_start, list_length))
 
         # History rows are durable and name whatever probes were configured
         # when they were written, while probe_mapper is built from the CURRENT
@@ -516,6 +651,13 @@ def prepare_chartdata(
                 chart_data[slot]["data"].append({"x": timestamp, "y": history_nt[key][index]})
             for slot in setpoint_slots:
                 chart_data[slot]["data"].append({"x": timestamp, "y": history_psp[index]})
+            for source_key, slot in duty_slots:
+                value = history[source_key][index]
+                # None stays None -- a sample from before duty was recorded is
+                # a gap in the line, not a zero. Zero duty is a real reading.
+                chart_data[slot]["data"].append(
+                    {"x": timestamp, "y": None if value is None else value * _DUTY_SCALES[source_key]}
+                )
 
             time_labels.append(timestamp)
     # No history: return empty series. This used to fabricate one point per

@@ -12,8 +12,12 @@ describe("tooltipPlugin", () => {
     // green. This drives a stub uPlot-shaped object -- not a real uPlot
     // instance -- through the plugin's own hooks.init/hooks.setCursor.
     const seriesShape = [
-      { label: "Grill", color: "#ff7a1a" },
-      { label: '<img src=x onerror="window.__pwned = true">', color: "#4dc9ff" },
+      { label: "Grill", color: "#ff7a1a", axis: "temp" as const },
+      {
+        label: '<img src=x onerror="window.__pwned = true">',
+        color: "#4dc9ff",
+        axis: "temp" as const,
+      },
     ];
     const plugin = tooltipPlugin(seriesShape);
 
@@ -63,7 +67,7 @@ describe("tooltipPlugin", () => {
   });
 
   it("hides the tooltip and removes it from the DOM on destroy", () => {
-    const plugin = tooltipPlugin([{ label: "Grill", color: "#ff7a1a" }]);
+    const plugin = tooltipPlugin([{ label: "Grill", color: "#ff7a1a", axis: "temp" as const }]);
     const over = document.createElement("div");
     const stubU = { over } as unknown as uPlot;
 
@@ -81,7 +85,7 @@ describe("tooltipPlugin", () => {
   });
 
   it("hides the tooltip instead of rendering rows when the cursor leaves the plot (idx is null)", () => {
-    const plugin = tooltipPlugin([{ label: "Grill", color: "#ff7a1a" }]);
+    const plugin = tooltipPlugin([{ label: "Grill", color: "#ff7a1a", axis: "temp" as const }]);
     const over = document.createElement("div");
     const stubU = {
       over,

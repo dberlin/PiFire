@@ -23,7 +23,18 @@ const DEFAULT_MINUTES = 120;
 // the shared adapter.
 function toPointSeries(data: HistoryChartData): HistorySeriesInput[] {
   const { times, series } = toChartInput(data);
-  return series.map((s) => ({
+  return series
+    // Temperatures only. This chart has ONE y-axis, and duty is a 0-100%
+    // control signal -- plotted against degrees it would sit as a flat line on
+    // the floor of a 225-degree scale. Filtered explicitly rather than left to
+    // chance so a duty series added server-side can never silently appear here
+    // mis-scaled; giving this chart a second axis is what would lift it.
+    .filter((s) => s.axis === "temp")
+    // `visible: false` is the shared adapter's way of saying "off, but
+    // reachable from the chart's controls". This chart has no controls, so
+    // off means not drawn.
+    .filter((s) => s.visible)
+    .map((s) => ({
     label: s.label,
     color: s.color,
     points: times.map((t, i) => [t, s.values[i] ?? null] as [number, number | null]),

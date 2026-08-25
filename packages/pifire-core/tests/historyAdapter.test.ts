@@ -75,9 +75,10 @@ describe("toChartInput", () => {
   it("maps each dataset's y values in time order", () => {
     const { series } = toChartInput(POPULATED);
 
-    expect(series.map((s) => s.label)).toEqual(["Grill", "Grill Target"]);
+    expect(series.map((s) => s.label)).toEqual(["Grill", "Grill Target", "Probe 1"]);
     expect(series[0].values).toEqual([100, 110, 120]);
     expect(series[1].values).toEqual([225, 225, 225]);
+    expect(series[2].values).toEqual([90, 95, 100]);
   });
 
   it("carries each dataset's borderColor through as the series stroke", () => {
@@ -96,10 +97,46 @@ describe("toChartInput", () => {
     expect(toChartInput(noColor).series[0].color).toBe("#8a7f70");
   });
 
-  it("drops hidden datasets (a probe disabled in Settings)", () => {
+  it("keeps a hidden dataset, marked not visible rather than dropped", () => {
+    // `hidden` means "off", not "discard". It used to mean discard, and the
+    // consequence was that a probe switched off in Settings had its recorded
+    // history silently thrown away here -- nothing drew it and nothing said it
+    // existed. The chart's own controls decide what is drawn now.
     const { series } = toChartInput(POPULATED);
 
-    expect(series.map((s) => s.label)).not.toContain("Probe 1");
+    const probe = series.find((s) => s.label === "Probe 1");
+    expect(probe).toBeDefined();
+    expect(probe?.visible).toBe(false);
+    expect(probe?.values).toEqual([90, 95, 100]);
+  });
+
+  it("marks datasets the server did not hide as visible", () => {
+    const { series } = toChartInput(POPULATED);
+
+    expect(series.find((s) => s.label === "Grill")?.visible).toBe(true);
+  });
+
+  it("carries the axis a series belongs to", () => {
+    const withDuty: HistoryChartData = {
+      ...POPULATED,
+      chart_data: [
+        { label: "Grill", borderColor: "#f00", hidden: false, axis: "temp", data: [] },
+        { label: "Auger Duty", borderColor: "#ff8a2b", hidden: true, axis: "duty", data: [] },
+      ],
+    };
+
+    const { series } = toChartInput(withDuty);
+
+    expect(series.map((s) => s.axis)).toEqual(["temp", "duty"]);
+  });
+
+  it("treats a dataset with no axis as a temperature", () => {
+    // A cook file written before duty existed carries no `axis` on its
+    // datasets, and every series in one is a temperature. Defaulting the other
+    // way would plot an old cook's probes against a 0-100% scale.
+    const { series } = toChartInput(POPULATED);
+
+    expect(series.every((s) => s.axis === "temp")).toBe(true);
   });
 
   it("pads a dataset shorter than time_labels with nulls so the chart stays aligned", () => {

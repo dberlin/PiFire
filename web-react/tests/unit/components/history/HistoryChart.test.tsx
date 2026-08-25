@@ -24,8 +24,20 @@ beforeEach(() => {
 
 const times = [1, 2, 3, 4, 5];
 const series = [
-  { label: "Grill", color: "#ff7a1a", values: [200, 210, 220, 225, 224] },
-  { label: "Probe 1", color: "#4dc9ff", values: [80, 90, 100, 110, 120] },
+  {
+    label: "Grill",
+    color: "#ff7a1a",
+    values: [200, 210, 220, 225, 224],
+    axis: "temp" as const,
+    visible: true,
+  },
+  {
+    label: "Probe 1",
+    color: "#4dc9ff",
+    values: [80, 90, 100, 110, 120],
+    axis: "temp" as const,
+    visible: true,
+  },
 ];
 
 describe("HistoryChart", () => {
@@ -51,7 +63,7 @@ describe("HistoryChart", () => {
     expect(container.querySelector(".pf-history-chart")).toBeInTheDocument();
   });
 
-  it("keeps showing the chart's legend for the new shape after a series is added, not an empty one", () => {
+  it("rebuilds for the new shape after a series is added, rather than showing an empty plot", () => {
     // Regression pin for the merged rebuild/setData effect: a re-render
     // with a CHANGED series shape (a probe added mid-cook is a real case,
     // not a hypothetical) must still trigger a rebuild. Before the merge,
@@ -59,17 +71,28 @@ describe("HistoryChart", () => {
     // rebuild effect staying adjacent and in declaration order -- nothing
     // enforced that, and a reordering would have silently left the chart
     // showing the OLD shape (or empty).
+    //
+    // Counted via uPlot's per-series cursor points. This used to read the
+    // legend's series entries, which is no longer rendered -- the chip row
+    // above the chart replaced it -- but `.u-cursor-pt` is built one per
+    // series at construction time and serves the same purpose.
     const { rerender, container } = render(<HistoryChart times={times} series={series} />);
-    const before = container.querySelectorAll(".u-legend .u-series").length;
+    const before = container.querySelectorAll(".u-cursor-pt").length;
     expect(before).toBeGreaterThan(0);
 
     const withExtraProbe = [
       ...series,
-      { label: "Probe 2", color: "#ffab00", values: [70, 75, 80, 85, 90] },
+      {
+        label: "Probe 2",
+        color: "#ffab00",
+        values: [70, 75, 80, 85, 90],
+        axis: "temp" as const,
+        visible: true,
+      },
     ];
     rerender(<HistoryChart times={times} series={withExtraProbe} />);
 
-    const after = container.querySelectorAll(".u-legend .u-series").length;
+    const after = container.querySelectorAll(".u-cursor-pt").length;
     expect(after).toBe(before + 1);
     expect(container.querySelector(".pf-history-chart")).toBeInTheDocument();
   });
@@ -175,5 +198,69 @@ describe("formatTooltipValue", () => {
       />,
     );
     expect(annotationPluginMock.mock.calls).toHaveLength(1);
+  });
+});
+
+describe("HistoryChart series visibility", () => {
+  const dutySeries = [
+    ...series,
+    {
+      label: "Auger Duty",
+      color: "#ff8a2b",
+      values: [20, 22, 18, 25, 21],
+      axis: "duty" as const,
+      visible: false,
+    },
+  ];
+
+  // uPlot builds its own root element and appends it to the host, and destroys
+  // it on teardown. So the identity of that node IS whether the plot was
+  // rebuilt -- a more durable signal than spying on uPlot's methods, which are
+  // assigned per instance rather than on the prototype.
+  const plotNode = (container: HTMLElement) => container.querySelector(".uplot");
+
+  it("toggles a series WITHOUT rebuilding the plot", () => {
+    // The constraint this whole design is shaped around. uPlot is rebuilt
+    // whenever the series SHAPE changes, and a fresh plot autoscales -- so
+    // implementing a toggle by adding or removing entries in the series array
+    // would silently throw away whatever the user had zoomed to, on every
+    // click. Visibility therefore rides setSeries on the live instance, and
+    // `visible` is kept out of the shape key.
+    const { container, rerender } = render(<HistoryChart times={times} series={dutySeries} />);
+    const before = plotNode(container);
+    expect(before).not.toBeNull();
+
+    rerender(
+      <HistoryChart
+        times={times}
+        series={dutySeries.map((s) => (s.label === "Auger Duty" ? { ...s, visible: true } : s))}
+      />,
+    );
+
+    expect(plotNode(container)).toBe(before);
+  });
+
+  it("still rebuilds when the series shape itself changes", () => {
+    // The other half of the contract, and the negative control for the test
+    // above: a genuinely new set of series (a probe renamed, a duty column
+    // appearing for the first time) DOES need a new plot. Without this, the
+    // assertion above would pass just as well against a component that never
+    // rebuilt at all.
+    const { container, rerender } = render(<HistoryChart times={times} series={series} />);
+    const before = plotNode(container);
+
+    rerender(<HistoryChart times={times} series={dutySeries} />);
+
+    expect(plotNode(container)).not.toBe(before);
+  });
+
+  it("does not render uPlot's own legend", () => {
+    // The chip row above the chart is the only visibility control. Leaving
+    // uPlot's legend on gives every series a second one that toggles `show`
+    // directly on the instance, which the chips know nothing about -- the two
+    // then disagree until something unrelated resyncs them.
+    const { container } = render(<HistoryChart times={times} series={dutySeries} />);
+
+    expect(container.querySelector(".u-legend")).toBeNull();
   });
 });

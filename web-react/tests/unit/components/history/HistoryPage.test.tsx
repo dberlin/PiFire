@@ -129,7 +129,10 @@ describe("HistoryPage", () => {
     await renderLoaded();
 
     expect(fetchHistoryChartMock).toHaveBeenCalledTimes(1);
-    expect(chartEl().getAttribute("data-labels")).toBe("Grill");
+    // "Probe 1" is disabled in Settings in this fixture. It is still handed to
+    // the chart -- off by default, reachable from the chart's own controls --
+    // rather than dropped before it gets there.
+    expect(chartEl().getAttribute("data-labels")).toBe("Grill,Probe 1");
   });
 
   it("asks for the user's saved window on first load by sending no minutes", async () => {

@@ -26,6 +26,7 @@ type Type1 = string;
  * via the `definition` "FiniteNumber".
  */
 export type FiniteNumber = number;
+type Axis = "temp" | "duty";
 type Backgroundcolor1 = string;
 type Bordercapstyle = string;
 type Bordercolor2 = string;
@@ -322,6 +323,7 @@ export interface HistoryAnnotationLabel {
  * via the `definition` "HistoryDataset".
  */
 export interface HistoryDataset {
+  axis?: Axis;
   backgroundColor?: Backgroundcolor1;
   borderCapStyle?: Bordercapstyle;
   borderColor?: Bordercolor2;
