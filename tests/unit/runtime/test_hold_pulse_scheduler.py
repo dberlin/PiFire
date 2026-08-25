@@ -427,7 +427,7 @@ def test_auger_and_fan_adopt_together_from_one_result_revision(hold_cycle):
     first = _output(1, 0.1, fan_duty=25.0)
     replacement = _output(2, 0.9, fan_duty=75.0)
     runner = FakeControllerRunner(period=1.0, commands_fan=True).script([first, replacement])
-    hold = hold_cycle(runner, controller="mpc")
+    hold = hold_cycle(runner, controller="mpc", dc_fan=True)
     hold.settings["platform"]["dc_fan"] = True
     hold.control["pwm_control"] = True
     hold.setup()

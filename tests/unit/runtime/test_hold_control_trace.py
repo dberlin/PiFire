@@ -635,7 +635,7 @@ def test_production_hold_seed_lifecycle_rereads_into_calibration(hold_cycle, tmp
     runner = FakeControllerRunner(period=1.0, commands_fan=True, actuation_mode=ActuationMode.FRAMED_PULSE).script(
         [_mpc_result(revision) for revision in range(1, 33)]
     )
-    mode = hold_cycle(runner, controller="mpc")
+    mode = hold_cycle(runner, controller="mpc", dc_fan=True)
     mode.settings["platform"]["dc_fan"] = True
     mode.control["pwm_control"] = True
     mode.ctx.store._settings["platform"]["dc_fan"] = True
@@ -853,7 +853,7 @@ def test_reconfigure_finishes_the_old_pid_session_before_opening_coherent_mpc_se
     recorder = _install_recorder(monkeypatch)
     runner = _ReconfiguringRunner(period=1.0, wants_async=True).script([_pid_result(), _mpc_result(2)])
     runner.snapshot = {"revision": 1}
-    mode = hold_cycle(runner, controller="pid", model_store=_ModelStore())
+    mode = hold_cycle(runner, controller="pid", model_store=_ModelStore(), dc_fan=True)
     mode.settings["platform"]["dc_fan"] = True
     mode.control["pwm_control"] = True
     mode.ctx.store._settings["platform"]["dc_fan"] = True

@@ -5,9 +5,10 @@ class FakeGrillPlatform:
     def __init__(self, dc_fan=False, standalone=True, input_on=True, outputs=("power", "auger", "fan", "igniter")):
         self.calls = []
         self._input_on = input_on
-        self._status = {k: False for k in outputs}
-        self._status["pwm"] = 100
-        self._status["frequency"] = 100
+        self._status = {key: False for key in outputs if key not in {"pwm", "frequency"}}
+        if dc_fan:
+            self._status["pwm"] = 100
+            self._status["frequency"] = 100
 
     def _rec(self, name, *args):
         self.calls.append((name, args))

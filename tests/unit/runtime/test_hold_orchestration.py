@@ -439,8 +439,6 @@ def test_teardown_orders_cleanup_and_owns_each_resource_at_most_once(hold_cycle,
         "fan": False,
         "igniter": False,
         "power": False,
-        "pwm": 100,
-        "frequency": 100,
     }
 
 
@@ -810,8 +808,6 @@ def test_early_hardware_setup_failure_closes_created_trace_and_outputs(
         "fan": False,
         "igniter": False,
         "power": False,
-        "pwm": 100,
-        "frequency": 100,
     }
 
 

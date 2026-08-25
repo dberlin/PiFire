@@ -65,9 +65,9 @@ from controller.runtime.modes.hold_learning import (
 class _HoldOutputStatus:
     auger: bool
     fan: bool
-    pwm: int | float
+    pwm: int | float | None
 
-    def __getitem__(self, name: str) -> bool | int | float:
+    def __getitem__(self, name: str) -> bool | int | float | None:
         return getattr(self, name)
 
 
@@ -1297,6 +1297,16 @@ class HoldMode(ControlMode):
         self._apply_hold_lid_fan_hardware_and_state(context, inhibition.lid_will_open)
         self._flush_tick_trace(context.trace)
 
+    def _hold_output_status(
+        self,
+        current_output_status: Mapping[str, bool | int | float],
+    ) -> _HoldOutputStatus:
+        return _HoldOutputStatus(
+            auger=bool(current_output_status["auger"]),
+            fan=bool(current_output_status["fan"]),
+            pwm=(current_output_status["pwm"] if self.settings["platform"]["dc_fan"] else None),
+        )
+
     def _adopt_tick_configuration_and_session(
         self,
         now: float,
@@ -1376,11 +1386,7 @@ class HoldMode(ControlMode):
         return _HoldTickContext(
             now=now,
             ptemp=ptemp,
-            output_status=_HoldOutputStatus(
-                auger=bool(current_output_status["auger"]),
-                fan=bool(current_output_status["fan"]),
-                pwm=current_output_status["pwm"],
-            ),
+            output_status=self._hold_output_status(current_output_status),
             trace=trace,
             active_calibration_reset=active_calibration_reset,
             calibration_handled=(
@@ -1405,11 +1411,7 @@ class HoldMode(ControlMode):
         current_output_status = self.grill.get_output_status()
         return replace(
             context,
-            output_status=_HoldOutputStatus(
-                auger=bool(current_output_status["auger"]),
-                fan=bool(current_output_status["fan"]),
-                pwm=current_output_status["pwm"],
-            ),
+            output_status=self._hold_output_status(current_output_status),
         )
 
     def _publish_safety_ceiling_and_consume_calibration(

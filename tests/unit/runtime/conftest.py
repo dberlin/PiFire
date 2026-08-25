@@ -26,9 +26,10 @@ def hold_cycle(monkeypatch):
     would otherwise seed before the loop starts.
     """
 
-    def build(runner, *, cycle_data_extra=None, model_store=None, controller="pid_sp"):
+    def build(runner, *, cycle_data_extra=None, model_store=None, controller="pid_sp", dc_fan=False):
         settings = base_settings()
         settings["controller"]["selected"] = controller
+        settings["platform"]["dc_fan"] = dc_fan
         settings["cycle_data"].update(cycle_data_extra or {})
         control_data = base_control(mode="Hold")
         control_data["primary_setpoint"] = 225

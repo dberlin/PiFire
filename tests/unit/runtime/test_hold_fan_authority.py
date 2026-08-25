@@ -14,7 +14,7 @@ def _grant(hold, *, dc_fan, pwm_control):
 
 def test_ownership_is_granted_when_the_command_can_reach_the_fan(hold_cycle):
     runner = FakeControllerRunner(period=0.01, commands_fan=True, actuation_mode=ActuationMode.FRAMED_PULSE)
-    hold = hold_cycle(runner, controller="mpc")
+    hold = hold_cycle(runner, controller="mpc", dc_fan=True)
     _grant(hold, dc_fan=True, pwm_control=True)
     hold.setup()
     assert hold.state.controller.controls_fan is True
@@ -25,7 +25,7 @@ def test_ownership_is_granted_when_the_command_can_reach_the_fan(hold_cycle):
 
 def test_ownership_is_refused_when_pwm_control_is_off(hold_cycle):
     runner = FakeControllerRunner(period=0.01, commands_fan=True, actuation_mode=ActuationMode.FRAMED_PULSE)
-    hold = hold_cycle(runner, controller="mpc")
+    hold = hold_cycle(runner, controller="mpc", dc_fan=True)
     _grant(hold, dc_fan=True, pwm_control=False)
     hold.setup()
     # False, not True: the claim would suppress the temp-profile and fan-assist
@@ -35,7 +35,7 @@ def test_ownership_is_refused_when_pwm_control_is_off(hold_cycle):
 
 def test_refusing_ownership_logs_an_error_naming_the_controller(hold_cycle, caplog):
     runner = FakeControllerRunner(period=0.01, commands_fan=True, actuation_mode=ActuationMode.FRAMED_PULSE)
-    hold = hold_cycle(runner, controller="mpc")
+    hold = hold_cycle(runner, controller="mpc", dc_fan=True)
     _grant(hold, dc_fan=True, pwm_control=False)
     with caplog.at_level(logging.ERROR):
         hold.setup()
@@ -45,7 +45,7 @@ def test_refusing_ownership_logs_an_error_naming_the_controller(hold_cycle, capl
 
 def test_a_controller_that_does_not_command_the_fan_logs_nothing(hold_cycle, caplog):
     runner = FakeControllerRunner(period=0.01, commands_fan=False)
-    hold = hold_cycle(runner, controller="pid_sp")
+    hold = hold_cycle(runner, controller="pid_sp", dc_fan=True)
     _grant(hold, dc_fan=True, pwm_control=False)
     with caplog.at_level(logging.ERROR):
         hold.setup()
@@ -74,16 +74,36 @@ def test_hold_without_a_controller_remains_safe_and_reports_no_pulse(
         "fan": False,
         "igniter": False,
         "power": False,
-        "pwm": 100,
-        "frequency": 100,
     }
+
+
+def test_non_pwm_hold_tick_accepts_status_without_pwm_keys_after_manual_release(
+    hold_cycle,
+) -> None:
+    runner = FakeControllerRunner(period=999, commands_fan=False)
+    hold = hold_cycle(runner, controller="pid_sp")
+    _grant(hold, dc_fan=False, pwm_control=False)
+    hold.setup()
+    hold._last_now = 1.0
+    hold._last_ptemp = 220.0
+    hold._on_manual_output("auger", True)
+    hold.state.manual_override["auger"] = 1.0
+    hold.grill._status.pop("pwm", None)
+    hold.grill._status.pop("frequency", None)
+    status = hold.grill.get_output_status()
+
+    hold.on_tick(2.0, 220.0, status)
+
+    assert hold.state.manual_override["auger"] == 0
+    assert "pwm" not in hold.grill.get_output_status()
+    assert all(name != "set_duty_cycle" for name, _args in hold.grill.calls)
 
 
 def test_temperature_profile_updates_unowned_dc_fan_duty(
     hold_cycle,
 ) -> None:
     runner = FakeControllerRunner(period=999, commands_fan=False)
-    hold = hold_cycle(runner, controller="pid_sp")
+    hold = hold_cycle(runner, controller="pid_sp", dc_fan=True)
     _grant(hold, dc_fan=True, pwm_control=True)
     hold.settings["pwm"]["temp_range_list"] = [100.0]
     hold.settings["pwm"]["profiles"] = [{"duty_cycle": 42}]
@@ -100,7 +120,7 @@ def test_empty_temperature_profile_preserves_existing_dc_fan_duty(
     hold_cycle,
 ) -> None:
     runner = FakeControllerRunner(period=999, commands_fan=False)
-    hold = hold_cycle(runner, controller="pid_sp")
+    hold = hold_cycle(runner, controller="pid_sp", dc_fan=True)
     _grant(hold, dc_fan=True, pwm_control=True)
     hold.settings["pwm"]["temp_range_list"] = []
     hold.settings["pwm"]["profiles"] = []
