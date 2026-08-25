@@ -142,7 +142,7 @@ def backup_pellet_db(action="backup", retry_count=0):
             pelletdb = read_pellet_db_file(filename=pelletdb_backup_file, retry_count=retry_count)
             write_pellet_db(pelletdb)
         else:
-            warning = f"There was an issue with loading the Pellet Database (possibly corruption).  No backups found, setting to defaults."
+            warning = "There was an issue with loading the Pellet Database (possibly corruption).  No backups found, setting to defaults."
             pelletdb = default_pellets()
             write_pellet_db(pelletdb)
         write_warning(warning)

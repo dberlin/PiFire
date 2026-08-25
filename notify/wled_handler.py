@@ -452,7 +452,7 @@ class WLEDNotificationHandler:
 
         elif notifyevent == "Test_Notify":
             self.send_suggested_preset("booting", suggested_config)
-            self.logger.info(f"WLED Test Notification Triggered with suggested preset")
+            self.logger.info("WLED Test Notification Triggered with suggested preset")
 
         elif notifyevent == "Probe_Temp_Achieved":
             self.send_suggested_preset("target_reached", suggested_config)

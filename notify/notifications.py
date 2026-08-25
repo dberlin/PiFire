@@ -636,12 +636,12 @@ def _estimate_eta(temperatures, target_temperature, interval_seconds=3, max_hist
 
     # Ensure target temperature is not already reached
     if target_temperature <= max(temperatures):
-        eventLogger.debug(f"ETA: Target temperature already achieved.")
+        eventLogger.debug("ETA: Target temperature already achieved.")
         return None
 
     # Ensure that interval is between 1 and 60 seconds
     if interval_seconds > 60 or interval_seconds < 1:
-        eventLogger.debug(f"ETA: History data interval not between 1 and 60 seconds.")
+        eventLogger.debug("ETA: History data interval not between 1 and 60 seconds.")
         return None
 
     # Convert minutes to seconds
@@ -650,7 +650,7 @@ def _estimate_eta(temperatures, target_temperature, interval_seconds=3, max_hist
 
     # Check if enough data points provided
     if len(temperatures) < min_data_points:
-        eventLogger.debug(f"ETA: Not enough history data to make estimate.")
+        eventLogger.debug("ETA: Not enough history data to make estimate.")
         return None
 
     # Truncate data to fit within limits
@@ -680,14 +680,14 @@ def _estimate_eta(temperatures, target_temperature, interval_seconds=3, max_hist
 
         # Avoid division by zero
         if denominator == 0:
-            eventLogger.debug(f"ETA: Cannot calculate slope - no temperature change detected.")
+            eventLogger.debug("ETA: Cannot calculate slope - no temperature change detected.")
             return None
 
         slope = numerator / denominator
 
         # If temperature isn't rising (or is falling), we can't predict ETA
         if slope <= 0:
-            eventLogger.debug(f"ETA: Temperature not increasing, cannot estimate ETA.")
+            eventLogger.debug("ETA: Temperature not increasing, cannot estimate ETA.")
             return None
 
         # Predict time to reach target temperature (assuming linear trend)

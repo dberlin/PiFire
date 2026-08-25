@@ -201,7 +201,7 @@ def unpack_thumb(thumbname, filename, tmp_id):
 
                 #  Create temporary folder for the thumbnail
                 if not os.path.exists("./static/img/tmp"):
-                    os.mkdir(f"./static/img/tmp")
+                    os.mkdir("./static/img/tmp")
                 if not os.path.exists(f"./static/img/tmp/{tmp_id}"):
                     os.symlink(os.path.join(base, tmp_id), f"./static/img/tmp/{tmp_id}")
             else:

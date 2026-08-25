@@ -576,7 +576,7 @@ class Meater_Device:
                     connectedAddresses.append(self.address)
                 except:
                     self.address = None
-                    logger_msg = f"(Meater) Failed to connect to Meater probe."
+                    logger_msg = "(Meater) Failed to connect to Meater probe."
                     self.logger.debug(logger_msg)
                     # ic(logger_msg)
 
@@ -594,11 +594,11 @@ class Meater_Device:
                     self.probe = self.probeHandler.checkProperties()
                     self.probe.subscribe_to_temps()
                     self.device_setup = True
-                    logger_msg = f"(Meater) Meater device setup complete."
+                    logger_msg = "(Meater) Meater device setup complete."
                     self.logger.debug(logger_msg)
                     # ic(logger_msg)
                 except:
-                    logger_msg = f"(Meater) Failed to setup Meater device."
+                    logger_msg = "(Meater) Failed to setup Meater device."
                     self.logger.debug(logger_msg)
                     # ic(logger_msg)
                     self.device_setup = False
@@ -627,7 +627,7 @@ class Meater_Device:
                         # ic(logger_msg)
 
                 except:
-                    logger_msg = f"(Meater) Meater device has gone away..."
+                    logger_msg = "(Meater) Meater device has gone away..."
                     self.logger.debug(logger_msg)
                     # ic(logger_msg)
                     # Clean up

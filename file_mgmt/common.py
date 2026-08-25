@@ -84,7 +84,7 @@ def read_json_file_data(filename, jsonfile, unpackassets=True):
                     destination.close()
 
                     if not os.path.exists("./static/img/tmp"):
-                        os.mkdir(f"./static/img/tmp")
+                        os.mkdir("./static/img/tmp")
                     if not os.path.exists(f"./static/img/tmp/{parent_id}"):
                         os.symlink(os.path.join(base, parent_id), f"./static/img/tmp/{parent_id}")
 

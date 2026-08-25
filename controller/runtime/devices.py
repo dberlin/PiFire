@@ -207,7 +207,7 @@ def build_devices(settings, *, errors, event_log, control_log):
         )
 
     except:
-        control_log.exception(f"Error occurred loading probes modules. Trace dump: ")
+        control_log.exception("Error occurred loading probes modules. Trace dump: ")
         # settings['probe_settings']['probe_map'] = default_probe_map(settings["probe_settings"]['probe_profiles'])
         probe_complex = ProbesMain(
             settings["probe_settings"]["probe_map"],
@@ -216,9 +216,9 @@ def build_devices(settings, *, errors, event_log, control_log):
             inference_policy=inference_policy,
         )
         error_event = (
-            f"An error occurred loading the probes module(s).  All probes & probe devices have been disabled. "
-            f"This sometimes means that the hardware is not connected properly, or the module is not configured correctly. "
-            f"Please run the configuration wizard again from the admin panel to fix this issue. "
+            "An error occurred loading the probes module(s).  All probes & probe devices have been disabled. "
+            "This sometimes means that the hardware is not connected properly, or the module is not configured correctly. "
+            "Please run the configuration wizard again from the admin panel to fix this issue. "
         )
         errors.append(error_event)
         write_errors(ErrorKind.CONTROL, errors)

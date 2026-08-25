@@ -273,7 +273,7 @@ class Controller:
             self.last = grill_platform.get_input_status()
             if not self.last:
                 self.eventLogger.info("Switch set to off, going to stop mode.")
-                self.controlLogger.info(f"Switch set to off, going to stop mode.")
+                self.controlLogger.info("Switch set to off, going to stop mode.")
                 self.control["updated"] = True  # Change mode
                 self.control["mode"] = Mode.STOP
                 store.write_control_snapshot(self.control, origin="control")

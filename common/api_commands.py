@@ -443,10 +443,10 @@ def _cmd_set_mode(data, control, settings, arglist, origin):
                     )
                 else:
                     data["result"] = "ERROR"
-                    data["message"] = f"Prime amount should be an integer in grams."
+                    data["message"] = "Prime amount should be an integer in grams."
             else:
                 data["result"] = "ERROR"
-                data["message"] = f"Prime amount not specified."
+                data["message"] = "Prime amount not specified."
         except:
             data["result"] = "ERROR"
             data["message"] = f"Set Mode {arglist[1]} with {arglist[2]} caused an exception."
@@ -499,10 +499,10 @@ def _cmd_set_pmode(data, control, settings, arglist, origin):
                 data["message"] = f"Set PMode out of range(0-9): {arglist[1]}"
         else:
             data["result"] = "ERROR"
-            data["message"] = f"Set PMode invalid value."
+            data["message"] = "Set PMode invalid value."
     else:
         data["result"] = "ERROR"
-        data["message"] = f"Set PMode invalid arguments."
+        data["message"] = "Set PMode invalid arguments."
 
 
 def _cmd_set_splus(data, control, settings, arglist, origin):
@@ -578,10 +578,10 @@ def _cmd_set_notify(data, control, settings, arglist, origin):
                         fields["target"] = float(arglist[3])
                 else:
                     data["result"] = "ERROR"
-                    data["message"] = f"Notify object target value invalid or missing."
+                    data["message"] = "Notify object target value invalid or missing."
             else:
                 data["result"] = "ERROR"
-                data["message"] = f"Notify object update failed."
+                data["message"] = "Notify object update failed."
             # The entry is addressed by (label, type) read off the entry the
             # loop above MATCHED. Not by a type derived from the subcommand:
             # `notify` matches on label alone, so for the Timer and Hopper
@@ -595,7 +595,7 @@ def _cmd_set_notify(data, control, settings, arglist, origin):
             enqueue_control_delta(control_delta(ops=ops), origin=origin)
     else:
         data["result"] = "ERROR"
-        data["message"] = f"Notify object label was not specified."
+        data["message"] = "Notify object label was not specified."
 
 
 def _cmd_set_pwm(data, control, settings, arglist, origin):
@@ -623,10 +623,10 @@ def _cmd_set_duty_cycle(data, control, settings, arglist, origin):
             enqueue_control_delta(control_delta(set_values={"duty_cycle": duty_cycle}), origin=origin)
         else:
             data["result"] = "ERROR"
-            data["message"] = f"Duty cycle must be an integer between 0-100."
+            data["message"] = "Duty cycle must be an integer between 0-100."
     else:
         data["result"] = "ERROR"
-        data["message"] = f"Duty cycle must be specified as an integer between 0-100 percent."
+        data["message"] = "Duty cycle must be specified as an integer between 0-100 percent."
 
 
 def _cmd_set_tuning_mode(data, control, settings, arglist, origin):
@@ -878,7 +878,7 @@ def _cmd_set_timer(data, control, settings, arglist, origin):
         )
     else:
         data["result"] = "ERROR"
-        data["message"] = f"Timer command not recognized."
+        data["message"] = "Timer command not recognized."
 
 
 def _cmd_set_manual(data, control, settings, arglist, origin):
@@ -911,7 +911,7 @@ def _cmd_set_manual(data, control, settings, arglist, origin):
             control["manual"].update(assigned)
         else:
             data["result"] = "ERROR"
-            data["message"] = f"Manual command not recognized or contained an error."
+            data["message"] = "Manual command not recognized or contained an error."
         # The guard is UNCHANGED, wart included: it sits outside the if/elif
         # chain, so a rejected request still writes when control["manual"]
         # ["change"] holds a stale value from a previous command. What it writes
@@ -926,7 +926,7 @@ def _cmd_set_manual(data, control, settings, arglist, origin):
 
     else:
         data["result"] = "ERROR"
-        data["message"] = f"Before changing manual outputs, system must be put into Manual mode."
+        data["message"] = "Before changing manual outputs, system must be put into Manual mode."
 
 
 def _cmd_cmd_restart(data, control, settings, arglist, origin):

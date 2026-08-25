@@ -319,7 +319,7 @@ class Meater_Device:
                 try:
                     scanner = btle.Scanner()
 
-                    logger_msg = f"(Meater) Starting scan..."
+                    logger_msg = "(Meater) Starting scan..."
                     self.logger.debug(logger_msg)
                     # ic(logger_msg)
 
@@ -337,7 +337,7 @@ class Meater_Device:
                             self.logger.debug(logger_msg)
                             # ic(logger_msg)
                             break
-                    logger_msg = f"(Meater) Stopping scan."
+                    logger_msg = "(Meater) Stopping scan."
 
                 except Exception as e:
                     logger_msg = f"(Meater) Error scanning for device: {e}"
@@ -380,7 +380,7 @@ class Meater_Device:
                                 self.meater_type = "MEATER_PRO"
                                 self.meater = MeaterPro(self.device, temp_handle)
                                 self.device_setup = True
-                                logger_msg = f"(Meater) Meater Pro setup complete"
+                                logger_msg = "(Meater) Meater Pro setup complete"
                                 self.logger.debug(logger_msg)
                                 # ic(logger_msg)
                                 break
@@ -388,7 +388,7 @@ class Meater_Device:
                                 self.meater_type = "MEATER_ORIGINAL"
                                 self.meater = MeaterOriginal(self.device, temp_handle)
                                 self.device_setup = True
-                                logger_msg = f"(Meater) Meater Original setup complete"
+                                logger_msg = "(Meater) Meater Original setup complete"
                                 self.logger.debug(logger_msg)
                                 # ic(logger_msg)
                                 break
@@ -409,7 +409,7 @@ class Meater_Device:
         while not self._closing.is_set():
             if self.device_setup:
                 self.sensor_thread_active = True
-                logger_msg = f"(Meater) Sensor thread active."
+                logger_msg = "(Meater) Sensor thread active."
                 self.logger.debug(logger_msg)
                 # ic(logger_msg)
 

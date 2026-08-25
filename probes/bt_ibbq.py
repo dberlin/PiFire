@@ -223,7 +223,7 @@ class iBBQ_Device:
                         # ic(logger_msg)
                         self.hardware_id = bbq
                     else:
-                        logger_msg = f"(ibbq) No iBBQ/xBBQ devices found"  # NEW
+                        logger_msg = "(ibbq) No iBBQ/xBBQ devices found"  # NEW
                         # self.logger.debug(logger_msg)
                         # ic(logger_msg)
             except Exception as e:
@@ -294,7 +294,7 @@ class iBBQ_Device:
 
                     time.sleep(1)
                     self.device_setup = True
-                    logger_msg = f"(ibbq) iBBQ/xBBQ device setup complete."  # NEW
+                    logger_msg = "(ibbq) iBBQ/xBBQ device setup complete."  # NEW
                     self.logger.debug(logger_msg)
                     # ic(logger_msg)
                 except Exception as e:  # NEW: log the reason
@@ -318,14 +318,14 @@ class iBBQ_Device:
                             self.probe_values_C = self.ibbq_delegate.get_probe_temps()
                             self.battery_percentage = self.ibbq_delegate.get_batt_percent()
 
-                    logger_msg = f"(ibbq) Sensor thread inactive."
+                    logger_msg = "(ibbq) Sensor thread inactive."
                     self.logger.debug(logger_msg)
                     self.sensor_thread_active = False
                     # self.device_setup = False
                     # self.hardware_id = None
 
                 except BTLEDisconnectError:
-                    logger_msg = f"(ibbq) iBBQ/xBBQ device has gone away..."  # NEW
+                    logger_msg = "(ibbq) iBBQ/xBBQ device has gone away..."  # NEW
                     self.logger.debug(logger_msg)
                     # ic(logger_msg)
                     # Clean up

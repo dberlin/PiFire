@@ -258,7 +258,7 @@ def test_read_events_records_returns_dicts(ds, monkeypatch):
 
 
 def test_read_events_records_caps_at_60(ds, monkeypatch):
-    fake_events = [[f"2024-01-01", "00:00:00", f"message {i}\n"] for i in range(100)]
+    fake_events = [["2024-01-01", "00:00:00", f"message {i}\n"] for i in range(100)]
 
     def fake_read_events(legacy=True):
         return fake_events, len(fake_events)

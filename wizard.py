@@ -247,7 +247,7 @@ def _run_install_commands(command_list, percent, increment, status, python_exec)
             time.sleep(2)
 
         percent += increment
-        output = f" - Completed General Dependency Item"
+        output = " - Completed General Dependency Item"
         logger.info(output)
         set_updater_install_status(percent, status, output)
 
@@ -508,7 +508,7 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
 
     pip_list = subprocess.run(command, capture_output=True, text=True)
     if pip_list.returncode == 0:
-        print(f"PIP List Command Success.")
+        print("PIP List Command Success.")
 
     # Run system commands dependencies
     status = "Installing General Dependencies..."

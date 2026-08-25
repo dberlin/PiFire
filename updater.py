@@ -986,7 +986,7 @@ def install_dependencies(current_version_string="0.0.0", current_build=None):
         print(f"Return Code: {return_code}")
 
         percent += increment
-        output = f" - Completed General Dependency Item"
+        output = " - Completed General Dependency Item"
         set_updater_install_status(percent, status, output)
         if DEBUG:
             print(f"Percent: {percent}")
@@ -1146,7 +1146,7 @@ if __name__ == "__main__":
         current_build = settings["versions"].get("build", 0)
 
         percent = 10
-        status = f"Installing Dependencies for Current Version..."
+        status = "Installing Dependencies for Current Version..."
         output = f" - APT, Python and Command Dependencies for version {current_version} ({current_build})"
         set_updater_install_status(percent, status, output)
 
