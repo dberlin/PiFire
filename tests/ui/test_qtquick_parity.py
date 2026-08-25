@@ -97,6 +97,23 @@ def _dispatch_probe(monkeypatch):
         pass
 
     monkeypatch.setattr(bf.requests, "get", lambda url: effects.append(("requests.get", url)))
+
+    #  cmd_reboot and cmd_poweroff are two of the commands this test dispatches,
+    #  and unpatched they really do reboot the machine: `real_hw` defaults to
+    #  True in a test datastore, so the gate in common/system.py passes, and the
+    #  work happens on a daemon thread that swallows its own exceptions -- so the
+    #  test stays green while the host goes down three seconds later, during
+    #  whatever test is running by then.
+    #
+    #  Recorded as effects rather than blocked outright: the assertion below is
+    #  that every command DOES something, so these have to remain observable.
+    #  Patched on `bf`, where _command_handler looks them up -- _base_flex bound
+    #  them at import, so patching common.system would be looked straight past.
+    def _record(name):
+        return lambda *args, **kwargs: effects.append((name,))
+
+    for _power in ("reboot_system", "shutdown_system", "restart_scripts"):
+        monkeypatch.setattr(bf, _power, _record(_power))
     disp = qmod.Display.for_dispatch({"display_data_filename": "./display/qtquick_dsi_1280x720t.json"}, "F")
     return disp, effects
 

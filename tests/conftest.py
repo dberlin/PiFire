@@ -1,7 +1,10 @@
 import json
 import os
+import shlex
+import subprocess
 import sys
 import tempfile
+import threading
 from pathlib import Path
 from unittest import mock
 
@@ -66,6 +69,209 @@ if _xdist_worker:
     os.environ["PIFIRE_LOG_DIR"] = tempfile.mkdtemp(prefix=f"pifire-test-logs-{_xdist_worker}-")
 else:
     os.environ.setdefault("PIFIRE_LOG_DIR", tempfile.mkdtemp(prefix="pifire-test-logs-"))
+
+"""
+==============================================================================
+ Power-action guard
+==============================================================================
+
+Installed at IMPORT time, like PIFIRE_DB_PATH and PIFIRE_LOG_DIR above and for
+the same reason: it has to be in place before any test module imports anything,
+and it has to stay in place for the whole session -- including for daemon
+threads that outlive the test that started them.
+
+A test run really did reboot this machine. `sudo supervisorctl restart all`,
+`sudo systemctl reboot` and `sudo systemctl poweroff` all executed, five seconds
+apart, and the suite reported nothing: the calls happen on daemon threads, so
+the exceptions that would have surfaced them were swallowed with the thread.
+
+Three things have to line up for that, and all three did:
+
+  - `real_hw` defaults to True (common/settings_schema.py), so a fresh test
+    datastore claims to be a real appliance and `is_real_hardware()` -- the gate
+    in front of every lifecycle call in common/system.py -- passes.
+  - The installers grant NOPASSWD sudo for exactly these commands, so on an
+    installed Linux box they SUCCEED. On a developer machine without PiFire
+    installed they fail harmlessly, which is why this stayed invisible.
+  - The calls moved from `os.system("... sudo reboot &")` to `subprocess.run`,
+    walking past harnesses that had patched os.system for years.
+
+So the guard is on the PRIMITIVE, not on the named functions. Patching
+`common.system.reboot_system` is defeated by any module that did
+`from common.system import reboot_system` at import time, and patching
+os.system was defeated by moving the call to subprocess -- that exact class of
+escape is what has now bitten repeatedly. Every one of these paths ends at
+`subprocess.Popen` or `os.system`, and code cannot be moved out from under
+those without leaving Python entirely.
+
+`subprocess.run`/`call`/`check_call`/`check_output` all construct a Popen, so
+guarding Popen covers them too. os.spawn*/os.exec* are not used anywhere in the
+tree; add them here if that changes.
+"""
+
+#: Programs that can power down the machine or bounce the services a developer
+#: is working on. common/system.py is the only module in the tree that runs any
+#: of them -- everything else naming them is a comment or a type literal -- so
+#: blocking the PROGRAM rather than a program+subcommand pair costs nothing and
+#: leaves no gap for `supervisorctl stop` to slip through.
+_POWER_PROGRAMS = frozenset({"reboot", "poweroff", "halt", "shutdown", "systemctl", "supervisorctl"})
+
+#: Attempts recorded even when the raise below is swallowed -- which is the
+#: normal case here, since common/system.py runs these on daemon threads.
+_power_attempts = []
+_power_attempts_lock = threading.Lock()
+_current_test = None
+
+_real_popen = subprocess.Popen
+_real_os_system = os.system
+_real_thread_start = threading.Thread.start
+
+
+def _stamped_thread_start(self):
+    """Remember which test started each thread.
+
+    Without this, a refusal is reported against whatever test happened to be
+    running when the thread fired -- and common/system.py's threads sleep for
+    seconds before acting, so that is reliably NOT the test that started them.
+    Chasing one of these without the origin means bisecting the suite.
+    """
+    self._pf_origin_test = _current_test
+    return _real_thread_start(self)
+
+
+threading.Thread.start = _stamped_thread_start
+
+
+def _command_tokens(command):
+    """Program basenames in `command`, whether it is an argv list or a shell string."""
+    if isinstance(command, bytes):
+        command = command.decode("utf-8", "replace")
+    if isinstance(command, str):
+        try:
+            parts = shlex.split(command)
+        except ValueError:  # unbalanced quotes -- fall back to a crude split
+            parts = command.split()
+    elif isinstance(command, (list, tuple)):
+        parts = [p.decode("utf-8", "replace") if isinstance(p, bytes) else str(p) for p in command]
+    else:
+        return []
+    return [os.path.basename(p) for p in parts]
+
+
+def _refuse_power_action(seam, command):
+    """Record the attempt, then raise. Both, because either alone is not enough.
+
+    The raise fails the test when the call is on the main thread. The record is
+    what catches it when it is not: a daemon thread's exception goes to stderr
+    and the test passes regardless, which is precisely how a reboot got through
+    a green suite.
+    """
+    thread = threading.current_thread()
+    # The test that started this THREAD, not the one running now -- those differ
+    # whenever the call came off common/system.py's delayed daemon threads.
+    origin = getattr(thread, "_pf_origin_test", None) or _current_test
+    with _power_attempts_lock:
+        _power_attempts.append((origin, thread.name, seam, command))
+    raise AssertionError(
+        f"BLOCKED: {seam} tried to run a power action: {command!r}\n"
+        "Nothing in the test suite may restart or power down the machine. Patch the "
+        "seam the code under test actually calls -- and patch where the name is BOUND, "
+        "not on common.system, if the caller imported it at module level."
+    )
+
+
+def _guarded_popen(command, *args, **kwargs):
+    if set(_command_tokens(command)) & _POWER_PROGRAMS:
+        _refuse_power_action("subprocess.Popen", command)
+    return _real_popen(command, *args, **kwargs)
+
+
+def _guarded_os_system(command):
+    if set(_command_tokens(command)) & _POWER_PROGRAMS:
+        _refuse_power_action("os.system", command)
+    return _real_os_system(command)
+
+
+subprocess.Popen = _guarded_popen
+os.system = _guarded_os_system
+
+
+@pytest.fixture
+def power_guard():
+    """For the guard's OWN tests, and nothing else.
+
+    Two things a test of this guard needs that no other test may have:
+
+    `drain()` takes the recorded attempts and clears them, so a test that
+    deliberately triggers one is not then failed by the autouse fixture below.
+
+    `executed` is filled INSTEAD of running anything: the real primitives are
+    swapped for recorders for the duration. That is what makes it safe to point
+    the real `reboot_system()` at a machine and check it is refused -- if the
+    guard were broken, the call reaches a list rather than systemd.
+    """
+
+    class _Guard:
+        def __init__(self):
+            self.executed = []
+
+        def drain(self):
+            with _power_attempts_lock:
+                attempts = list(_power_attempts)
+                _power_attempts.clear()
+            return attempts
+
+    guard = _Guard()
+    globals_ = _guarded_popen.__globals__
+    # Held in locals, NOT read back from the module on the way out: these names
+    # are the very globals being replaced, so restoring from them would put the
+    # recorders back permanently and every later subprocess in the session would
+    # get a Mock instead of a process.
+    saved_popen = globals_["_real_popen"]
+    saved_os_system = globals_["_real_os_system"]
+
+    def _record_popen(command, *args, **kwargs):
+        guard.executed.append(command)
+        return mock.Mock()
+
+    def _record_os_system(command):
+        guard.executed.append(command)
+        return 0
+
+    globals_["_real_popen"] = _record_popen
+    globals_["_real_os_system"] = _record_os_system
+    try:
+        yield guard
+    finally:
+        globals_["_real_popen"] = saved_popen
+        globals_["_real_os_system"] = saved_os_system
+        guard.drain()
+
+
+@pytest.fixture(autouse=True)
+def _no_power_actions(request):
+    """Fail any test that reached a power action, including from a thread.
+
+    A refused call that happened on a daemon thread cannot fail the test by
+    raising, so it is reported here instead. The grace period in
+    `_restart_supervisor_programs` means such a thread can fire several seconds
+    after the test that started it returned -- so the attempt is reported with
+    the test that was running when it was MADE, which may not be this one.
+    """
+    global _current_test
+    _current_test = request.node.nodeid
+    with _power_attempts_lock:
+        _power_attempts.clear()
+    yield
+    with _power_attempts_lock:
+        attempts = list(_power_attempts)
+        _power_attempts.clear()
+    if attempts:
+        detail = "\n".join(
+            f"  {seam} {command!r} (thread {thread}, during {test})" for test, thread, seam, command in attempts
+        )
+        raise AssertionError(f"power action(s) attempted during this test:\n{detail}")
+
 
 from common import datastore  # noqa: E402
 
