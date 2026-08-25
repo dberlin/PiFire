@@ -6,7 +6,7 @@ generated/
 # acados build, FetchContent, generation transaction, and runtime publication state
 /build/
 /cmake-build-*/
-/native/.generated-stage-*/
+/native/.generated-staging/
 /native/.acados-exchange-probe-*/
 /controller/_native/
 
