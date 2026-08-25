@@ -46,11 +46,14 @@ def test_export_import_roundtrip(fresh):
     datastore.set_blob("settings:general", json.dumps({"globals": {"units": "C"}}))
     p = str(fresh / "out.json")
     datastore.export_config("settings:general", p)
-    assert json.load(open(p))["globals"]["units"] == "C"
+    with open(p) as handle:
+        assert json.load(handle)["globals"]["units"] == "C"
     # edit the file, re-import
-    d = json.load(open(p))
+    with open(p) as handle:
+        d = json.load(handle)
     d["globals"]["units"] = "F"
-    json.dump(d, open(p, "w"))
+    with open(p, "w") as handle:
+        json.dump(d, handle)
     datastore.import_config("settings:general", p)
     assert json.loads(datastore.get_blob("settings:general"))["globals"]["units"] == "F"
 
@@ -58,7 +61,8 @@ def test_export_import_roundtrip(fresh):
 def test_import_rejects_malformed(fresh):
     datastore.init()
     p = str(fresh / "bad.json")
-    open(p, "w").write("{not json")
+    with open(p, "w") as handle:
+        handle.write("{not json")
     with pytest.raises(ValueError):
         datastore.import_config("settings:general", p)
 

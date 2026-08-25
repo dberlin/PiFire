@@ -154,7 +154,8 @@ import os
 
 def test_manifest_max31865_has_spi_bus_fields():
     repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-    manifest = json.load(open(os.path.join(repo_root, "wizard", "wizard_manifest.json")))
+    with open(os.path.join(repo_root, "wizard", "wizard_manifest.json")) as handle:
+        manifest = json.load(handle)
     entry = manifest["modules"]["probes"]["max31865_adafruit"]
 
     labels = [item["label"] for item in entry["device_specific"]["config"]]
@@ -182,7 +183,8 @@ def test_manifest_list_defaults_are_valid_values():
     # otherwise nothing is preselected. Guards against the cs `default: "D2"`
     # (a label, not a value) regression.
     repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-    manifest = json.load(open(os.path.join(repo_root, "wizard", "wizard_manifest.json")))
+    with open(os.path.join(repo_root, "wizard", "wizard_manifest.json")) as handle:
+        manifest = json.load(handle)
     offenders = []
     for name, entry in manifest["modules"]["probes"].items():
         for item in entry.get("device_specific", {}).get("config", []):

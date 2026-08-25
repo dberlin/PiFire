@@ -197,7 +197,8 @@ import os
 
 def test_manifest_max31856_entry():
     repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-    manifest = json.load(open(os.path.join(repo_root, "wizard", "wizard_manifest.json")))
+    with open(os.path.join(repo_root, "wizard", "wizard_manifest.json")) as handle:
+        manifest = json.load(handle)
     probes = manifest["modules"]["probes"]
     assert "max31856_adafruit" in probes
     entry = probes["max31856_adafruit"]

@@ -194,9 +194,8 @@ def unpack_thumb(thumbname, filename, tmp_id):
                 os.makedirs(os.path.join(base, tmp_id), mode=0o700, exist_ok=True)
 
                 #  Write fullsize image to disk
-                destination = open(os.path.join(base, tmp_id, thumbname), "wb")  # Write bytes to proper destination
-                destination.write(thumb)
-                destination.close()
+                with open(os.path.join(base, tmp_id, thumbname), "wb") as destination:
+                    destination.write(thumb)
                 path_filename = f"{tmp_id}/{thumbname}"
 
                 #  Create temporary folder for the thumbnail

@@ -221,28 +221,26 @@ def _export_temp_path(filename, suffix):
 def prepare_metrics_csv(metrics_data, filename):
     filename = _export_temp_path(filename, "-PiFire-Metrics-Export.csv")
 
-    csvfile = open(filename, "w")
+    with open(filename, "w") as csvfile:
+        list_length = len(metrics_data)  # Length of list
 
-    list_length = len(metrics_data)  # Length of list
-
-    if list_length > 0:
-        # Build the header row
-        writeline = ""
-        for item in range(len(metrics_items)):
-            writeline += f"{metrics_items[item][0]}, "
-        writeline += "\n"
-        csvfile.write(writeline)
-        for index in range(list_length):
+        if list_length > 0:
+            # Build the header row
             writeline = ""
             for item in range(len(metrics_items)):
-                writeline += f"{metrics_data[index][metrics_items[item][0]]}, "
+                writeline += f"{metrics_items[item][0]}, "
             writeline += "\n"
             csvfile.write(writeline)
-    else:
-        writeline = "No Data\n"
-        csvfile.write(writeline)
+            for index in range(list_length):
+                writeline = ""
+                for item in range(len(metrics_items)):
+                    writeline += f"{metrics_data[index][metrics_items[item][0]]}, "
+                writeline += "\n"
+                csvfile.write(writeline)
+        else:
+            writeline = "No Data\n"
+            csvfile.write(writeline)
 
-    csvfile.close()
     return filename
 
 
@@ -256,56 +254,51 @@ def prepare_csv(data=None, filename=""):
         exportfilename = _export_temp_path(filename, "-Pifire-Export.csv")
 
     # Open CSV File for editing
-    csvfile = open(exportfilename, "w")
+    with open(exportfilename, "w") as csvfile:
+        if data == []:
+            data = read_history()
 
-    if data == []:
-        data = read_history()
+        # Get the length of the data (number of captured events)
+        list_length = len(data)
 
-    # Get the length of the data (number of captured events)
-    list_length = len(data)
+        if list_length > 0:
+            exd_data = "EXD" in data[0]
 
-    if list_length > 0:
-        exd_data = "EXD" in data[0]
-
-        # Set Standard Labels
-        labels = "Time, "
-        primary_key = next(iter(data[0]["P"].keys()))
-        labels += f"{primary_key} Temp, {primary_key} Set Point, {primary_key} Notify Target"
-        for key in data[0]["F"]:
-            labels += f", {key} Temp, {key} Notify Target"
-        for key in data[0]["AUX"]:
-            labels += f", {key} Temp"
-        if exd_data:
-            for key in data[0]["EXD"]:
-                labels += f", {key}"
-
-        # End the labels line
-        labels += "\n"
-
-        writeline = labels
-        csvfile.write(writeline)
-
-        for index in range(list_length):
-            converted_dt = datetime.datetime.fromtimestamp(int(data[index]["T"]) / 1000)
-            timestr = converted_dt.strftime("%Y-%m-%d %H:%M:%S")
-            writeline = (
-                f"{timestr}, {data[index]['P'][primary_key]}, {data[index]['PSP']}, {data[index]['NT'][primary_key]}"
-            )
-            for key in data[index]["F"]:
-                writeline += f", {data[index]['F'][key]}, {data[index]['NT'][key]}"
-            for key in data[index]["AUX"]:
-                writeline += f", {data[index]['AUX'][key]}"
-            # Add any additional data if keys exist
+            # Set Standard Labels
+            labels = "Time, "
+            primary_key = next(iter(data[0]["P"].keys()))
+            labels += f"{primary_key} Temp, {primary_key} Set Point, {primary_key} Notify Target"
+            for key in data[0]["F"]:
+                labels += f", {key} Temp, {key} Notify Target"
+            for key in data[0]["AUX"]:
+                labels += f", {key} Temp"
             if exd_data:
-                for key in data[index]["EXD"]:
-                    writeline += f", {data[index]['EXD'][key]}"
-            # Write line to file
-            csvfile.write(writeline + "\n")
-    else:
-        writeline = "No Data\n"
-        csvfile.write(writeline)
+                for key in data[0]["EXD"]:
+                    labels += f", {key}"
 
-    csvfile.close()
+            # End the labels line
+            labels += "\n"
+
+            writeline = labels
+            csvfile.write(writeline)
+
+            for index in range(list_length):
+                converted_dt = datetime.datetime.fromtimestamp(int(data[index]["T"]) / 1000)
+                timestr = converted_dt.strftime("%Y-%m-%d %H:%M:%S")
+                writeline = f"{timestr}, {data[index]['P'][primary_key]}, {data[index]['PSP']}, {data[index]['NT'][primary_key]}"
+                for key in data[index]["F"]:
+                    writeline += f", {data[index]['F'][key]}, {data[index]['NT'][key]}"
+                for key in data[index]["AUX"]:
+                    writeline += f", {data[index]['AUX'][key]}"
+                # Add any additional data if keys exist
+                if exd_data:
+                    for key in data[index]["EXD"]:
+                        writeline += f", {data[index]['EXD'][key]}"
+                # Write line to file
+                csvfile.write(writeline + "\n")
+        else:
+            writeline = "No Data\n"
+            csvfile.write(writeline)
 
     return exportfilename
 

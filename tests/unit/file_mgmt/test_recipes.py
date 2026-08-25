@@ -51,7 +51,8 @@ def test_create_recipefile_same_title_collision_does_not_overwrite(ds, isolated_
     # Tamper with the first archive's mtime/marker so we can tell, after the
     # second call, whether it got silently truncated-and-overwritten (the
     # bug) or left alone (the fix).
-    first_contents_before = open(first_filename, "rb").read()
+    with open(first_filename, "rb") as handle:
+        first_contents_before = handle.read()
 
     second_filename = create_recipefile()
     assert os.path.exists(second_filename)
@@ -60,4 +61,5 @@ def test_create_recipefile_same_title_collision_does_not_overwrite(ds, isolated_
     # and the first one's bytes must be untouched by the second call.
     assert first_filename != second_filename
     assert second_filename == first_filename.replace(".pfrecipe", "-1.pfrecipe")
-    assert open(first_filename, "rb").read() == first_contents_before
+    with open(first_filename, "rb") as handle:
+        assert handle.read() == first_contents_before

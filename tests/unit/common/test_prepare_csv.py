@@ -101,7 +101,8 @@ def test_prepare_csv_works_under_a_non_default_history_folder(ds, tmp_path):
     try:
         assert os.path.dirname(result) == "/tmp", result
         assert os.path.basename(result) == "MyCook.pifire-Pifire-Export.csv"
-        lines = open(result).read().splitlines()
+        with open(result) as handle:
+            lines = handle.read().splitlines()
         assert lines[0].startswith("Time, ")
         assert len(lines) == 3  # header + two rows
     finally:
@@ -119,7 +120,8 @@ def test_prepare_metrics_csv_works_under_a_non_default_history_folder(ds, tmp_pa
     try:
         assert os.path.dirname(result) == "/tmp", result
         assert os.path.basename(result) == "MyCook.pifire-PiFire-Metrics-Export.csv"
-        lines = open(result).read().splitlines()
+        with open(result) as handle:
+            lines = handle.read().splitlines()
         assert len(lines) == 3  # header + two events
     finally:
         os.remove(result)

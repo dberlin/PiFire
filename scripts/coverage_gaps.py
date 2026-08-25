@@ -37,7 +37,8 @@ def weight(path):
 
 def main():
     coverage_path = sys.argv[1] if len(sys.argv) > 1 else "coverage.json"
-    data = json.load(open(coverage_path))
+    with open(coverage_path) as handle:
+        data = json.load(handle)
 
     rows = []
     for path, f in data["files"].items():

@@ -255,8 +255,8 @@ def read_events(legacy=True):
             event_file.close()
     # If file not found error, then create events.log file
     except OSError:
-        event_file = open(log_path("events.log"), "w")
-        event_file.close()
+        with open(log_path("events.log"), "w"):
+            pass
         event_lines = []
 
     # Initialize event_list list

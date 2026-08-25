@@ -150,7 +150,8 @@ def test_no_tau_or_theta_config_is_read(clock):
     that pid_sp does not read them."""
     import controller.pid_sp as mod
 
-    source = open(mod.__file__).read()
+    with open(mod.__file__) as handle:
+        source = handle.read()
     assert 'config.get("tau"' not in source
     assert 'config.get("theta"' not in source
     assert "math.exp" not in source

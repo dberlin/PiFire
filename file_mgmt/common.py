@@ -71,17 +71,11 @@ def read_json_file_data(filename, jsonfile, unpackassets=True):
                     base = get_asset_tmp_base()
                     os.makedirs(os.path.join(base, parent_id, "thumbs"), mode=0o700, exist_ok=True)
                     #  Write fullsize image to disk
-                    destination = open(
-                        os.path.join(base, parent_id, f"{id}.{filetype}"), "wb"
-                    )  # Write bytes to proper destination
-                    destination.write(data)
-                    destination.close()
+                    with open(os.path.join(base, parent_id, f"{id}.{filetype}"), "wb") as destination:
+                        destination.write(data)
                     #  Write thumbnail image to disk
-                    destination = open(
-                        os.path.join(base, parent_id, "thumbs", f"{id}.{filetype}"), "wb"
-                    )  # Write bytes to proper destination
-                    destination.write(thumb)
-                    destination.close()
+                    with open(os.path.join(base, parent_id, "thumbs", f"{id}.{filetype}"), "wb") as destination:
+                        destination.write(thumb)
 
                     if not os.path.exists("./static/img/tmp"):
                         os.mkdir("./static/img/tmp")

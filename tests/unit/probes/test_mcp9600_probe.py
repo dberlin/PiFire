@@ -214,7 +214,8 @@ def test_kttdevice_exposes_ambient_temperature(monkeypatch):
 
 def test_manifest_mcp9600_entry():
     repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-    manifest = json.load(open(os.path.join(repo_root, "wizard", "wizard_manifest.json")))
+    with open(os.path.join(repo_root, "wizard", "wizard_manifest.json")) as handle:
+        manifest = json.load(handle)
     probes = manifest["modules"]["probes"]
     assert "mcp9600_adafruit" in probes
     entry = probes["mcp9600_adafruit"]

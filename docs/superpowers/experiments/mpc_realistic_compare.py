@@ -62,7 +62,8 @@ class MPCAdapter:
 class PIDAdapter:
     def __init__(self, module):
         _clk.t = 0.0
-        meta = json.load(open("controller/controllers.json"))["metadata"][module]
+        with open("controller/controllers.json") as handle:
+            meta = json.load(handle)["metadata"][module]
         cfg = {o["option_name"]: o["option_default"] for o in meta["config"]}
         self.c = importlib.import_module(f"controller.{module}").Controller(cfg, "F", dict(CYCLE))
 
