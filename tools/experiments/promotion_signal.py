@@ -758,7 +758,6 @@ def main():
     rows = [r for r in all_rows if in_scope(r)]
     sim_rows = [r for r in rows if r["plant"] is not None]
     real_rows = [r for r in rows if r["profile"] == "real_mak_cook"]
-    flat_rows = [r for r in rows if str(r["profile"]).startswith("flat_synth")]
     real_all = [r for r in all_rows if r["profile"] == "real_mak_cook"]
     flat_all = [r for r in all_rows if str(r["profile"]).startswith("flat_synth")]
     say(

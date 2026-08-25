@@ -205,7 +205,6 @@ def closed_loop(plant_name, setpoint_f, duration_s, seed=0, adaptive=True):
         core = mod.Controller(dict(CM.CONTROLLER_CONFIGS["pid_ac"]), "F", cycle_data)
         plant = getattr(CM, plant_name)(seed=seed)
 
-        pulse = cycle_data["HoldCycleTime"] * cycle_data["u_min"]
         cycle, u_min, u_max = cycle_data["HoldCycleTime"], cycle_data["u_min"], cycle_data["u_max"]
         core.set_target(setpoint_f)
         CM._report(core, u_min, "seed", 0)

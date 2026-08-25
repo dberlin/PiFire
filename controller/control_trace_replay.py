@@ -217,7 +217,6 @@ def validate_records(records: Sequence[ControlTraceRecord]) -> ReplayReport:
                 payload,
                 session,
                 updates,
-                allocations,
                 scheduler_resets,
                 lid_active,
                 manual_active,
@@ -314,7 +313,6 @@ def _validate_framed_frame(
     payload: FramedPulseFramePayload,
     session: SessionPayload,
     updates: dict[int, tuple[int, UpdatePayload]],
-    allocations: dict[int, tuple[int, AllocationPayload]],
     scheduler_resets: dict[int, int],
     lid: bool,
     manual: bool,
@@ -323,7 +321,6 @@ def _validate_framed_frame(
     index: int,
 ) -> None:
     update = updates.get(payload.result_revision)
-    allocation = allocations.get(payload.result_revision)
     if update is None:
         add(ReplayIssueCode.MISSING_UPDATE, "framed pulse cannot join its result revision", index)
     elif update[1].actuation_mode is not ActuationMode.FRAMED_PULSE:

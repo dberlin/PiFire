@@ -17,7 +17,6 @@ ignore = [
     "E731",  # lambda assignment
     "F401",  # unused imports
     "F403",  # star imports
-    "F841",  # unused variables
 
     # The two below are NOT part of that backlog -- they are deliberate, and the
     # incremental-cleanup note above does not apply to them.

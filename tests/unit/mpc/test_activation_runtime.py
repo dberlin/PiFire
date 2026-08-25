@@ -961,7 +961,6 @@ def test_later_retiree_close_failure_never_republishes_earlier_closed_owner(
         timestamp_ms=2_000,
     )
     replacement = _pair(_descriptor(43.0, candidate_generation=9, role_generation=9))
-    original_close = OwnedMpcPair.close
     assert runtime.queue_prepared_activation(pending_record, pending, _durable())
 
     pending_solver = pending.solver
