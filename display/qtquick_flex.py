@@ -31,8 +31,9 @@ from display._loggers import resolve_loggers
 
 class Display(DisplayBase):
     def __init__(
-        self, dev_pins, buttonslevel="HIGH", rotation=0, units="F", config={}, *, event_log=None, control_log=None
+        self, dev_pins, buttonslevel="HIGH", rotation=0, units="F", config=None, *, event_log=None, control_log=None
     ):
+        config = {} if config is None else config
         # Intentionally do NOT call super().__init__(): the parent process only
         # needs to spawn the Qt child and expose no-op stubs. Full DisplayBase
         # init (PIL canvas, assets, pygame menu JSON) is neither needed nor

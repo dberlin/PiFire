@@ -119,7 +119,8 @@ def paginate_list(datalist, sortkey="", reversesortorder=False, itemsperpage=10,
     return pagination
 
 
-def prepare_annotations(displayed_starttime, metrics_data=[]):
+def prepare_annotations(displayed_starttime, metrics_data=None):
+    metrics_data = [] if metrics_data is None else metrics_data
     if metrics_data == []:
         metrics_data = read_all_metrics()
     annotation_json = {}
@@ -245,7 +246,8 @@ def prepare_metrics_csv(metrics_data, filename):
     return filename
 
 
-def prepare_csv(data=[], filename=""):
+def prepare_csv(data=None, filename=""):
+    data = [] if data is None else data
     # Create filename if no name specified
     if filename == "":
         now = datetime.datetime.now()

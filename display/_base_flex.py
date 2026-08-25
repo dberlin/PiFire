@@ -95,8 +95,9 @@ NEW_EMBER_FLEX_TYPES = {
 
 class DisplayBase:
     def __init__(
-        self, dev_pins, buttonslevel="HIGH", rotation=0, units="F", config={}, *, event_log=None, control_log=None
+        self, dev_pins, buttonslevel="HIGH", rotation=0, units="F", config=None, *, event_log=None, control_log=None
     ):
+        config = {} if config is None else config
         # Init Global Variables and Constants
         self.config = config
 

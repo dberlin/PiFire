@@ -265,7 +265,8 @@ def config_txt_path(system_type=None):
     return TEST_MODE_CONFIG
 
 
-def rpi_config_write(config_type, feature, add_config={}, pin=0, param="", pin_type="gpio_pin", system_type=None):
+def rpi_config_write(config_type, feature, add_config=None, pin=0, param="", pin_type="gpio_pin", system_type=None):
+    add_config = {} if add_config is None else add_config
     result = "SUCCESS"
     changed = False
     config_filename = config_txt_path(system_type)

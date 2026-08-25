@@ -49,7 +49,7 @@ def calc_shh_coefficients(t1, t2, t3, r1, r2, r3, units="F"):
     return (a, b, c)
 
 
-def calc_shh_chart(a, b, c, units="F", temp_range=220, tr_points=[]):
+def calc_shh_chart(a, b, c, units="F", temp_range=220, tr_points=None):
     """
     Based on SHH Coefficients determined during tuning, show Temp (x) vs. Tr (y) chart
     """

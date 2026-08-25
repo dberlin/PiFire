@@ -339,7 +339,7 @@ def upgrade_cookfile(cookfilename, repair=False):
 
 def prepare_chartdata(
     probe_config,
-    chart_info={},
+    chart_info=None,
     num_items=10,
     reduce=True,
     data_points=10000,
@@ -348,6 +348,7 @@ def prepare_chartdata(
     max_points=None,
 ):
     """Build Probe Mapper and Chart Data Struct"""
+    chart_info = {} if chart_info is None else chart_info
     chart_data = []
 
     if chart_info == {}:
