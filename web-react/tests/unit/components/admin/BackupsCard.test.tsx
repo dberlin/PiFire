@@ -101,6 +101,29 @@ describe("BackupsCard download", () => {
   });
 });
 
+describe("BackupsCard diagnostics bundle", () => {
+  it("offers the database and logs as one download", () => {
+    mount();
+    const link = screen.getByRole("link", { name: "Download Diagnostics" });
+    expect(link.getAttribute("href")).toBe("/api/admin/diagnostics/download");
+  });
+
+  it("is offered while the grill is running", () => {
+    //  The whole point is capturing a cook that is misbehaving right now, so
+    //  unlike a settings restore this must not be mode-gated.
+    mount("Hold");
+    expect(screen.getByRole("link", { name: "Download Diagnostics" })).toBeTruthy();
+  });
+
+  it("is not listed among the restorable backups", () => {
+    //  It is a snapshot to send someone, not a file this card can restore from,
+    //  and a Restore button beside it would be a lie.
+    mount();
+    const link = screen.getByRole("link", { name: "Download Diagnostics" });
+    expect(link.closest("li")).toBe(null);
+  });
+});
+
 describe("BackupsCard restore", () => {
   it("restores nothing until confirmed", () => {
     mount();

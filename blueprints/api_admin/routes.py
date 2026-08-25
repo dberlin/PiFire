@@ -434,6 +434,11 @@ def admin_logs_download():
     return send_file(admin_api.build_log_archive(), as_attachment=True, max_age=0)
 
 
+@api_admin_bp.route("/diagnostics/download", methods=["GET"])
+def admin_diagnostics_download():
+    return send_file(admin_api.build_diagnostics_bundle(), as_attachment=True, max_age=0)
+
+
 @api_admin_bp.route("/logs/view", methods=["GET"])
 def admin_logs_view():
     """One log family as plain text, with byte-range support.

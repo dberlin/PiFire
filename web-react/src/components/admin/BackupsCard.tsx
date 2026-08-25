@@ -4,6 +4,7 @@ import {
   adminErrorText,
   backupDownloadUrl,
   createBackup,
+  diagnosticsDownloadUrl,
   restoreBackup,
   uploadBackup,
 } from "../../helpers/admin/adminApi";
@@ -151,6 +152,21 @@ export function BackupsCard({
             </div>
           );
         })}
+      </div>
+
+      {/* Deliberately outside the lists above and not mode-gated: this is a
+          snapshot to send someone, not a file this card can restore from, and
+          the cook worth capturing is usually the one running right now. */}
+      <div className="pf-admin-backup-head">
+        <div>
+          <h3 className="pf-admin-subtitle">Diagnostics</h3>
+          <p className="pf-admin-note">
+            The database and every log in one zip, for whoever is debugging a grill.
+          </p>
+        </div>
+        <a className="pf-admin-btn" href={diagnosticsDownloadUrl()} download>
+          Download Diagnostics
+        </a>
       </div>
 
       <div className="pf-admin-upload">

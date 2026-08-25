@@ -13,7 +13,9 @@ power the machine off, and it stays that way.
 
 import datetime
 import os
+import pathlib
 import re
+import sqlite3
 import tempfile
 import zipfile
 
@@ -232,6 +234,18 @@ def delete_logs(folder=None):
     return sorted(removed)
 
 
+def _archive_log_families(archive, folder, prefix=""):
+    """Write every log family member into an already-open ZipFile.
+
+    Shared by the logs-only archive and the diagnostics bundle so the two cannot
+    drift into disagreeing about which files count as logs -- rotated members
+    included, which is the part a plain `.log` glob gets wrong.
+    """
+    for members in list_log_families(folder).values():
+        for name in members:
+            archive.write(os.path.join(folder, name), arcname=prefix + name)
+
+
 def build_log_archive(folder=None):
     """Zip every log family member into a temp file and return its path.
 
@@ -244,9 +258,72 @@ def build_log_archive(folder=None):
     staging = tempfile.mkdtemp(prefix="pifire-logs-")
     archive = os.path.join(staging, f"PiFire_Logs_{stamp}.zip")
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
-        for members in list_log_families(folder).values():
-            for name in members:
-                zf.write(os.path.join(folder, name), arcname=name)
+        _archive_log_families(zf, folder)
+    return archive
+
+
+def _snapshot_database(destination):
+    """Write a consistent, standalone copy of the live database to `destination`.
+
+    Deliberately NOT shutil.copy. datastore opens pifire.db in WAL mode and
+    control.py, app.py and display_process.py all write to it while this runs, so
+    the bytes of the main database file on their own are a torn snapshot: every
+    row still sitting in pifire.db-wal is missing from it, and the recipient reads
+    a database that silently stops short of the moment they cared about. Shipping
+    the -wal and -shm alongside would be the other way out, and is worse -- three
+    files a recipient must keep together and a format that is only readable by a
+    compatible SQLite.
+
+    VACUUM INTO reads the source through one consistent transaction and emits a
+    fully checkpointed database that stands alone. It is read-only with respect
+    to the source, so a diagnostics download cannot disturb a running cook.
+    """
+    source = datastore.DB_PATH
+    try:
+        #  Read-only for the same reason: a plain connection that happens to be
+        #  the last one open checkpoints and truncates the live WAL on close.
+        connection = sqlite3.connect(f"{pathlib.Path(source).resolve().as_uri()}?mode=ro", uri=True)
+    except sqlite3.OperationalError:
+        #  Read-only access to a WAL database needs a -shm to share; if no writer
+        #  has left one behind there is nothing live to protect either.
+        connection = sqlite3.connect(source)
+    try:
+        try:
+            connection.execute("VACUUM INTO ?", (destination,))
+        except sqlite3.OperationalError:
+            #  VACUUM INTO landed in SQLite 3.27 (Pi OS ships far newer). The
+            #  backup API is older and equally consistent against live writers.
+            target = sqlite3.connect(destination)
+            try:
+                connection.backup(target)
+            finally:
+                target.close()
+    finally:
+        connection.close()
+
+
+def build_diagnostics_bundle(folder=None):
+    """Zip a database snapshot plus every log into a temp file; return its path.
+
+    One artifact to hand whoever is debugging a grill: the database carries
+    settings, history, control traces and the database-backed logs, and the log
+    folder carries what only ever exists as files. There is no settings.json to
+    include -- nothing writes one; settings live in the database.
+
+    Same private-mkdtemp staging as build_log_archive, for the same reason.
+    """
+    folder = folder or LOG_FOLDER
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    staging = tempfile.mkdtemp(prefix="pifire-diagnostics-")
+    snapshot = os.path.join(staging, "pifire.db")
+    _snapshot_database(snapshot)
+    archive = os.path.join(staging, f"PiFire_Diagnostics_{stamp}.zip")
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.write(snapshot, arcname="pifire.db")
+        _archive_log_families(zf, folder, prefix="logs/")
+    #  The snapshot is a whole second copy of the database; it has served its
+    #  purpose once it is inside the zip.
+    os.remove(snapshot)
     return archive
 
 

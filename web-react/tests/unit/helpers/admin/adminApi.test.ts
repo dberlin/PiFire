@@ -4,6 +4,7 @@ import {
   backupDownloadUrl,
   createBackup,
   deleteLogs,
+  diagnosticsDownloadUrl,
   factoryReset,
   fetchAdminState,
   fetchBackups,
@@ -197,5 +198,9 @@ describe("download hrefs", () => {
 
   it("builds the log archive href", () => {
     expect(logsDownloadUrl("")).toBe("/api/admin/logs/download");
+  });
+
+  it("builds the diagnostics bundle href", () => {
+    expect(diagnosticsDownloadUrl("")).toBe("/api/admin/diagnostics/download");
   });
 });

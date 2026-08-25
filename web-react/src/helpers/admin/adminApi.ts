@@ -204,3 +204,8 @@ export const deleteLogs = (baseUrl = BASE_URL) => post<LogsDeleted>(baseUrl, "lo
 
 /** Href for the zip of every log. Same anchor reasoning as backupDownloadUrl. */
 export const logsDownloadUrl = (baseUrl = BASE_URL) => url(baseUrl, "logs/download");
+
+/** Href for the one-file bug report: a consistent pifire.db snapshot plus every
+ * log. Same anchor reasoning as backupDownloadUrl, and it matters more here --
+ * the bundle is the largest thing this app ever hands back. */
+export const diagnosticsDownloadUrl = (baseUrl = BASE_URL) => url(baseUrl, "diagnostics/download");
