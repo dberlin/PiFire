@@ -20,6 +20,27 @@ ignore = [
     "F405",  # names from star imports
     "F541",  # f-string without placeholders
     "F841",  # unused variables
+
+    # The two below are NOT part of that backlog -- they are deliberate, and the
+    # incremental-cleanup note above does not apply to them.
+
+    # BLE001 (blind-except). PiFire is a long-running daemon driving physical
+    # hardware: 40 sites in controller/model_learning, 48 across controller/runtime
+    # and its modes, 15 in probes and 9 in grillplat. A failing probe read, a
+    # wedged I2C bus or a bad learning sample must degrade that one reading, not
+    # raise out of the control loop and stop a cook mid-cycle. Catching broad
+    # `Exception` at those boundaries is the design, which is the same reason
+    # E722 (bare except) is ignored above.
+    "BLE001",  # blind except -- deliberate at hardware and control-loop boundaries
+
+    # RUF100 (unused-noqa). 141 of the 144 hits are `# noqa` markers naming rules
+    # this file already ignores (E402, F401, F841, E731, F811); they are "unused"
+    # only BECAUSE of the ignore list above, and become load-bearing again the
+    # moment those ignores are removed incrementally as planned. Deleting them
+    # would throw away the record of which suppressions are intentional -- e.g.
+    # the `# noqa: F401` markers on dynamically-resolved widget classes in
+    # display/. The remaining 3 name PLC0415, which is not in the default set.
+    "RUF100",  # unused noqa -- the markers document intent the ignore list masks
 ]
 # `line-length` above is only advisory to the formatter unless E501 is selected
 # explicitly -- it is NOT in Ruff's default rule set. It is enabled here scoped
