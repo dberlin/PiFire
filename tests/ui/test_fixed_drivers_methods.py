@@ -288,13 +288,13 @@ def _rendered_icons(d):
 
 
 def test_ssd1306_constructs_and_sizes():
-    mod, d = _make_ssd1306()
+    _mod, d = _make_ssd1306()
     assert (d.WIDTH, d.HEIGHT) == (128, 64)
     assert d.device is not None
 
 
 def test_ssd1306_draw_methods_forward_to_device():
-    mod, d = _make_ssd1306()
+    _mod, d = _make_ssd1306()
     d.device.display.reset_mock()
 
     d._display_splash()
@@ -315,7 +315,7 @@ def test_ssd1306_display_current_all_outpins_off_and_no_notify():
     # Cover the "nothing lit up" branches (fan/igniter/auger False, no
     # notify_data requiring a bell icon) -- and assert the outcome, rather
     # than only that rendering did not raise.
-    mod, d = _make_ssd1306()
+    _mod, d = _make_ssd1306()
     status = dict(SAMPLE_STATUS_DATA)
     status["outpins"] = {"fan": False, "igniter": False, "auger": False}
     status["notify_data"] = []
@@ -327,7 +327,7 @@ def test_ssd1306_display_current_all_outpins_off_and_no_notify():
 
 
 def test_ssd1306_public_status_methods_set_state_without_touching_device():
-    mod, d = _make_ssd1306()
+    _mod, d = _make_ssd1306()
     d.device.display.reset_mock()
 
     d.display_status(SAMPLE_IN_DATA, SAMPLE_STATUS_DATA)
@@ -394,7 +394,7 @@ def _make_ssd1306b(monkeypatch, initial_mode=Mode.STOP):
 
 
 def test_ssd1306b_constructs_with_buttons_and_menu():
-    mod, d, _state, _calls = _make_ssd1306b(pytest.MonkeyPatch())
+    _mod, d, _state, _calls = _make_ssd1306b(pytest.MonkeyPatch())
     assert (d.WIDTH, d.HEIGHT) == (128, 64)
     assert d.up_button is not None and d.down_button is not None and d.enter_button is not None
     assert "inactive" in d.menu and "active" in d.menu
@@ -432,7 +432,7 @@ def test_ssd1306b_draw_methods_forward_to_device(monkeypatch):
 
 
 def test_ssd1306b_event_detect_opens_inactive_menu(monkeypatch):
-    _mod, d, state, _calls = _make_ssd1306b(monkeypatch, initial_mode=Mode.STOP)
+    _mod, d, _state, _calls = _make_ssd1306b(monkeypatch, initial_mode=Mode.STOP)
     d.device.display.reset_mock()
 
     d.input_event = "ENTER"
@@ -443,7 +443,7 @@ def test_ssd1306b_event_detect_opens_inactive_menu(monkeypatch):
 
 
 def test_ssd1306b_menu_navigates_and_selects_startup(monkeypatch):
-    _mod, d, state, calls = _make_ssd1306b(monkeypatch, initial_mode=Mode.STOP)
+    _mod, d, _state, calls = _make_ssd1306b(monkeypatch, initial_mode=Mode.STOP)
 
     d.input_event = "ENTER"
     d._event_detect()  # open inactive menu, option 0 == "Startup"
@@ -461,7 +461,7 @@ def test_ssd1306b_menu_navigates_and_selects_startup(monkeypatch):
 
 
 def test_ssd1306b_menu_active_mode_shutdown_and_network(monkeypatch):
-    _mod, d, state, calls = _make_ssd1306b(monkeypatch, initial_mode=Mode.HOLD)
+    _mod, d, _state, calls = _make_ssd1306b(monkeypatch, initial_mode=Mode.HOLD)
 
     d.input_event = "ENTER"
     d._event_detect()  # active menu (mode=Hold != inactive modes)
@@ -485,7 +485,7 @@ def test_ssd1306b_menu_active_mode_shutdown_and_network(monkeypatch):
 
 
 def test_ssd1306b_menu_grill_hold_value_adjusts_and_commits(monkeypatch):
-    _mod, d, state, calls = _make_ssd1306b(monkeypatch, initial_mode=Mode.HOLD)
+    _mod, d, _state, calls = _make_ssd1306b(monkeypatch, initial_mode=Mode.HOLD)
 
     d.input_event = "ENTER"
     d._event_detect()  # active menu
@@ -512,7 +512,7 @@ def test_ssd1306b_menu_grill_hold_value_adjusts_and_commits(monkeypatch):
 
 
 def test_ssd1306b_menu_grill_hold_value_celsius_bounds(monkeypatch):
-    _mod, d, state, calls = _make_ssd1306b(monkeypatch, initial_mode=Mode.HOLD)
+    _mod, d, _state, _calls = _make_ssd1306b(monkeypatch, initial_mode=Mode.HOLD)
     d.units = "C"
 
     d.input_event = "ENTER"
@@ -529,7 +529,7 @@ def test_ssd1306b_menu_grill_hold_value_celsius_bounds(monkeypatch):
 
 
 def test_ssd1306b_menu_smokeplus_toggle(monkeypatch):
-    _mod, d, state, calls = _make_ssd1306b(monkeypatch, initial_mode=Mode.HOLD)
+    _mod, d, _state, calls = _make_ssd1306b(monkeypatch, initial_mode=Mode.HOLD)
     d.input_event = "ENTER"
     d._event_detect()
     for _ in range(4):  # UP: Shutdown(0)->Hold(1)->Smoke(2)->Stop(3)->SmokePlus(4)
@@ -541,7 +541,7 @@ def test_ssd1306b_menu_smokeplus_toggle(monkeypatch):
 
 
 def test_ssd1306b_menu_monitor_and_stop_from_inactive(monkeypatch):
-    _mod, d, state, calls = _make_ssd1306b(monkeypatch, initial_mode=Mode.STOP)
+    _mod, d, _state, calls = _make_ssd1306b(monkeypatch, initial_mode=Mode.STOP)
     d.input_event = "ENTER"
     d._event_detect()
     d.input_event = "UP"
@@ -562,7 +562,7 @@ def test_ssd1306b_menu_monitor_and_stop_from_inactive(monkeypatch):
 
 
 def test_ssd1306b_event_detect_ignores_unknown_and_menu_timeout(monkeypatch):
-    _mod, d, state, calls = _make_ssd1306b(monkeypatch)
+    _mod, d, _state, _calls = _make_ssd1306b(monkeypatch)
     d.input_event = "SOMETHING_ELSE"
     d._event_detect()
     assert d.menu_active is False  # unrecognized command -> early return
@@ -599,12 +599,12 @@ def _make_st7789p():
 
 
 def test_st7789p_constructs_and_takes_device_geometry():
-    mod, d = _make_st7789p()
+    _mod, d = _make_st7789p()
     assert (d.WIDTH, d.HEIGHT) == (240, 240)
 
 
 def test_st7789p_splash_and_clear_forward_to_device():
-    mod, d = _make_st7789p()
+    _mod, d = _make_st7789p()
     d.device.display.reset_mock()
 
     d._display_splash()
@@ -625,7 +625,7 @@ def test_st7789p_display_text_completes_and_forwards_to_device():
     to succeed even though impact.ttf is not vendored in this repo, isolating
     this test to the render path itself, not an environment font-availability
     gap. Not validated on real ST7789 hardware."""
-    mod, d = _make_st7789p()
+    _mod, d = _make_st7789p()
     d.device.display.reset_mock()
     d.display_data = "225"
 
@@ -639,7 +639,7 @@ def test_st7789p_display_current_completes_and_forwards_to_device():
     _display_current hits the same fixed getbbox text-measurement path, at
     every callsite (grill temp, fan/igniter/auger icons, notification icon,
     mode label). Not validated on real ST7789 hardware."""
-    mod, d = _make_st7789p()
+    _mod, d = _make_st7789p()
     d.device.display.reset_mock()
 
     d._display_current(SAMPLE_IN_DATA, SAMPLE_STATUS_DATA)
@@ -648,7 +648,7 @@ def test_st7789p_display_current_completes_and_forwards_to_device():
 
 
 def test_st7789p_public_status_methods():
-    mod, d = _make_st7789p()
+    _mod, d = _make_st7789p()
     d.display_status(SAMPLE_IN_DATA, SAMPLE_STATUS_DATA)
     assert d.in_data == SAMPLE_IN_DATA and d.units == SAMPLE_STATUS_DATA["units"]
     d.display_splash()
@@ -807,7 +807,7 @@ def _make_ili9341f(monkeypatch, event_log=None, control_log=None, **config_overr
 
 
 def test_ili9341f_constructs_device_and_input(monkeypatch):
-    mod, d = _make_ili9341f(monkeypatch)
+    _mod, d = _make_ili9341f(monkeypatch)
     assert d.device is not None
     assert d.up_button is not None and d.encoder is not None
     assert d.background is not None and d.display_canvas is not None
@@ -903,7 +903,7 @@ def test_ili9341f_encoder_callbacks_set_events(monkeypatch):
 
 
 def test_ili9341f_no_input_types_disables_input(monkeypatch):
-    mod, d = _make_ili9341f(monkeypatch, input_types_supported=["none"])
+    _mod, d = _make_ili9341f(monkeypatch, input_types_supported=["none"])
     assert d.input_enabled is False
 
 
@@ -978,14 +978,14 @@ def _make_prototype():
 
 
 def test_prototype_constructs_and_shows_splash_on_init():
-    mod, d = _make_prototype()
+    _mod, d = _make_prototype()
     assert d.screen is not None
     # __init__ calls self.display_splash() itself; confirm it drew something.
     assert any(call[0] == "addstr" for call in d.screen.calls)
 
 
 def test_prototype_display_status_draws_probe_and_notify_and_pins(monkeypatch):
-    mod, d = _make_prototype()
+    _mod, d = _make_prototype()
     d.screen.calls.clear()
     status_data = {
         "mode": "Hold",
@@ -1031,7 +1031,7 @@ def test_prototype_display_status_low_and_mid_hopper_levels(monkeypatch):
 
 
 def test_prototype_clear_display_and_display_text():
-    mod, d = _make_prototype()
+    _mod, d = _make_prototype()
     d.screen.calls.clear()
     d.clear_display()
     assert any(c[0] == "refresh" for c in d.screen.calls)
@@ -1042,5 +1042,5 @@ def test_prototype_clear_display_and_display_text():
 
 
 def test_prototype_display_network_is_a_noop():
-    mod, d = _make_prototype()
+    _mod, d = _make_prototype()
     d.display_network()  # `pass` -- just proves it doesn't raise

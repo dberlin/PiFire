@@ -63,7 +63,7 @@ def test_read_distance_mm_returns_range_directly():
     import distance.vl53l0x as vl_mod
 
     with mock.patch.object(tof_mod, "open_i2c_bus", return_value=mock.sentinel.bus):
-        hopper, VL53L0X = _make_hopper(tof_mod, vl_mod, range_value=123)
+        hopper, _VL53L0X = _make_hopper(tof_mod, vl_mod, range_value=123)
         try:
             assert hopper._read_distance_mm() == 123
         finally:

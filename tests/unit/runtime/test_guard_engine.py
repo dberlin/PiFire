@@ -105,7 +105,7 @@ def test_edge_fires_request_transition_with_params(monkeypatch):
 def test_edge_reignite_from_self_uses_mode_name(monkeypatch):
     control = _control("Hold")
     guards = {"Hold": {"pre_act": [Edge(_true, "Reignite", "safety", reignite_from_self=True)]}}
-    mode_obj, ctx, store, notifier = _setup("Hold", control, monkeypatch, guards)
+    mode_obj, ctx, _store, _notifier = _setup("Hold", control, monkeypatch, guards)
     fired = evaluate_phase(mode_obj, ctx, "pre_act", now=0, ptemp=100)
     assert fired is True
     assert control["mode"] == "Reignite"
@@ -126,7 +126,7 @@ def test_priority_first_matching_edge_wins(monkeypatch):
         return True
 
     guards = {"Smoke": {"pre_act": [Edge(_record_true, "Error", "safety"), Edge(_second, "Reignite", "safety")]}}
-    mode_obj, ctx, store, notifier = _setup("Smoke", control, monkeypatch, guards)
+    mode_obj, ctx, _store, _notifier = _setup("Smoke", control, monkeypatch, guards)
     fired = evaluate_phase(mode_obj, ctx, "pre_act", now=0, ptemp=100)
     assert fired is True
     assert control["mode"] == "Error"  # first edge won
@@ -136,7 +136,7 @@ def test_priority_first_matching_edge_wins(monkeypatch):
 def test_universal_star_edges_apply_to_any_mode(monkeypatch):
     control = _control("Monitor")
     guards = {"*": {"pre_act": [Edge(_true, "Stop", "terminal")]}}
-    mode_obj, ctx, store, notifier = _setup("Monitor", control, monkeypatch, guards)
+    mode_obj, ctx, _store, _notifier = _setup("Monitor", control, monkeypatch, guards)
     fired = evaluate_phase(mode_obj, ctx, "pre_act", now=0, ptemp=100)
     assert fired is True
     assert control["mode"] == "Stop"
@@ -150,7 +150,7 @@ def test_star_edges_take_priority_over_mode_edges(monkeypatch):
         "Smoke": {"pre_act": [Edge(_true, "Reignite", "safety")]},
         "*": {"pre_act": [Edge(_true, "Error", "safety")]},
     }
-    mode_obj, ctx, store, notifier = _setup("Smoke", control, monkeypatch, guards)
+    mode_obj, ctx, _store, _notifier = _setup("Smoke", control, monkeypatch, guards)
     evaluate_phase(mode_obj, ctx, "pre_act", now=0, ptemp=100)
     assert control["mode"] == "Error"  # universal edge won over the mode edge
 
@@ -158,7 +158,7 @@ def test_star_edges_take_priority_over_mode_edges(monkeypatch):
 def test_no_match_returns_false_and_writes_nothing(monkeypatch):
     control = _control("Smoke")
     guards = {"Smoke": {"pre_act": [Edge(_false, "Error", "safety")]}}
-    mode_obj, ctx, store, notifier = _setup("Smoke", control, monkeypatch, guards)
+    mode_obj, ctx, store, _notifier = _setup("Smoke", control, monkeypatch, guards)
     fired = evaluate_phase(mode_obj, ctx, "pre_act", now=0, ptemp=100)
     assert fired is False
     assert store.writes == []
@@ -167,7 +167,7 @@ def test_no_match_returns_false_and_writes_nothing(monkeypatch):
 
 def test_empty_phase_returns_false(monkeypatch):
     control = _control("Smoke")
-    mode_obj, ctx, store, notifier = _setup("Smoke", control, monkeypatch, {})
+    mode_obj, ctx, _store, _notifier = _setup("Smoke", control, monkeypatch, {})
     assert evaluate_phase(mode_obj, ctx, "pre_loop", now=0, ptemp=100) is False
 
 

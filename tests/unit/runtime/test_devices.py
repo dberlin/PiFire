@@ -394,7 +394,7 @@ def test_build_devices_distance_failures_do_not_set_critical_error_or_reraise_in
         _selective_import({"distance.nonexistent_dist_xyz": ModuleNotFoundError}),
     )
 
-    devices, errors = build_devices(settings, errors=[], event_log=_RecordingLogger(), control_log=_RecordingLogger())
+    _devices, errors = build_devices(settings, errors=[], event_log=_RecordingLogger(), control_log=_RecordingLogger())
 
     assert len(errors) == 1
     assert not read_control().get("critical_error")
@@ -675,7 +675,7 @@ def test_build_display_import_failure_uses_default_display_config_and_rotation(d
     settings["modules"]["display"] = "nonexistent_display_xyz"
     errors = []
 
-    display, errors = build_display(
+    _display, errors = build_display(
         settings, errors=errors, event_log=_RecordingLogger(), control_log=_RecordingLogger()
     )
 

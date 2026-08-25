@@ -26,7 +26,7 @@ def _make(config):
 def test_emc_bus_opened_via_factory_mcp2221():
     from common.i2c_bus_config import MCP2221Bus
 
-    platform, open_bus, emc2101, emc2301 = _make(
+    _platform, open_bus, emc2101, emc2301 = _make(
         _base_config(chip="emc2101", i2c_bus={"kind": "mcp2221", "serial": "SERIAL9"})
     )
     open_bus.assert_called_once_with(MCP2221Bus(serial="SERIAL9"))

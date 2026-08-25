@@ -35,7 +35,7 @@ def test_status_after_first_tick(monkeypatch, mode, expected_status):
     settings = base_settings()
     control_data = base_control(mode=mode)
     control_data["updated"] = True
-    c, ctx, store, grill, dist, notifier = make_controller(settings, control_data, base_pellet_db())
+    c, _ctx, store, _grill, _dist, _notifier = make_controller(settings, control_data, base_pellet_db())
     _spy_dispatch(c)
     c.setup()
     c.tick()
@@ -50,7 +50,7 @@ def test_active_set_when_operating(monkeypatch):
     control_data = base_control(mode="Smoke")
     control_data["updated"] = True
     control_data["next_mode"] = "Stop"
-    c, ctx, store, grill, dist, notifier = make_controller(settings, control_data, base_pellet_db())
+    c, _ctx, store, _grill, _dist, _notifier = make_controller(settings, control_data, base_pellet_db())
     _spy_dispatch(c)
     c.setup()
     c.tick()
@@ -70,7 +70,7 @@ def test_monitor_error_keeps_power_on(monkeypatch):
     control_data = base_control(mode="Error")
     control_data["status"] = "monitor"
     control_data["updated"] = True
-    c, ctx, store, grill, dist, notifier = make_controller(settings, control_data, base_pellet_db())
+    c, _ctx, _store, grill, _dist, _notifier = make_controller(settings, control_data, base_pellet_db())
     _spy_dispatch(c)
     c.setup()
     c.tick()
@@ -86,7 +86,7 @@ def test_normal_error_powers_off(monkeypatch):
     control_data = base_control(mode="Error")
     control_data["status"] = "active"
     control_data["updated"] = True
-    c, ctx, store, grill, dist, notifier = make_controller(settings, control_data, base_pellet_db())
+    c, _ctx, _store, grill, _dist, _notifier = make_controller(settings, control_data, base_pellet_db())
     _spy_dispatch(c)
     c.setup()
     c.tick()

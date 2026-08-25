@@ -57,7 +57,7 @@ def _patch_controller():
 
 
 def test_construct_i2c_bus_returns_locked_i2c():
-    controller, patch = _patch_controller()
+    _controller, patch = _patch_controller()
     with patch:
         bus = i2c_bus.open_i2c_bus(FT232HBus())
     assert isinstance(bus, i2c_bus._LockedI2C)
@@ -71,7 +71,7 @@ def test_scan_uses_poll():
 
 
 def test_blank_and_one_selector_share_one_controller():
-    controller, patch = _patch_controller()
+    _controller, patch = _patch_controller()
     with patch as new_controller:
         a = i2c_bus.open_i2c_bus(FT232HBus())
         b = i2c_bus.open_i2c_bus(FT232HBus(url="1"))
@@ -86,7 +86,7 @@ def test_blank_selector_produces_a_real_pyftdi_url():
     # UsbToolsError("Invalid URL: 1") -- see discover_ft232h_devices() in
     # common/ft232h.py, which already builds "ftdi://ftdi:232h/1" for this
     # exact case.
-    controller, patch = _patch_controller()
+    _controller, patch = _patch_controller()
     with patch as new_controller:
         i2c_bus.open_i2c_bus(FT232HBus())
     called_url = new_controller.call_args[0][0]
@@ -120,7 +120,7 @@ def test_i2c_nack_becomes_oserror():
 
 
 def test_runtime_rejects_basic_after_ft232h():
-    controller, patch = _patch_controller()
+    _controller, patch = _patch_controller()
     with patch:
         i2c_bus.open_i2c_bus(FT232HBus())
         with pytest.raises(i2c_bus.I2CBusConfigError):
@@ -179,7 +179,7 @@ def test_set_toggles_only_its_own_bit():
 
 
 def test_unknown_pin_name_raises():
-    controller, port = _controller_with_gpio()
+    controller, _port = _controller_with_gpio()
     with mock.patch.object(ft232h, "_new_controller", return_value=controller):
         gpio = ft232h.open_gpio("")
     with pytest.raises(ValueError):
@@ -187,7 +187,7 @@ def test_unknown_pin_name_raises():
 
 
 def test_reserved_i2c_pin_raises():
-    controller, port = _controller_with_gpio()
+    controller, _port = _controller_with_gpio()
     with mock.patch.object(ft232h, "_new_controller", return_value=controller):
         gpio = ft232h.open_gpio("")
     for reserved in ("D0", "D1", "D2", "D3"):
@@ -196,7 +196,7 @@ def test_reserved_i2c_pin_raises():
 
 
 def test_gpio_and_i2c_share_one_controller():
-    controller, port = _controller_with_gpio()
+    controller, _port = _controller_with_gpio()
     with mock.patch.object(ft232h, "_new_controller", return_value=controller) as new_controller:
         bus = i2c_bus.open_i2c_bus(FT232HBus())
         gpio = ft232h.open_gpio("1")  # '' and '1' alias
@@ -206,7 +206,7 @@ def test_gpio_and_i2c_share_one_controller():
 
 
 def test_open_gpio_is_cached_per_controller():
-    controller, port = _controller_with_gpio()
+    controller, _port = _controller_with_gpio()
     with mock.patch.object(ft232h, "_new_controller", return_value=controller):
         a = ft232h.open_gpio("")
         b = ft232h.open_gpio("1")

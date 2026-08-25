@@ -912,7 +912,7 @@ def test_build_runner_selects_sync_for_non_async_core(monkeypatch):
             return False
 
     monkeypatch.setattr(runner_mod, "_build_core", lambda *a, **k: (SyncCore(), "Active"))
-    r, status = build_runner({}, {})
+    r, _status = build_runner({}, {})
     assert isinstance(r, SyncControllerRunner)
     r.stop()  # no-op
 

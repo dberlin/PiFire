@@ -282,7 +282,7 @@ def test_open_mcp2221_selector_opens_matching_serial():
 
 
 def test_open_mcp2221_selector_not_found_raises():
-    modules, FakeDevice = _fake_easymcp2221_module(not_found_serials={"ZZZZ"})
+    modules, _FakeDevice = _fake_easymcp2221_module(not_found_serials={"ZZZZ"})
     with mock.patch.dict("sys.modules", modules), pytest.raises(i2c_bus.I2CBusConfigError):
         i2c_bus.open_i2c_bus(MCP2221Bus(serial="ZZZZ"))
 

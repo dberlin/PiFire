@@ -107,7 +107,7 @@ def _respond(instance, command, response=None):
 
 
 def test_init_configures_serial_port_with_expected_parameters(serial_mock):
-    serial_module, instance = serial_mock
+    serial_module, _instance = serial_mock
     relay = NumatoUSBRelay("/dev/ttyACM0", baudrate=115200, timeout=2.0)
     serial_module.Serial.assert_called_once_with(
         port="/dev/ttyACM0",
@@ -121,7 +121,7 @@ def test_init_configures_serial_port_with_expected_parameters(serial_mock):
 
 
 def test_init_default_baudrate_and_timeout(serial_mock):
-    serial_module, instance = serial_mock
+    serial_module, _instance = serial_mock
     NumatoUSBRelay("/dev/ttyACM0")
     _, kwargs = serial_module.Serial.call_args
     assert kwargs["baudrate"] == 921600
@@ -275,7 +275,7 @@ def test_relay_on_rejects_out_of_range_index(serial_mock):
 
 
 def test_relay_on_rejects_negative_index(serial_mock):
-    _, instance = serial_mock
+    _, _instance = serial_mock
     relay = NumatoUSBRelay("/dev/ttyACM0")
     with pytest.raises(ValueError):
         relay.relay_on(-1)
@@ -410,7 +410,7 @@ def test_gpio_read_true_high(serial_mock):
 
 
 def test_gpio_set_rejects_out_of_range_index(serial_mock):
-    _, instance = serial_mock
+    _, _instance = serial_mock
     relay = NumatoUSBRelay("/dev/ttyACM0")
     with pytest.raises(ValueError, match="gpio index"):
         relay.gpio_set(4)
@@ -451,7 +451,7 @@ def test_adc_read_voltage_uses_custom_reference(serial_mock):
 
 
 def test_adc_read_rejects_out_of_range_index(serial_mock):
-    _, instance = serial_mock
+    _, _instance = serial_mock
     relay = NumatoUSBRelay("/dev/ttyACM0")
     with pytest.raises(ValueError, match="adc index"):
         relay.adc_read(4)

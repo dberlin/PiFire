@@ -859,7 +859,7 @@ def test_a_materially_degraded_residual_drops_trust():
     envelope, so this is the only thing that can catch it."""
     identifier = FOPDTIdentifier()
     identifier.restore({"K": 800.0, "tau": 600.0, "theta": 20.0, "revision": 5})
-    idx, other = _resid_setup(identifier, 20.0)
+    idx, _other = _resid_setup(identifier, 20.0)
     identifier._bank.resid_ew[idx] = 100.0  # unambiguously worse than the best
     for _ in range(DISTRUST_WINDOW):
         identifier._check_distrust()
@@ -874,7 +874,7 @@ def test_a_healthy_residual_is_not_dropped():
     DISTRUST_WINDOW is too tight."""
     identifier = FOPDTIdentifier()
     identifier.restore({"K": 800.0, "tau": 600.0, "theta": 20.0, "revision": 5})
-    idx, other = _resid_setup(identifier, 20.0)
+    idx, _other = _resid_setup(identifier, 20.0)
     identifier._bank.resid_ew[idx] = 1.0  # ties the best candidate
     for _ in range(DISTRUST_WINDOW * 5):
         identifier._check_distrust()
@@ -891,7 +891,7 @@ def test_distrust_ratio_boundary_does_not_trip_exactly_at_the_threshold():
     assert DISTRUST_RATIO == 8.0
     identifier = FOPDTIdentifier()
     identifier.restore({"K": 800.0, "tau": 600.0, "theta": 20.0, "revision": 1})
-    idx, other = _resid_setup(identifier, 20.0)
+    idx, _other = _resid_setup(identifier, 20.0)
     identifier._bank.resid_ew[idx] = 8.0
     for _ in range(DISTRUST_WINDOW * 2):
         identifier._check_distrust()
@@ -902,7 +902,7 @@ def test_distrust_ratio_boundary_trips_just_above_the_threshold():
     assert DISTRUST_RATIO == 8.0
     identifier = FOPDTIdentifier()
     identifier.restore({"K": 800.0, "tau": 600.0, "theta": 20.0, "revision": 1})
-    idx, other = _resid_setup(identifier, 20.0)
+    idx, _other = _resid_setup(identifier, 20.0)
     identifier._bank.resid_ew[idx] = 8.01
     for _ in range(DISTRUST_WINDOW):
         identifier._check_distrust()
@@ -915,7 +915,7 @@ def test_distrust_window_boundary_requires_the_full_sustain_count():
     test_confirmation_requires_a_full_window_before_trust."""
     identifier = FOPDTIdentifier()
     identifier.restore({"K": 800.0, "tau": 600.0, "theta": 20.0, "revision": 1})
-    idx, other = _resid_setup(identifier, 20.0)
+    idx, _other = _resid_setup(identifier, 20.0)
     identifier._bank.resid_ew[idx] = 100.0
     for _ in range(DISTRUST_WINDOW - 1):
         identifier._check_distrust()
@@ -930,7 +930,7 @@ def test_distrust_is_not_sticky():
     count does not move again."""
     identifier = FOPDTIdentifier()
     identifier.restore({"K": 800.0, "tau": 600.0, "theta": 20.0, "revision": 5})
-    idx, other = _resid_setup(identifier, 20.0)
+    idx, _other = _resid_setup(identifier, 20.0)
     identifier._bank.resid_ew[idx] = 100.0
     for _ in range(DISTRUST_WINDOW):
         identifier._check_distrust()

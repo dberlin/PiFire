@@ -363,7 +363,7 @@ def test_button_row_for_mode_recipe_paused_highlights_next():
 
 
 def test_button_row_for_mode_recipe_ignored_in_shutdown():
-    button_type, button_list, _ = DisplayBase._button_row_for_mode("Shutdown", True, False)
+    button_type, _button_list, _ = DisplayBase._button_row_for_mode("Shutdown", True, False)
     assert button_type == ["Smoke", "Hold", "Stop", "Shutdown"]
 
 

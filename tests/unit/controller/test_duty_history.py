@@ -53,7 +53,7 @@ def test_average_shifts_the_window_by_each_delay():
 
 def test_a_window_reaching_before_retained_history_is_invalid():
     h = _history([(100.0, 0.5)])
-    values, valid = h.average(150.0, 160.0, np.array([0.0, 60.0]))
+    _values, valid = h.average(150.0, 160.0, np.array([0.0, 60.0]))
     # 150-60 = 90 < 100, the earliest thing we know
     assert valid.tolist() == [True, False]
 

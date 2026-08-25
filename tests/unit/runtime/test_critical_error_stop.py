@@ -46,7 +46,7 @@ def _controller(monkeypatch, *, mode, critical_error):
     control_data = base_control(mode=mode)
     control_data["critical_error"] = critical_error
     control_data["updated"] = False
-    c, ctx, store, grill, dist, notifier = make_controller(
+    c, _ctx, store, grill, _dist, _notifier = make_controller(
         settings, control_data, base_pellet_db(), clock=ManualClock()
     )
     calls = []
@@ -73,7 +73,7 @@ def _request_mode(store, mode):
 def test_stop_is_dispatched_while_critical_error_is_latched(monkeypatch):
     """THE REGRESSION. A lit grill (Manual) on a platform that failed to build
     must still be stoppable."""
-    c, store, grill, calls = _controller(monkeypatch, mode=Mode.MANUAL, critical_error=True)
+    c, store, grill, _calls = _controller(monkeypatch, mode=Mode.MANUAL, critical_error=True)
     _request_mode(store, Mode.STOP)
 
     c.tick()
@@ -92,7 +92,7 @@ def test_stop_is_dispatched_while_critical_error_is_latched(monkeypatch):
 
 
 def test_shutdown_is_dispatched_while_critical_error_is_latched(monkeypatch):
-    c, store, grill, calls = _controller(monkeypatch, mode=Mode.SMOKE, critical_error=True)
+    c, store, _grill, calls = _controller(monkeypatch, mode=Mode.SMOKE, critical_error=True)
     _request_mode(store, Mode.SHUTDOWN)
 
     c.tick()
@@ -109,7 +109,7 @@ def test_error_is_dispatched_while_critical_error_is_latched(monkeypatch):
     critical_error=True, updated=True -- on a heartbeat timeout. Before this
     change that write gated ITSELF out: the flag it set in the same breath
     stopped its own Error mode from ever being dispatched."""
-    c, store, grill, calls = _controller(monkeypatch, mode=Mode.SMOKE, critical_error=True)
+    c, store, grill, _calls = _controller(monkeypatch, mode=Mode.SMOKE, critical_error=True)
     _request_mode(store, Mode.ERROR)
 
     c.tick()
@@ -147,7 +147,7 @@ def test_cook_modes_are_still_refused_while_critical_error_is_latched(monkeypatc
 
 
 def test_stop_dispatches_unchanged_when_critical_error_is_clear(monkeypatch):
-    c, store, grill, calls = _controller(monkeypatch, mode=Mode.MANUAL, critical_error=False)
+    c, store, grill, _calls = _controller(monkeypatch, mode=Mode.MANUAL, critical_error=False)
     _request_mode(store, Mode.STOP)
 
     c.tick()
@@ -162,7 +162,7 @@ def test_stop_dispatches_unchanged_when_critical_error_is_clear(monkeypatch):
 
 
 def test_startup_dispatches_unchanged_when_critical_error_is_clear(monkeypatch):
-    c, store, grill, calls = _controller(monkeypatch, mode=Mode.STOP, critical_error=False)
+    c, store, _grill, calls = _controller(monkeypatch, mode=Mode.STOP, critical_error=False)
     _request_mode(store, Mode.STARTUP)
 
     c.tick()
@@ -186,7 +186,7 @@ def test_critical_error_survives_every_dispatch_outcome(monkeypatch, requested):
     without the re-stamp in tick() a Stop would ANSWER "can this controller
     drive its platform?" by forgetting the question -- and the very next
     Startup would sail through the gate onto hardware that never built."""
-    c, store, grill, calls = _controller(monkeypatch, mode=Mode.MANUAL, critical_error=True)
+    c, store, _grill, _calls = _controller(monkeypatch, mode=Mode.MANUAL, critical_error=True)
     _request_mode(store, requested)
 
     c.tick()
@@ -197,7 +197,7 @@ def test_critical_error_survives_every_dispatch_outcome(monkeypatch, requested):
 def test_a_stopped_grill_still_refuses_to_light_on_broken_hardware(monkeypatch):
     """The end-to-end safety property: Stop is reachable, and reaching it does
     not hand back the ability to start a fire."""
-    c, store, grill, calls = _controller(monkeypatch, mode=Mode.MANUAL, critical_error=True)
+    c, store, _grill, calls = _controller(monkeypatch, mode=Mode.MANUAL, critical_error=True)
 
     _request_mode(store, Mode.STOP)
     c.tick()

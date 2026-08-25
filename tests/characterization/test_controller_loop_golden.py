@@ -89,7 +89,7 @@ def test_setup_runs_initial_hopper_check_and_binds_pelletdb(monkeypatch):
     # extraction) must run in setup(), binding pelletdb and reading the level.
     _neutralize_externals(monkeypatch)
     settings = base_settings()
-    c, ctx, store, grill, dist, notifier = make_controller(settings, base_control(mode="Stop"), base_pellet_db())
+    c, _ctx, store, _grill, dist, _notifier = make_controller(settings, base_control(mode="Stop"), base_pellet_db())
     c.setup()
     assert c.pelletdb is not None
     assert dist.get_level_calls == 1  # boot-time hopper read happened
@@ -101,7 +101,7 @@ def test_setup_boot_to_monitor_requests_monitor_mode(monkeypatch):
     _neutralize_externals(monkeypatch)
     settings = base_settings()
     settings["globals"]["boot_to_monitor"] = True
-    c, ctx, store, grill, dist, notifier = make_controller(settings, base_control(mode="Stop"), base_pellet_db())
+    c, _ctx, store, _grill, _dist, _notifier = make_controller(settings, base_control(mode="Stop"), base_pellet_db())
     c.setup()
     control = store.read_control()
     assert control["mode"] == "Monitor"
@@ -112,7 +112,7 @@ def test_setup_no_boot_to_monitor_leaves_mode(monkeypatch):
     _neutralize_externals(monkeypatch)
     settings = base_settings()
     settings["globals"]["boot_to_monitor"] = False
-    c, ctx, store, grill, dist, notifier = make_controller(settings, base_control(mode="Stop"), base_pellet_db())
+    c, _ctx, store, _grill, _dist, _notifier = make_controller(settings, base_control(mode="Stop"), base_pellet_db())
     c.setup()
     assert store.read_control()["mode"] == "Stop"
 
@@ -128,7 +128,7 @@ def test_tick_smoke_dispatches_work_cycle_then_next_mode(monkeypatch):
     control_data = base_control(mode="Smoke")
     control_data["updated"] = True
     control_data["next_mode"] = "Stop"
-    c, ctx, store, grill, dist, notifier = make_controller(settings, control_data, base_pellet_db())
+    c, _ctx, _store, _grill, _dist, _notifier = make_controller(settings, control_data, base_pellet_db())
     calls = _spy_dispatch(c)
     c.setup()
     c.tick()
@@ -144,7 +144,7 @@ def test_tick_hold_dispatches_work_cycle_then_next_mode(monkeypatch):
     control_data["updated"] = True
     control_data["next_mode"] = "Stop"
     control_data["primary_setpoint"] = 225
-    c, ctx, store, grill, dist, notifier = make_controller(settings, control_data, base_pellet_db())
+    c, _ctx, _store, _grill, _dist, _notifier = make_controller(settings, control_data, base_pellet_db())
     calls = _spy_dispatch(c)
     c.setup()
     c.tick()
@@ -157,7 +157,7 @@ def test_tick_monitor_sets_status_monitor_and_runs_cycle(monkeypatch):
     settings = base_settings()
     control_data = base_control(mode="Monitor")
     control_data["updated"] = True
-    c, ctx, store, grill, dist, notifier = make_controller(settings, control_data, base_pellet_db())
+    c, _ctx, store, _grill, _dist, _notifier = make_controller(settings, control_data, base_pellet_db())
     calls = _spy_dispatch(c)
     c.setup()
     c.tick()
@@ -170,7 +170,7 @@ def test_tick_manual_runs_cycle_without_next_mode(monkeypatch):
     settings = base_settings()
     control_data = base_control(mode="Manual")
     control_data["updated"] = True
-    c, ctx, store, grill, dist, notifier = make_controller(settings, control_data, base_pellet_db())
+    c, _ctx, _store, _grill, _dist, _notifier = make_controller(settings, control_data, base_pellet_db())
     calls = _spy_dispatch(c)
     c.setup()
     c.tick()
@@ -184,7 +184,7 @@ def test_tick_recipe_dispatches_recipe_mode(monkeypatch):
     control_data = base_control(mode="Recipe")
     control_data["updated"] = True
     control_data["recipe"]["start_step"] = 2
-    c, ctx, store, grill, dist, notifier = make_controller(settings, control_data, base_pellet_db())
+    c, _ctx, _store, _grill, _dist, _notifier = make_controller(settings, control_data, base_pellet_db())
     calls = _spy_dispatch(c)
     c.setup()
     c.tick()
@@ -196,7 +196,7 @@ def test_tick_shutdown_sets_next_mode_stop_and_dispatches(monkeypatch):
     settings = base_settings()
     control_data = base_control(mode="Shutdown")
     control_data["updated"] = True
-    c, ctx, store, grill, dist, notifier = make_controller(settings, control_data, base_pellet_db())
+    c, _ctx, _store, _grill, _dist, _notifier = make_controller(settings, control_data, base_pellet_db())
     calls = _spy_dispatch(c)
     c.setup()
     c.tick()
@@ -215,7 +215,7 @@ def test_tick_stop_mode_cleanup(monkeypatch):
     control_data = base_control(mode="Stop")
     control_data["updated"] = True
     control_data["cook_id"] = "cook-session-stop"
-    c, ctx, store, grill, dist, notifier = make_controller(settings, control_data, base_pellet_db())
+    c, _ctx, store, grill, _dist, _notifier = make_controller(settings, control_data, base_pellet_db())
     store.append_metric(dict(default_metrics(), mode="Smoke"))
     _spy_dispatch(c)
     c.setup()
@@ -259,7 +259,7 @@ def test_active_history_clear_rotates_identity_before_stop_archive(monkeypatch):
     monkeypatch.setattr(store_mod, "generate_uuid", lambda: next(generated_ids))
     control_data = base_control(mode="Smoke")
     control_data["cook_id"] = "old-cook-session"
-    c, ctx, store, grill, dist, notifier = make_controller(
+    _c, ctx, store, _grill, _dist, _notifier = make_controller(
         base_settings(),
         control_data,
         base_pellet_db(),
@@ -322,7 +322,7 @@ def test_outer_clear_rebinds_control_before_settings_update_and_transition_write
     control_data["settings_update"] = True
     control_data["distance_update"] = True
     control_data["updated"] = True
-    c, ctx, store, grill, dist, notifier = make_controller(
+    c, _ctx, store, _grill, _dist, _notifier = make_controller(
         base_settings(),
         control_data,
         base_pellet_db(),
@@ -368,7 +368,7 @@ def test_tick_stop_mode_cookfile_failure_is_contained(monkeypatch, caplog):
     control_data = base_control(mode="Stop")
     control_data["updated"] = True
     control_data["cook_id"] = "cook-session-failure"
-    c, ctx, store, grill, dist, notifier = make_controller(settings, control_data, base_pellet_db())
+    c, _ctx, store, grill, _dist, _notifier = make_controller(settings, control_data, base_pellet_db())
     # A non-empty metrics list with a non-Prime last mode is what makes tick()
     # reach the create_cookfile() call at all (controller.py's `if len(
     # metrics_list) != 0: ... if metrics_list[-1]["mode"] != Mode.PRIME:`).
@@ -419,7 +419,7 @@ def test_tick_error_mode_cleanup(monkeypatch):
     control_data = base_control(mode="Error")
     control_data["updated"] = True
     clock = ManualClock()
-    c, ctx, store, grill, dist, notifier = make_controller(settings, control_data, base_pellet_db(), clock=clock)
+    c, _ctx, store, grill, _dist, _notifier = make_controller(settings, control_data, base_pellet_db(), clock=clock)
     _spy_dispatch(c)
     c.setup()
     c.tick()
@@ -437,7 +437,7 @@ def test_tick_terminal_reset_preserves_racing_clear_and_discards_transient_comma
     _neutralize_externals(monkeypatch)
     control_data = base_control(mode=mode)
     control_data["updated"] = True
-    c, ctx, store, grill, dist, notifier = make_controller(
+    c, _ctx, store, grill, _dist, _notifier = make_controller(
         base_settings(),
         control_data,
         base_pellet_db(),
@@ -471,7 +471,7 @@ def test_tick_switch_off_triggers_stop(monkeypatch):
     control_data = base_control(mode="Smoke")
     control_data["updated"] = False
     grill = FakeGrillPlatform(standalone=False, outputs=tuple(settings["platform"]["outputs"]))
-    c, ctx, store, grill, dist, notifier = make_controller(settings, control_data, base_pellet_db(), grill=grill)
+    c, _ctx, store, grill, _dist, _notifier = make_controller(settings, control_data, base_pellet_db(), grill=grill)
     _spy_dispatch(c)
     c.setup()  # binds last = input status (on)
     grill.set_input(False)  # user flips switch off
@@ -490,7 +490,7 @@ def test_tick_timer_expiry_sends_notification(monkeypatch):
     control_data["timer"] = {"start": 1, "paused": 0, "end": 5}
     control_data["notify_data"] = [{"type": "timer", "req": True, "shutdown": True, "keep_warm": True}]
     clock = ManualClock(start=10)  # now (10) >= end (5)
-    c, ctx, store, grill, dist, notifier = make_controller(settings, control_data, base_pellet_db(), clock=clock)
+    c, _ctx, store, _grill, _dist, _notifier = make_controller(settings, control_data, base_pellet_db(), clock=clock)
     _spy_dispatch(c)
     c.setup()
     c.tick()
@@ -514,7 +514,7 @@ def test_tick_hopper_check_requests_a_sample_and_clears(monkeypatch):
     control_data["updated"] = False
     control_data["hopper_check"] = True
     dist = _RecordingDistance(level=42)
-    c, ctx, store, grill, dist, notifier = make_controller(settings, control_data, base_pellet_db(), dist=dist)
+    c, _ctx, store, _grill, dist, _notifier = make_controller(settings, control_data, base_pellet_db(), dist=dist)
     _spy_dispatch(c)
     c.setup()
     dist.sample_requests = 0
@@ -534,7 +534,7 @@ def test_tick_hopper_check_does_not_delay_the_next_refresh(monkeypatch):
     control_data["hopper_check"] = True
     clock = ManualClock(start=1000)
     dist = _RecordingDistance(level=42)
-    c, ctx, store, grill, dist, notifier = make_controller(
+    c, _ctx, store, _grill, dist, _notifier = make_controller(
         settings, control_data, base_pellet_db(), dist=dist, clock=clock
     )
     _spy_dispatch(c)
@@ -564,7 +564,7 @@ def test_tick_refreshes_hopper_level_on_a_timer(monkeypatch):
     control_data["hopper_check"] = False
     clock = ManualClock(start=1000)
     dist = _RecordingDistance(level=77)
-    c, ctx, store, grill, dist, notifier = make_controller(
+    c, _ctx, store, _grill, dist, _notifier = make_controller(
         settings, control_data, base_pellet_db(), dist=dist, clock=clock
     )
     _spy_dispatch(c)
@@ -607,7 +607,7 @@ def test_the_control_loop_never_waits_on_a_hopper_reading(monkeypatch):
     control_data["hopper_check"] = False
     clock = ManualClock(start=1000)
     dist = _HostileDistance()
-    c, ctx, store, grill, dist, notifier = make_controller(
+    c, _ctx, _store, _grill, dist, _notifier = make_controller(
         settings, control_data, base_pellet_db(), dist=dist, clock=clock
     )
     _spy_dispatch(c)
@@ -639,7 +639,7 @@ def test_servicing_a_hopper_check_does_not_wait_either(monkeypatch):
     # everything else, so a wait bolted onto the request is still caught.
     dist = _HostileDistance()
     dist.request_sample = lambda: None
-    c, ctx, store, grill, dist, notifier = make_controller(
+    c, _ctx, store, _grill, dist, _notifier = make_controller(
         settings, control_data, base_pellet_db(), dist=dist, clock=clock
     )
     _spy_dispatch(c)
@@ -660,7 +660,7 @@ def test_tick_distance_update_updates_distances_and_clears(monkeypatch):
     control_data["updated"] = False
     control_data["distance_update"] = True
     dist = _RecordingDistance()
-    c, ctx, store, grill, dist, notifier = make_controller(settings, control_data, base_pellet_db(), dist=dist)
+    c, _ctx, store, _grill, dist, _notifier = make_controller(settings, control_data, base_pellet_db(), dist=dist)
     _spy_dispatch(c)
     c.setup()
     c.tick()
@@ -674,7 +674,7 @@ def test_tick_settings_update_clears_flag(monkeypatch):
     control_data = base_control(mode="Stop")
     control_data["updated"] = False
     control_data["settings_update"] = True
-    c, ctx, store, grill, dist, notifier = make_controller(settings, control_data, base_pellet_db())
+    c, _ctx, store, _grill, _dist, _notifier = make_controller(settings, control_data, base_pellet_db())
     _spy_dispatch(c)
     c.setup()
     c.tick()
@@ -687,7 +687,7 @@ def test_tick_probe_profile_update_clears_flag(monkeypatch):
     control_data = base_control(mode="Stop")
     control_data["updated"] = False
     control_data["probe_profile_update"] = True
-    c, ctx, store, grill, dist, notifier = make_controller(settings, control_data, base_pellet_db())
+    c, _ctx, store, _grill, _dist, _notifier = make_controller(settings, control_data, base_pellet_db())
     _spy_dispatch(c)
     c.setup()
     c.tick()
@@ -703,7 +703,7 @@ def test_tick_probe_map_update_rebuilds_devices_and_clears_flag(monkeypatch):
     control_data = base_control(mode="Stop")
     control_data["updated"] = False
     control_data["probe_map_update"] = True
-    c, ctx, store, grill, dist, notifier = make_controller(settings, control_data, base_pellet_db())
+    c, ctx, store, _grill, _dist, _notifier = make_controller(settings, control_data, base_pellet_db())
     _spy_dispatch(c)
     c.setup()
     c.tick()
@@ -719,7 +719,7 @@ def test_tick_tolerates_a_control_blob_without_the_new_flag(monkeypatch):
     control_data = base_control(mode="Stop")
     control_data["updated"] = False
     control_data.pop("probe_map_update", None)
-    c, ctx, store, grill, dist, notifier = make_controller(base_settings(), control_data, base_pellet_db())
+    c, ctx, _store, _grill, _dist, _notifier = make_controller(base_settings(), control_data, base_pellet_db())
     _spy_dispatch(c)
     c.setup()
     c.tick()  # must not raise
@@ -751,7 +751,7 @@ def _stop_after(monkeypatch, modes):
     control_data = base_control(mode="Stop")
     control_data["updated"] = True
     control_data["cook_id"] = "cook-session-stop"
-    c, ctx, store, grill, dist, notifier = make_controller(base_settings(), control_data, base_pellet_db())
+    c, _ctx, store, _grill, _dist, _notifier = make_controller(base_settings(), control_data, base_pellet_db())
     for mode in modes:
         store.append_metric(dict(default_metrics(), mode=mode))
     store.write_history({"probe": 225})

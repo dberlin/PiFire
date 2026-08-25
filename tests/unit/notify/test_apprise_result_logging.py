@@ -44,7 +44,7 @@ def test_apprise_success_logs_debug(monkeypatch):
 
 
 def test_apprise_failure_logs_warning(monkeypatch):
-    logger, handler = _patch(monkeypatch, notify_return=False)
+    logger, _handler = _patch(monkeypatch, notify_return=False)
 
     N._send_apprise_notifications(_settings(), "Title", "Body")
 
@@ -52,7 +52,7 @@ def test_apprise_failure_logs_warning(monkeypatch):
 
 
 def test_apprise_exception_is_guarded_and_logged(monkeypatch):
-    logger, handler = _patch(monkeypatch, notify_side_effect=RuntimeError("boom"))
+    logger, _handler = _patch(monkeypatch, notify_side_effect=RuntimeError("boom"))
 
     # Must not propagate -- sibling guards notify() in try/except.
     N._send_apprise_notifications(_settings(), "Title", "Body")

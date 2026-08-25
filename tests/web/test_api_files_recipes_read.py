@@ -50,7 +50,7 @@ def test_traversal_attempts_are_refused(client, folders, hostile):
 
 
 def test_a_traversal_to_a_real_recipe_outside_the_folder_is_refused(client, folders, tmp_path):
-    _history, recipe_dir = folders
+    _history, _recipe_dir = folders
     name = write_recipe(str(tmp_path) + "/", "Outside-Recipe")
     resp = client.get(f"/api/files/recipes/detail?file=../{name}")
     assert resp.status_code == 404

@@ -89,7 +89,7 @@ def test_natural_applies_when_not_updated_hold_keeps_setpoint():
 
 def test_natural_forces_setpoint_zero_when_not_hold():
     control = _base_control(mode="Startup", updated=False, primary_setpoint=300)
-    ctx, store, notifier = _ctx(control)
+    ctx, _store, _notifier = _ctx(control)
     out = request_transition(ctx, control, "Smoke", kind="natural", setpoint=225)
     assert out["mode"] == "Smoke"
     assert out["primary_setpoint"] == 0  # non-Hold target forces 0
@@ -98,7 +98,7 @@ def test_natural_forces_setpoint_zero_when_not_hold():
 
 def test_natural_yields_when_already_updated():
     control = _base_control(mode="Error", updated=True)
-    ctx, store, notifier = _ctx(control)
+    ctx, store, _notifier = _ctx(control)
     out = request_transition(ctx, control, "Smoke", kind="natural", setpoint=0)
     assert out["mode"] == "Error"  # yielded: safety trip survives
     assert store.writes == []  # no write when yielding
@@ -116,7 +116,7 @@ def test_natural_yields_to_a_same_mode_request_from_a_listed_source():
     # entirely because terminal modes are unlisted. A transition the caller is
     # about to abandon must not be rejected on its way to being abandoned.
     control = _base_control(mode="Smoke", updated=True)
-    ctx, store, notifier = _ctx(control)
+    ctx, store, _notifier = _ctx(control)
     out = request_transition(ctx, control, "Smoke", kind="natural", setpoint=0)
     assert out["mode"] == "Smoke"
     assert store.writes == []
@@ -269,7 +269,7 @@ def test_every_guard_edge_target_is_a_legal_exit():
 def test_illegal_edge_raises_transition_error():
     # Manual's declared exits are {Stop, Error}; Manual -> Reignite is illegal.
     control = _base_control(mode="Manual", updated=False)
-    ctx, store, notifier = _ctx(control)
+    ctx, _store, _notifier = _ctx(control)
     try:
         request_transition(ctx, control, "Reignite", kind="safety")
     except TransitionError:
@@ -289,7 +289,7 @@ def test_legal_edges_pass():
         ("Recipe", "Stop", "terminal"),
     ]:
         control = _base_control(mode=from_mode, updated=False)
-        ctx, store, notifier = _ctx(control)
+        ctx, _store, _notifier = _ctx(control)
         out = request_transition(ctx, control, to_mode, kind=kind)
         assert out["mode"] == to_mode
 
@@ -300,6 +300,6 @@ def test_unlisted_source_mode_is_noop_passthrough():
     assert "Stop" not in transitions_mod.ALLOWED_EXITS
     assert "Error" not in transitions_mod.ALLOWED_EXITS
     control = _base_control(mode="Error", updated=True)
-    ctx, store, notifier = _ctx(control)
+    ctx, _store, _notifier = _ctx(control)
     out = request_transition(ctx, control, "Stop", kind="natural", setpoint=0)
     assert out["mode"] == "Error"  # yielded, no TransitionError from unlisted source

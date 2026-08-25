@@ -94,21 +94,21 @@ def test_relay_only_fan_on_off_and_toggle():
 
 
 def test_relay_only_set_duty_cycle_and_frequency_are_noops():
-    with make_ft232h_platform(_relay_config()) as (plat, harness):
+    with make_ft232h_platform(_relay_config()) as (plat, _harness):
         plat.set_duty_cycle(50)
         plat.set_pwm_frequency(20000)
         assert plat.emc is None
 
 
 def test_get_output_status_relay_mode_has_no_pwm_keys():
-    with make_ft232h_platform(_relay_config()) as (plat, harness):
+    with make_ft232h_platform(_relay_config()) as (plat, _harness):
         plat.auger_on()
         status = plat.get_output_status()
         assert status == {"auger": True, "igniter": False, "power": False, "fan": False}
 
 
 def test_get_input_status_is_false():
-    with make_ft232h_platform(_relay_config()) as (plat, harness):
+    with make_ft232h_platform(_relay_config()) as (plat, _harness):
         assert plat.get_input_status() is False
 
 

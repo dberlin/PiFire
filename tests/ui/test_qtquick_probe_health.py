@@ -182,7 +182,7 @@ def _assert_no_qml_warnings(warnings):
 
 
 def test_suspected_is_inline_only_and_keeps_numeric_reading():
-    engine, backend, root, warnings = _load_main([_health(state="suspected")], (1024, 600))
+    _engine, _, root, warnings = _load_main([_health(state="suspected")], (1024, 600))
     banner = _find(root, "probeHealthBanner")
     assert banner.property("active") is False
     assert _text(root, "primaryHealthStatus") == "CHECK PROBE"
@@ -193,7 +193,7 @@ def test_suspected_is_inline_only_and_keeps_numeric_reading():
 
 def test_observe_primary_is_persistent_and_does_not_claim_heating_stopped():
     health = [_health(state="confirmed", outcome="notify_only", temperature_valid=True, faults=["malfunction"])]
-    engine, backend, root, warnings = _load_main(health)
+    _engine, _, root, warnings = _load_main(health)
     banner = _find(root, "probeHealthBanner")
     assert banner.property("active") is True
     assert banner.property("dismissible") is False
@@ -209,7 +209,7 @@ def test_observe_primary_is_persistent_and_does_not_claim_heating_stopped():
 
 def test_stopped_primary_is_highest_priority_and_suppresses_temperature():
     health = [_health(state="confirmed", outcome="stopped", temperature_valid=False, faults=["open"], policy="enforce")]
-    engine, backend, root, warnings = _load_main(health, (1024, 768))
+    _engine, _, root, warnings = _load_main(health, (1024, 768))
     banner = _find(root, "probeHealthBanner")
     assert "CONTROL PROBE UNAVAILABLE" in str(banner.property("summaryText"))
     assert "PiFire stopped heating" in str(banner.property("summaryText"))
@@ -232,7 +232,7 @@ def test_secondary_unavailable_uses_reserved_card_status_and_em_dash():
             source="hardware",
         )
     ]
-    engine, backend, root, warnings = _load_main(health, (1024, 600))
+    _engine, _, root, warnings = _load_main(health, (1024, 600))
     assert _text(root, "foodTemperature-Brisket") == "—"
     assert _text(root, "foodHealthStatus-Brisket") == "PROBE UNAVAILABLE"
     assert "Grill control continues" in str(_find(root, "probeHealthBanner").property("summaryText"))
@@ -264,7 +264,7 @@ def test_multiple_faults_and_aux_are_available_in_scrollable_details():
             source="hardware",
         ),
     ]
-    engine, backend, root, warnings = _load_main(health)
+    _engine, backend, root, warnings = _load_main(health)
     banner = _find(root, "probeHealthBanner")
     assert "+2 more" in str(banner.property("summaryText"))
     assert isinstance(banner, QQuickItem)
@@ -297,7 +297,7 @@ def test_last_reported_qualifies_retained_health_without_changing_priority():
             age=47.0,
         )
     ]
-    engine, backend, root, warnings = _load_main(health)
+    _engine, _, root, warnings = _load_main(health)
     summary = str(_find(root, "probeHealthBanner").property("summaryText"))
     assert summary.startswith("Last reported: Grill")
     assert "CONTROL PROBE UNAVAILABLE" in summary
@@ -308,7 +308,7 @@ def test_last_reported_qualifies_retained_health_without_changing_priority():
 
 def test_recovery_removes_banner_and_status_without_a_recovery_pill():
     health = [_health(state="confirmed", outcome="notify_only", faults=["malfunction"])]
-    engine, backend, root, warnings = _load_main(health)
+    _engine, backend, root, warnings = _load_main(health)
     assert _find(root, "probeHealthBanner").property("active") is True
     backend.property("probeHealth").update([_health(state="healthy", evidence=[], faults=[])])
     QTest.qWait(30)
@@ -320,7 +320,7 @@ def test_recovery_removes_banner_and_status_without_a_recovery_pill():
 
 @pytest.mark.parametrize("state", ["healthy", "unmonitored"])
 def test_quiet_states_do_not_create_status_pills(state):
-    engine, backend, root, warnings = _load_main([_health(state=state, evidence=[], faults=[])])
+    _engine, _, root, warnings = _load_main([_health(state=state, evidence=[], faults=[])])
     assert _find(root, "probeHealthBanner").property("active") is False
     assert _text(root, "primaryHealthStatus") == ""
     _assert_no_qml_warnings(warnings)
@@ -339,7 +339,7 @@ def test_quiet_states_do_not_create_status_pills(state):
 )
 def test_banner_and_details_fit_compact_and_rotated_viewports(size, rotation):
     health = [_health(state="confirmed", outcome="stopped", temperature_valid=False, faults=["open"])]
-    engine, backend, root, warnings = _load_main(health, size, rotation)
+    _engine, _, root, warnings = _load_main(health, size, rotation)
     rotor = _find(root, "rotor")
     banner = _find(root, "probeHealthBanner")
     logical_width = float(rotor.property("width"))
@@ -370,7 +370,7 @@ def test_banner_and_details_fit_compact_and_rotated_viewports(size, rotation):
 @pytest.mark.parametrize("rotation", [90, 270])
 def test_rotated_dashboard_reflows_to_vertical_scroll_without_horizontal_clipping(rotation):
     health = [_health(state="confirmed", outcome="stopped", temperature_valid=False, faults=["open"])]
-    engine, backend, root, warnings = _load_main(health, (1024, 600), rotation)
+    _engine, _, root, warnings = _load_main(health, (1024, 600), rotation)
     portrait = _find(root, "portraitDashFlick")
     landscape = _find(root, "landscapeDashBody")
     gauge_card = _find(root, "portraitGaugeCard")
@@ -386,7 +386,7 @@ def test_rotated_dashboard_reflows_to_vertical_scroll_without_horizontal_clippin
 
 def test_banner_accessible_press_action_opens_settled_details():
     health = [_health(state="confirmed", outcome="notify_only", faults=["malfunction"])]
-    engine, backend, root, warnings = _load_main(health)
+    _engine, _, root, warnings = _load_main(health)
     banner = _find(root, "probeHealthBanner")
     interface = QAccessible.queryAccessibleInterface(banner)
     assert interface is not None
@@ -401,7 +401,7 @@ def test_banner_accessible_press_action_opens_settled_details():
 
 def test_natural_encoder_flow_opens_details_with_close_focused_and_closes_it():
     health = [_health(state="confirmed", outcome="notify_only", faults=["malfunction"])]
-    engine, backend, root, warnings = _load_main(health)
+    _engine, backend, root, warnings = _load_main(health)
     banner = _find(root, "probeHealthBanner")
     assert isinstance(banner, QQuickItem)
     banner.forceActiveFocus()
@@ -422,7 +422,7 @@ def test_natural_encoder_flow_opens_details_with_close_focused_and_closes_it():
 
 def test_banner_and_details_actions_have_accessible_metadata_and_focus_targets():
     health = [_health(state="confirmed", outcome="notify_only", faults=["malfunction"])]
-    engine, backend, root, warnings = _load_main(health)
+    _engine, _, root, warnings = _load_main(health)
     banner = _find(root, "probeHealthBanner")
     interface = QAccessible.queryAccessibleInterface(banner)
     assert interface is not None

@@ -42,7 +42,7 @@ class Display:
     def display_status(self, in_data, status_data):
         """Screen Box"""
         self.screen.clear()
-        num_rows, num_cols = self.screen.getmaxyx()
+        _num_rows, num_cols = self.screen.getmaxyx()
         self.screen.box()
         title = f"| Mode: {status_data['mode']} |"
         title_col = (num_cols // 2) - (len(title) // 2)
@@ -111,7 +111,7 @@ class Display:
         splash_str.append(r" |  _/ | || __|  | || '_|/ -_) ")
         splash_str.append(r" |_|   |_||_|    |_||_|  \___|  ")
         self.screen.clear()
-        num_rows, num_cols = self.screen.getmaxyx()
+        _num_rows, num_cols = self.screen.getmaxyx()
         self.screen.box()
         title = "| PiFire Display |"
         title_col = (num_cols // 2) - (len(title) // 2)
@@ -127,7 +127,7 @@ class Display:
     def clear_display(self):
         """Screen Box"""
         self.screen.clear()
-        num_rows, num_cols = self.screen.getmaxyx()
+        _num_rows, num_cols = self.screen.getmaxyx()
         self.screen.box()
         title = "| PiFire Display |"
         title_col = (num_cols // 2) - (len(title) // 2)
@@ -138,7 +138,7 @@ class Display:
 
     def display_text(self, text):
         self.screen.clear()
-        num_rows, num_cols = self.screen.getmaxyx()
+        _num_rows, num_cols = self.screen.getmaxyx()
         self.screen.box()
         title = "PiFire Display"
         title_col = (num_cols // 2) - (len(title) // 2)

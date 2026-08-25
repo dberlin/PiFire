@@ -64,7 +64,7 @@ def test_run_wizard_dev_mode_resolves_to_restart_not_reboot(ds, no_install):
 
     wizard.run_wizard(settings, wizard_data, install_info)
 
-    percent, status, output = install_persistence.get_wizard_install_status()
+    percent, _status, _output = install_persistence.get_wizard_install_status()
     assert percent == 101
 
 
@@ -90,7 +90,7 @@ def test_run_wizard_skips_unknown_setting_key(ds, no_install):
     # Must not raise.
     wizard.run_wizard(settings, wizard_data, install_info)
 
-    percent, status, output = install_persistence.get_wizard_install_status()
+    percent, _status, _output = install_persistence.get_wizard_install_status()
     assert percent == 101  # ran to completion (restart-only), not frozen mid-install
 
 
@@ -113,5 +113,5 @@ def test_run_wizard_skips_unknown_module_name(ds, no_install):
     # Must not raise.
     wizard.run_wizard(settings, wizard_data, install_info)
 
-    percent, status, output = install_persistence.get_wizard_install_status()
+    percent, _status, _output = install_persistence.get_wizard_install_status()
     assert percent == 101  # ran to completion (restart-only), not frozen mid-install

@@ -238,7 +238,7 @@ def get_available_updates(branch=""):
 
 def do_update():
     branch, error_msg1 = get_branch()
-    remote, error_msg2 = get_remote_url()
+    _remote, error_msg2 = get_remote_url()
     if error_msg1 == "" and error_msg2 == "":
         command = ["git", "fetch", "--all"]
         fetch = subprocess.run(command, capture_output=True, text=True)
@@ -290,7 +290,7 @@ def get_log(num_commits=10):
 
 
 def get_remote_version():
-    remote_url, error_msg = get_remote_url()
+    _remote_url, error_msg = get_remote_url()
     current_branch, branch_error = get_branch()
 
     # A detached checkout has no origin/<branch> to ask about, but it does have
@@ -489,7 +489,7 @@ def _change_branch_checkout(branch_target):
 
 def _install_update_checkout():
     branch, error_msg1 = get_branch()
-    remote, error_msg2 = get_remote_url()
+    _remote, error_msg2 = get_remote_url()
     if error_msg1 == "" and error_msg2 == "":
         fetch = subprocess.run(["git", "fetch"], capture_output=True, text=True)
         reset = subprocess.run(["git", "reset", "--hard", "HEAD"], capture_output=True, text=True)

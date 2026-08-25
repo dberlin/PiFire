@@ -580,7 +580,7 @@ def bench():
     import pandas as pd
 
     verify_twins()
-    t, temp, Q = make_cook(80.0, 250.0, 0)
+    t, _temp, Q = make_cook(80.0, 250.0, 0)
     p = TRUTH
 
     reps = 20

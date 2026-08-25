@@ -91,7 +91,7 @@ def test_a_missing_boot_config_reports_why_it_failed(monkeypatch, tmp_path):
 def test_enable_spi_first_run_changes_and_writes_line(monkeypatch, _test_mode_config):
     monkeypatch.setattr(board_config, "read_settings", lambda: _settings())
 
-    message, changed = board_config.enable_spi()
+    _message, changed = board_config.enable_spi()
 
     assert changed is True
     assert "dtparam=spi=on" in _test_mode_config.read_text()
@@ -102,7 +102,7 @@ def test_enable_spi_second_run_with_same_settings_is_a_noop(monkeypatch, _test_m
 
     board_config.enable_spi()
     before = _test_mode_config.read_text()
-    message, changed = board_config.enable_spi()
+    _message, changed = board_config.enable_spi()
 
     assert changed is False
     assert _test_mode_config.read_text() == before
@@ -127,7 +127,7 @@ def test_set_backlight_never_reports_a_reboot_even_when_it_writes(monkeypatch, t
     monkeypatch.setattr(board_config, "read_settings", lambda: _settings(system_type="raspberry_pi_all"))
     monkeypatch.setattr(board_config, "create_file", lambda filename, lines: f"wrote {filename}")
 
-    message, changed = board_config.set_backlight()
+    _message, changed = board_config.set_backlight()
 
     assert changed is False
 
@@ -136,7 +136,7 @@ def test_append_file_adds_missing_line(tmp_path):
     target = tmp_path / "modules"
     target.write_text("some-other-module\n")
 
-    message, changed = board_config.append_file(str(target), "i2c-dev\n")
+    _message, changed = board_config.append_file(str(target), "i2c-dev\n")
 
     assert changed is True
     assert "i2c-dev" in target.read_text()
@@ -146,7 +146,7 @@ def test_append_file_is_idempotent_when_line_already_present(tmp_path):
     target = tmp_path / "modules"
     target.write_text("i2c-dev\n")
 
-    message, changed = board_config.append_file(str(target), "i2c-dev\n")
+    _message, changed = board_config.append_file(str(target), "i2c-dev\n")
 
     assert changed is False
     assert target.read_text().count("i2c-dev") == 1
@@ -155,7 +155,7 @@ def test_append_file_is_idempotent_when_line_already_present(tmp_path):
 def test_append_file_creates_missing_file(tmp_path):
     target = tmp_path / "modules"  # does not exist yet
 
-    message, changed = board_config.append_file(str(target), "i2c-dev\n")
+    _message, changed = board_config.append_file(str(target), "i2c-dev\n")
 
     assert changed is True
     assert target.read_text() == "i2c-dev\n"

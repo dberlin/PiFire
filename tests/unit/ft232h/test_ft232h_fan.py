@@ -29,7 +29,7 @@ def test_emc2101_init_opens_i2c_and_controller():
 
 
 def test_emc2301_init_uses_emc2301_at_default_address():
-    with make_ft232h_platform(_emc_config("emc2301")) as (plat, harness):
+    with make_ft232h_platform(_emc_config("emc2301")) as (_plat, harness):
         harness.emc2301_cls.assert_called_once()
         # Default EMC2301 address is 0x2F.
         assert harness.emc2301_cls.call_args.kwargs.get("address") == 0x2F
@@ -54,7 +54,7 @@ def test_fan_off_zeroes_speed_and_deasserts_relay():
 
 
 def test_set_duty_cycle_clamps_to_0_100():
-    with make_ft232h_platform(_emc_config("emc2101")) as (plat, harness):
+    with make_ft232h_platform(_emc_config("emc2101")) as (plat, _harness):
         plat.set_duty_cycle(150)
         assert plat.emc.manual_fan_speed == 100
         plat.set_duty_cycle(-20)
@@ -62,7 +62,7 @@ def test_set_duty_cycle_clamps_to_0_100():
 
 
 def test_ramp_device_ends_at_max_duty_cycle():
-    with make_ft232h_platform(_emc_config("emc2101")) as (plat, harness):
+    with make_ft232h_platform(_emc_config("emc2101")) as (plat, _harness):
         # Pre-set the stop event so the loop body runs once then exits without sleeping.
         plat._ramp_stop.set()
         plat._ramp_device(on_time=1, min_duty_cycle=20, max_duty_cycle=90, fps=25)
@@ -70,7 +70,7 @@ def test_ramp_device_ends_at_max_duty_cycle():
 
 
 def test_get_output_status_emc_mode_reports_pwm_and_frequency():
-    with make_ft232h_platform(_emc_config("emc2101")) as (plat, harness):
+    with make_ft232h_platform(_emc_config("emc2101")) as (plat, _harness):
         plat.fan_on(60)
         status = plat.get_output_status()
         assert status["fan"] is True
@@ -79,7 +79,7 @@ def test_get_output_status_emc_mode_reports_pwm_and_frequency():
 
 
 def test_cleanup_zeroes_emc_speed():
-    with make_ft232h_platform(_emc_config("emc2101")) as (plat, harness):
+    with make_ft232h_platform(_emc_config("emc2101")) as (plat, _harness):
         plat.fan_on(50)
         plat.cleanup()
         assert plat.emc.manual_fan_speed == 0

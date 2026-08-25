@@ -76,7 +76,7 @@ def test_transitionkind_members_are_their_strings():
 
 def test_natural_enum_kind_yields_when_updated():
     control = _base_control(mode="Smoke", updated=False, primary_setpoint=0)
-    ctx, store, notifier = _ctx(control)
+    ctx, _store, _notifier = _ctx(control)
     out = request_transition(ctx, control, "Hold", kind=TransitionKind.NATURAL, setpoint=225)
     assert out["mode"] == "Hold"
     assert out["primary_setpoint"] == 225
@@ -97,7 +97,7 @@ def test_safety_enum_kind_applies_authoritatively():
 
 def test_terminal_enum_kind_applies_authoritatively():
     control = _base_control(mode="Shutdown", primary_setpoint=225)
-    ctx, store, notifier = _ctx(control)
+    ctx, _store, _notifier = _ctx(control)
     out = request_transition(ctx, control, "Stop", kind=TransitionKind.TERMINAL)
     assert out["mode"] == "Stop"
     assert out["updated"] is True

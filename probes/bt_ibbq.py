@@ -111,7 +111,7 @@ class DataDelegate(DefaultDelegate):
             if len(data) >= 5 and data[0] == 0x24:
                 # Battery format: <BHHB  (0x24, current_mV, max_mV, pad)
                 try:
-                    header, current_voltage, max_voltage, pad = struct.unpack("<BHHB", data[:6])
+                    _header, current_voltage, max_voltage, _pad = struct.unpack("<BHHB", data[:6])
                     if max_voltage == 0:
                         max_voltage = 6580
                     self.batt_percent = 100 * current_voltage / max_voltage

@@ -326,9 +326,9 @@ def main():
         print(f"\n=== {plant} plant (noise floor {floor:.3f} C) ===")
         row = {}
         for label, free, two in (("full", FULL_FREE, True), ("lump", LUMP_FREE, False)):
-            j, pbest, per = fit_joint(recs, free, two_state=two)
+            j, pbest, _per = fit_joint(recs, free, two_state=two)
             jn, pn, pern = fit_joint(recs_nolid, free, two_state=two)
-            _, per_all = joint_rmse(recs, pn, two_state=two)
+            _, _per_all = joint_rmse(recs, pn, two_state=two)
             dead, coast = model_dead_time_and_coast(pn, two_state=two)
             row[label] = {
                 "joint": j,
@@ -352,7 +352,7 @@ def main():
     rc = [real_cook()]
     print("\n=== real MAK cook (mak_cook_2026-08-02.csv) ===")
     for label, free, two in (("full", FULL_FREE, True), ("lump", LUMP_FREE, False)):
-        j, pbest, per = fit_joint(rc, free, two_state=two, starts=8)
+        j, pbest, _per = fit_joint(rc, free, two_state=two, starts=8)
         print(f"  {label:5s} RMSE={j:.3f} C   params=" + ", ".join(f"{k}={pbest[k]:.4g}" for k in free))
     print(f"\nelapsed {time.time() - t0:.0f}s")
 

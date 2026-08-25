@@ -144,7 +144,7 @@ def test_do_update_reports_the_branch_error_instead_of_raising(detached, in_chec
 
 def test_install_update_does_not_claim_success_on_a_detached_head(detached, in_checkout):
     in_checkout(detached)
-    success, status, output = updater.install_update()
+    success, _status, output = updater.install_update()
 
     assert success is False
     assert "detached" in output.lower(), (

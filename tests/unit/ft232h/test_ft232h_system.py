@@ -10,7 +10,7 @@ def _config():
 
 
 def test_supported_commands_lists_expected():
-    with make_ft232h_platform(_config()) as (plat, harness):
+    with make_ft232h_platform(_config()) as (plat, _harness):
         result = plat.supported_commands([])
         assert result["result"] == "OK"
         cmds = result["data"]["supported_cmds"]
@@ -19,18 +19,18 @@ def test_supported_commands_lists_expected():
 
 
 def test_check_alive_ok():
-    with make_ft232h_platform(_config()) as (plat, harness):
+    with make_ft232h_platform(_config()) as (plat, _harness):
         assert plat.check_alive([])["result"] == "OK"
 
 
 def test_check_throttled_reports_not_throttled():
-    with make_ft232h_platform(_config()) as (plat, harness):
+    with make_ft232h_platform(_config()) as (plat, _harness):
         data = plat.check_throttled([])["data"]
         assert data["cpu_under_voltage"] is False
         assert data["cpu_throttled"] is False
 
 
 def test_check_cpu_temp_returns_float():
-    with make_ft232h_platform(_config()) as (plat, harness):
+    with make_ft232h_platform(_config()) as (plat, _harness):
         result = plat.check_cpu_temp([])
         assert isinstance(result["data"]["cpu_temp"], float)

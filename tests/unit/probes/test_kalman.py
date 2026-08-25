@@ -156,7 +156,7 @@ def test_resets_after_three_nones():
 
 def test_single_none_keeps_state_warm():
     kf = TempKalman(units="F")
-    out, t = _feed_constant(kf, 250.0, steps=40)
+    _out, t = _feed_constant(kf, 250.0, steps=40)
     assert kf.update(None) is None
     resumed = kf.update(250.0, now=t + 0.10)
     # One dropped read must not force a re-init; estimate stays near 250.

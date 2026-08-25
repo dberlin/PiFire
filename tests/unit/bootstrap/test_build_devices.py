@@ -30,7 +30,7 @@ class _FakeLogger:
 def test_build_devices_prototype_platform_headless():
     from controller.runtime.devices import build_devices
 
-    devices, errors = build_devices(_proto_settings(), errors=[], event_log=_FakeLogger(), control_log=_FakeLogger())
+    devices, _errors = build_devices(_proto_settings(), errors=[], event_log=_FakeLogger(), control_log=_FakeLogger())
     assert devices.grill_platform is not None
     assert devices.probe_complex is not None
     assert devices.dist_device is not None
@@ -61,7 +61,7 @@ def test_build_devices_disabled_probe_fallback_observes_with_legacy_settings(mon
 
     monkeypatch.setattr(probes_main, "ProbesMain", FailThenDisable)
 
-    devices, errors = build_devices(_proto_settings(), errors=[], event_log=_FakeLogger(), control_log=_FakeLogger())
+    devices, _errors = build_devices(_proto_settings(), errors=[], event_log=_FakeLogger(), control_log=_FakeLogger())
 
     assert calls == [(False, "observe"), (True, "observe")]
     assert devices.probe_complex.thermocouple_inference_policy is ThermocoupleInferencePolicy.OBSERVE
@@ -72,5 +72,5 @@ def test_build_display_prototype_none():
 
     settings = _proto_settings()
     settings["display"] = {"config": {"none": {}}}
-    display, errors = build_display(settings, errors=[], event_log=_FakeLogger(), control_log=_FakeLogger())
+    display, _errors = build_display(settings, errors=[], event_log=_FakeLogger(), control_log=_FakeLogger())
     assert display is not None

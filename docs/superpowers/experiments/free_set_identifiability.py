@@ -165,7 +165,7 @@ def _model_hot_state(p, *, q, t_ref_c, cap=40000):
     lags = np.zeros(max(int(p["n_delay"]), 0))
     block = 200
     for _ in range(cap // block):
-        temps, st = integrate(p, q=np.full(block, q), T_c0=T_c, T_f0=T_f, lags0=lags)
+        _temps, st = integrate(p, q=np.full(block, q), T_c0=T_c, T_f0=T_f, lags0=lags)
         T_c, T_f, lags = st["T_c"], st["T_f"], st["lags"]
         if T_c >= t_ref_c:
             return st

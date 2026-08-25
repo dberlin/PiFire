@@ -68,7 +68,7 @@ def test_pin_value_write_sets_single_bit():
 
 
 def test_pull_raises_not_implemented():
-    dev, fake = make()
+    dev, _fake = make()
     pin = dev.get_pin(0)
     with pytest.raises(NotImplementedError):
         pin.init(mode=Pin.IN, pull=Pin.PULL_UP)

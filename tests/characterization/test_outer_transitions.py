@@ -36,7 +36,7 @@ def build_controller(monkeypatch, *, mode="Stop", settings=None, control_over=No
     control_data = base_control(mode=mode)
     for key, value in (control_over or {}).items():
         control_data[key] = value
-    c, ctx, store, grill, dist, notifier = make_controller(settings, control_data, base_pellet_db())
+    c, _ctx, store, _grill, _dist, _notifier = make_controller(settings, control_data, base_pellet_db())
     c.setup()
     return c, store
 
@@ -297,7 +297,7 @@ def test_prime_dispatch_survives_missing_start_to_mode(monkeypatch):
     # not KeyError.
     settings = base_settings()
     settings["startup"].pop("start_to_mode", None)
-    c, store = build_controller(monkeypatch, mode="Prime", settings=settings, control_over={"updated": True})
+    c, _store = build_controller(monkeypatch, mode="Prime", settings=settings, control_over={"updated": True})
     calls = _spy_dispatch(c)
     c.tick()  # must not raise
     # next_mode was invoked with the default setpoint (no crash on the missing key).
