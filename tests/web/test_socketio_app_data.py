@@ -64,7 +64,6 @@ from common.persistence.runtime import (
     read_errors,
     read_pellets_store,
     read_settings,
-    read_status,
     write_connected_user,
     write_errors,
     write_generic_key,
@@ -137,100 +136,6 @@ def sio(ds):
 # =====================================================================
 
 
-def test_get_settings_data(sio):
-    resp = sio.mod._get_app_data("settings_data")
-    assert resp["result"] == "OK"
-    assert resp["message"] is None
-    assert resp["data"] == read_settings()
-
-
-def test_get_dash_data(sio):
-    # _get_app_data("dash_data") wraps _get_dash_data(settings, pelletdb) in an
-    # OK envelope. Pin that dispatch/wrapping with a sentinel; the _get_dash_data
-    # internals (probe assembly) need a fully control-runtime-seeded `current`,
-    # which this harness lacks, so they are mocked out here.
-    sentinel = {"grillName": "sentinel-dash"}
-    with mock.patch.object(sio.mod, "_get_dash_data", return_value=sentinel) as m_dash:
-        resp = sio.mod._get_app_data("dash_data")
-    assert resp["result"] == "OK"
-    assert resp["data"] is sentinel
-    # called with (settings, pelletdb) read from the store
-    args = m_dash.call_args.args
-    assert args[0] == read_settings()
-    assert args[1] == read_pellets_store()
-
-
-def test_get_pellets_data(sio):
-    resp = sio.mod._get_app_data("pellets_data")
-    assert resp["result"] == "OK"
-    assert resp["data"]["uuid"] == read_settings()["server_info"]["uuid"]
-    assert resp["data"]["pellets"] == read_pellets_store()
-
-
-def test_get_hopper_level(sio):
-    resp = sio.mod._get_app_data("hopper_level")
-    assert resp["result"] == "OK"
-    assert resp["data"] == read_pellets_store()["current"]["hopper_level"]
-
-
-def test_get_info_data_field_remap(sio):
-    # Pin the exact system_info -> response remapping without depending on
-    # real hardware probing: feed a canned _get_system_info result.
-    canned = {
-        "hardware_info": {
-            "cpu_info": {
-                "model": "PiModel",
-                "model_name": "CPU-Name",
-                "hardware": "HW",
-                "cores": 4,
-                "frequency": 1500,
-            },
-            "total_ram": 1000,
-            "available_ram": 500,
-        },
-        "os_info": {
-            "PRETTY_NAME": "PrettyOS",
-            "VERSION": "12",
-            "VERSION_CODENAME": "bookworm",
-            "ARCHITECTURE": "arm64",
-            "BITS": "64",
-        },
-        "network_info": {"iface": "wlan0"},
-        "cpu_throttled": False,
-        "cpu_under_voltage": True,
-        "wifi_quality_value": 55,
-        "wifi_quality_max": 70,
-        "wifi_quality_percentage": 78,
-        "uptime": "up 3 days",
-        "cpu_temp": 42.5,
-    }
-    with mock.patch.object(sio.mod, "_get_system_info", return_value=canned):
-        resp = sio.mod._get_app_data("info_data")
-    assert resp["result"] == "OK"
-    d = resp["data"]
-    assert d["uuid"] == read_settings()["server_info"]["uuid"]
-    assert d["platformInfo"]["systemModel"] == "PiModel"
-    assert d["platformInfo"]["cpuModel"] == "CPU-Name"
-    assert d["platformInfo"]["cpuCores"] == 4
-    assert d["platformInfo"]["totalRam"] == 1000
-    assert d["osInfo"]["prettyName"] == "PrettyOS"
-    assert d["osInfo"]["codeName"] == "bookworm"
-    assert d["osInfo"]["bits"] == "64"
-    assert d["networkInfo"] == {"iface": "wlan0"}
-    assert d["cpuUnderVolt"] is True
-    assert d["wifiQualityPercentage"] == 78
-    assert d["cpuTemp"] == 42.5
-
-
-def test_get_manual_data(sio):
-    resp = sio.mod._get_app_data("manual_data")
-    assert resp["result"] == "OK"
-    assert resp["data"]["manual"] == read_status()["outpins"]
-    # default control mode is "Stop", so active is False
-    assert resp["data"]["active"] is False
-    assert resp["data"]["dcFan"] == read_settings()["platform"]["dc_fan"]
-
-
 def test_dash_data_exposes_manual_power_and_pwm(sio):
     """The React manual controls need the power relay's live state and the
     current DC-fan duty. Legacy's control panel reads both (status['outpins']
@@ -247,26 +152,6 @@ def test_dash_data_exposes_manual_power_and_pwm(sio):
     assert set(dash["outputs"]) == {"fan", "auger", "igniter", "power"}
     assert isinstance(dash["outputs"]["power"], bool)
     assert isinstance(dash["manualPwm"], int)
-
-
-def test_get_recipe_data_details_none_found(sio):
-    # No recipe files (mock the file lister) -> empty list -> Error.
-    with mock.patch.object(sio.mod, "get_recipefilelist", return_value=[]):
-        resp = sio.mod._get_app_data("recipe_data", "details")
-    assert resp["result"] == "Error"
-    assert resp["message"] == "Error: Recipes details not found"
-
-
-def test_get_recipe_data_arg01_none_returns_none(sio):
-    # Latent fall-through: recipe_data with arg01=None hits no return -> None.
-    resp = sio.mod._get_app_data("recipe_data")
-    assert resp is None
-
-
-def test_get_invalid_action(sio):
-    resp = sio.mod._get_app_data("bogus_action")
-    assert resp["result"] == "Error"
-    assert resp["message"] == "Error: Received request without valid action"
 
 
 # =====================================================================
@@ -345,38 +230,6 @@ def test_get_invalid_action(sio):
 # _get_app_data -- recipe_data "details" found-result path (arg01="details"
 # with at least one file that parses OK), plus the skip-on-bad-status branch.
 # =====================================================================
-
-
-def test_get_recipe_data_details_found(sio):
-    recipe_data = {"metadata": {"id": "rid3"}}
-    with (
-        mock.patch.object(sio.mod, "get_recipefilelist", return_value=["foo.pfrecipe"]),
-        mock.patch.object(sio.mod, "read_recipefile", return_value=(recipe_data, "OK")),
-    ):
-        resp = sio.mod._get_app_data("recipe_data", "details")
-    assert resp["result"] == "OK"
-    assert resp["data"]["recipe_details"] == [{"filename": "foo.pfrecipe", "details": recipe_data}]
-    assert resp["data"]["uuid"] == read_settings()["server_info"]["uuid"]
-
-
-def test_get_recipe_data_non_details_arg01_returns_none(sio):
-    # Same latent fall-through as arg01=None: any arg01 other than "details"
-    # (the outer `if arg01 is not None` is entered but the inner
-    # `if arg01 == "details"` is not) hits no `return` -> implicit None.
-    resp = sio.mod._get_app_data("recipe_data", "bogus")
-    assert resp is None
-
-
-def test_get_recipe_data_details_skips_non_ok_status(sio):
-    # A file that fails to parse (status != "OK") is excluded from the
-    # results list -> falls through to the "no results" Error branch.
-    with (
-        mock.patch.object(sio.mod, "get_recipefilelist", return_value=["bad.pfrecipe"]),
-        mock.patch.object(sio.mod, "read_recipefile", return_value=({}, "Error")),
-    ):
-        resp = sio.mod._get_app_data("recipe_data", "details")
-    assert resp["result"] == "Error"
-    assert resp["message"] == "Error: Recipes details not found"
 
 
 # =====================================================================
@@ -738,12 +591,6 @@ def test_get_system_info_maps_control_and_system_info_fields(sio):
 # =====================================================================
 # get_app_data / post_app_data -- thin @socketio.on wrappers
 # =====================================================================
-
-
-def test_get_app_data_wrapper_delegates_to_get_app_data(sio):
-    resp = sio.mod.get_app_data(action="settings_data")
-    assert resp["result"] == "OK"
-    assert resp["data"] == read_settings()
 
 
 # =====================================================================

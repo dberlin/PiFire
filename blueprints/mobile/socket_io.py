@@ -34,10 +34,8 @@ from common.app import (
 from common.common import (
     ErrorKind,
     flush_events_records,
-    read_generic_json,
 )
 from common.control_delta import control_delta
-from common.modes import Mode
 from common.persistence.control import (
     enqueue_control_delta,
     read_control,
@@ -70,7 +68,6 @@ from common.web_contracts.core import (
 )
 from config import Config
 from controller.learning_report import controller_learning_report_revision
-from file_mgmt.recipes import get_recipefilelist, read_recipefile
 
 thread_lock = threading.Lock()
 thread_event = Event()
@@ -179,11 +176,6 @@ def listen_app_data(force=False):
             thread = socketio.start_background_task(_emit_app_data, thread_event, force)
 
     return _response(result="OK")
-
-
-@socketio.on("get_app_data")
-def get_app_data(action=None, arg01=None, arg02=None):
-    return _get_app_data(action, arg01, arg02)
 
 
 """
@@ -497,117 +489,6 @@ def _get_dash_data(settings, pelletdb):
         by_alias=True,
         exclude_none=False,
     )
-
-
-def _get_app_data_settings_data(settings, arg01, arg02):
-    return _response(result="OK", data=settings)
-
-
-def _get_app_data_dash_data(settings, arg01, arg02):
-    pelletdb = read_pellets_store()
-    return _response(result="OK", data=_get_dash_data(settings, pelletdb))
-
-
-def _get_app_data_pellets_data(settings, arg01, arg02):
-    return _response(result="OK", data=_get_pellet_socket_data(settings, read_pellets_store()))
-
-
-def _get_app_data_hopper_level(settings, arg01, arg02):
-    return _response(result="OK", data=read_pellets_store()["current"]["hopper_level"])
-
-
-def _get_app_data_info_data(settings, arg01, arg02):
-    system_info = _get_system_info(read_control())
-    return _response(
-        result="OK",
-        data={
-            "uuid": settings["server_info"]["uuid"],
-            "platformInfo": {
-                "systemModel": system_info["hardware_info"]["cpu_info"]["model"],
-                "cpuModel": system_info["hardware_info"]["cpu_info"]["model_name"],
-                "cpuHardware": system_info["hardware_info"]["cpu_info"]["hardware"],
-                "cpuCores": system_info["hardware_info"]["cpu_info"]["cores"],
-                "cpuFrequency": system_info["hardware_info"]["cpu_info"]["frequency"],
-                "totalRam": system_info["hardware_info"]["total_ram"],
-                "availableRam": system_info["hardware_info"]["available_ram"],
-            },
-            "osInfo": {
-                "prettyName": system_info["os_info"]["PRETTY_NAME"],
-                "version": system_info["os_info"]["VERSION"],
-                "codeName": system_info["os_info"]["VERSION_CODENAME"],
-                "architecture": system_info["os_info"]["ARCHITECTURE"],
-                "bits": system_info["os_info"]["BITS"],
-            },
-            "networkInfo": system_info["network_info"],
-            "cpuThrottled": system_info["cpu_throttled"],
-            "cpuUnderVolt": system_info["cpu_under_voltage"],
-            "wifiQualityValue": system_info["wifi_quality_value"],
-            "wifiQualityMax": system_info["wifi_quality_max"],
-            "wifiQualityPercentage": system_info["wifi_quality_percentage"],
-            "upTime": system_info["uptime"],
-            "cpuTemp": system_info["cpu_temp"],
-            "outPins": settings["platform"]["outputs"],
-            "inPins": settings["platform"]["inputs"],
-            "devPins": settings["platform"]["devices"],
-            "serverVersion": settings["versions"]["server"],
-            "serverBuild": settings["versions"]["build"],
-            "platform": settings["modules"]["grillplat"],
-            "display": settings["modules"]["display"],
-            "distance": settings["modules"]["dist"],
-            "pipList": read_generic_json("pip_list.json"),
-            "dcFan": settings["platform"]["dc_fan"],
-        },
-    )
-
-
-def _get_app_data_manual_data(settings, arg01, arg02):
-    control = read_control()
-    return _response(
-        result="OK",
-        data={
-            "manual": read_status()["outpins"],
-            "active": control["mode"] == Mode.MANUAL,
-            "dcFan": settings["platform"]["dc_fan"],
-        },
-    )
-
-
-def _get_app_data_recipe_data(settings, arg01, arg02):
-    if arg01 is not None and arg01 == "details":
-        filelist = get_recipefilelist()
-        recipedetailslist = []
-        for filename in filelist:
-            filepath = f"{recipe_folder}{filename}"
-            recipe_data, status = read_recipefile(filepath)
-            if status == "OK":
-                recipe_data = _encode_assets(recipe_data)
-                recipedetailslist.append({"filename": filename, "details": recipe_data})
-        if recipedetailslist:
-            return _response(
-                result="OK", data={"uuid": settings["server_info"]["uuid"], "recipe_details": recipedetailslist}
-            )
-        else:
-            return _response(result="Error", message="Error: Recipes details not found")
-
-
-_GET_APP_DATA_DISPATCH = {
-    "settings_data": _get_app_data_settings_data,
-    "dash_data": _get_app_data_dash_data,
-    "pellets_data": _get_app_data_pellets_data,
-    "hopper_level": _get_app_data_hopper_level,
-    "info_data": _get_app_data_info_data,
-    "manual_data": _get_app_data_manual_data,
-    "recipe_data": _get_app_data_recipe_data,
-}
-
-
-def _get_app_data(action=None, arg01=None, arg02=None):
-    settings = read_settings_store()
-
-    handler = _GET_APP_DATA_DISPATCH.get(action)
-    if handler is None:
-        return _response(result="Error", message="Error: Received request without valid action")
-    return handler(settings, arg01, arg02)
 
 
 def _get_probe_data(probe_type, settings, current, probe_device_info, notify_data):
