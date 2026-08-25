@@ -45,11 +45,13 @@ describe("LogsCard listing", () => {
 
   it("offers one archive rather than a per-file download", () => {
     //  Matching the server: /logs/download takes no filename at all, which is
-    //  the same path rule the rest of the page follows.
+    //  the same path rule the rest of the page follows. The card's other link
+    //  is the diagnostics bundle, likewise filename-free -- what must never
+    //  appear here is a link per log file.
     mount();
-    const links = screen.getAllByRole("link");
-    expect(links.length).toBe(1);
-    expect(links[0].getAttribute("href")).toBe("/api/admin/logs/download");
+    const hrefs = screen.getAllByRole("link").map((a) => a.getAttribute("href"));
+    expect(hrefs).toEqual(["/api/admin/logs/download", "/api/admin/diagnostics/download"]);
+    expect(hrefs.some((href) => href?.includes(".log"))).toBe(false);
   });
 
   it("disables the delete when there is nothing to delete", () => {
@@ -57,6 +59,34 @@ describe("LogsCard listing", () => {
     expect(
       (screen.getByRole("button", { name: "Delete All Logs" }) as HTMLButtonElement).disabled,
     ).toBe(true);
+  });
+});
+
+describe("LogsCard diagnostics bundle", () => {
+  it("offers the database and logs as one download", () => {
+    mount();
+    const link = screen.getByRole("link", { name: "Download Diagnostics" });
+    expect(link.getAttribute("href")).toBe("/api/admin/diagnostics/download");
+  });
+
+  it("sits in the wrapping action row, not the scroll area", () => {
+    //  .pf-admin-card is overflow-hidden with .pf-admin-scroll as its flex:1
+    //  child. Inside that scroll area the button falls below the fold on a
+    //  height-constrained card; .pf-admin-actions wraps instead, so the action
+    //  cannot be pushed out of reach. This lived in BackupsCard first and hit
+    //  both failure modes there.
+    const { container } = mount();
+    const link = screen.getByRole("link", { name: "Download Diagnostics" });
+    expect(link.closest(".pf-admin-actions")).not.toBe(null);
+    expect(link.closest(".pf-admin-scroll")).toBe(null);
+    expect(container.querySelector(".pf-admin-actions")).toBeTruthy();
+  });
+
+  it("is offered even when there are no log files", () => {
+    //  The database half of the bundle is the valuable half, and it is there
+    //  whether or not any .log survives.
+    mount([]);
+    expect(screen.getByRole("link", { name: "Download Diagnostics" })).toBeTruthy();
   });
 });
 

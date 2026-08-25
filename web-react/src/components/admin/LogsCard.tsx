@@ -1,5 +1,10 @@
 import { useState } from "react";
-import { adminErrorText, deleteLogs, logsDownloadUrl } from "../../helpers/admin/adminApi";
+import {
+  adminErrorText,
+  deleteLogs,
+  diagnosticsDownloadUrl,
+  logsDownloadUrl,
+} from "../../helpers/admin/adminApi";
 import { ConfirmAction } from "../dashboard/ConfirmAction";
 
 /**
@@ -75,6 +80,15 @@ export function LogsCard({
       <div className="pf-admin-actions">
         <a className="pf-admin-btn" href={logsDownloadUrl()} download>
           Download All
+        </a>
+        {/* Here rather than in BackupsCard: the bundle is these logs plus the
+            database, and .pf-admin-actions WRAPS rather than scrolling, so the
+            button cannot be pushed out of reach. The backups card is height
+            constrained by its grid row -- parked beside its .pf-admin-scroll
+            this squeezed the backup lists to a sliver, and inside it the button
+            fell below the fold. */}
+        <a className="pf-admin-btn" href={diagnosticsDownloadUrl()} download>
+          Download Diagnostics
         </a>
         <button
           type="button"
