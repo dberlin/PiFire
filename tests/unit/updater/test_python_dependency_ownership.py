@@ -15,6 +15,7 @@ FRESH_INSTALLERS = (
 VENV_CREATORS = (*FRESH_INSTALLERS, ROOT / "updater/upgrade.sh")
 ALLOWED_SYSTEM_PYTHON_PACKAGES = {"python3", "python3-dev", "python3-devel"}
 RPI_LGPIO_DEPENDENCY = "rpi-lgpio>=0.6; platform_system == 'Linux' and platform_machine == 'aarch64'"
+LINUX_LGPIO_DEPENDENCY = "lgpio>=0.2.2.0; platform_system == 'Linux'"
 
 
 def _manifest() -> dict:
@@ -43,14 +44,17 @@ def test_shared_scipy_is_a_production_project_dependency() -> None:
     assert any(dependency.startswith("scipy>=1.18.0") for dependency in project["dependencies"])
 
 
-def test_raspberry_pi_profiles_install_lgpio_in_the_venv() -> None:
+def test_linux_blinka_profiles_install_platform_lgpio_in_the_venv() -> None:
     profiles = _manifest()["modules"]["grillplatform"]
     raspberry = [entry for entry in profiles.values() if entry["filename"] == "raspberry_pi_all"]
-    other = [entry for entry in profiles.values() if entry["filename"] != "raspberry_pi_all"]
+    generic_linux = [entry for entry in profiles.values() if entry["filename"] != "raspberry_pi_all"]
 
     assert raspberry
+    assert generic_linux
     assert all(RPI_LGPIO_DEPENDENCY in entry["py_dependencies"] for entry in raspberry)
-    assert all(not any("lgpio" in dependency for dependency in entry["py_dependencies"]) for entry in other)
+    assert all(LINUX_LGPIO_DEPENDENCY not in entry["py_dependencies"] for entry in raspberry)
+    assert all(LINUX_LGPIO_DEPENDENCY in entry["py_dependencies"] for entry in generic_linux)
+    assert all(RPI_LGPIO_DEPENDENCY not in entry["py_dependencies"] for entry in generic_linux)
 
 
 def test_installers_do_not_install_system_python_runtime_packages() -> None:
