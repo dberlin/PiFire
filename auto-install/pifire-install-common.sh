@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 #
-# Shared install/upgrade steps for PiFire.
+# Shared install/build steps for PiFire.
 #
-# Sourced by auto-install/install.sh, install-debian.sh, install-fedora.sh,
-# pifire-dietpi.sh and updater/upgrade.sh. Everything here runs AFTER the repo
-# is on disk, which is why it can live in one file: the installers themselves
-# are fetched standalone with `curl | bash` and have to be self-contained until
-# the clone completes.
+# Sourced by the four fresh installers and updater/rebuild-web-ui.sh. Everything
+# here runs after the repository is on disk, which is why it can live in one
+# file: the installers themselves are fetched standalone with `curl | bash` and
+# have to be self-contained until the clone completes.
 #
 # Callers are expected to have set:
 #   $SUDO   -- "sudo", or "" when already root
@@ -71,10 +70,9 @@ pifire_require_commands() {
 # ---------------------------------------------------------------------------
 
 # The React app is served from web-react/dist (blueprints/spa/routes.py), and
-# dist/ is git-ignored -- it is a build artifact, not a checked-in one. So a
-# fresh clone has no web interface at all until this runs, and an upgrade that
-# pulls new React sources keeps serving the OLD bundle until it runs again.
-# Both the installers and updater/upgrade.sh call it for that reason.
+# dist/ is git-ignored. A fresh clone has no bundle; an update with new React
+# sources keeps serving the old bundle until this runs.
+# Both the installers and updater/rebuild-web-ui.sh call it for that reason.
 
 # The bun to build with. Set by pifire_get_bun.
 #
@@ -165,10 +163,9 @@ pifire_get_bun() {
 	local repo="${1:-$PIFIRE_REPO_DIR}"
 	pifire_locate_bun "$repo" && return 0
 
-	# bun ships as a zip and its installer shells out to unzip. The installers
-	# put it in the package list, but an install predating that -- upgrading
-	# through updater/upgrade.sh, which installs no packages -- will not have
-	# it, and the failure surfaces only as an unzip error buried in the log.
+	# bun ships as a zip and its installer shells out to unzip. The fresh
+	# installers put it in the package list; the platform-neutral updater does
+	# not mutate OS packages, so an older installation may still need it.
 	if ! command -v unzip >/dev/null 2>&1; then
 		log " !! 'unzip' is required to unpack bun, and is not on PATH."
 		log " !! Install it (apt install unzip / dnf install unzip) and re-run."
@@ -236,8 +233,7 @@ pifire_build_web_ui() {
 	log " + Installing web UI dependencies"
 	# `set -o pipefail` inside each subshell is load-bearing: without it the
 	# pipeline's status is TEE's, so a failed install or build reports success
-	# and the only thing that notices is the artifact check below. (The same
-	# trap is documented at the uv sync in updater/upgrade.sh.)
+	# and the only thing that notices is the artifact check below.
 	#
 	# --frozen-lockfile: bun.lock is committed, and a build that silently
 	# resolved different versions than were tested is not the tested build.

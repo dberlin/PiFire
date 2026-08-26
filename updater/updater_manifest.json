@@ -230,8 +230,20 @@
           "apt_dependencies": [],
           "command_list": [
             [
-              "bash",
-              "/usr/local/bin/pifire/updater/upgrade.sh"
+              "python",
+              "/usr/local/bin/pifire/updater.py",
+              "--bootstrap-uv",
+              "--legacy-python-token",
+              "sudo"
+            ],
+            [
+              "python",
+              "/usr/local/bin/pifire/updater.py",
+              "--refresh-python-environment",
+              "--previous-wizard-ref",
+              "v1.22.2",
+              "--legacy-python-token",
+              "sudo"
             ]
           ]
         }

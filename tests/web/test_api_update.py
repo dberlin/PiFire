@@ -42,6 +42,7 @@ def test_state_returns_the_update_data_shape(ds, client, monkeypatch):
         "web_ui_stale": False,
         "web_ui_build_failed": False,
         "restart_pending": False,
+        "manual_dependency_actions": [],
     }
 
 
@@ -496,7 +497,10 @@ def test_state_reports_a_restart_the_updater_could_not_take(ds, client, monkeypa
     describes what the machine is still owed and has to survive the tab.
     """
     import blueprints.api_update.routes as ur
-    from common.persistence.install_state import set_update_restart_pending
+    from common.persistence.install_state import (
+        set_update_manual_dependency_actions,
+        set_update_restart_pending,
+    )
 
     _stub_reads(monkeypatch)
     monkeypatch.setattr(ur, "web_ui_needs_rebuild", lambda root: False)
@@ -504,10 +508,18 @@ def test_state_reports_a_restart_the_updater_could_not_take(ds, client, monkeypa
     monkeypatch.setattr(ur, "detached_head", lambda: None)
 
     assert client.get("/api/update/state").get_json()["data"]["restart_pending"] is False
+    assert client.get("/api/update/state").get_json()["data"]["manual_dependency_actions"] == []
 
     set_update_restart_pending(True)
+    set_update_manual_dependency_actions(
+        ["Install OS package: libusb", "Run command: board-config.py --spi"],
+    )
 
     assert client.get("/api/update/state").get_json()["data"]["restart_pending"] is True
+    assert client.get("/api/update/state").get_json()["data"]["manual_dependency_actions"] == [
+        "Install OS package: libusb",
+        "Run command: board-config.py --spi",
+    ]
 
 
 def test_the_webapp_clears_the_pending_restart_at_its_own_boot():

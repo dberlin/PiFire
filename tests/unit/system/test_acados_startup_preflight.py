@@ -122,6 +122,7 @@ def test_startup_waits_for_real_update_transaction_through_dependency_cursor(
     monkeypatch.setattr(updater, "REPO_ROOT", str(repo))
     monkeypatch.setattr(updater, "logger", __import__("logging").getLogger("transaction-lock-test"), raising=False)
     monkeypatch.setattr(updater, "read_settings", lambda: {"versions": {"server": "1.12.0", "build": 92}})
+    monkeypatch.setattr(updater, "selected_wizard_dependencies", lambda settings: None)
     monkeypatch.setattr(updater, "set_updater_install_status", lambda *args: None)
     monkeypatch.setattr(updater, "time", type("_Time", (), {"sleep": staticmethod(lambda _: None)}))
     monkeypatch.setattr(
@@ -140,11 +141,11 @@ def test_startup_waits_for_real_update_transaction_through_dependency_cursor(
         assert release_dependency.wait(timeout=5)
         with trace.open("a") as handle:
             handle.write("dependency-cursor\n")
-        return 0, False
+        return 0, False, ()
 
     monkeypatch.setattr(updater, "install_dependencies", dependencies)
     monkeypatch.setattr(updater, "rebuild_web_ui_if_stale", lambda: True)
-    monkeypatch.setattr(updater, "publish_finished", lambda reboot: None)
+    monkeypatch.setattr(updater, "publish_finished", lambda reboot, manual_actions: None)
     target = updater.run_update if flow_name == "update" else updater.run_branch_change
     thread = threading.Thread(target=target, args=("development",), daemon=True)
     thread.start()

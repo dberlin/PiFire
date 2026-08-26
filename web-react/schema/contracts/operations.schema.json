@@ -924,6 +924,13 @@
           ],
           "title": "Detached"
         },
+        "manual_dependency_actions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Manual Dependency Actions",
+          "type": "array"
+        },
         "remote_url": {
           "title": "Remote Url",
           "type": "string"
@@ -958,7 +965,8 @@
         "remote_version",
         "web_ui_stale",
         "web_ui_build_failed",
-        "restart_pending"
+        "restart_pending",
+        "manual_dependency_actions"
       ],
       "title": "UpdateState",
       "type": "object"

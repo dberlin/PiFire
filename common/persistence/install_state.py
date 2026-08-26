@@ -10,6 +10,7 @@ _WIZARD_INSTALL_KEY = "wizard:install"
 _WIZARD_STATUS_PREFIX = "wizard"
 _UPDATER_STATUS_PREFIX = "updater"
 _UPDATE_RESTART_PENDING_KEY = "updater:restart_pending"
+_UPDATE_MANUAL_DEPENDENCY_ACTIONS_KEY = "updater:manual_dependency_actions"
 
 
 def _read_json_key_or_none(key):
@@ -90,3 +91,13 @@ def get_update_restart_pending():
 def set_update_restart_pending(pending):
     """Record whether installed code is still waiting for a service restart."""
     datastore.set_blob(_UPDATE_RESTART_PENDING_KEY, json.dumps(bool(pending)))
+
+
+def get_update_manual_dependency_actions():
+    """Return user-owned dependency actions that must happen before restart."""
+    return _read_json_key_or_none(_UPDATE_MANUAL_DEPENDENCY_ACTIONS_KEY) or []
+
+
+def set_update_manual_dependency_actions(actions):
+    """Persist dependency actions that the cross-platform updater cannot perform."""
+    datastore.set_blob(_UPDATE_MANUAL_DEPENDENCY_ACTIONS_KEY, json.dumps(list(actions)))

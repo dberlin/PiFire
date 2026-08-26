@@ -60,6 +60,7 @@ const state = {
     web_ui_stale: false,
     web_ui_build_failed: false,
     restart_pending: false,
+    manual_dependency_actions: [],
   },
 };
 
@@ -632,6 +633,28 @@ describe("UpdatePage pending restart", () => {
 
     const message = await screen.findByText(/drop an active fire/i);
     expect(message.textContent).toMatch(/running the code from before/i);
+  });
+
+  it("shows persistent manual dependency actions and withholds restart controls", async () => {
+    seed();
+    apiMocks.fetchUpdateState.mockResolvedValue({
+      ...state,
+      data: {
+        ...state.data,
+        restart_pending: true,
+        manual_dependency_actions: [
+          "Install OS package: libusb",
+          "Run command: board-config.py --spi",
+        ],
+      },
+    });
+
+    renderPage();
+
+    expect(await screen.findByText("Manual dependency action required")).toBeInTheDocument();
+    expect(screen.getByText("Install OS package: libusb")).toBeInTheDocument();
+    expect(screen.getByText("Run command: board-config.py --spi")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Restart Anyway" })).toBeNull();
   });
 
   it("stays quiet when nothing is pending", async () => {

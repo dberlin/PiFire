@@ -115,3 +115,38 @@ def test_run_wizard_skips_unknown_module_name(ds, no_install):
 
     percent, _status, _output = install_persistence.get_wizard_install_status()
     assert percent == 101  # ran to completion (restart-only), not frozen mid-install
+
+
+def test_selected_module_dependencies_have_one_shared_collection_contract():
+    module = lambda py, apt, commands: {
+        "py_dependencies": py,
+        "apt_dependencies": apt,
+        "command_list": commands,
+    }
+    wizard_data = {
+        "modules": {
+            "grillplatform": {"generic": module(["platform-py"], ["platform-os"], [["platform-command"]])},
+            "display": {"screen": module(["display-py"], [], [])},
+            "distance": {"tof": module(["distance-py"], ["distance-os"], [])},
+            "probes": {"thermocouple": module(["probe-py"], [], [["probe-command"]])},
+        }
+    }
+    install_info = {
+        "modules": {
+            "grillplatform": {
+                "profile_selected": ["stale-profile-name"],
+                "settings": {"current": "generic"},
+            },
+            "display": {"profile_selected": ["screen"], "settings": {}},
+            "distance": {"profile_selected": ["tof"], "settings": {}},
+            "probes": {"profile_selected": ["thermocouple"], "settings": {}},
+        }
+    }
+
+    dependencies = wizard.collect_module_dependencies(wizard_data, install_info)
+
+    assert dependencies == (
+        ["platform-py", "display-py", "distance-py", "probe-py"],
+        ["platform-os", "distance-os"],
+        [["platform-command"], ["probe-command"]],
+    )

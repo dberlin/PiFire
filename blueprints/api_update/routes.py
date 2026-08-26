@@ -21,6 +21,7 @@ from common.persistence.control import (
     read_control,
 )
 from common.persistence.install_state import (
+    get_update_manual_dependency_actions,
     get_update_restart_pending,
     get_updater_install_status,
     set_updater_install_status,
@@ -142,6 +143,7 @@ def update_state():
                 # the whole point -- the restart prompt used to live only in the
                 # page's memory and vanished with a reload.
                 "restart_pending": get_update_restart_pending(),
+                "manual_dependency_actions": get_update_manual_dependency_actions(),
             },
         )
     )

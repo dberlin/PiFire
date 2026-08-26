@@ -19,9 +19,7 @@ defeated by the absence of the others:
     guarded command hands the pipeline's exit status to tee -- which always
     succeeds -- so adding the logging silently UNDOES the guard unless pipefail
     is in effect. install-debian.sh and install-fedora.sh set it once at the top
-    of the file; install.sh, pifire-dietpi.sh and upgrade.sh do not, so their
-    guards wrap the pipeline in a `( set -o pipefail; ... )` subshell, the same
-    idiom pifire_sync_python_and_rebuild_acados uses.
+    of the file; install.sh and pifire-dietpi.sh use a guarded subshell.
 
 Structural, like test_supervisor_restart_is_uniform: it pins the shape at every
 call site, so a fifth installer -- or this step moved elsewhere -- carries the
@@ -42,20 +40,16 @@ import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 
-#: Every script that installs uv and creates the venv. Kept explicit rather than
-#: globbed so a script that stops doing this shows up as a failure to explain,
-#: not as silent coverage loss.
+#: Every fresh installer that installs uv and creates the venv. Kept explicit
+#: rather than globbed so coverage loss is visible.
 SCRIPTS = [
     "auto-install/install.sh",
     "auto-install/install-debian.sh",
     "auto-install/install-fedora.sh",
     "auto-install/pifire-dietpi.sh",
-    "updater/upgrade.sh",
 ]
 
-#: The uv steps, as commands rather than as prose -- upgrade.sh logs
-#: " + Configuring supervisor for the uv venv", and a plain substring search
-#: reads that echo as a call site.
+#: The uv steps, as commands rather than prose.
 STEPS = {
     "uv venv": re.compile(r"(?:^|[;&|(]\s*|!\s+)uv\s+venv\b"),
     "the uv installer": re.compile(r"astral\.sh/uv/install\.sh"),

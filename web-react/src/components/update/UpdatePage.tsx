@@ -314,6 +314,18 @@ export function UpdatePage() {
         {note && <p className="pf-update-note">{note}</p>}
       </section>
 
+      {state.manual_dependency_actions.length > 0 && (
+        <section className="pf-admin-card pf-admin-wide" role="alert">
+          <h3>Manual dependency action required</h3>
+          <p>Complete these platform-specific steps before restarting PiFire:</p>
+          <ul>
+            {state.manual_dependency_actions.map((action) => (
+              <li key={action}>{action}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {progress && (
         <section className="pf-admin-card pf-admin-wide" aria-label="update progress">
           <div
@@ -332,9 +344,11 @@ export function UpdatePage() {
               shipped code nothing ever loaded. */}
           {done === "ok" && (
             <p className="pf-update-done">
-              {state.restart_pending
-                ? "Update complete. PiFire must restart to run the new code."
-                : "Update complete — PiFire is restarting to load the new code."}
+              {state.manual_dependency_actions.length > 0
+                ? "Update complete. Complete the manual dependency actions before restarting PiFire."
+                : state.restart_pending
+                  ? "Update complete. PiFire must restart to run the new code."
+                  : "Update complete — PiFire is restarting to load the new code."}
             </p>
           )}
           {done === "reboot" && (
@@ -381,7 +395,9 @@ export function UpdatePage() {
           PiFire: app.py clears the flag at its own boot, so the ask ends when
           -- and only when -- the code it is asking about is actually loaded. */}
       <ConfirmAction
-        open={state.restart_pending && !restartDeferred}
+        open={
+          state.restart_pending && state.manual_dependency_actions.length === 0 && !restartDeferred
+        }
         title="Restart required — the grill is running"
         message="An update is installed but PiFire is still running the code from before it. Restarting stops the control process, which will drop an active fire, so it was left to you. Restart once the cook is finished."
         confirmLabel="Restart Anyway"

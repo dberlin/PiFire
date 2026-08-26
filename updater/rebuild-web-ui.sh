@@ -3,12 +3,10 @@
 # Rebuild the React bundle the Flask SPA blueprint serves, from whatever
 # sources are currently checked out.
 #
-# Entry point for rebuilding OUTSIDE a version upgrade: updater.py calls this
-# after every update and branch change, and /api/update/rebuild-web-ui calls it
-# on demand. updater/upgrade.sh runs the same build as part of a version
-# migration, so all three routes lead to one implementation --
-# pifire_build_web_ui in auto-install/pifire-install-common.sh, which is never
-# reimplemented here.
+# updater.py calls this after every update and branch change, and
+# /api/update/rebuild-web-ui calls it on demand. Both routes lead to one
+# implementation -- pifire_build_web_ui in
+# auto-install/pifire-install-common.sh -- rather than reimplementing the build.
 #
 # When to run it is decided by common/web_ui_build.py, not here: this script
 # always builds.

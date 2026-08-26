@@ -190,6 +190,7 @@ class UpdateState(WireModel):
     web_ui_stale: bool
     web_ui_build_failed: bool
     restart_pending: bool
+    manual_dependency_actions: list[str]
 
 
 class UpdateCheck(WireModel):

@@ -94,6 +94,7 @@ type Started = boolean;
 type Branch = string;
 type Branches = string[];
 type Detached = string | null;
+type ManualDependencyActions = string[];
 type RemoteUrl = string;
 type RemoteVersion = string;
 type RestartPending = boolean;
@@ -442,6 +443,7 @@ export interface UpdateState {
   branch: Branch;
   branches: Branches;
   detached: Detached;
+  manual_dependency_actions: ManualDependencyActions;
   remote_url: RemoteUrl;
   remote_version: RemoteVersion;
   restart_pending: RestartPending;

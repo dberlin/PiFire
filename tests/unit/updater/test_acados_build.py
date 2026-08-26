@@ -281,6 +281,7 @@ def test_dependency_failure_is_terminal_and_never_finishes_or_restarts(
     published: list[tuple[int, str, str]] = []
     monkeypatch.setattr(updater, "logger", __import__("logging").getLogger("acados-update-test"), raising=False)
     monkeypatch.setattr(updater, "read_settings", lambda: {"versions": {"server": "1.12.0", "build": 92}})
+    monkeypatch.setattr(updater, "selected_wizard_dependencies", lambda settings: None)
     monkeypatch.setattr(updater, "set_updater_install_status", lambda *args: published.append(args))
     monkeypatch.setattr(updater, "time", type("_Time", (), {"sleep": staticmethod(lambda _: None)}))
     monkeypatch.setattr(
@@ -288,7 +289,7 @@ def test_dependency_failure_is_terminal_and_never_finishes_or_restarts(
         "install_update",
         lambda: (True, "Update Completed Successfully", " - native release published"),
     )
-    monkeypatch.setattr(updater, "install_dependencies", lambda *args: (9, False))
+    monkeypatch.setattr(updater, "install_dependencies", lambda *args: (9, False, ()))
     monkeypatch.setattr(
         updater,
         "rebuild_web_ui_if_stale",
@@ -379,6 +380,7 @@ def test_real_git_flow_restores_branch_revision_runtime_and_terminal_status(
     monkeypatch.setattr(updater, "REPO_ROOT", str(checkout))
     monkeypatch.setattr(updater, "logger", logging.getLogger(f"real-{flow_name}-rollback"), raising=False)
     monkeypatch.setattr(updater, "read_settings", lambda: cursor)
+    monkeypatch.setattr(updater, "selected_wizard_dependencies", lambda settings: None)
     monkeypatch.setattr(updater, "time", type("_Time", (), {"sleep": staticmethod(lambda _: None)}))
     monkeypatch.setattr(
         updater,

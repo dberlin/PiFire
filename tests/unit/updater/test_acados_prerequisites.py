@@ -352,8 +352,9 @@ def test_old_cursor_dispatches_bootstrap_before_any_dependency_collection_or_mut
         lambda manifest: pytest.fail("version cursor advanced after native bootstrap failure"),
     )
 
-    result, reboot = updater.install_dependencies("1.9.0", 0)
+    result, reboot, manual_actions = updater.install_dependencies("1.9.0", 0)
 
     assert result == 41
     assert reboot is False
+    assert manual_actions == ()
     assert events == [("bash", "/new-tree/install-acados-prerequisites.sh")]

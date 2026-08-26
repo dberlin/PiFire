@@ -16,10 +16,13 @@
 """
 
 import argparse
+import copy
 import fcntl
 import json
 import logging
 import os
+import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -27,6 +30,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from urllib.request import urlopen
 
 from common import datastore
 from common.acados_build import run_acados_build
@@ -34,6 +38,7 @@ from common.common import (
     create_logger,
     log_path,
     read_updater_manifest,
+    read_wizard,
     semantic_ver_is_lower,
     write_generic_json,
     write_log,
@@ -42,6 +47,7 @@ from common.install_log import INSTALL_FAILED_PERCENT
 from common.modes import Mode
 from common.persistence.control import read_control
 from common.persistence.install_state import (
+    set_update_manual_dependency_actions,
     set_update_restart_pending,
     set_updater_install_status,
     set_wizard_install_status,
@@ -62,6 +68,35 @@ from common.web_ui_build import (
 
 #: This file sits at the repo root, beside web-react/ and updater/.
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+UV_BOOTSTRAP_COMMAND = [
+    "python",
+    "/usr/local/bin/pifire/updater.py",
+    "--bootstrap-uv",
+    "--legacy-python-token",
+    "sudo",
+]
+PYTHON_REFRESH_BOOTSTRAP_COMMAND = [
+    "python",
+    "/usr/local/bin/pifire/updater.py",
+    "--refresh-python-environment",
+    "--previous-wizard-ref",
+    "v1.22.2",
+    "--legacy-python-token",
+    "sudo",
+]
+PLATFORM_NEUTRAL_BOOTSTRAP_COMMANDS = (
+    UV_BOOTSTRAP_COMMAND,
+    PYTHON_REFRESH_BOOTSTRAP_COMMAND,
+)
+MANUAL_DEPENDENCY_ACTIONS_EXIT = 75
+
+
+@dataclass(frozen=True)
+class WizardDependencies:
+    python: tuple[str, ...]
+    apt: tuple[str, ...]
+    commands: tuple[tuple[str, ...], ...]
+
 
 #: The same logger __main__ attaches a file handler to -- logging caches by
 #: name, so both names are one object. Bound here as well so the functions below
@@ -650,22 +685,20 @@ def grill_is_stopped():
         return False
 
 
-def publish_finished(reboot):
-    """End a run so the page stops polling, and restart PiFire when it is safe.
+def publish_finished(reboot, manual_actions=()):
+    """End a run, preserving any operator-owned dependency work before restart."""
+    if manual_actions:
+        actions = list(manual_actions)
+        set_update_manual_dependency_actions(actions)
+        set_update_restart_pending(True)
+        _publish(
+            FINISHED_PERCENT,
+            "Manual dependency action required",
+            " - Update installed. Complete before restarting: " + " | ".join(actions),
+        )
+        return
 
-    Published by whatever ran LAST, not by install_dependencies: an update
-    rebuilds the web UI after the dependencies, and that rebuild publishes
-    progress of its own. Ending inside install_dependencies left every update
-    sitting at percent 95 -- "Checking Web UI..." -- against a process that had
-    already exited.
-
-    "Finished!  Restarting Server..." used to be a plain lie. Nothing in the
-    update path called supervisorctl, so the new code sat on disk while the old
-    code kept serving it, and the only way to load it was a button on a page
-    that had usually navigated away by the time the run ended. The update
-    completed, said it was restarting, and left a webapp answering from before
-    the pull -- new routes 404ing against a bundle that had them.
-    """
+    set_update_manual_dependency_actions([])
     if reboot:
         #  Not ours to take: power-cycling the machine is a bigger thing than
         #  bouncing three programs, and the page offers it.
@@ -697,6 +730,17 @@ def report_failure(status, output):
     sys.exit(1)
 
 
+def exit_after_python_environment_bootstrap(result):
+    """Preserve the manual-action sentinel instead of replacing its status."""
+    if result == MANUAL_DEPENDENCY_ACTIONS_EXIT:
+        raise SystemExit(result)
+    if result != 0:
+        report_failure(
+            "ERROR Synchronizing Python Environment",
+            f" - Python environment refresh exited {result}",
+        )
+
+
 def run_acados_rebuild(repo_root: str | Path = REPO_ROOT) -> None:
     """Conditionally rebuild the native runtime and publish terminal status."""
     status = "Rebuilding acados native runtime..."
@@ -718,6 +762,7 @@ def run_update(branch):
     settings = read_settings()
     current_version = settings["versions"]["server"]
     current_build = settings["versions"].get("build", 0)
+    previous_wizard_dependencies = selected_wizard_dependencies(settings)
 
     with update_startup_transaction():
         set_updater_install_status(
@@ -731,7 +776,11 @@ def run_update(branch):
         if not success:
             report_failure(status, output)
         time.sleep(4)
-        dependency_result, reboot = install_dependencies(current_version, current_build)
+        dependency_result, reboot, manual_actions = install_dependencies(
+            current_version,
+            current_build,
+            previous_wizard_dependencies,
+        )
         if dependency_result != 0:
             report_failure(
                 "ERROR Installing Dependencies and Migrations",
@@ -741,7 +790,7 @@ def run_update(branch):
     # Web remains outside the control transaction: it is diagnostic and does
     # not consume the native ABI. Control may start once the cursor is durable.
     rebuild_web_ui_if_stale()
-    publish_finished(reboot)
+    publish_finished(reboot, manual_actions)
 
 
 def run_branch_change(branch):
@@ -749,6 +798,7 @@ def run_branch_change(branch):
     settings = read_settings()
     current_version = settings["versions"]["server"]
     current_build = settings["versions"].get("build", 0)
+    previous_wizard_dependencies = selected_wizard_dependencies(settings)
 
     with update_startup_transaction():
         set_updater_install_status(
@@ -762,7 +812,11 @@ def run_branch_change(branch):
         if not success:
             report_failure(status, output)
         time.sleep(4)
-        dependency_result, reboot = install_dependencies(current_version, current_build)
+        dependency_result, reboot, manual_actions = install_dependencies(
+            current_version,
+            current_build,
+            previous_wizard_dependencies,
+        )
         if dependency_result != 0:
             report_failure(
                 "ERROR Installing Dependencies and Migrations",
@@ -770,7 +824,7 @@ def run_branch_change(branch):
             )
 
     rebuild_web_ui_if_stale()
-    publish_finished(reboot)
+    publish_finished(reboot, manual_actions)
 
 
 def record_installed_version(manifest=None):
@@ -808,6 +862,207 @@ def record_installed_version(manifest=None):
         f"Recorded installed version {target['server']} build {target_build} (was {stored} build {stored_build})"
     )
     return True
+
+
+def _run_python_refresh_command(command):
+    status = "Synchronizing Python Environment..."
+    process = subprocess.Popen(
+        command,
+        cwd=REPO_ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        bufsize=1,
+    )
+    assert process.stdout is not None
+    for raw_line in process.stdout:
+        _publish(27, status, raw_line.rstrip("\r\n"))
+    return process.wait()
+
+
+def selected_wizard_dependencies(settings=None, wizard_data=None):
+    """Resolve dependencies for the hardware currently selected in settings."""
+    settings = read_settings() if settings is None else settings
+    wizard_data = read_wizard() if wizard_data is None else wizard_data
+
+    from wizard import collect_module_dependencies, wizardInstallInfoExisting
+
+    install_info = wizardInstallInfoExisting(settings, wizard_data)
+    py_dependencies, apt_dependencies, command_list = collect_module_dependencies(
+        wizard_data,
+        install_info,
+    )
+    return WizardDependencies(
+        python=tuple(py_dependencies),
+        apt=tuple(apt_dependencies),
+        commands=tuple(tuple(command) for command in command_list),
+    )
+
+
+def _manual_dependency_actions(previous, current):
+    if previous is None:
+        return ()
+
+    previous_apt = set(previous.apt)
+    previous_commands = set(previous.commands)
+    actions = []
+    seen_apt = set()
+    for package in current.apt:
+        if package not in previous_apt and package not in seen_apt:
+            actions.append(f"Install OS package: {package}")
+            seen_apt.add(package)
+    seen_commands = set()
+    for command in current.commands:
+        if command not in previous_commands and command not in seen_commands:
+            actions.append(f"Run command: {shlex.join(command)}")
+            seen_commands.add(command)
+    return tuple(actions)
+
+
+def bootstrap_uv_executable(repo_root=None, which=None, opener=None, runner=None):
+    """Install a standalone uv outside every venv for the one-time migration."""
+    repository = Path(repo_root or REPO_ROOT)
+    which = shutil.which if which is None else which
+    opener = urlopen if opener is None else opener
+    runner = subprocess.run if runner is None else runner
+    if which("uv"):
+        return "uv"
+
+    install_dir = repository / ".toolchain" / "uv"
+    install_dir.mkdir(parents=True, exist_ok=True)
+    with opener("https://astral.sh/uv/install.sh") as response:
+        installer = response.read()
+    result = runner(
+        ["/bin/sh"],
+        cwd=repository,
+        input=installer,
+        env={**os.environ, "UV_INSTALL_DIR": str(install_dir)},
+        capture_output=True,
+        check=False,
+    )
+    executable = install_dir / "uv"
+    if result.returncode != 0 or not executable.is_file():
+        stderr = result.stderr.decode(errors="replace") if isinstance(result.stderr, bytes) else result.stderr
+        raise RuntimeError(stderr.strip() or "uv bootstrap did not produce an executable")
+    return str(executable)
+
+
+def ensure_uv_executable(repo_root=None, which=None):
+    """Return an existing uv executable without running a non-uv bootstrap."""
+    repository = Path(repo_root or REPO_ROOT)
+    which = shutil.which if which is None else which
+    if which("uv"):
+        return "uv"
+    executable = repository / ".toolchain" / "uv" / "uv"
+    if executable.is_file():
+        return str(executable)
+    raise RuntimeError("uv is not installed; run the platform-neutral uv bootstrap first")
+
+
+def _venv_create_command(repo_root=None, uv_executable="uv"):
+    config = Path(repo_root or REPO_ROOT) / ".venv" / "pyvenv.cfg"
+    legacy_system_site = False
+    if config.exists():
+        for line in config.read_text().splitlines():
+            key, separator, value = line.partition("=")
+            if separator and key.strip().lower() == "include-system-site-packages" and value.strip().lower() == "true":
+                legacy_system_site = True
+                break
+    mode = "--clear" if legacy_system_site else "--allow-existing"
+    return [uv_executable, "venv", mode, ".venv"]
+
+
+def read_wizard_at_revision(revision, git_runner=None):
+    """Read the wizard manifest from a pre-update Git revision."""
+    git_runner = subprocess.run if git_runner is None else git_runner
+    command = ["git", "show", f"{revision}:wizard/wizard_manifest.json"]
+    result = git_runner(
+        command,
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or f"could not read wizard manifest at {revision}")
+    return json.loads(result.stdout)
+
+
+def refresh_python_environment_from_revision(
+    revision,
+    settings=None,
+    wizard_data=None,
+    runner=None,
+    git_runner=None,
+):
+    """Refresh while comparing manual dependencies with a released baseline."""
+    settings = read_settings() if settings is None else settings
+    wizard_data = read_wizard() if wizard_data is None else wizard_data
+    previous_wizard_data = read_wizard_at_revision(revision, git_runner)
+    previous_dependencies = selected_wizard_dependencies(
+        copy.deepcopy(settings),
+        previous_wizard_data,
+    )
+    return refresh_python_environment(
+        settings=settings,
+        wizard_data=wizard_data,
+        previous_dependencies=previous_dependencies,
+        runner=runner,
+    )
+
+
+def refresh_python_environment(
+    settings=None,
+    wizard_data=None,
+    previous_dependencies=None,
+    runner=None,
+):
+    """Synchronize the project venv and reinstall Python extras for selected hardware."""
+    settings = read_settings() if settings is None else settings
+    wizard_data = read_wizard() if wizard_data is None else wizard_data
+    runner = _run_python_refresh_command if runner is None else runner
+    current_dependencies = selected_wizard_dependencies(settings, wizard_data)
+    manual_actions = _manual_dependency_actions(previous_dependencies, current_dependencies)
+    uv_executable = ensure_uv_executable()
+    commands = [
+        _venv_create_command(uv_executable=uv_executable),
+        [uv_executable, "sync", "--no-dev"],
+        *[
+            [uv_executable, "pip", "install", "--python", ".venv/bin/python", dependency]
+            for dependency in current_dependencies.python
+        ],
+    ]
+    for command in commands:
+        result = runner(command)
+        if result != 0:
+            return result, ()
+
+    settings["globals"]["uv"] = True
+    settings["globals"]["venv"] = True
+    settings["globals"]["python_exec"] = ".venv/bin/python"
+    write_settings(settings)
+    return 0, manual_actions
+
+
+def run_python_environment_bootstrap(previous_wizard_ref=None):
+    """Run the checked-out updater's refresh and own the migration cursor."""
+    if previous_wizard_ref:
+        result, manual_actions = refresh_python_environment_from_revision(previous_wizard_ref)
+    else:
+        result, manual_actions = refresh_python_environment()
+    if result != 0:
+        return result, ()
+    record_installed_version()
+    if manual_actions:
+        set_update_manual_dependency_actions(manual_actions)
+        set_update_restart_pending(True)
+        output = " - Manual dependency action required before restart: " + " | ".join(manual_actions)
+        _publish(INSTALL_FAILED_PERCENT, "Manual dependency action required", output)
+        print(output)
+        return MANUAL_DEPENDENCY_ACTIONS_EXIT, manual_actions
+    return 0, ()
 
 
 def _migration_is_pending(current_version_string, current_build, version_info):
@@ -848,7 +1103,11 @@ def _run_acados_bootstrap_migrations(updater_info, current_version_string, curre
     return 0
 
 
-def install_dependencies(current_version_string="0.0.0", current_build=None):
+def install_dependencies(
+    current_version_string="0.0.0",
+    current_build=None,
+    previous_wizard_dependencies=None,
+):
     updaterInfo = read_updater_manifest()
     bootstrap_result = _run_acados_bootstrap_migrations(
         updaterInfo,
@@ -856,7 +1115,12 @@ def install_dependencies(current_version_string="0.0.0", current_build=None):
         current_build,
     )
     if bootstrap_result != 0:
-        return bootstrap_result, False
+        return bootstrap_result, False, ()
+    refresh_result, manual_actions = refresh_python_environment(
+        previous_dependencies=previous_wizard_dependencies,
+    )
+    if refresh_result != 0:
+        return refresh_result, False, ()
 
     result = 0
     percent = 30
@@ -898,7 +1162,10 @@ def install_dependencies(current_version_string="0.0.0", current_build=None):
                         apt_dependencies.append(package)
 
                 for command in version_info["dependencies"][section]["command_list"]:
-                    command_list.append(command)
+                    # Old updater code executes this manifest bridge to enter the
+                    # newly checked-out updater. New code already refreshed above.
+                    if command not in PLATFORM_NEUTRAL_BOOTSTRAP_COMMANDS:
+                        command_list.append(command)
 
                 if version_info["reboot_required"]:
                     reboot = True
@@ -1075,7 +1342,7 @@ def install_dependencies(current_version_string="0.0.0", current_build=None):
     # publishes progress of its own -- so ending here left every update sitting
     # at percent 95 ("Checking Web UI...") with the browser polling a run that
     # had already finished.
-    return result, reboot
+    return result, reboot, manual_actions
 
 
 """
@@ -1084,10 +1351,10 @@ def install_dependencies(current_version_string="0.0.0", current_build=None):
 ==============================================================================
 """
 if __name__ == "__main__":
-    # updater.py runs as its own standalone process (upgrade.sh launches it
-    # directly), so it gets no benefit from app.py's or control.py's init()
-    # call. Must run before the first read_settings()/write_settings() call
-    # below -- see app.py:39 and control.py:70, which do the same.
+    # updater.py runs as its own standalone process (the web updater and
+    # platform-neutral manifest bootstrap both launch it directly), so it gets
+    # no benefit from app.py's or control.py's init() call. Initialize before
+    # the first settings access, as those entry points do.
     datastore.init()
 
     parser = argparse.ArgumentParser(description="Updater Script")
@@ -1108,10 +1375,31 @@ if __name__ == "__main__":
         help="Rebuild the React web UI from the current sources",
     )
     parser.add_argument(
+        "--previous-wizard-ref",
+        help="Git revision whose selected wizard dependencies are the comparison baseline",
+    )
+    parser.add_argument(
+        "--legacy-python-token",
+        choices=("sudo",),
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
         "--rebuild-acados",
         action="store_true",
         required=False,
         help="Conditionally rebuild the acados native runtime",
+    )
+    parser.add_argument(
+        "--refresh-python-environment",
+        action="store_true",
+        required=False,
+        help="Synchronize the venv and selected wizard Python dependencies",
+    )
+    parser.add_argument(
+        "--bootstrap-uv",
+        action="store_true",
+        required=False,
+        help="Install the standalone uv prerequisite outside the virtual environment",
     )
     parser.add_argument("-l", "--legacyvenv", action="store_true", required=False, help="Set venv flag in settings")
     parser.add_argument("-d", "--debug", action="store_true", required=False, help="Enable Debug Mode")
@@ -1147,7 +1435,7 @@ if __name__ == "__main__":
         traceback. Its only channel to the browser is the install status, and a
         run that raises simply stops writing to it -- leaving the page polling
         "Starting Update..." forever, which is indistinguishable from a slow
-        update. The negative percent is what ends that poll.
+        update.
         """
         logger.error("Update failed: %s", exc, exc_info=(exc_type, exc, tb))
         set_updater_install_status(INSTALL_FAILED_PERCENT, "Update failed", f"{exc_type.__name__}: {exc}")
@@ -1165,6 +1453,16 @@ if __name__ == "__main__":
     elif args.branch:
         num_args += 1
         run_branch_change(args.branch)
+    elif args.bootstrap_uv:
+        num_args += 1
+        bootstrap_uv_executable()
+
+    elif args.refresh_python_environment:
+        num_args += 1
+        refresh_result, _manual_actions = run_python_environment_bootstrap(
+            args.previous_wizard_ref,
+        )
+        exit_after_python_environment_bootstrap(refresh_result)
 
     elif args.rebuildwebui:
         num_args += 1
@@ -1197,19 +1495,24 @@ if __name__ == "__main__":
         settings = read_settings()
         current_version = settings["versions"]["server"]
         current_build = settings["versions"].get("build", 0)
+        previous_wizard_dependencies = selected_wizard_dependencies(settings)
 
         percent = 10
         status = "Installing Dependencies for Current Version..."
         output = f" - APT, Python and Command Dependencies for version {current_version} ({current_build})"
         set_updater_install_status(percent, status, output)
 
-        dependency_result, reboot = install_dependencies(current_version, current_build)
+        dependency_result, reboot, manual_actions = install_dependencies(
+            current_version,
+            current_build,
+            previous_wizard_dependencies,
+        )
         if dependency_result != 0:
             report_failure(
                 "ERROR Installing Dependencies and Migrations",
                 f" - dependency steps exited {dependency_result}",
             )
-        publish_finished(reboot)
+        publish_finished(reboot, manual_actions)
 
     if args.piplist:
         num_args += 1

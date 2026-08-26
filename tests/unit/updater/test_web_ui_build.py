@@ -1,10 +1,8 @@
 """When the updater rebuilds the served React bundle.
 
 web-react/dist is git-ignored, so an update merges new React sources and leaves
-the built bundle untouched -- and blueprints/spa/routes.py goes on serving it.
-Nothing rebuilt it on an ordinary update: the only caller was
-updater/upgrade.sh, which updater.py runs as a version-migration step listed in
-updater_manifest.json under 1.10.0, so no current install still reaches it.
+the built bundle untouched. updater.py therefore owns the post-update rebuild;
+the recovery endpoint uses the same injected build runner.
 
 No test here runs a real build; rebuild_web_ui takes an injected runner.
 """
@@ -347,10 +345,11 @@ def quiet_updater(monkeypatch):
     monkeypatch.setattr(updater, "logger", logging.getLogger("t"), raising=False)
     monkeypatch.setattr(updater, "set_updater_install_status", lambda p, s, o: published.append((p, s, o)))
     monkeypatch.setattr(updater, "read_settings", lambda: {"versions": {"server": "1.10.10", "build": 70}})
+    monkeypatch.setattr(updater, "selected_wizard_dependencies", lambda settings: None)
     monkeypatch.setattr(updater, "time", type("_", (), {"sleep": staticmethod(lambda _: None)}))
     monkeypatch.setattr(updater, "install_update", lambda: (True, "Update Completed Successfully", " - ok"))
     monkeypatch.setattr(updater, "change_branch", lambda b: (True, "Branch Changed Successfully", " - ok"))
-    monkeypatch.setattr(updater, "install_dependencies", lambda v, b: (0, False))
+    monkeypatch.setattr(updater, "install_dependencies", lambda *args: (0, False, ()))
     monkeypatch.setattr(updater, "rebuild_web_ui_if_stale", lambda *a, **k: True)
     #  A finished run RESTARTS, which is the side effect this fixture exists to
     #  keep out of a unit test: publish_finished() ends with restart_scripts,
@@ -406,7 +405,7 @@ def test_a_reboot_required_run_ends_on_the_reboot_sentinel(quiet_updater, monkey
     a service when the machine needs a reboot."""
     import updater
 
-    monkeypatch.setattr(updater, "install_dependencies", lambda v, b: (0, True))
+    monkeypatch.setattr(updater, "install_dependencies", lambda *args: (0, True, ()))
 
     updater.run_update("main")
 
@@ -551,6 +550,7 @@ def one_command_update(monkeypatch, version_store):
             ],
         },
     )
+    monkeypatch.setattr(updater, "refresh_python_environment", lambda **kwargs: (0, ()))
     monkeypatch.setattr(updater.subprocess, "Popen", lambda *a, **k: _FakeProcess(codes["exit"]))
     monkeypatch.setattr(
         updater.subprocess, "call", lambda *a, **k: pytest.fail("a real subprocess escaped the test harness")
@@ -561,9 +561,10 @@ def one_command_update(monkeypatch, version_store):
 def test_a_clean_install_records_the_manifest_version(one_command_update, version_store):
     import updater
 
-    result, _ = updater.install_dependencies("1.10.10", 70)
+    result, _, manual_actions = updater.install_dependencies("1.10.10", 70)
 
     assert result == 0
+    assert manual_actions == ()
     assert version_store["versions"]["server"] == "1.11.0"
     assert version_store["versions"]["build"] == 71
 
@@ -575,8 +576,9 @@ def test_a_failed_dependency_step_leaves_the_version_alone(one_command_update, v
 
     one_command_update["exit"] = 1
 
-    result, _ = updater.install_dependencies("1.10.10", 70)
+    result, _, manual_actions = updater.install_dependencies("1.10.10", 70)
 
     assert result != 0
+    assert manual_actions == ()
     assert version_store["versions"]["server"] == "1.10.10", "a failed run must not claim the new version"
     assert version_store["versions"]["build"] == 70

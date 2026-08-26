@@ -1,10 +1,7 @@
 """What happens at the very end of an update.
 
-Nothing in the update path used to restart anything. `run_update` pulled,
-installed dependencies, rebuilt the bundle, published "Finished!  Restarting
-Server..." -- and exited, having restarted nothing. `updater/upgrade.sh` did not
-either; it ends after copying supervisor's .conf files, without so much as a
-`reread`. The only thing that ever loaded an update's code was a button on the
+The updater once published "Finished! Restarting Server..." and exited without
+restarting anything. The only path that loaded new code was a button on the
 updater page, at the end of a run that page had to have watched from the start.
 
 So an update would finish, announce a restart, and leave gunicorn serving the
@@ -16,7 +13,7 @@ import pytest
 
 import updater
 from common.modes import Mode
-from common.persistence.install_state import get_update_restart_pending
+from common.persistence.install_state import get_update_manual_dependency_actions, get_update_restart_pending
 
 
 @pytest.fixture
@@ -27,9 +24,9 @@ def finish(ds, monkeypatch):
     monkeypatch.setattr(updater, "_publish", lambda percent, status, line: published.append(percent))
     monkeypatch.setattr(updater, "restart_scripts", lambda wait=False: restarts.append(wait))
 
-    def run(mode, reboot=False):
+    def run(mode, reboot=False, manual_actions=()):
         monkeypatch.setattr(updater, "read_control", lambda: {"mode": mode})
-        updater.publish_finished(reboot)
+        updater.publish_finished(reboot, manual_actions)
         return published[-1], restarts
 
     return run
@@ -85,6 +82,20 @@ def test_an_unreadable_control_record_counts_as_running(ds, monkeypatch):
     assert updater.grill_is_stopped() is False
 
 
+def test_manual_dependency_actions_block_restart_and_persist_for_the_user(finish):
+    actions = [
+        "Install OS package: libusb",
+        "Run command: board-config.py --spi",
+    ]
+
+    percent, restarts = finish(Mode.STOP, manual_actions=actions)
+
+    assert restarts == []
+    assert percent == updater.FINISHED_PERCENT
+    assert get_update_restart_pending() is True
+    assert get_update_manual_dependency_actions() == actions
+
+
 def test_install_dependencies_no_longer_claims_to_restart_anything(ds, monkeypatch):
     """Its percent-100 line said "Finished!  Restarting Server..." from the
     middle of a run, where it neither knew nor decided whether a restart
@@ -100,6 +111,7 @@ def test_install_dependencies_no_longer_claims_to_restart_anything(ds, monkeypat
     )
     monkeypatch.setattr(updater, "read_updater_manifest", lambda: {"versions": []})
     monkeypatch.setattr(updater, "_run_acados_bootstrap_migrations", lambda *a: 0)
+    monkeypatch.setattr(updater, "refresh_python_environment", lambda **kwargs: (0, ()))
     monkeypatch.setattr(updater, "read_settings", lambda: {"globals": {"uv": True}})
     monkeypatch.setattr(updater, "record_installed_version", lambda manifest=None: None)
     monkeypatch.setattr(updater.time, "sleep", lambda seconds: None)

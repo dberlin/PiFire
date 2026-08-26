@@ -180,6 +180,29 @@ def wizardInstallInfoExisting(settings, wizardData):
     return wizardInstallInfo
 
 
+def collect_module_dependencies(wizard_data, wizard_install_info):
+    """Return selected Python, OS-package, and command dependencies in manifest order."""
+    py_dependencies = []
+    apt_dependencies = []
+    command_list = []
+
+    for module, install_info in wizard_install_info["modules"].items():
+        selected_profiles = install_info["profile_selected"]
+        if module == "grillplatform":
+            selected = install_info["settings"].get("current")
+            selected_profiles = [selected] if selected else selected_profiles
+
+        for selected in selected_profiles:
+            module_data = wizard_data["modules"][module].get(selected)
+            if module_data is None:
+                continue
+            py_dependencies.extend(module_data["py_dependencies"])
+            apt_dependencies.extend(module_data["apt_dependencies"])
+            command_list.extend(module_data["command_list"])
+
+    return py_dependencies, apt_dependencies, command_list
+
+
 def _stream_command(command, percent, status):
     """Run `command`, publishing every output line to the install status and the
     wizard log. Returns the list of lines seen.
@@ -420,30 +443,10 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
     logger.info(status)
     set_wizard_install_status(percent, status, output)
     time.sleep(2)
-    # Get PyPi & Apt dependencies
-    py_dependencies = []
-    apt_dependencies = []
-    command_list = []
-
-    for module in WizardInstallInfo["modules"]:
-        for selected in WizardInstallInfo["modules"][module]["profile_selected"]:
-            if module == "grillplatform":
-                selected = WizardInstallInfo["modules"][module]["settings"]["current"]
-            module_data = WizardData["modules"][module].get(selected)
-            if module_data is None:
-                # Same stale-draft/unknown-module guard as the settings-writing
-                # loop above: a module name that isn't in the manifest must not
-                # raise inside the detached installer process.
-                set_wizard_install_status(
-                    percent, status, f"   - Skipped unknown module {selected} for section {module}"
-                )
-                continue
-            for py_dependency in module_data["py_dependencies"]:
-                py_dependencies.append(py_dependency)
-            for apt_dependency in module_data["apt_dependencies"]:
-                apt_dependencies.append(apt_dependency)
-            for command in module_data["command_list"]:
-                command_list.append(command)
+    py_dependencies, apt_dependencies, command_list = collect_module_dependencies(
+        WizardData,
+        WizardInstallInfo,
+    )
 
     # Calculate the percent done from remaining items to install
     items_remaining = len(py_dependencies) + len(apt_dependencies) + len(command_list)
@@ -546,15 +549,13 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
 ==============================================================================
 """
 
-print("PiFire Module Wizard")
-print("Copyright 2022-2025, MIT License, Ben Parmeter")
 
 if __name__ == "__main__":
-    # wizard.py runs as its own standalone process (the installer and
-    # upgrade.sh launch it directly), so it gets no benefit from app.py's or
-    # control.py's init() call. Must run before the first read_settings()
-    # call below -- see app.py:39 and control.py:70, which do the same.
+    # wizard.py runs as its own standalone process when an installer or the web
+    # wizard launches it, so initialize the datastore before settings access.
     datastore.init()
+    print("PiFire Module Wizard")
+    print("Copyright 2022-2025, MIT License, Ben Parmeter")
 
     parser = argparse.ArgumentParser(description="PiFire Module Wizard")
     parser.add_argument(

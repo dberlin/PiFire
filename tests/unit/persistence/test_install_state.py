@@ -5,11 +5,13 @@ import pytest
 
 from common.persistence.install_state import (
     delete_wizard_install_info,
+    get_update_manual_dependency_actions,
     get_update_restart_pending,
     get_updater_install_status,
     get_wizard_install_status,
     load_os_info,
     load_wizard_install_info,
+    set_update_manual_dependency_actions,
     set_update_restart_pending,
     set_updater_install_status,
     set_wizard_install_status,
@@ -170,3 +172,20 @@ def test_pending_restart_round_trips(ds):
     assert get_update_restart_pending() is True
     set_update_restart_pending(False)
     assert get_update_restart_pending() is False
+
+
+def test_manual_dependency_actions_default_to_empty(ds):
+    assert get_update_manual_dependency_actions() == []
+
+
+def test_manual_dependency_actions_round_trip_owned_copies(ds):
+    actions = ["Install OS package: libusb", "Run: board-config.py --spi"]
+    set_update_manual_dependency_actions(actions)
+
+    loaded = get_update_manual_dependency_actions()
+    assert loaded == actions
+    loaded.append("mutated by caller")
+    assert get_update_manual_dependency_actions() == actions
+
+    set_update_manual_dependency_actions([])
+    assert get_update_manual_dependency_actions() == []
