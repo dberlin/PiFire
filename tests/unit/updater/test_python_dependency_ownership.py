@@ -96,7 +96,7 @@ def test_current_update_bootstraps_the_new_platform_neutral_updater() -> None:
     )
     commands = [command for section in migration["dependencies"].values() for command in section["command_list"]]
 
-    assert current["build"] == 118
+    assert current["build"] == 119
     assert commands == [
         [
             "python",
