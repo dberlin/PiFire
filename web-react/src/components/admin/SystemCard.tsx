@@ -126,6 +126,7 @@ export function SystemCard({ mode }: { mode: string }) {
       </div>
 
       <ConfirmAction
+        viewport
         open={pending !== null}
         title={pending?.title ?? ""}
         message={pending?.message}

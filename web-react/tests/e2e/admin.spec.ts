@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { stubAdmin } from "./apiFixtures";
 import { ensureStopped } from "./helpers";
 
 // The admin page against the real backend, reading only.
@@ -78,6 +79,20 @@ test.describe("admin page", () => {
     //  Cancel, not Confirm. The afterEach proves nothing left the browser.
     await page.getByRole("button", { name: "Cancel" }).click();
     await expect(page.getByText("Shut the system down?")).toBeHidden();
+  });
+
+  test("keeps both power-confirmation actions reachable in a short viewport", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 480 });
+    // Pin this one read so the layout regression does not require a running
+    // backend; the fixture is a real stopped-mode response.
+    await stubAdmin(page);
+    await page.goto("/admin");
+
+    await page.getByRole("button", { name: "Reboot" }).click();
+    await expect(page.getByRole("button", { name: "Confirm" })).toBeInViewport({ ratio: 1 });
+    await expect(page.getByRole("button", { name: "Cancel" })).toBeInViewport({ ratio: 1 });
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await expect(page.getByText("Reboot the system?")).toBeHidden();
   });
 
   test("factory reset names the pellet database before anything is committed", async ({
