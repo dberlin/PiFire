@@ -94,7 +94,7 @@ def test_current_update_runs_the_dependency_ownership_migration() -> None:
     )
     commands = [command for section in migration["dependencies"].values() for command in section["command_list"]]
 
-    assert current["build"] == 116
+    assert current["build"] == 118
     assert ["bash", "/usr/local/bin/pifire/updater/upgrade.sh"] in commands
     all_commands = [
         command
