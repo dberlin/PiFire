@@ -68,6 +68,37 @@ def test_run_wizard_dev_mode_resolves_to_restart_not_reboot(ds, no_install):
     assert percent == 101
 
 
+def test_run_wizard_uses_compatible_uv_for_python_dependencies(ds, monkeypatch):
+    import updater
+
+    settings = defaults.default_settings()
+    settings["globals"]["uv"] = True
+    settings["probe_settings"]["probe_map"]["probe_devices"] = []
+    runtime_persistence.write_settings_store(settings)
+    wizard_data = read_wizard()
+    install_info = wizard.wizardInstallInfoExisting(settings, wizard_data)
+    commands = []
+
+    monkeypatch.setattr(wizard, "logger", logging.getLogger("wizard_test"), raising=False)
+    monkeypatch.setattr(wizard, "is_real_hardware", lambda *a, **k: True)
+    monkeypatch.setattr(wizard.time, "sleep", lambda *a, **k: None)
+    monkeypatch.setattr(wizard, "_stream_command", lambda command, *a, **k: commands.append(command) or [])
+    monkeypatch.setattr(updater, "ensure_uv_executable", lambda: "/repo/.toolchain/uv/uv")
+
+    class _Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    monkeypatch.setattr(wizard.subprocess, "run", lambda *a, **k: _Result())
+
+    wizard.run_wizard(settings, wizard_data, install_info)
+
+    pip_commands = [command for command in commands if command[1:3] == ["pip", "install"]]
+    assert pip_commands
+    assert {command[0] for command in pip_commands} == {"/repo/.toolchain/uv/uv"}
+
+
 def test_run_wizard_skips_unknown_setting_key(ds, no_install):
     """A dependency key that isn't in the selected module's manifest entry must
     not crash the detached installer.

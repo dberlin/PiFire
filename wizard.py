@@ -244,6 +244,7 @@ def _stream_command(command, percent, status):
         failure = f"   ! {command[0]} exited with code {code}"
         set_wizard_install_status(percent, status, failure)
         logger.error(failure)
+        raise subprocess.CalledProcessError(code, command)
     return lines
 
 
@@ -481,9 +482,15 @@ def run_wizard(settings, WizardData, WizardInstallInfo):
 
     # Install Py dependencies
     python_exec = settings["globals"].get("python_exec", "python")
-
     if settings["globals"].get("uv", False):
-        launch_pip = ["uv", "pip", "install"]
+        uv_executable = "uv"
+        if is_real_hardware():
+            # The updater may have installed a compatible repo-owned uv when
+            # an older executable remains on PATH. Reuse that resolver here.
+            from updater import ensure_uv_executable
+
+            uv_executable = ensure_uv_executable()
+        launch_pip = [uv_executable, "pip", "install"]
     else:
         launch_pip = [python_exec, "-m", "pip", "install"]
 

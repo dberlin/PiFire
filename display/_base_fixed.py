@@ -700,11 +700,21 @@ class _DisplayBase:
         # Create canvas
         img = Image.new("RGBA", (self.WIDTH, self.HEIGHT), color=(0, 0, 0))
 
-        label_canvas = self._draw_text(self.display_data, self.primary_font, 42, (255, 255, 0))
-        label_x = self.WIDTH // 2 - label_canvas.width // 2
-        label_y = self.HEIGHT // 2 - label_canvas.height // 2
-        label_origin = (label_x, label_y)
-        img.paste(label_canvas, label_origin, label_canvas)
+        margin = 4
+        max_width = self.WIDTH - margin * 2
+        max_height = self.HEIGHT - margin * 2
+        font_size = 42
+        label_canvas = self._draw_text(self.display_data, self.primary_font, font_size, (255, 255, 0))
+        if label_canvas.width > max_width or label_canvas.height > max_height:
+            scale = min(max_width / label_canvas.width, max_height / label_canvas.height)
+            font_size = max(1, int(font_size * scale))
+            label_canvas = self._draw_text(self.display_data, self.primary_font, font_size, (255, 255, 0))
+            while label_canvas.width > max_width or label_canvas.height > max_height:
+                font_size -= 1
+                label_canvas = self._draw_text(self.display_data, self.primary_font, font_size, (255, 255, 0))
+        label_x = (self.WIDTH - label_canvas.width) // 2
+        label_y = (self.HEIGHT - label_canvas.height) // 2
+        img.paste(label_canvas, (label_x, label_y), label_canvas)
 
         self._display_canvas(img)
 

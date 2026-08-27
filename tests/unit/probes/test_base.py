@@ -21,6 +21,8 @@ hit (basic-bus unknown chip-select) is added here for completeness.
 """
 
 import logging
+import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -499,7 +501,12 @@ def test_to_celsius_and_to_fahrenheit():
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_spi_bus_basic_unknown_cs_raises():
+def test_resolve_spi_bus_basic_unknown_cs_raises(monkeypatch):
+    # This branch validates configuration before opening SPI hardware. Keep the
+    # unit test independent of whether the host is a supported Blinka board.
+    monkeypatch.setitem(sys.modules, "board", SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "digitalio", SimpleNamespace())
+
     with pytest.raises(ValueError, match="Unknown SPI chip-select"):
         resolve_spi_bus({"spi_bus_kind": "basic", "cs": "NOPE"}, default_cs="D6")
 

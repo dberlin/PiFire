@@ -89,6 +89,8 @@ PLATFORM_NEUTRAL_BOOTSTRAP_COMMANDS = (
     PYTHON_REFRESH_BOOTSTRAP_COMMAND,
 )
 MANUAL_DEPENDENCY_ACTIONS_EXIT = 75
+MINIMUM_UV_VERSION = (0, 10, 0)
+_run_uv_version = subprocess.run
 
 
 @dataclass(frozen=True)
@@ -921,16 +923,42 @@ def _manual_dependency_actions(previous, current):
     return tuple(actions)
 
 
+def _uv_is_compatible(executable):
+    """Whether `executable` supports dependency-scoped build augmentation."""
+    try:
+        result = _run_uv_version(
+            [str(executable), "--version"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return False
+    if result.returncode != 0:
+        return False
+    try:
+        name, raw_version, *_ = result.stdout.strip().split()
+        parsed = tuple(int(part) for part in raw_version.split("."))
+    except (AttributeError, TypeError, ValueError):
+        return False
+    return name == "uv" and parsed >= MINIMUM_UV_VERSION
+
+
 def bootstrap_uv_executable(repo_root=None, which=None, opener=None, runner=None):
-    """Install a standalone uv outside every venv for the one-time migration."""
+    """Install a compatible standalone uv outside every venv for migration."""
     repository = Path(repo_root or REPO_ROOT)
     which = shutil.which if which is None else which
     opener = urlopen if opener is None else opener
     runner = subprocess.run if runner is None else runner
-    if which("uv"):
+    path_uv = which("uv")
+    if path_uv and _uv_is_compatible(path_uv):
         return "uv"
 
     install_dir = repository / ".toolchain" / "uv"
+    executable = install_dir / "uv"
+    if executable.is_file() and _uv_is_compatible(executable):
+        return str(executable)
+
     install_dir.mkdir(parents=True, exist_ok=True)
     with opener("https://astral.sh/uv/install.sh") as response:
         installer = response.read()
@@ -942,7 +970,6 @@ def bootstrap_uv_executable(repo_root=None, which=None, opener=None, runner=None
         capture_output=True,
         check=False,
     )
-    executable = install_dir / "uv"
     if result.returncode != 0 or not executable.is_file():
         stderr = result.stderr.decode(errors="replace") if isinstance(result.stderr, bytes) else result.stderr
         raise RuntimeError(stderr.strip() or "uv bootstrap did not produce an executable")
@@ -950,15 +977,36 @@ def bootstrap_uv_executable(repo_root=None, which=None, opener=None, runner=None
 
 
 def ensure_uv_executable(repo_root=None, which=None):
-    """Return an existing uv executable without running a non-uv bootstrap."""
+    """Return a uv new enough for dependency-scoped build augmentation."""
     repository = Path(repo_root or REPO_ROOT)
     which = shutil.which if which is None else which
-    if which("uv"):
-        return "uv"
     executable = repository / ".toolchain" / "uv" / "uv"
-    if executable.is_file():
+    if executable.is_file() and _uv_is_compatible(executable):
         return str(executable)
-    raise RuntimeError("uv is not installed; run the platform-neutral uv bootstrap first")
+    path_uv = which("uv")
+    if path_uv and _uv_is_compatible(path_uv):
+        return "uv"
+    required = ".".join(str(part) for part in MINIMUM_UV_VERSION)
+    raise RuntimeError(f"uv is not installed or is older than {required}; run the platform-neutral uv bootstrap first")
+
+
+def _write_pip_list(settings=None, runner=None):
+    """Write installed Python packages using the compatible environment tool."""
+    settings = read_settings() if settings is None else settings
+    runner = subprocess.run if runner is None else runner
+    python_exec = settings["globals"].get("python_exec", "python")
+    if settings["globals"].get("uv", False):
+        command = [ensure_uv_executable(), "pip", "list", "--format=json"]
+    else:
+        command = [python_exec, "-m", "pip", "list", "--format=json"]
+
+    result = runner(command, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        print(f"Error creating PIP List: {result.stderr}")
+        write_generic_json([], "pip_list.json")
+        return result.returncode
+    write_generic_json(json.loads(result.stdout), "pip_list.json")
+    return 0
 
 
 def _venv_create_command(repo_root=None, uv_executable="uv"):
@@ -1190,7 +1238,8 @@ def install_dependencies(
     python_exec = settings["globals"].get("python_exec", "python")
 
     if settings["globals"].get("uv", False):
-        launch_pip = ["uv", "pip", "install"]
+        uv_executable = ensure_uv_executable() if py_dependencies else "uv"
+        launch_pip = [uv_executable, "pip", "install"]
     else:
         launch_pip = [python_exec, "-m", "pip", "install"]
 
@@ -1516,24 +1565,7 @@ if __name__ == "__main__":
 
     if args.piplist:
         num_args += 1
-        settings = read_settings()
-
-        # Get python executable
-        python_exec = settings["globals"].get("python_exec", "python")
-
-        if settings["globals"].get("uv", False):
-            command = ["uv", "pip", "list", "--format=json"]
-        else:
-            command = [python_exec, "-m", "pip", "list", "--format=json"]
-
-        pip_list = subprocess.run(command, capture_output=True, text=True, check=False)
-        if pip_list.returncode == 0:
-            write_generic_json(json.loads(pip_list.stdout), "pip_list.json")
-            # print(f'PIP List: {pip_list.stdout}')
-        else:
-            print(f"Error creating PIP List: {pip_list.stderr}")
-            pip_list = []
-            write_generic_json(pip_list, "pip_list.json")
+        _write_pip_list()
 
     if args.uv:
         num_args += 1

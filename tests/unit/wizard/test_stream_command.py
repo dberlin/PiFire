@@ -8,6 +8,7 @@ installer, no package manager, nothing that touches the system.
 """
 
 import logging
+import subprocess
 import sys
 
 import pytest
@@ -65,12 +66,12 @@ def test_returns_the_lines_for_sentinel_scanning(captured):
 
 
 def test_a_failing_command_reports_its_exit_code(captured):
-    """A non-zero exit is precisely when the operator opens the panel. The old
-    loops print()ed the code to a stdout nobody reads -- the installer runs
-    detached -- so a failed package install was indistinguishable from a clean
-    one from anywhere the user could see."""
-    run("import sys; print('E: Unable to locate package', file=sys.stderr); sys.exit(1)", captured)
+    """A failed dependency must stop the detached installer rather than letting
+    it publish a false 100% / Finished state."""
+    with pytest.raises(subprocess.CalledProcessError) as raised:
+        run("import sys; print('E: Unable to locate package', file=sys.stderr); sys.exit(1)", captured)
 
+    assert raised.value.returncode == 1
     assert captured[0] == "E: Unable to locate package"
     assert captured[-1].endswith("exited with code 1")
 

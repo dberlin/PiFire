@@ -28,6 +28,31 @@ def test_splash_and_text_render():
     assert len(render(b, "_display_text")) == 64
 
 
+@pytest.mark.parametrize(
+    ("module", "rotation"),
+    [
+        ("display._base_240x240", 0),
+        ("display._base_240x320", 0),
+        ("display._base_240x320", 90),
+        ("display._base_320x480", 0),
+        ("display._base_320x480", 90),
+    ],
+)
+def test_long_text_fits_inside_every_fixed_viewport(module, rotation):
+    base = make_base(module, rotation=rotation)
+    base.display_text("Network Error")
+    render(base, "_display_text")
+
+    bounds = base._captured.convert("RGB").getbbox()
+    assert bounds is not None
+    left, top, right, bottom = bounds
+    margin = 4
+    assert left >= margin
+    assert top >= margin
+    assert right <= base.WIDTH - margin
+    assert bottom <= base.HEIGHT - margin
+
+
 def test_no_hardware_no_reboot():
     # os.system is neutralized in make_base; constructing must not raise or shell out.
     make_base("display._base_240x240")

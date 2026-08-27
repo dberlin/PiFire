@@ -59,6 +59,14 @@ def test_linux_blinka_profiles_install_platform_lgpio_in_the_venv() -> None:
     assert all(RPI_LGPIO_DEPENDENCY not in entry["py_dependencies"] for entry in generic_linux)
 
 
+def test_lgpio_build_uses_python_managed_swig_and_bundled_native_sources() -> None:
+    config = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    uv = config.get("tool", {}).get("uv", {})
+
+    assert uv.get("extra-build-dependencies", {}).get("lgpio") == ["swig==4.4.1"]
+    assert uv.get("extra-build-variables", {}).get("lgpio") == {"PYPI": "1"}
+
+
 def test_installers_do_not_install_system_python_runtime_packages() -> None:
     package_pattern = re.compile(r"\bpython3(?:-[a-z0-9][a-z0-9.+-]*)?\b")
 
@@ -307,6 +315,67 @@ def raise_unexpected_bootstrap() -> None:
     raise AssertionError("new updater must not invoke its old-process bootstrap command")
 
 
+def test_pending_updater_python_dependency_uses_compatible_uv(monkeypatch) -> None:
+    import updater
+
+    manifest = {
+        "versions": [
+            {
+                "version": "9.0.0",
+                "build": 999,
+                "reboot_required": False,
+                "dependencies": {
+                    "app": {
+                        "py_dependencies": ["legacy-extra"],
+                        "apt_dependencies": [],
+                        "command_list": [],
+                    }
+                },
+            }
+        ]
+    }
+    commands = []
+
+    class Process:
+        returncode = 0
+        stdout = None
+
+        def __init__(self):
+            self.stdout = self
+
+        def readline(self):
+            return ""
+
+        def poll(self):
+            return 0
+
+    def popen(command, **kwargs):
+        commands.append(command)
+        return Process()
+
+    monkeypatch.setattr(updater, "DEBUG", False, raising=False)
+    monkeypatch.setattr(updater, "read_updater_manifest", lambda: manifest)
+    monkeypatch.setattr(updater, "_run_acados_bootstrap_migrations", lambda *args: 0)
+    monkeypatch.setattr(updater, "refresh_python_environment", lambda **kwargs: (0, ()))
+    monkeypatch.setattr(updater, "read_settings", lambda: {"globals": {"uv": True, "python_exec": ".venv/bin/python"}})
+    monkeypatch.setattr(updater, "ensure_uv_executable", lambda: "/repo/.toolchain/uv/uv")
+    monkeypatch.setattr(
+        updater,
+        "version",
+        lambda package: (_ for _ in ()).throw(updater.PackageNotFoundError()),
+    )
+    monkeypatch.setattr(updater.subprocess, "Popen", popen)
+    monkeypatch.setattr(updater, "record_installed_version", lambda value: None)
+    monkeypatch.setattr(updater.time, "sleep", lambda seconds: None)
+
+    result, reboot, manual_actions = updater.install_dependencies("1.0.0", 0)
+
+    assert result == 0
+    assert reboot is False
+    assert manual_actions == ()
+    assert commands == [["/repo/.toolchain/uv/uv", "pip", "install", "legacy-extra"]]
+
+
 def test_updater_flags_only_new_os_packages_and_commands(monkeypatch) -> None:
     import updater
 
@@ -469,6 +538,89 @@ def test_missing_uv_is_bootstrapped_outside_the_virtual_environment(tmp_path) ->
     assert calls[0][0] == ["/bin/sh"]
     assert calls[0][1]["input"] == b"install uv"
 
+
+
+def test_old_path_uv_is_replaced_with_repo_owned_toolchain(tmp_path, monkeypatch) -> None:
+    import updater
+
+    class VersionResult:
+        returncode = 0
+        stdout = "uv 0.8.3\n"
+
+    monkeypatch.setattr(updater, "_run_uv_version", lambda *args, **kwargs: VersionResult())
+
+    class Download:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return b"install uv"
+
+    class InstallResult:
+        returncode = 0
+        stderr = b""
+
+    def install(command, **kwargs):
+        install_dir = pathlib.Path(kwargs["env"]["UV_INSTALL_DIR"])
+        install_dir.mkdir(parents=True, exist_ok=True)
+        (install_dir / "uv").write_text("binary")
+        return InstallResult()
+
+    executable = updater.bootstrap_uv_executable(
+        repo_root=tmp_path,
+        which=lambda name: "/old/uv",
+        opener=lambda url: Download(),
+        runner=install,
+    )
+
+    assert executable == str(tmp_path / ".toolchain" / "uv" / "uv")
+
+
+def test_ensure_uv_prefers_compatible_repo_toolchain_over_old_path_uv(tmp_path, monkeypatch) -> None:
+    import updater
+
+    executable = tmp_path / ".toolchain" / "uv" / "uv"
+    executable.parent.mkdir(parents=True)
+    executable.write_text("binary")
+
+    class VersionResult:
+        returncode = 0
+        stdout = "uv 0.12.0\n"
+
+    monkeypatch.setattr(updater, "_run_uv_version", lambda *args, **kwargs: VersionResult())
+
+    assert updater.ensure_uv_executable(repo_root=tmp_path, which=lambda name: "/old/uv") == str(executable)
+
+
+def test_pip_list_uses_the_compatible_uv_resolver(monkeypatch) -> None:
+    import updater
+
+    assert hasattr(updater, "_write_pip_list")
+    monkeypatch.setattr(updater, "ensure_uv_executable", lambda: "/repo/.toolchain/uv/uv")
+    written = []
+    monkeypatch.setattr(updater, "write_generic_json", lambda value, filename: written.append((value, filename)))
+    commands = []
+
+    class Result:
+        returncode = 0
+        stdout = '[{"name": "lgpio"}]'
+        stderr = ""
+
+    def run(command, **kwargs):
+        commands.append(command)
+        return Result()
+
+    result = updater._write_pip_list(
+        {"globals": {"uv": True, "python_exec": ".venv/bin/python"}},
+        runner=run,
+    )
+
+    assert result == 0
+    assert commands == [["/repo/.toolchain/uv/uv", "pip", "list", "--format=json"]]
+    assert written == [([{"name": "lgpio"}], "pip_list.json")]
 
 def test_automatic_refresh_refuses_missing_uv_before_running_any_command(tmp_path, monkeypatch) -> None:
     import updater

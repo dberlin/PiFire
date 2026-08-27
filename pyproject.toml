@@ -56,6 +56,16 @@ dependencies = [
     "easymcp2221>=1.8.4",
 ]
 
+# lgpio's legacy setup.py omits both of its real source-build requirements.
+# SWIG 4.5 drops compatibility aliases still used by lgpio.i, while 4.4.1
+# generates a Python 3.14-compatible wrapper. PYPI=1 makes the build compile
+# the bundled C sources instead of linking a system liblgpio Debian lacks.
+[tool.uv.extra-build-dependencies]
+lgpio = ["swig==4.4.1"]
+
+[tool.uv.extra-build-variables]
+lgpio = { PYPI = "1" }
+
 
 [dependency-groups]
 codegen = [
