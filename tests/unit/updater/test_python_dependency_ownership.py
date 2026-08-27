@@ -64,7 +64,10 @@ def test_lgpio_build_uses_python_managed_swig_and_bundled_native_sources() -> No
     uv = config.get("tool", {}).get("uv", {})
 
     assert uv.get("extra-build-dependencies", {}).get("lgpio") == ["swig==4.4.1"]
-    assert uv.get("extra-build-variables", {}).get("lgpio") == {"PYPI": "1"}
+    assert uv.get("extra-build-variables", {}).get("lgpio") == {
+        "PYPI": "1",
+        "CPPFLAGS": "-std=gnu17",
+    }
 
 
 def test_installers_do_not_install_system_python_runtime_packages() -> None:
