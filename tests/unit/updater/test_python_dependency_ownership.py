@@ -94,17 +94,13 @@ def test_legacy_rpi_gpio_install_paths_are_removed() -> None:
     assert not (ROOT / "wizard/raspi5.sh").exists()
 
 
-def test_current_update_bootstraps_the_new_platform_neutral_updater() -> None:
+def test_platform_neutral_bootstrap_migration_is_preserved() -> None:
     manifest = _updater_manifest()
-    current = manifest["metadata"]["versions"]
     migration = next(
-        entry
-        for entry in manifest["versions"]
-        if entry["version"] == current["server"] and entry["build"] == current["build"]
+        entry for entry in manifest["versions"] if entry["version"] == "1.23.0" and entry["build"] == 119
     )
     commands = [command for section in migration["dependencies"].values() for command in section["command_list"]]
 
-    assert current["build"] == 119
     assert commands == [
         [
             "python",
