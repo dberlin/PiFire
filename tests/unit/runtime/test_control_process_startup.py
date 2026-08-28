@@ -1,9 +1,13 @@
 """Control-process startup preserves unfinished cook state across routine restarts."""
 
+from types import SimpleNamespace
+
 from common.defaults import default_control, default_metrics
 from common.persistence.control import write_control_snapshot
 from common.persistence.history import append_metric, read_all_metrics, read_history, write_history
 from control import _initialize_runtime_state
+from controller.runtime.context import ControllerContext, Devices
+from controller.runtime.controller import Controller
 from controller.runtime.store import SqliteStore
 
 _HISTORY_ROW = {
@@ -19,6 +23,48 @@ def _seed_control(cook_id: str) -> None:
     control["mode"] = "Hold"
     control["manual"]["pwm"] = 37
     write_control_snapshot(control, origin="control")
+
+
+class _ProcessPersistence:
+    def __init__(self) -> None:
+        self.close_calls = []
+
+    def close(self, timeout=2.0):
+        self.close_calls.append(timeout)
+        return True
+
+
+def test_process_shutdown_closes_shared_persistence_exactly_once() -> None:
+    persistence = _ProcessPersistence()
+    repository = object()
+    grill = SimpleNamespace(cleanup_calls=0)
+
+    def cleanup_grill():
+        grill.cleanup_calls += 1
+
+    grill.cleanup = cleanup_grill
+    ctx = ControllerContext(
+        devices=Devices(
+            grill_platform=grill,
+            probe_complex=object(),
+            dist_device=object(),
+        ),
+        store=SimpleNamespace(read_settings=dict),
+        notifications=object(),
+        clock=SimpleNamespace(now=lambda: 0.0),
+        event_log=SimpleNamespace(info=lambda _message: None),
+        control_log=SimpleNamespace(info=lambda _message: None),
+        trajectory_repository=repository,
+        model_persistence=persistence,
+    )
+    controller = Controller(ctx)
+
+    controller.cleanup()
+    controller.cleanup()
+
+    assert controller.ctx.trajectory_repository is repository
+    assert persistence.close_calls == [2.0]
+    assert grill.cleanup_calls == 1
 
 
 def test_routine_restart_preserves_prime_carry_over_identity_and_metrics(ds):

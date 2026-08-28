@@ -29,6 +29,7 @@ from common.model_evidence import (
     RecorderGapEvidence,
     RollbackEvidence,
 )
+from common.persistence.learning_trajectory import LearningTrajectoryRepository
 from common.persistence.model_evidence import (
     ModelActivationState,
     read_model_activation,
@@ -207,7 +208,7 @@ class _EvidencePersistence(Protocol):
         snapshot: dict[str, object],
     ) -> bool: ...
 
-    def flush_and_stop(self) -> bool: ...
+    def barrier(self, timeout: float = 2.0) -> bool: ...
 
 
 class _ModelStore(Protocol):
@@ -268,6 +269,7 @@ class HoldLearningRuntime:
         runner: _HoldLearningRunner | None,
         model_store: _ModelStore | None,
         persistence: _EvidencePersistence | None,
+        trajectory_repository: LearningTrajectoryRepository | None = None,
         trace: ControlTraceSession | None,
         controller_name: str,
         logger: _LifecycleLogger,
@@ -276,6 +278,7 @@ class HoldLearningRuntime:
         self._runner = runner
         self._model_store = model_store
         self._persistence = persistence
+        self._trajectory_repository = trajectory_repository
         self._trace = trace
         self._controller_name = controller_name
         self._logger = logger
@@ -744,17 +747,24 @@ class HoldLearningRuntime:
                 self.retire_generation(generation)
             except Exception as error:
                 self._logger.warning(f"Controller evidence retirement failed: {error}")
+        if not self._runner_finished:
+            self._runner_finished = True
+            if runner is not None:
+                try:
+                    runner.finish_teardown()
+                except Exception as error:
+                    self._logger.warning(f"Controller teardown close failed: {error}")
         persistence = self._persistence
         if not self._persistence_finished:
             self._persistence_finished = True
-            flushed = persistence is None
+            drained = persistence is None
             if persistence is not None:
                 try:
-                    flushed = persistence.flush_and_stop() and not persistence.failed
+                    drained = persistence.barrier(timeout=2.0) and not persistence.failed
                 except Exception as error:
-                    flushed = False
-                    self._logger.warning(f"Model persistence flush failed: {error}")
-            if not flushed:
+                    drained = False
+                    self._logger.warning(f"Model persistence barrier failed: {error}")
+            if not drained:
                 self.mark_evidence_unavailable()
                 self._finalize_checkpoint_failure()
         trace = self._trace
@@ -772,13 +782,6 @@ class HoldLearningRuntime:
                     trace.close()
                 except Exception as error:
                     self._logger.warning(f"Control trace close failed: {error}")
-        if not self._runner_finished:
-            self._runner_finished = True
-            if runner is not None:
-                try:
-                    runner.finish_teardown()
-                except Exception as error:
-                    self._logger.warning(f"Controller teardown close failed: {error}")
 
     def submit_completed_observation(
         self,

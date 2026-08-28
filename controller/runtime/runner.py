@@ -51,7 +51,10 @@ from controller.base import (
 from controller.mpc_allocator import AllocationResult
 from controller.runtime.model_fitting import TeardownRefitOutcome
 from controller.runtime.model_lifecycle import ModelLifecycleRunner
-from controller.runtime.model_persistence import DurableActivationReceipt
+from controller.runtime.model_persistence import (
+    DurableActivationReceipt,
+    ModelPersistenceWorker,
+)
 
 if TYPE_CHECKING:
     from controller.model_learning.calibration import CalibrationDecision
@@ -610,6 +613,7 @@ class SyncControllerRunner(ControllerRunner):
         core,
         *,
         controller_type: ControllerType | None = None,
+        model_persistence: ModelPersistenceWorker | None = None,
         monotonic_clock: Callable[[], float] = time.monotonic,
         wall_clock: Callable[[], float] = time.time,
         warning_callback: Callable[[ResultStaleState], None] | None = None,
@@ -627,6 +631,7 @@ class SyncControllerRunner(ControllerRunner):
         self._wall_clock = wall_clock
         self._warning_callback = warning_callback
         self._controller_type = controller_type
+        self._model_persistence = model_persistence
         self._observation_sequence = 0
         self._configuration_revision = 0
         period = getattr(core, "get_control_period", lambda: None)()
@@ -701,7 +706,12 @@ class SyncControllerRunner(ControllerRunner):
         return self.latest()
 
     def reconfigure(self, settings, control, logger=None):
-        core, status = _build_core(settings, control, logger=logger)
+        core, status = _build_core(
+            settings,
+            control,
+            logger=logger,
+            model_persistence=self._model_persistence,
+        )
         if status == "Active":
             retired = self._core
             self._core = core
@@ -864,6 +874,7 @@ class ThreadedControllerRunner(ControllerRunner):
         core,
         *,
         controller_type: ControllerType | None = None,
+        model_persistence: ModelPersistenceWorker | None = None,
         monotonic_clock: Callable[[], float] = time.monotonic,
         wall_clock: Callable[[], float] = time.time,
         warning_callback: Callable[[ResultStaleState], None] | None = None,
@@ -918,6 +929,7 @@ class ThreadedControllerRunner(ControllerRunner):
         self._commands_fan = core.commands_fan()
         self._actuation_mode = _actuation_mode_for(core)
         self._controller_type = controller_type
+        self._model_persistence = model_persistence
         self._quality = _ResultQualityTracker(_control_period_seconds(self._control_period))
         self._monotonic_clock = monotonic_clock
         self._wall_clock = wall_clock
@@ -1305,7 +1317,12 @@ class ThreadedControllerRunner(ControllerRunner):
         return result
 
     def reconfigure(self, settings, control, logger=None):
-        core, status = _build_core(settings, control, logger=logger)
+        core, status = _build_core(
+            settings,
+            control,
+            logger=logger,
+            model_persistence=self._model_persistence,
+        )
         retired_pending = None
         if status == "Active":
             with self._lock:
@@ -1598,7 +1615,14 @@ def _dependency_hint(controller_type, settings):
     )
 
 
-def _build_core(settings, control, logger=None, controller_type=None, event_logger=None):
+def _build_core(
+    settings,
+    control,
+    logger=None,
+    controller_type=None,
+    event_logger=None,
+    model_persistence: ModelPersistenceWorker | None = None,
+):
     """Construct the selected controller core without leaking import or startup failures.
 
     MPC construction also validates the published acados native release. A
@@ -1613,11 +1637,14 @@ def _build_core(settings, control, logger=None, controller_type=None, event_logg
             logger.exception("Error occurred loading controller module. Trace dump: ")
         return None, "Inactive"
     try:
+        controller_kwargs = {"logger": event_logger}
+        if controller_type == "mpc" and model_persistence is not None:
+            controller_kwargs["activation_persistence"] = model_persistence
         core = module.Controller(
             settings["controller"]["config"][controller_type],
             settings["globals"]["units"],
             settings["cycle_data"],
-            logger=event_logger,
+            **controller_kwargs,
         )
         core.set_target(control["primary_setpoint"])
     except Exception:
@@ -1627,16 +1654,41 @@ def _build_core(settings, control, logger=None, controller_type=None, event_logg
     return core, "Active"
 
 
-def _wrap(core, status, controller_type):
+def _wrap(
+    core,
+    status,
+    controller_type,
+    model_persistence: ModelPersistenceWorker | None = None,
+):
     if core is None:
         return None, status
     actual_type = _controller_type_for(controller_type)
     if core.wants_async():
-        return ThreadedControllerRunner(core, controller_type=actual_type), status
-    return SyncControllerRunner(core, controller_type=actual_type), status
+        return (
+            ThreadedControllerRunner(
+                core,
+                controller_type=actual_type,
+                model_persistence=model_persistence,
+            ),
+            status,
+        )
+    return (
+        SyncControllerRunner(
+            core,
+            controller_type=actual_type,
+            model_persistence=model_persistence,
+        ),
+        status,
+    )
 
 
-def build_runner(settings, control, logger=None, event_logger=None):
+def build_runner(
+    settings,
+    control,
+    logger=None,
+    event_logger=None,
+    model_persistence: ModelPersistenceWorker | None = None,
+):
     """Build the runner for a work cycle, substituting the default controller if
     the selected one will not build.
 
@@ -1652,9 +1704,20 @@ def build_runner(settings, control, logger=None, event_logger=None):
     Nothing is written back to settings: the user's choice is preserved so that
     re-saving it (once the missing package is installed) just works.
     """
-    core, status = _build_core(settings, control, logger=logger, event_logger=event_logger)
+    core, status = _build_core(
+        settings,
+        control,
+        logger=logger,
+        event_logger=event_logger,
+        model_persistence=model_persistence,
+    )
     if core is not None:
-        return _wrap(core, status, _selected_controller(settings))
+        return _wrap(
+            core,
+            status,
+            _selected_controller(settings),
+            model_persistence,
+        )
 
     selected = _selected_controller(settings)
     if selected == FALLBACK_CONTROLLER:
@@ -1667,7 +1730,12 @@ def build_runner(settings, control, logger=None, event_logger=None):
 
     hint = _dependency_hint(selected, settings)
     core, status = _build_core(
-        settings, control, logger=logger, controller_type=FALLBACK_CONTROLLER, event_logger=event_logger
+        settings,
+        control,
+        logger=logger,
+        controller_type=FALLBACK_CONTROLLER,
+        event_logger=event_logger,
+        model_persistence=model_persistence,
     )
     if core is None:
         _raise_banner(
@@ -1684,7 +1752,7 @@ def build_runner(settings, control, logger=None, event_logger=None):
         f"Your controller selection has not been changed.",
         logger=logger,
     )
-    return _wrap(core, status, FALLBACK_CONTROLLER)
+    return _wrap(core, status, FALLBACK_CONTROLLER, model_persistence)
 
 
 def report_reconfigure_failure(settings, logger=None):

@@ -2000,11 +2000,11 @@ def test_cook_history_is_an_owned_copy_and_finalize_advances_revision_once() -> 
     harness.activation.close()
 
 
-def test_close_is_idempotent_and_does_not_close_activation_owned_pair_or_fifo() -> None:
+def test_close_is_idempotent_and_leaves_injected_activation_persistence_open() -> None:
     harness = _harness()
     harness.runtime.close()
     harness.runtime.close()
     assert harness.active.closed is False
     assert harness.persistence.close_count == 0
     harness.activation.close()
-    assert harness.persistence.close_count == 1
+    assert harness.persistence.close_count == 0

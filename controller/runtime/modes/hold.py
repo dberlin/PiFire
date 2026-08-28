@@ -18,6 +18,7 @@ from common.control_trace import (
 )
 from common.controller_model_state import ControllerModelStore
 from common.modes import Mode
+from common.persistence.learning_trajectory import LearningTrajectoryRepository
 from common.persistence.protocols import JsonValue
 from controller.applied_output import (
     AppliedOutput,
@@ -722,21 +723,35 @@ class HoldMode(ControlMode):
             conditional_writer=self.ctx.store.save_model_checkpoint,
         )
         self._model_store = None
+        trajectory_repository = getattr(self.ctx, "trajectory_repository", None)
+        persistence_worker = getattr(self.ctx, "model_persistence", None)
         try:
-            persistence_worker = ModelPersistenceWorker(
-                model_store,
-                self.ctx.event_log,
-            )
+            if trajectory_repository is None:
+                trajectory_repository = LearningTrajectoryRepository()
+                self.ctx.trajectory_repository = trajectory_repository
+            if persistence_worker is None:
+                persistence_worker = ModelPersistenceWorker(
+                    model_store,
+                    self.ctx.event_log,
+                )
+                if hasattr(persistence_worker, "_trajectory_repository"):
+                    persistence_worker._trajectory_repository = trajectory_repository
+                self.ctx.model_persistence = persistence_worker
             self._persistence_worker = persistence_worker
         except Exception as error:
             learning_evidence_available = False
             persistence_worker = None
+            trajectory_repository = None
             self._trace_warning(f"Model persistence unavailable: {error}")
         self._controller_name = self.settings["controller"]["selected"]
 
         # Load Controller Module (i.e. PID)
         self._runner, self._controller_status = _runner_mod.build_runner(
-            self.settings, self.control, logger=self.ctx.control_log, event_logger=self.ctx.event_log
+            self.settings,
+            self.control,
+            logger=self.ctx.control_log,
+            event_logger=self.ctx.event_log,
+            model_persistence=persistence_worker,
         )
         actual_type = getattr(self._runner, "controller_type", lambda: None)() if self._runner is not None else None
         if isinstance(actual_type, ControllerType):
@@ -746,6 +761,7 @@ class HoldMode(ControlMode):
             runner=self._runner,
             model_store=model_store,
             persistence=persistence_worker,
+            trajectory_repository=trajectory_repository,
             trace=self._control_trace,
             controller_name=self._controller_name,
             logger=self.ctx.event_log,
@@ -2152,19 +2168,19 @@ class HoldMode(ControlMode):
                 if learning is not None:
                     learning.finish_teardown(generation=self._runner_configuration_revision)
                 else:
-                    persistence = self._persistence_worker
-                    if persistence is not None:
-                        try:
-                            persistence.flush_and_stop()
-                        except Exception as error:
-                            self._trace_warning(f"Model persistence close failed: {error}")
-                    if trace is not None:
-                        trace.close()
                     if runner is not None:
                         try:
                             runner.finish_teardown()
                         except Exception as error:
                             self._trace_warning(f"Controller teardown close failed: {error}")
+                    persistence = self._persistence_worker
+                    if persistence is not None:
+                        try:
+                            persistence.barrier(timeout=2.0)
+                        except Exception as error:
+                            self._trace_warning(f"Model persistence barrier failed: {error}")
+                    if trace is not None:
+                        trace.close()
                 teardown.phase = _TeardownPhase.FINISHED
         if stop_error is not None:
             raise stop_error

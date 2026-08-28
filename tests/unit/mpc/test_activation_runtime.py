@@ -97,8 +97,8 @@ class _Persistence(ModelPersistenceWorker):
         self.evidence_records.append(record)
         return EvidenceSubmission(accepted=not self.reject_evidence)
 
-    def flush_and_stop(self, *, timeout: float = 0.1) -> bool:
-        self.events.append("flush")
+    def close(self, timeout: float = 2.0) -> bool:
+        self.events.append("close")
         self.close_count += 1
         return True
 
@@ -151,7 +151,9 @@ def _factory() -> MpcPairFactory:
 
 
 def _runtime(
-    *, receipt_timeout: float = 2.0
+    *,
+    receipt_timeout: float = 2.0,
+    owns_persistence: bool = False,
 ) -> tuple[
     ActivationRuntime,
     OwnedMpcPair,
@@ -176,6 +178,7 @@ def _runtime(
         factory,
         incumbent,
         persistence,
+        owns_persistence=owns_persistence,
         clock_ms=lambda: 2_000,
         receipt_timeout=receipt_timeout,
     )
@@ -499,14 +502,71 @@ def test_pending_candidate_and_every_retained_pair_close_exactly_once() -> None:
     runtime.close()
     assert incumbent.closed
     assert candidate.closed
-    assert persistence.close_count == 1
+    assert persistence.close_count == 0
 
     runtime, incumbent, candidate, prepared, persistence = _runtime()
     _activate(runtime, candidate, prepared, persistence)
     runtime.close()
     assert incumbent.closed
     assert candidate.closed
+    assert persistence.close_count == 0
+
+
+def test_owned_activation_runtime_closes_persistence_once_on_normal_close() -> None:
+    runtime, _incumbent, _candidate, _prepared, persistence = _runtime(
+        owns_persistence=True
+    )
+
+    runtime.close()
+    runtime.close()
+
     assert persistence.close_count == 1
+    assert persistence.events == ["close"]
+
+
+def test_owned_activation_close_false_retries_persistence_without_reclosing_pairs(
+    monkeypatch,
+) -> None:
+    runtime, incumbent, _candidate, _prepared, persistence = _runtime(
+        owns_persistence=True
+    )
+    outcomes = iter((False, True))
+
+    def close_with_retry(*, timeout=2.0):
+        del timeout
+        persistence.events.append("close")
+        persistence.close_count += 1
+        return next(outcomes)
+
+    persistence.close = close_with_retry
+    pair_closes = []
+    original_close = OwnedMpcPair.close
+
+    def count_close(pair):
+        if pair is incumbent:
+            pair_closes.append(pair)
+        return original_close(pair)
+
+    monkeypatch.setattr(OwnedMpcPair, "close", count_close)
+
+    with pytest.raises(RuntimeError, match="complete activation runtime ownership"):
+        runtime.close()
+    assert incumbent.closed
+    runtime.close()
+
+    assert persistence.close_count == 2
+    assert persistence.events == ["close", "close"]
+    assert pair_closes == [incumbent]
+
+
+def test_injected_activation_runtime_never_closes_persistence_worker() -> None:
+    runtime, _incumbent, _candidate, _prepared, persistence = _runtime()
+
+    runtime.close()
+    runtime.close()
+
+    assert persistence.close_count == 0
+    assert persistence.events == []
 
 
 @pytest.mark.parametrize("first_failure", ("exception", "rejected", "non-durable"))
@@ -608,8 +668,10 @@ def test_closed_runtime_rejects_every_activation_advancement_boundary() -> None:
     candidate.close()
 
 
-def test_close_retries_pending_abort_before_persistence_flush() -> None:
-    runtime, _incumbent, candidate, prepared, persistence = _runtime()
+def test_owned_close_retries_pending_abort_before_persistence_close() -> None:
+    runtime, _incumbent, candidate, prepared, persistence = _runtime(
+        owns_persistence=True
+    )
     assert runtime.queue_prepared_activation(prepared, candidate, _durable())
     persistence.next_phase_error = RuntimeError("abort unavailable")
     assert not runtime.abort_prepared_activation(prepared, "lifecycle-failed")
@@ -620,13 +682,15 @@ def test_close_retries_pending_abort_before_persistence_flush() -> None:
 
     assert candidate.closed
     assert runtime.pending_abort_count == 0
-    assert persistence.events[-2:] == ["phase:aborted", "flush"]
+    assert persistence.events[-2:] == ["phase:aborted", "close"]
 
 
 def test_close_reports_permanently_unresolved_abort_after_all_owner_cleanup(
     monkeypatch,
 ) -> None:
-    runtime, incumbent, candidate, prepared, persistence = _runtime()
+    runtime, incumbent, candidate, prepared, persistence = _runtime(
+        owns_persistence=True
+    )
     close_calls = []
     original_close = OwnedMpcPair.close
 
@@ -649,7 +713,7 @@ def test_close_reports_permanently_unresolved_abort_after_all_owner_cleanup(
     assert close_calls == [candidate]
     assert runtime.pending_abort_count == 1
     assert persistence.close_count == 1
-    assert persistence.events[-1] == "flush"
+    assert persistence.events[-1] == "close"
 
 
 def test_public_boundary_validation_rejects_invalid_ownership_inputs() -> None:
@@ -668,6 +732,8 @@ def test_public_boundary_validation_rejects_invalid_ownership_inputs() -> None:
         ActivationRuntime(factory, incumbent, SimpleNamespace())
     with pytest.raises(ValueError):
         ActivationRuntime(factory, incumbent, persistence, receipt_timeout=-1)
+    with pytest.raises(TypeError):
+        ActivationRuntime(factory, incumbent, persistence, owns_persistence=1)
     runtime = ActivationRuntime(factory, incumbent, persistence)
     prepared = PreparedActivationRecord.prepared(
         timestamp_ms=1_000,
@@ -752,10 +818,14 @@ def test_replace_active_pair_closes_displaced_owners_and_closed_runtime_rejects(
     assert third.closed
 
 
-def test_close_attempts_persistence_and_all_pairs_after_collaborator_failures() -> None:
-    runtime, incumbent, candidate, prepared, persistence = _runtime()
+def test_owned_close_attempts_persistence_and_all_pairs_after_collaborator_failures() -> None:
+    runtime, incumbent, candidate, prepared, persistence = _runtime(
+        owns_persistence=True
+    )
     assert runtime.queue_prepared_activation(prepared, candidate, _durable())
-    persistence.flush_and_stop = lambda *, timeout=0.1: (_ for _ in ()).throw(RuntimeError("flush failed"))
+    persistence.close = lambda timeout=2.0: (_ for _ in ()).throw(
+        RuntimeError("close failed")
+    )
     candidate.estimator.close = lambda: (_ for _ in ()).throw(RuntimeError("close failed"))
     with pytest.raises(RuntimeError, match="complete activation runtime ownership"):
         runtime.close()

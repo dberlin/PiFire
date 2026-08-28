@@ -74,8 +74,8 @@ class _Persistence:
     def __init__(self, events):
         self._events = events
 
-    def flush_and_stop(self, *, timeout):
-        assert timeout == pytest.approx(0.1)
+    def close(self, timeout=2.0):
+        del timeout
         self._events.append("persistence-close")
 
 
@@ -97,6 +97,7 @@ def _patch_construction(monkeypatch, events, pair):
 class _ActivationPersistence(ModelPersistenceWorker):
     def __init__(self) -> None:
         self.reject_evidence = False
+        self.close_count = 0
         self.phase_receipts: list[DurableActivationReceipt] = []
 
     def submit_activation_phase(self, _record, *, expected_phase):
@@ -108,8 +109,9 @@ class _ActivationPersistence(ModelPersistenceWorker):
     def submit_evidence(self, _record):
         return EvidenceSubmission(accepted=not self.reject_evidence)
 
-    def flush_and_stop(self, *, timeout=0.1):
+    def close(self, timeout=2.0):
         del timeout
+        self.close_count += 1
         return True
 
 
@@ -253,14 +255,23 @@ def test_controller_constructs_and_closes_focused_owners_in_dependency_order(
             events.append("persistence")
 
     class Activation:
-        def __init__(self, _factory, active_pair, persistence):
+        def __init__(
+            self,
+            _factory,
+            active_pair,
+            persistence,
+            *,
+            owns_persistence,
+        ):
             self.active_pair = active_pair
             self._persistence = persistence
+            self._owns_persistence = owns_persistence
             events.append("activation")
 
         def close(self):
             events.append("activation-close")
-            self._persistence.flush_and_stop(timeout=0.1)
+            if self._owns_persistence:
+                self._persistence.close()
             self.active_pair.close()
 
     class Grey:
@@ -291,6 +302,7 @@ def test_controller_constructs_and_closes_focused_owners_in_dependency_order(
     ]
 
     controller.close()
+    controller.close()
     assert events[-4:] == [
         "grey-close",
         "activation-close",
@@ -298,14 +310,67 @@ def test_controller_constructs_and_closes_focused_owners_in_dependency_order(
         "pair-close",
     ]
 
-
-def test_activation_construction_failure_reverse_closes_untransferred_owners(monkeypatch):
+def test_injected_controller_normal_close_never_closes_worker(monkeypatch) -> None:
     events = []
     pair = _Pair(events)
     persistence = _Persistence(events)
     _patch_construction(monkeypatch, events, pair)
 
-    def fail_activation(_factory, _pair, _persistence):
+    class Activation:
+        def __init__(
+            self,
+            _factory,
+            active_pair,
+            persistence_worker,
+            *,
+            owns_persistence,
+        ):
+            assert owns_persistence is False
+            self.active_pair = active_pair
+            self._persistence = persistence_worker
+            events.append("activation")
+
+        def close(self):
+            events.append("activation-close")
+            self.active_pair.close()
+
+    class Grey:
+        def __init__(self, **_callbacks):
+            events.append("grey")
+
+        def close(self):
+            events.append("grey-close")
+
+    monkeypatch.setattr(mpc_module, "ActivationRuntime", Activation)
+    monkeypatch.setattr(mpc_module, "GreyLearningRuntime", Grey)
+
+    controller = mpc_module.Controller(
+        dict(_CONFIG),
+        "C",
+        dict(_CYCLE),
+        activation_persistence=persistence,
+    )
+    controller.close()
+    controller.close()
+
+    assert events[-3:] == ["grey-close", "activation-close", "pair-close"]
+    assert "persistence-close" not in events
+
+
+def test_injected_activation_construction_failure_does_not_close_worker(monkeypatch):
+    events = []
+    pair = _Pair(events)
+    persistence = _Persistence(events)
+    _patch_construction(monkeypatch, events, pair)
+
+    def fail_activation(
+        _factory,
+        _pair,
+        _persistence,
+        *,
+        owns_persistence,
+    ):
+        assert owns_persistence is False
         events.append("activation")
         raise LookupError("activation-construction")
 
@@ -324,6 +389,42 @@ def test_activation_construction_failure_reverse_closes_untransferred_owners(mon
         "configured",
         "pair",
         "activation",
+        "pair-close",
+    ]
+
+
+def test_internal_activation_construction_failure_closes_worker_once(monkeypatch):
+    events = []
+    pair = _Pair(events)
+    persistence = _Persistence(events)
+    _patch_construction(monkeypatch, events, pair)
+    monkeypatch.setattr(
+        mpc_module,
+        "ModelPersistenceWorker",
+        lambda _store, _logger: persistence,
+    )
+
+    def fail_activation(
+        _factory,
+        _pair,
+        _persistence,
+        *,
+        owns_persistence,
+    ):
+        assert owns_persistence is True
+        events.append("activation")
+        raise LookupError("activation-construction")
+
+    monkeypatch.setattr(mpc_module, "ActivationRuntime", fail_activation)
+
+    with pytest.raises(LookupError, match="activation-construction"):
+        mpc_module.Controller(dict(_CONFIG), "C", dict(_CYCLE))
+
+    assert events == [
+        "factory",
+        "configured",
+        "pair",
+        "activation",
         "persistence-close",
         "pair-close",
     ]
@@ -336,14 +437,23 @@ def test_grey_construction_failure_preserves_original_after_activation_cleanup_f
     _patch_construction(monkeypatch, events, pair)
 
     class Activation:
-        def __init__(self, _factory, active_pair, persistence_worker):
+        def __init__(
+            self,
+            _factory,
+            active_pair,
+            persistence_worker,
+            *,
+            owns_persistence,
+        ):
             self.active_pair = active_pair
             self._persistence = persistence_worker
+            self._owns_persistence = owns_persistence
             events.append("activation")
 
         def close(self):
             events.append("activation-close")
-            self._persistence.flush_and_stop(timeout=0.1)
+            if self._owns_persistence:
+                self._persistence.close()
             self.active_pair.close()
             raise RuntimeError("activation-cleanup")
 
@@ -362,10 +472,9 @@ def test_grey_construction_failure_preserves_original_after_activation_cleanup_f
             activation_persistence=persistence,
         )
 
-    assert events[-4:] == [
+    assert events[-3:] == [
         "grey",
         "activation-close",
-        "persistence-close",
         "pair-close",
     ]
 

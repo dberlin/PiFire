@@ -85,6 +85,7 @@ class Controller:
         # Last time the hopper level was written to pelletdb, by either the
         # automatic refresh or an explicit hopper_check. setup() re-stamps it.
         self._hopper_refresh_time = ctx.clock.now()
+        self._cleanup_complete = False
 
     # --- work-cycle dispatch helpers ---
 
@@ -211,10 +212,41 @@ class Controller:
     # --- lifecycle ---
 
     def cleanup(self):
-        """atexit handler: log and clean up the grill platform on process exit."""
-        self.eventLogger.info("Control Script Exiting.")
-        self.controlLogger.info("Control Script Exiting.")
-        self.grill_platform.cleanup()
+        """Close process-owned persistence and hardware exactly once."""
+        if self._cleanup_complete:
+            return
+        self._cleanup_complete = True
+        for logger in (self.eventLogger, self.controlLogger):
+            try:
+                logger.info("Control Script Exiting.")
+            except Exception:  # noqa: S110 -- exit logging cannot preempt owner cleanup
+                pass
+        persistence = getattr(self.ctx, "model_persistence", None)
+        if persistence is not None:
+            try:
+                closed = persistence.close(timeout=2.0)
+                if closed is False:
+                    error_log = getattr(self.eventLogger, "error", None)
+                    if callable(error_log):
+                        error_log("Model persistence process shutdown timed out")
+            except Exception as error:
+                error_log = getattr(self.eventLogger, "error", None)
+                if callable(error_log):
+                    try:
+                        error_log(
+                            f"Model persistence process shutdown failed: {error}"
+                        )
+                    except Exception:  # noqa: S110 -- cleanup must continue after logging failure
+                        pass
+        try:
+            self.grill_platform.cleanup()
+        except Exception as error:
+            error_log = getattr(self.eventLogger, "error", None)
+            if callable(error_log):
+                try:
+                    error_log(f"Grill platform cleanup failed: {error}")
+                except Exception:  # noqa: S110 -- no logger failure may escape atexit
+                    pass
 
     def setup(self):
         """One-time initialization run before the main loop starts."""

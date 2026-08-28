@@ -102,7 +102,7 @@ class _PersistenceWorker(Protocol):
         *,
         expected_phase: None,
     ) -> DurableActivationReceipt: ...
-    def flush_and_stop(self, *, timeout: float) -> bool: ...
+    def close(self, timeout: float = 2.0) -> bool: ...
 
 
 class _RollbackCommitter(Protocol):
@@ -201,7 +201,7 @@ def _stop_worker(worker: _PersistenceWorker | None) -> bool:
     if worker is None:
         return True
     try:
-        return worker.flush_and_stop(timeout=2.0) is True
+        return worker.close(timeout=2.0) is True
     except Exception:
         return False
 

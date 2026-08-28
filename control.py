@@ -27,10 +27,13 @@ import logging
 
 from common import datastore
 from common.common import ErrorKind, create_logger  # Common Module for WebUI and Control Program
+from common.controller_model_state import ControllerModelStore
+from common.persistence.learning_trajectory import LearningTrajectoryRepository
 from controller.runtime.clock import RealClock
 from controller.runtime.context import ControllerContext
 from controller.runtime.controller import Controller
 from controller.runtime.devices import build_devices
+from controller.runtime.model_persistence import ModelPersistenceWorker
 from controller.runtime.notifier import LiveNotifier
 from controller.runtime.store import SqliteStore
 
@@ -100,6 +103,16 @@ if __name__ == "__main__":
     eventLogger.info("Resetting ephemeral control state and preserving unfinished cook data")
 
     devices, errors = build_devices(settings, errors=errors, event_log=eventLogger, control_log=controlLogger)
+    trajectory_repository = LearningTrajectoryRepository()
+    model_persistence = ModelPersistenceWorker(
+        ControllerModelStore(
+            reader=store.read_generic_key,
+            writer=store.write_generic_key,
+            conditional_writer=store.save_model_checkpoint,
+        ),
+        eventLogger,
+        trajectory_repository=trajectory_repository,
+    )
 
     # Build the injected context used by the controller / mode functions instead of bare globals
     ctx = ControllerContext(
@@ -109,6 +122,8 @@ if __name__ == "__main__":
         clock=RealClock(),
         event_log=eventLogger,
         control_log=controlLogger,
+        trajectory_repository=trajectory_repository,
+        model_persistence=model_persistence,
     )
 
     # Hand off to the orchestrator: setup() + the control loop.

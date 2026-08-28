@@ -10,6 +10,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from hashlib import sha256
 from pathlib import Path
+from threading import local
 from typing import Literal, Protocol, cast
 
 from common import datastore
@@ -436,6 +437,7 @@ class LearningTrajectoryRepository:
         self._database_path = Path(
             datastore.DB_PATH if database_path is None else database_path
         )
+        self._write_state = local()
         self._reopen_quarantined_segment_ids: tuple[str, ...] = ()
         with self._connection(ensure_schema=True):
             pass
@@ -493,7 +495,25 @@ class LearningTrajectoryRepository:
             connection.close()
 
     @contextmanager
+    def write_transaction(self) -> Iterator[sqlite3.Connection]:
+        """Let several repository-ledger mutations share one real transaction."""
+        active = getattr(self._write_state, "connection", None)
+        if active is not None:
+            yield cast(sqlite3.Connection, active)
+            return
+        with self._connection() as connection, datastore.transaction(connection):
+            self._write_state.connection = connection
+            try:
+                yield connection
+            finally:
+                del self._write_state.connection
+
+    @contextmanager
     def _write(self) -> Iterator[sqlite3.Connection]:
+        active = getattr(self._write_state, "connection", None)
+        if active is not None:
+            yield cast(sqlite3.Connection, active)
+            return
         with self._connection() as connection, datastore.transaction(connection):
             yield connection
 

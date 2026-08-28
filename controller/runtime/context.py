@@ -4,7 +4,9 @@
 import logging
 from dataclasses import dataclass, field
 
+from common.persistence.learning_trajectory import LearningTrajectoryRepository
 from common.persistence.protocols import ControllerStore
+from controller.runtime.model_persistence import ModelPersistenceWorker
 
 #: The two operator-visible logger names. `create_logger` configures their
 #: handlers, level and file once at process startup (control.py); everything
@@ -33,3 +35,5 @@ class ControllerContext:
     #  files instead of silently discarding the message.
     event_log: object = field(default_factory=lambda: logging.getLogger(EVENT_LOG_NAME))
     control_log: object = field(default_factory=lambda: logging.getLogger(CONTROL_LOG_NAME))
+    trajectory_repository: LearningTrajectoryRepository | None = None
+    model_persistence: ModelPersistenceWorker | None = None

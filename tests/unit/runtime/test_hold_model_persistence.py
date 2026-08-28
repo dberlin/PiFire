@@ -35,7 +35,7 @@ from controller.model_learning.contracts import ActivationPolicy, CandidateOrigi
 from controller.mpc import Controller as MpcController
 from controller.mpc_config import DEFAULT_MPC_CONFIG as MPC_DEFAULTS
 from controller.mpc_snapshot import migrate_grey_learning_snapshot
-from controller.runtime.model_persistence import ModelPersistenceWorker
+from controller.runtime.model_persistence import EvidenceSubmission, ModelPersistenceWorker
 from controller.runtime.runner import (
     ControllerUpdateResult,
     ThreadedControllerRunner,
@@ -86,6 +86,172 @@ def _framed_output():
         solve_duration_seconds=0.0,
         completed_wall_time=0.0,
     )
+
+
+class _SharedPersistence(ModelPersistenceWorker):
+    def __init__(self, *, reject_checkpoints: bool = False) -> None:
+        self.reject_checkpoints = reject_checkpoints
+        self.checkpoints = []
+        self.evidence_batches = []
+        self.trajectory_batches = []
+        self.barrier_calls = []
+        self.close_calls = []
+
+    @property
+    def evidence_blocked(self) -> bool:
+        return False
+
+    @property
+    def failed(self) -> bool:
+        return False
+
+    def submit_checkpoint(self, name, snapshot):
+        self.checkpoints.append((name, deepcopy(snapshot)))
+        return not self.reject_checkpoints
+
+    def submit_evidence_batch(self, records):
+        self.evidence_batches.append(tuple(records))
+        return EvidenceSubmission(accepted=True)
+
+    def submit_trajectory_batch(self, batch):
+        self.trajectory_batches.append(batch)
+        return SimpleNamespace(
+            accepted=True,
+            completed=True,
+            durable=True,
+            error=None,
+            gap=None,
+            wait=lambda _timeout=None: True,
+        )
+
+
+    def barrier(self, timeout=2.0):
+        self.barrier_calls.append(timeout)
+        return True
+
+    def close(self, timeout=2.0):
+        self.close_calls.append(timeout)
+        return True
+
+
+def _inject_process_persistence(hold, worker, repository) -> None:
+    hold.ctx.model_persistence = worker
+    hold.ctx.trajectory_repository = repository
+
+
+def test_hold_stop_barriers_shared_persistence_without_closing_it(hold_cycle) -> None:
+    worker = _SharedPersistence()
+    repository = object()
+    hold = hold_cycle(FakeControllerRunner(period=0.0), controller="pid_sp")
+    _inject_process_persistence(hold, worker, repository)
+    hold.setup()
+
+    hold.ctx.clock.advance(400.0)
+    hold.teardown(200.0)
+    hold.teardown(200.0)
+
+    assert hold._persistence_worker is worker
+    assert worker.barrier_calls == [2.0]
+    assert worker.close_calls == []
+
+
+def test_consecutive_holds_share_exact_process_worker_and_repository(hold_cycle) -> None:
+    worker = _SharedPersistence()
+    repository = object()
+    first = hold_cycle(FakeControllerRunner(period=0.0), controller="pid_sp")
+    first.control["cook_id"] = "cook-a"
+    _inject_process_persistence(first, worker, repository)
+    first.setup()
+    assert first._hold_learning is not None
+    assert first._hold_learning._persistence is worker
+    assert first._hold_learning._trajectory_repository is repository
+    first.ctx.clock.advance(400.0)
+    first.teardown(200.0)
+
+    second = hold_cycle(FakeControllerRunner(period=0.0), controller="pid_sp")
+    second.control["cook_id"] = "cook-b"
+    _inject_process_persistence(second, worker, repository)
+    second.setup()
+    assert second._hold_learning is not None
+    assert second._hold_learning._persistence is worker
+    assert second._hold_learning._trajectory_repository is repository
+    second.ctx.clock.advance(400.0)
+    second.teardown(200.0)
+
+    assert first._persistence_worker is second._persistence_worker is worker
+    assert first.ctx.trajectory_repository is second.ctx.trajectory_repository is repository
+    assert worker.barrier_calls == [2.0, 2.0]
+    assert worker.close_calls == []
+
+
+def test_persistence_failure_cannot_change_hold_actuator_outcome(hold_cycle) -> None:
+    def exercise(*, reject_checkpoints: bool):
+        worker = _SharedPersistence(reject_checkpoints=reject_checkpoints)
+        runner = FakeControllerRunner(
+            period=0.0,
+            actuation_mode=ActuationMode.FRAMED_PULSE,
+        ).script([_framed_output()])
+        hold = hold_cycle(runner, controller="pid_sp")
+        _inject_process_persistence(hold, worker, object())
+        hold.setup()
+        runner.snapshot = {"revision": 1, "K": 700.0}
+        try:
+            hold.on_tick(
+                now=100.0,
+                ptemp=200.0,
+                current_output_status=_off(),
+            )
+            learning = hold._hold_learning
+            assert learning is not None
+            evidence_available = learning.evidence_available
+            tick_outcome = (
+                deepcopy(hold.grill.get_output_status()),
+                deepcopy(hold.control),
+                deepcopy(hold.state.cycle),
+                deepcopy(hold.state.controller),
+            )
+            tick_checkpoints = deepcopy(worker.checkpoints)
+        finally:
+            hold.ctx.clock.advance(400.0)
+            hold.teardown(200.0)
+        return {
+            "evidence_available": evidence_available,
+            "final_evidence_available": learning.evidence_available,
+            "tick_outcome": tick_outcome,
+            "final_outcome": (
+                deepcopy(hold.grill.get_output_status()),
+                deepcopy(hold.control),
+                deepcopy(hold.state.cycle),
+                deepcopy(hold.state.controller),
+            ),
+            "applied": tuple(runner.applied),
+            "tick_checkpoints": tick_checkpoints,
+            "final_checkpoints": deepcopy(worker.checkpoints),
+        }
+
+    accepting = exercise(reject_checkpoints=False)
+    failing = exercise(reject_checkpoints=True)
+
+    assert accepting["applied"] == failing["applied"]
+    assert accepting["tick_outcome"] == failing["tick_outcome"]
+    assert accepting["final_outcome"] == failing["final_outcome"]
+    assert accepting["evidence_available"]
+    assert not failing["evidence_available"]
+    assert accepting["final_evidence_available"]
+    assert not failing["final_evidence_available"]
+    checkpoint = ("pid_sp", {"revision": 1, "K": 700.0})
+    assert accepting["tick_checkpoints"] == failing["tick_checkpoints"] == [
+        checkpoint
+    ]
+    assert all(
+        attempt == checkpoint
+        for attempt in (
+            *accepting["final_checkpoints"],
+            *failing["final_checkpoints"],
+        )
+    )
+    assert len(accepting["final_checkpoints"]) == 1
+    assert len(failing["final_checkpoints"]) == 2
 
 
 def test_setup_restores_a_stored_model_before_seeding(hold_cycle):
@@ -324,6 +490,8 @@ def test_checkpoint_writer_does_not_block_hold_or_teardown_and_finishes_latest_s
     runner = FakeControllerRunner(period=0.01).script([_output(0.5)])
     store = _BlockingStore()
     hold = hold_cycle(runner, model_store=store, controller="pid_sp")
+    worker = ModelPersistenceWorker(store, hold.ctx.event_log)
+    _inject_process_persistence(hold, worker, object())
     hold.setup()
     runner.snapshot = {"revision": 1, "K": 700.0}
     tick_finished = threading.Event()
@@ -386,19 +554,15 @@ def test_checkpoint_writer_does_not_block_hold_or_teardown_and_finishes_latest_s
             hold.teardown(200.0)
         else:
             teardown_thread.join(timeout=1.0)
+        assert worker.close(timeout=5.0)
 
     assert not tick_thread.is_alive()
     assert teardown_thread is not None and not teardown_thread.is_alive()
     assert store.models["pid_sp"] == {"revision": 2, "K": 701.0}
     assert [snapshot["revision"] for _, snapshot in store.saved_snapshots] == [1, 2]
-    #  store.latest_saved firing only proves save_outcome returned -- the
-    #  persistence worker's own run loop still needs a moment afterward to
-    #  notice flush_and_stop's earlier stop request and let its thread exit.
-    #  Join (bounded, as a deadlock safety net -- see the module docstring
-    #  above) before checking is_alive() instead of checking instantaneously,
-    #  the same way tick_thread/teardown_thread are joined above: an
-    #  un-joined check here is itself a wall-clock race, just one that only
-    #  shows up under enough concurrent load to widen the window.
+    # Hold's bounded barrier deliberately left the process worker alive. The
+    # explicit process-owner close above is what joins it after the blocked
+    # write is released.
     for writer_thread in {*store.writer_threads}:
         writer_thread.join(timeout=5.0)
     assert store.writer_threads and all(not thread.is_alive() for thread in store.writer_threads)
@@ -588,13 +752,13 @@ def test_new_store_loads_owned_checkpoint_while_prior_writer_is_blocked():
         assert load_finished.wait(0.2), "replacement Hold blocked behind checkpoint I/O"
         assert loaded == [{"revision": 2}]
         release_write.set()
-        assert worker.flush_and_stop(timeout=1.0)
+        assert worker.close(timeout=1.0)
         assert replacement_store.save("mpc", {"revision": 2}) is True
         assert state["models"]["mpc"] == {"revision": 2}
     finally:
         release_write.set()
         load_thread.join(timeout=1.0)
-        worker.flush_and_stop()
+        worker.close()
 
 
 def test_checkpoint_worker_preserves_a_pending_checkpoint_when_b_is_submitted():
@@ -635,7 +799,7 @@ def test_checkpoint_worker_preserves_a_pending_checkpoint_when_b_is_submitted():
         store.allow_first_write.set()
         if pending_submission_thread is not None:
             pending_submission_thread.join(timeout=1.0)
-        worker.flush_and_stop()
+        worker.close()
 
     assert pending_submission_thread is not None and not pending_submission_thread.is_alive()
     assert not logger.errors
@@ -689,7 +853,7 @@ def test_checkpoint_worker_coalesces_pending_revisions_per_controller():
         store.allow_first_write.set()
         if pending_submission_thread is not None:
             pending_submission_thread.join(timeout=1.0)
-        worker.flush_and_stop()
+        worker.close()
 
     assert pending_submission_thread is not None and not pending_submission_thread.is_alive()
     assert not logger.errors
@@ -704,6 +868,7 @@ def test_timed_out_checkpoint_worker_cannot_overwrite_newer_replacement_checkpoi
     state = {}
     first_write_started = threading.Event()
     release_old_write = threading.Event()
+    old_write_finished = threading.Event()
 
     def read(_key):
         if not state:
@@ -720,6 +885,7 @@ def test_timed_out_checkpoint_worker_cannot_overwrite_newer_replacement_checkpoi
             assert release_old_write.wait(1.0)
         existing = state.get("models", {}).get(name)
         if existing is not None and existing["revision"] >= snapshot["revision"]:
+            old_write_finished.set()
             return False
         state.clear()
         state.update({"version": 1, "models": {name: deepcopy(snapshot)}})
@@ -732,19 +898,19 @@ def test_timed_out_checkpoint_worker_cannot_overwrite_newer_replacement_checkpoi
     try:
         assert old_worker.submit_checkpoint("mpc", {"revision": 1})
         assert first_write_started.wait(timeout=1.0)
-        assert not old_worker.flush_and_stop(timeout=0.01)
+        assert not old_worker.close(timeout=0.01)
 
         assert new_worker.submit_checkpoint("mpc", {"revision": 2})
-        assert new_worker.flush_and_stop(timeout=0.2)
+        assert new_worker.close(timeout=0.2)
         assert state["models"]["mpc"] == {"revision": 2}
 
         release_old_write.set()
-        assert old_worker.flush_and_stop(timeout=1.0)
+        assert old_write_finished.wait(timeout=1.0)
         assert new_store.load("mpc") == {"revision": 2}
     finally:
         release_old_write.set()
-        old_worker.flush_and_stop(timeout=1.0)
-        new_worker.flush_and_stop(timeout=1.0)
+        old_worker.close(timeout=1.0)
+        new_worker.close(timeout=1.0)
 
 
 class _CrashRecoveryEstimator:

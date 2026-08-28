@@ -5,11 +5,19 @@ import threading
 
 import pytest
 
+import controller.runtime.model_persistence as model_persistence_module
 from common.control_trace import AmbientSource
 from common.controller_model_state import (
     MAX_SNAPSHOT_BYTES,
     CheckpointSaveOutcome,
     ControllerModelStore,
+)
+from common.learning_trajectory import (
+    FrameDeliveryCertainty,
+    HoldEntrySample,
+    LearningTrajectoryFrame,
+    LearningTrajectorySegment,
+    TrajectoryBreakReason,
 )
 from common.model_evidence import (
     ActivationEvidence,
@@ -20,10 +28,15 @@ from common.model_evidence import (
     ModelEvidenceRecord,
     RefreshDiagnosticsEvidence,
 )
+from common.persistence.learning_trajectory import (
+    LearningTrajectoryRepository,
+    SegmentCursor,
+)
 from common.persistence.model_evidence import (
     append_model_evidence,
     commit_model_activation_phase,
     read_model_activation,
+    read_model_evidence,
 )
 from controller.model_learning.activation import (
     ActivationPhase,
@@ -35,6 +48,8 @@ from controller.runtime.model_persistence import (
     DurableActivationReceipt,
     EvidenceSubmission,
     ModelPersistenceWorker,
+    PersistenceReceipt,
+    TrajectoryAppendBatch,
 )
 from tests.unit.runtime._persistence_helpers import _current_pair_descriptor
 
@@ -143,6 +158,793 @@ def _activation(evidence_id: str) -> ModelEvidenceRecord:
         ),
     )
 
+def _trajectory_frame(
+    sequence: int,
+    *,
+    epoch_ms: int = 0,
+    effective_mode: str = "Hold",
+) -> LearningTrajectoryFrame:
+    start_ms = epoch_ms + sequence * 20_000
+    return LearningTrajectoryFrame(
+        sequence=sequence,
+        monotonic_start_ms=start_ms,
+        monotonic_end_ms=start_ms + 20_000,
+        wall_start_ms=1_700_000_000_000 + start_ms,
+        wall_end_ms=1_700_000_020_000 + start_ms,
+        chamber_temperature_c=225.0 + sequence,
+        probe_valid=True,
+        probe_source="primary",
+        ambient_temperature_c=20.0,
+        ambient_source="configured",
+        ambient_uncertainty_c=1.0,
+        delivered_auger_on_seconds=5.0,
+        realized_auger_duty=0.25,
+        normalized_combustion_load=0.25,
+        delivered_fan_on_seconds=20.0,
+        fan_duty_integral_seconds=10.0,
+        mean_actual_fan_duty=0.5,
+        auger_delivery_certainty=FrameDeliveryCertainty.EXACT,
+        fan_delivery_certainty=FrameDeliveryCertainty.EXACT,
+        effective_mode=effective_mode,
+        recipe_step_id=None,
+        complete=True,
+        continuous=True,
+        partial=False,
+        boundary_reason=None,
+    )
+
+
+def _stored_frame(
+    sequence: int,
+    *,
+    epoch_ms: int = 0,
+    effective_mode: str = "Hold",
+) -> LearningTrajectoryFrame:
+    return _trajectory_frame(
+        sequence,
+        epoch_ms=epoch_ms,
+        effective_mode=effective_mode,
+    )
+
+
+def _stored_hold_entry(frame: LearningTrajectoryFrame) -> HoldEntrySample:
+    return HoldEntrySample(
+        monotonic_ms=frame.monotonic_start_ms,
+        wall_ms=frame.wall_start_ms,
+        chamber_temperature_c=frame.chamber_temperature_c,
+        probe_valid=True,
+        probe_source="primary",
+    )
+
+
+def _stored_segment(
+    segment_id: str,
+    *,
+    epoch_ms: int = 0,
+) -> LearningTrajectorySegment:
+    frame = _stored_frame(0, epoch_ms=epoch_ms, effective_mode="Smoke")
+    return LearningTrajectorySegment(
+        schema_version=1,
+        observation_schema_version=1,
+        segment_id=segment_id,
+        cook_id=f"cook-{segment_id}",
+        trajectory_session_id=f"trajectory-{segment_id}",
+        trace_session_ids=(f"trace-{segment_id}",),
+        collection_provenance={"origin": "passive-online", "role_generation": 4},
+        configuration_provenance={"controller": "MPC", "revision": 7},
+        cadence_digest=_DIGEST,
+        model_structure_digest=_OTHER_DIGEST,
+        held_physics_digest=_DIGEST,
+        delay_input_mapping_digest=_OTHER_DIGEST,
+        actuation_mapping_digest=_DIGEST,
+        scored_fan_regime_digest=_OTHER_DIGEST,
+        ambient_semantics_digest=_DIGEST,
+        pre_roll_frames=(frame,),
+        hold_entry=None,
+        scored_hold_frames=(),
+        generation_audit_ranges=(
+            {
+                "start_sequence": 0,
+                "end_sequence": 0,
+                "role_generation": 4,
+            },
+        ),
+        start_monotonic_ms=frame.monotonic_start_ms,
+        end_monotonic_ms=frame.monotonic_end_ms,
+        start_wall_ms=frame.wall_start_ms,
+        end_wall_ms=frame.wall_end_ms,
+        start_sequence=0,
+        end_sequence=0,
+        pre_roll_end_reason=None,
+        terminal_break_reason=None,
+        state="open",
+        source_trace_digest=_OTHER_DIGEST,
+        source_schema_version=7,
+        source_row_digest=_DIGEST,
+        build_provenance={"builder": "trajectory-runtime", "revision": 1},
+    )
+
+
+def _trajectory_batch(
+    segment_id: str,
+    *,
+    sequence: int = 0,
+    kind: str = "compound",
+) -> TrajectoryAppendBatch:
+    frame = _trajectory_frame(sequence)
+    cursor = SegmentCursor(
+        segment_id=segment_id,
+        next_ordinal=sequence,
+        chain_digest="0" * 64,
+        corpus_revision=sequence,
+    )
+    if kind == "finalize":
+        return TrajectoryAppendBatch(
+            cursor=cursor,
+            finalize_reason=TrajectoryBreakReason.STOP,
+        )
+    if kind == "pre-roll":
+        return TrajectoryAppendBatch(cursor=cursor, pre_roll=(frame,))
+    return TrajectoryAppendBatch(
+        cursor=cursor,
+        hold_entry=HoldEntrySample(
+            monotonic_ms=frame.monotonic_start_ms,
+            wall_ms=frame.wall_start_ms,
+            chamber_temperature_c=frame.chamber_temperature_c,
+            probe_valid=True,
+            probe_source="primary",
+        ),
+        scored=(frame,),
+        evidence=(_refresh(f"{segment_id}-evidence"),),
+    )
+
+
+def test_barrier_drains_prior_work_and_leaves_worker_usable() -> None:
+    written: list[str] = []
+    worker = ModelPersistenceWorker(
+        _Store(),
+        _Logger(),
+        append_evidence=lambda records: written.extend(record.evidence_id for record in records),
+    )
+    try:
+        assert worker.submit_evidence(_refresh("before-barrier")).accepted
+        assert worker.barrier(timeout=1.0)
+        assert written == ["before-barrier"]
+
+        assert worker.submit_evidence(_refresh("after-barrier")).accepted
+        assert worker.barrier(timeout=1.0)
+        assert written == ["before-barrier", "after-barrier"]
+    finally:
+        worker.close(timeout=1.0)
+
+
+def test_close_is_idempotent_joins_once_and_rejects_post_close_work(monkeypatch) -> None:
+    threads = []
+    real_thread = threading.Thread
+
+    class _CountingThread(real_thread):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.join_count = 0
+            threads.append(self)
+
+        def join(self, timeout=None):
+            self.join_count += 1
+            return super().join(timeout=timeout)
+
+    monkeypatch.setattr(model_persistence_module, "Thread", _CountingThread)
+    store = _Store()
+    store.release_first_save.set()
+    worker = ModelPersistenceWorker(store, _Logger())
+    assert worker.submit_checkpoint("mpc", {"revision": 1})
+
+    assert worker.close(timeout=1.0)
+    assert worker.close(timeout=1.0)
+    assert not worker.submit_checkpoint("mpc", {"revision": 2})
+    assert not worker.submit_evidence(_refresh("after-close")).accepted
+    assert not worker.submit_activation_phase(
+        _prepared_activation(),
+        expected_phase=None,
+    ).accepted
+
+    rejected: PersistenceReceipt = worker.submit_trajectory_batch(
+        _trajectory_batch("after-close")
+    )
+    assert not rejected.accepted
+    assert rejected.completed
+    assert not rejected.durable
+    assert rejected.gap is not None
+    assert rejected.gap.reason == "persistence-closed"
+    assert len(threads) == 1
+    assert threads[0].join_count == 1
+
+
+def test_priority_fifo_and_timed_out_barrier_fence_prevent_overtake() -> None:
+    started = threading.Event()
+    release = threading.Event()
+    order: list[str] = []
+
+    class _PriorityStore(_Store):
+        def save_outcome(self, name, snapshot):
+            order.append(f"checkpoint:{name}:{snapshot['revision']}")
+            return CheckpointSaveOutcome.SAVED
+
+    def append_evidence(records):
+        record = records[0]
+        if record.evidence_id == "running":
+            started.set()
+            assert release.wait(timeout=1.0)
+        order.append(f"evidence:{record.evidence_id}")
+
+    def resulting_cursor(batch):
+        if batch.begin_segment is not None:
+            next_ordinal = len(batch.begin_segment.pre_roll_frames) + len(
+                batch.begin_segment.scored_hold_frames
+            )
+            return SegmentCursor(
+                segment_id=batch.begin_segment.segment_id,
+                next_ordinal=next_ordinal,
+                chain_digest=f"{next_ordinal:064x}",
+                corpus_revision=1,
+            )
+        assert batch.cursor is not None
+        if batch.break_reason is not None:
+            assert batch.next_segment is not None
+            next_ordinal = len(batch.next_segment.pre_roll_frames) + len(
+                batch.next_segment.scored_hold_frames
+            )
+            return SegmentCursor(
+                segment_id=batch.next_segment.segment_id,
+                next_ordinal=next_ordinal,
+                chain_digest=f"{next_ordinal:064x}",
+                corpus_revision=batch.cursor.corpus_revision + 1,
+            )
+        if batch.finalize_reason is not None:
+            return SegmentCursor(
+                segment_id=batch.cursor.segment_id,
+                next_ordinal=batch.cursor.next_ordinal,
+                chain_digest=batch.cursor.chain_digest,
+                corpus_revision=batch.cursor.corpus_revision + 1,
+            )
+        next_ordinal = (
+            batch.cursor.next_ordinal + len(batch.pre_roll) + len(batch.scored)
+        )
+        return SegmentCursor(
+            segment_id=batch.cursor.segment_id,
+            next_ordinal=next_ordinal,
+            chain_digest=f"{next_ordinal:064x}",
+            corpus_revision=batch.cursor.corpus_revision + 1,
+        )
+
+    durable_revision = 0
+
+    def persist_batch(batch):
+        nonlocal durable_revision
+        assert batch.cursor is not None
+        order.append(
+            f"trajectory:{batch.cursor.segment_id}:{batch.cursor.next_ordinal}"
+        )
+        durable_revision += 1
+        result = resulting_cursor(batch)
+        return SegmentCursor(
+            segment_id=result.segment_id,
+            next_ordinal=result.next_ordinal,
+            chain_digest=result.chain_digest,
+            corpus_revision=durable_revision,
+        )
+
+    def persist_phase(record, _expected_phase):
+        order.append(f"activation:{record.phase.value}")
+
+    worker = ModelPersistenceWorker(
+        _PriorityStore(),
+        _Logger(),
+        append_evidence=append_evidence,
+        persist_trajectory_batch=persist_batch,
+        persist_activation_phase=persist_phase,
+    )
+    prepared = _prepared_activation()
+    assert worker.submit_evidence(_refresh("running")).accepted
+    assert started.wait(timeout=1.0)
+    assert worker.submit_checkpoint("ordinary", {"revision": 1})
+    assert worker.submit_evidence(_refresh("ordinary-evidence")).accepted
+    pre_roll = worker.submit_trajectory_batch(
+        _trajectory_batch("pre-roll", kind="pre-roll")
+    )
+    compound_a_batch = _trajectory_batch("compound")
+    compound_a = worker.submit_trajectory_batch(compound_a_batch)
+    compound_b_source = _trajectory_batch("compound", sequence=1)
+    compound_b = worker.submit_trajectory_batch(
+        TrajectoryAppendBatch(
+            cursor=resulting_cursor(compound_a_batch),
+            hold_entry=compound_b_source.hold_entry,
+            scored=compound_b_source.scored,
+            evidence=compound_b_source.evidence,
+        )
+    )
+    boundary = worker.submit_trajectory_batch(
+        _trajectory_batch("segment-finalize", kind="finalize")
+    )
+    activation_before = worker.submit_activation_phase(
+        prepared,
+        expected_phase=None,
+    )
+    assert not worker.barrier(timeout=0.0)
+    activation_after = worker.submit_activation_phase(
+        prepared,
+        expected_phase=None,
+    )
+
+
+    release.set()
+    try:
+        assert worker.barrier(timeout=1.0)
+        assert all(
+            receipt.wait(timeout=1.0)
+            for receipt in (
+                pre_roll,
+                compound_a,
+                compound_b,
+                boundary,
+                activation_before,
+                activation_after,
+            )
+        )
+    finally:
+        worker.close(timeout=1.0)
+
+    assert order == [
+        "evidence:running",
+        "activation:prepared",
+        "trajectory:segment-finalize:0",
+        "trajectory:compound:0",
+        "trajectory:compound:1",
+        "trajectory:pre-roll:0",
+        "checkpoint:ordinary:1",
+        "evidence:ordinary-evidence",
+        "activation:prepared",
+    ]
+
+
+@pytest.mark.parametrize("fail_evidence", (False, True))
+def test_compound_scored_frame_and_evidence_commit_or_roll_back_atomically(
+    fail_evidence: bool,
+    ds,
+    monkeypatch,
+) -> None:
+    repository = LearningTrajectoryRepository()
+    worker = ModelPersistenceWorker(
+        _Store(),
+        _Logger(),
+        trajectory_repository=repository,
+    )
+    begin = worker.submit_trajectory_batch(
+        TrajectoryAppendBatch(begin_segment=_stored_segment("atomic"))
+    )
+    assert begin.wait(timeout=1.0)
+    assert begin.cursor is not None
+
+    frame = _stored_frame(1)
+    evidence = _refresh("atomic-evidence")
+    if fail_evidence:
+        real_append = model_persistence_module.append_model_evidence_in_transaction
+
+        def append_then_fail(connection, records):
+            real_append(connection, records)
+            raise RuntimeError("injected evidence failure")
+
+        monkeypatch.setattr(
+            model_persistence_module,
+            "append_model_evidence_in_transaction",
+            append_then_fail,
+        )
+
+    batch = TrajectoryAppendBatch(
+        cursor=begin.cursor,
+        hold_entry=_stored_hold_entry(frame),
+        scored=(frame,),
+        evidence=(evidence,),
+    )
+    receipt = worker.submit_trajectory_batch(batch)
+    try:
+        assert receipt.accepted
+        assert receipt.wait(timeout=1.0) is (not fail_evidence)
+        assert receipt.completed
+        assert receipt.durable is (not fail_evidence)
+        assert (receipt.error is not None) is fail_evidence
+        stored = repository.read_segment("atomic")
+        assert stored is not None
+        assert len(stored.scored_hold_frames) == (0 if fail_evidence else 1)
+        assert [record.evidence_id for record in read_model_evidence()] == (
+            [] if fail_evidence else ["atomic-evidence"]
+        )
+        assert isinstance(batch.scored, tuple)
+        assert isinstance(batch.evidence, tuple)
+    finally:
+        worker.close(timeout=1.0)
+
+
+def test_injected_trajectory_callback_must_return_resulting_cursor() -> None:
+    def missing_cursor(_batch):
+        return None
+
+    worker = ModelPersistenceWorker(
+        _Store(),
+        _Logger(),
+        persist_trajectory_batch=missing_cursor,
+    )
+    receipt = worker.submit_trajectory_batch(_trajectory_batch("invalid-cursor"))
+    try:
+        assert receipt.accepted
+        assert not receipt.wait(timeout=1.0)
+        assert receipt.completed
+        assert receipt.error is not None
+        assert "must return SegmentCursor" in receipt.error
+        assert receipt.cursor is None
+    finally:
+        worker.close(timeout=1.0)
+
+
+
+def test_real_repository_cursor_progresses_across_stale_queued_batches(ds) -> None:
+    repository = LearningTrajectoryRepository()
+    worker = ModelPersistenceWorker(
+        _Store(),
+        _Logger(),
+        trajectory_repository=repository,
+    )
+    begin = worker.submit_trajectory_batch(
+        TrajectoryAppendBatch(begin_segment=_stored_segment("cursor"))
+    )
+    assert begin.wait(timeout=1.0)
+    assert begin.cursor is not None
+    stale = begin.cursor
+    pre_roll = worker.submit_trajectory_batch(
+        TrajectoryAppendBatch(
+            cursor=stale,
+            pre_roll=(_stored_frame(1, effective_mode="Smoke"),),
+        )
+    )
+    scored_frame = _stored_frame(2)
+    scored = worker.submit_trajectory_batch(
+        TrajectoryAppendBatch(
+            cursor=stale,
+            hold_entry=_stored_hold_entry(scored_frame),
+            scored=(scored_frame,),
+            evidence=(_refresh("cursor-evidence"),),
+        )
+    )
+    finalized = worker.submit_trajectory_batch(
+        TrajectoryAppendBatch(
+            cursor=stale,
+            finalize_reason=TrajectoryBreakReason.STOP,
+        )
+    )
+    try:
+        assert pre_roll.wait(timeout=1.0)
+        assert scored.wait(timeout=1.0)
+        assert finalized.wait(timeout=1.0)
+        assert pre_roll.cursor is not None
+        assert scored.cursor is not None
+        assert finalized.cursor is not None
+        assert pre_roll.cursor.next_ordinal == 2
+        assert scored.cursor.next_ordinal == 3
+        assert finalized.cursor.next_ordinal == 3
+        assert (
+            stale.corpus_revision
+            < pre_roll.cursor.corpus_revision
+            < scored.cursor.corpus_revision
+            < finalized.cursor.corpus_revision
+        )
+        stored = repository.read_segment("cursor")
+        assert stored is not None
+        assert stored.state == "finalized"
+        assert stored.terminal_break_reason is TrajectoryBreakReason.STOP
+    finally:
+        worker.close(timeout=1.0)
+
+
+def test_interleaved_segments_rebase_cached_global_corpus_revision(ds) -> None:
+    repository = LearningTrajectoryRepository()
+    worker = ModelPersistenceWorker(
+        _Store(),
+        _Logger(),
+        trajectory_repository=repository,
+    )
+    begin_a = worker.submit_trajectory_batch(
+        TrajectoryAppendBatch(begin_segment=_stored_segment("interleaved-a"))
+    )
+    assert begin_a.wait(timeout=1.0)
+    assert begin_a.cursor is not None
+    stale_a = begin_a.cursor
+    begin_b = worker.submit_trajectory_batch(
+        TrajectoryAppendBatch(
+            begin_segment=_stored_segment("interleaved-b", epoch_ms=100_000)
+        )
+    )
+    assert begin_b.wait(timeout=1.0)
+    assert begin_b.cursor is not None
+    append_a = worker.submit_trajectory_batch(
+        TrajectoryAppendBatch(
+            cursor=stale_a,
+            pre_roll=(_stored_frame(1, effective_mode="Smoke"),),
+        )
+    )
+    try:
+        assert append_a.wait(timeout=1.0)
+        assert append_a.cursor is not None
+        assert append_a.cursor.corpus_revision > begin_b.cursor.corpus_revision
+        stored_a = repository.read_segment("interleaved-a")
+        assert stored_a is not None
+        assert len(stored_a.pre_roll_frames) == 2
+        assert not worker.failed
+    finally:
+        worker.close(timeout=1.0)
+
+
+def test_trajectory_queue_rejection_returns_explicit_gap_and_failure() -> None:
+    started = threading.Event()
+    release = threading.Event()
+
+    def persist_batch(_batch):
+        started.set()
+        assert release.wait(timeout=1.0)
+        assert _batch.cursor is not None
+        return _batch.cursor
+
+    worker = ModelPersistenceWorker(
+        _Store(),
+        _Logger(),
+        trajectory_capacity=1,
+        persist_trajectory_batch=persist_batch,
+    )
+    first = worker.submit_trajectory_batch(_trajectory_batch("running"))
+    assert started.wait(timeout=1.0)
+    queued = worker.submit_trajectory_batch(_trajectory_batch("queued", sequence=1))
+    rejected = worker.submit_trajectory_batch(
+        _trajectory_batch("rejected", sequence=2)
+    )
+    try:
+        assert first.accepted
+        assert queued.accepted
+        assert not rejected.accepted
+        assert rejected.completed
+        assert not rejected.durable
+        assert rejected.error == "trajectory-queue-overflow"
+        assert rejected.gap is not None
+        assert rejected.gap.reason == "trajectory-queue-overflow"
+        assert rejected.gap.break_reason is TrajectoryBreakReason.RECORDER_GAP
+    finally:
+        release.set()
+        worker.close(timeout=1.0)
+    assert first.completed and first.durable
+    assert queued.completed and queued.durable
+
+
+def test_rejected_lineage_stays_blocked_until_durable_break_and_begin(ds) -> None:
+    repository = LearningTrajectoryRepository()
+    started = threading.Event()
+    release = threading.Event()
+    worker = ModelPersistenceWorker(
+        _Store(),
+        _Logger(),
+        trajectory_capacity=1,
+        trajectory_repository=repository,
+    )
+    begin = worker.submit_trajectory_batch(
+        TrajectoryAppendBatch(begin_segment=_stored_segment("gap-lineage"))
+    )
+    assert begin.wait(timeout=1.0)
+    assert begin.cursor is not None
+    stale = begin.cursor
+    real_persist = worker._default_persist_trajectory_batch
+    blocked_once = False
+
+    def block_first_append(batch):
+        nonlocal blocked_once
+        if (
+            not blocked_once
+            and batch.cursor is not None
+            and batch.cursor.segment_id == "gap-lineage"
+            and batch.pre_roll
+        ):
+            blocked_once = True
+            started.set()
+            assert release.wait(timeout=1.0)
+        return real_persist(batch)
+
+    worker._persist_trajectory_batch_callback = block_first_append
+    running = worker.submit_trajectory_batch(
+        TrajectoryAppendBatch(
+            cursor=stale,
+            pre_roll=(_stored_frame(1, effective_mode="Smoke"),),
+        )
+    )
+    assert started.wait(timeout=1.0)
+    queued = worker.submit_trajectory_batch(
+        TrajectoryAppendBatch(
+            cursor=stale,
+            pre_roll=(_stored_frame(2, effective_mode="Smoke"),),
+        )
+    )
+    rejected = worker.submit_trajectory_batch(
+        TrajectoryAppendBatch(
+            cursor=stale,
+            pre_roll=(_stored_frame(3, effective_mode="Smoke"),),
+        )
+    )
+    blocked = worker.submit_trajectory_batch(
+        TrajectoryAppendBatch(
+            cursor=stale,
+            pre_roll=(_stored_frame(4, effective_mode="Smoke"),),
+        )
+    )
+    boundary = worker.submit_trajectory_batch(
+        TrajectoryAppendBatch(
+            cursor=stale,
+            break_reason=TrajectoryBreakReason.RECORDER_GAP,
+            next_segment=_stored_segment("after-gap", epoch_ms=100_000),
+        )
+    )
+    assert running.accepted and queued.accepted and boundary.accepted
+    assert not rejected.accepted
+    assert rejected.gap is not None
+    assert not blocked.accepted
+    assert blocked.error == "trajectory-lineage-blocked"
+    release.set()
+    try:
+        assert running.wait(timeout=1.0)
+        assert queued.wait(timeout=1.0)
+        assert boundary.wait(timeout=1.0)
+        assert boundary.cursor is not None
+        continued = worker.submit_trajectory_batch(
+            TrajectoryAppendBatch(
+                cursor=boundary.cursor,
+                pre_roll=(
+                    _stored_frame(
+                        1,
+                        epoch_ms=100_000,
+                        effective_mode="Smoke",
+                    ),
+                ),
+            )
+        )
+        assert continued.wait(timeout=1.0)
+        old = repository.read_segment("gap-lineage")
+        assert old is not None
+        assert old.terminal_break_reason is TrajectoryBreakReason.RECORDER_GAP
+    finally:
+        worker.close(timeout=1.0)
+
+
+def test_global_capacity_reserves_boundary_and_activation_slots() -> None:
+    started = threading.Event()
+    release = threading.Event()
+    store = _Store()
+    store.release_first_save.set()
+
+    def block_evidence(_records):
+        started.set()
+        assert release.wait(timeout=1.0)
+
+    def persist_cursor(batch):
+        assert batch.cursor is not None
+        return batch.cursor
+
+    def persist_phase(_record, _expected):
+        return None
+
+    worker = ModelPersistenceWorker(
+        store,
+        _Logger(),
+        work_capacity=4,
+        activation_reserve=1,
+        boundary_reserve=1,
+        append_evidence=block_evidence,
+        persist_trajectory_batch=persist_cursor,
+        persist_activation_phase=persist_phase,
+    )
+    assert worker.submit_evidence(_refresh("capacity-running")).accepted
+    assert started.wait(timeout=1.0)
+    assert worker.submit_checkpoint("ordinary-a", {"revision": 1})
+    assert not worker.submit_checkpoint("ordinary-b", {"revision": 1})
+    boundary = worker.submit_trajectory_batch(
+        _trajectory_batch("capacity-boundary", kind="finalize")
+    )
+    first_activation = worker.submit_activation_phase(
+        _prepared_activation(),
+        expected_phase=None,
+    )
+    second_activation = worker.submit_activation_phase(
+        _prepared_activation(),
+        expected_phase=None,
+    )
+    assert boundary.accepted
+    assert first_activation.accepted
+    assert not second_activation.accepted
+    assert not worker.barrier(timeout=0.0)
+    release.set()
+    try:
+        assert boundary.wait(timeout=1.0)
+        assert first_activation.wait(timeout=1.0)
+    finally:
+        worker.close(timeout=1.0)
+
+
+def test_close_retry_waits_for_same_single_stop_to_finish() -> None:
+    started = threading.Event()
+    release = threading.Event()
+    retry_finished = threading.Event()
+    retry_results = []
+
+    def block_evidence(_records):
+        started.set()
+        assert release.wait(timeout=1.0)
+
+    worker = ModelPersistenceWorker(
+        _Store(),
+        _Logger(),
+        append_evidence=block_evidence,
+    )
+    assert worker.submit_evidence(_refresh("close-running")).accepted
+    assert started.wait(timeout=1.0)
+    assert not worker.close(timeout=0.0)
+
+    def retry_close():
+        retry_results.append(worker.close(timeout=1.0))
+        retry_finished.set()
+
+    retry = threading.Thread(target=retry_close)
+    retry.start()
+    assert not retry_finished.wait(timeout=0.01)
+    release.set()
+    assert retry_finished.wait(timeout=1.0)
+    retry.join(timeout=1.0)
+    assert retry_results == [True]
+
+
+def test_activation_and_checkpoint_receipts_survive_trajectory_priority() -> None:
+    started = threading.Event()
+    release = threading.Event()
+    store = _Store()
+    store.release_first_save.set()
+    persisted_evidence = []
+
+    def persist_batch(_batch):
+        started.set()
+        assert release.wait(timeout=1.0)
+        assert _batch.cursor is not None
+        return _batch.cursor
+
+    worker = ModelPersistenceWorker(
+        store,
+        _Logger(),
+        append_evidence=lambda records: persisted_evidence.extend(records),
+        persist_trajectory_batch=persist_batch,
+    )
+    trajectory_receipt = worker.submit_trajectory_batch(
+        _trajectory_batch("receipt-preservation")
+    )
+    assert started.wait(timeout=1.0)
+    confidence = _confidence_for(_prepared_activation())
+    confidence_receipt = worker.submit_activation_confidence(confidence)
+    assert confidence_receipt.accepted
+    assert not confidence_receipt.completed
+    assert worker.submit_checkpoint("mpc", {"revision": 9})
+
+    release.set()
+    try:
+        assert trajectory_receipt.wait(timeout=1.0)
+        assert confidence_receipt.wait(timeout=1.0)
+        assert confidence_receipt.completed
+        assert confidence_receipt.durable
+        assert confidence_receipt.error is None
+        assert worker.barrier(timeout=1.0)
+        assert persisted_evidence == [confidence]
+        assert store.saved == [("mpc", {"revision": 9})]
+    finally:
+        worker.close(timeout=1.0)
+
 
 def test_checkpoint_submission_coalesces_latest_owned_snapshot_without_blocking():
     store = _Store()
@@ -152,12 +954,50 @@ def test_checkpoint_submission_coalesces_latest_owned_snapshot_without_blocking(
         assert store.first_save_started.wait(timeout=1.0)
         assert worker.submit_checkpoint("mpc", {"revision": 2, "parameters": {"gain": 2}})
         store.release_first_save.set()
-        assert worker.flush_and_stop(timeout=1.0)
+        assert worker.close(timeout=1.0)
     finally:
         store.release_first_save.set()
-        worker.flush_and_stop(timeout=1.0)
+        worker.close(timeout=1.0)
 
     assert [snapshot["revision"] for _, snapshot in store.saved] == [1, 2]
+
+
+def test_failed_checkpoint_restage_preserves_previous_queued_payload() -> None:
+    started = threading.Event()
+    release = threading.Event()
+
+    class _StagingStore(_Store):
+        def __init__(self):
+            super().__init__()
+            self.release_first_save.set()
+            self.staged_revisions = []
+
+        def stage_owned(self, _name, snapshot):
+            self.staged_revisions.append(snapshot["revision"])
+            return snapshot["revision"] != 2
+
+    def block_evidence(_records):
+        started.set()
+        assert release.wait(timeout=1.0)
+
+    store = _StagingStore()
+    worker = ModelPersistenceWorker(
+        store,
+        _Logger(),
+        append_evidence=block_evidence,
+    )
+    assert worker.submit_evidence(_refresh("stage-running")).accepted
+    assert started.wait(timeout=1.0)
+    assert worker.submit_checkpoint("mpc", {"revision": 1, "gain": 1.0})
+    assert not worker.submit_checkpoint("mpc", {"revision": 2, "gain": 2.0})
+    release.set()
+    try:
+        assert worker.barrier(timeout=1.0)
+    finally:
+        worker.close(timeout=1.0)
+
+    assert store.staged_revisions == [1, 2]
+    assert store.saved == [("mpc", {"revision": 1, "gain": 1.0})]
 
 
 def test_resubmitting_a_revision_already_being_saved_does_not_persist_it_twice():
@@ -178,10 +1018,10 @@ def test_resubmitting_a_revision_already_being_saved_does_not_persist_it_twice()
         # so _pending_checkpoints no longer holds it.
         assert worker.submit_checkpoint("mpc", {"revision": 7, "parameters": {"gain": 1}})
         store.release_first_save.set()
-        assert worker.flush_and_stop(timeout=1.0)
+        assert worker.close(timeout=1.0)
     finally:
         store.release_first_save.set()
-        worker.flush_and_stop(timeout=1.0)
+        worker.close(timeout=1.0)
 
     assert [snapshot["revision"] for _, snapshot in store.saved] == [7]
 
@@ -208,10 +1048,10 @@ def test_resubmitting_a_revision_already_saved_is_not_saved_again():
             assert worker._condition.wait_for(lambda: not worker._inflight_checkpoints, timeout=1.0)
 
         assert worker.submit_checkpoint("mpc", {"revision": 7, "parameters": {"gain": 1}})
-        assert worker.flush_and_stop(timeout=1.0)
+        assert worker.close(timeout=1.0)
     finally:
         store.release_first_save.set()
-        worker.flush_and_stop(timeout=1.0)
+        worker.close(timeout=1.0)
 
     assert [snapshot["revision"] for _, snapshot in store.saved] == [7]
 
@@ -239,10 +1079,10 @@ def test_bounded_evidence_overflow_returns_a_typed_gap_and_never_drops_activatio
         assert worker.evidence_blocked
         assert worker.commit_activation(_activation("activation"))
         store.release_first_save.set()
-        assert worker.flush_and_stop(timeout=1.0)
+        assert worker.close(timeout=1.0)
     finally:
         store.release_first_save.set()
-        worker.flush_and_stop(timeout=1.0)
+        worker.close(timeout=1.0)
 
     assert written == [_evidence("first"), second.recorder_gap]
     assert activations == [_activation("activation")]
@@ -264,7 +1104,7 @@ def test_evidence_submission_rejects_after_async_write_failure():
         assert rejected.recorder_gap is not None
         assert rejected.recorder_gap.payload.reason == "persistence-failed"
     finally:
-        worker.flush_and_stop(timeout=1.0)
+        worker.close(timeout=1.0)
 
 
 def test_checkpoint_uses_the_store_default_json_byte_boundary_before_enqueue():
@@ -279,10 +1119,10 @@ def test_checkpoint_uses_the_store_default_json_byte_boundary_before_enqueue():
         assert len(json.dumps(snapshot, allow_nan=False).encode("utf-8")) == MAX_SNAPSHOT_BYTES
         assert worker.submit_checkpoint("mpc", snapshot)
         assert not worker.submit_checkpoint("mpc", oversized)
-        assert worker.flush_and_stop(timeout=1.0)
+        assert worker.close(timeout=1.0)
     finally:
         store.release_first_save.set()
-        worker.flush_and_stop(timeout=1.0)
+        worker.close(timeout=1.0)
 
 
 def test_checkpoint_rejects_malformed_nonfinite_and_oversized_snapshots_synchronously():
@@ -294,7 +1134,7 @@ def test_checkpoint_rejects_malformed_nonfinite_and_oversized_snapshots_synchron
         assert not worker.submit_checkpoint("mpc", {"revision": 1, "blob": "x" * 65_537})
         assert logger.errors
     finally:
-        worker.flush_and_stop(timeout=1.0)
+        worker.close(timeout=1.0)
 
 
 def test_equal_checkpoint_revision_is_an_explicit_healthy_nonadvancing_outcome():
@@ -307,11 +1147,11 @@ def test_equal_checkpoint_revision_is_an_explicit_healthy_nonadvancing_outcome()
     worker = ModelPersistenceWorker(store, _Logger())
     try:
         assert worker.submit_checkpoint("mpc", {"revision": 1})
-        assert worker.flush_and_stop(timeout=1.0)
+        assert worker.close(timeout=1.0)
         assert store.save_outcome("mpc", {"revision": 1}) is CheckpointSaveOutcome.NONADVANCING
         assert not worker.evidence_blocked
     finally:
-        worker.flush_and_stop(timeout=1.0)
+        worker.close(timeout=1.0)
 
 
 def test_conditional_checkpoint_writer_failure_blocks_later_submissions():
@@ -324,13 +1164,13 @@ def test_conditional_checkpoint_writer_failure_blocks_later_submissions():
     worker = ModelPersistenceWorker(store, _Logger())
     try:
         assert worker.submit_checkpoint("mpc", {"revision": 1})
-        assert worker.flush_and_stop(timeout=1.0)
+        assert worker.close(timeout=1.0)
         assert worker.evidence_blocked
         assert not worker.submit_checkpoint("mpc", {"revision": 2})
         assert not worker.submit_evidence(_evidence("later")).accepted
         assert not worker.commit_activation(_activation("later"))
     finally:
-        worker.flush_and_stop(timeout=1.0)
+        worker.close(timeout=1.0)
 
 
 def test_save_only_store_cannot_coalesce_a_failed_checkpoint_as_healthy():
@@ -346,11 +1186,11 @@ def test_save_only_store_cannot_coalesce_a_failed_checkpoint_as_healthy():
     worker = ModelPersistenceWorker(store, _Logger())
     try:
         assert worker.submit_checkpoint("mpc", {"revision": 1})
-        assert worker.flush_and_stop(timeout=1.0)
+        assert worker.close(timeout=1.0)
         assert store.save_calls == 0
         assert worker.evidence_blocked
     finally:
-        worker.flush_and_stop(timeout=1.0)
+        worker.close(timeout=1.0)
 
 
 def test_explicit_failed_checkpoint_outcome_blocks_later_submissions():
@@ -361,13 +1201,13 @@ def test_explicit_failed_checkpoint_outcome_blocks_later_submissions():
     worker = ModelPersistenceWorker(FailedStore(), _Logger())
     try:
         assert worker.submit_checkpoint("mpc", {"revision": 1})
-        assert worker.flush_and_stop(timeout=1.0)
+        assert worker.close(timeout=1.0)
         assert worker.evidence_blocked
         assert not worker.submit_checkpoint("mpc", {"revision": 2})
         assert not worker.submit_evidence(_evidence("later")).accepted
         assert not worker.commit_activation(_activation("later"))
     finally:
-        worker.flush_and_stop(timeout=1.0)
+        worker.close(timeout=1.0)
 
 
 def test_evidence_batch_overflow_preserves_queued_fifo_and_records_every_omitted_origin():
@@ -390,10 +1230,10 @@ def test_evidence_batch_overflow_preserves_queued_fifo_and_records_every_omitted
         assert rejected.recorder_gap.payload.lost_record_count == 2
         assert worker.evidence_blocked
         store.release_first_save.set()
-        assert worker.flush_and_stop(timeout=1.0)
+        assert worker.close(timeout=1.0)
     finally:
         store.release_first_save.set()
-        worker.flush_and_stop(timeout=1.0)
+        worker.close(timeout=1.0)
 
     assert written == [_evidence("first"), rejected.recorder_gap]
 
@@ -415,10 +1255,10 @@ def test_worker_commits_each_accepted_evidence_batch_once_and_never_partially() 
         assert started.wait(timeout=1.0)
         assert written == []
         release.set()
-        assert worker.flush_and_stop(timeout=1.0)
+        assert worker.close(timeout=1.0)
     finally:
         release.set()
-        worker.flush_and_stop(timeout=1.0)
+        worker.close(timeout=1.0)
 
     assert written[0][0] == batch[0]
     assert written[0][2] == batch[2]
@@ -472,7 +1312,7 @@ def test_activation_submission_returns_an_explicit_receipt_not_a_durability_clai
         assert receipt.durable
     finally:
         release.set()
-        worker.flush_and_stop(timeout=1.0)
+        worker.close(timeout=1.0)
 
     assert writes == [(prepared, None)]
 
@@ -496,7 +1336,7 @@ def test_prepared_active_and_aborted_receipts_preserve_exact_cas_expectations_fi
         assert all(receipt.wait(timeout=1.0) for receipt in receipts)
         assert all(receipt.durable for receipt in receipts)
     finally:
-        worker.flush_and_stop(timeout=1.0)
+        worker.close(timeout=1.0)
 
     assert writes == [
         (ActivationPhase.PREPARED, None, None),
@@ -552,7 +1392,7 @@ def test_activation_confidence_and_phase_share_one_fifo_with_separate_durable_re
         assert phase_receipt.wait(timeout=1.0)
     finally:
         release.set()
-        worker.flush_and_stop(timeout=1.0)
+        worker.close(timeout=1.0)
 
     assert calls == [
         ("confidence-start", "confidence-before-prepared"),
@@ -635,7 +1475,7 @@ def test_activation_confidence_appends_preceding_assessment_in_one_durable_fifo_
         assert receipt.wait(timeout=1.0)
     finally:
         release.set()
-        worker.flush_and_stop(timeout=1.0)
+        worker.close(timeout=1.0)
 
     assert batches == [(assessment, confidence)]
     assert batches[0][0] is not assessment
@@ -664,7 +1504,7 @@ def test_failed_phase_write_completes_receipt_without_durability_and_blocks_late
         assert rejected.completed
         assert not rejected.durable
     finally:
-        worker.flush_and_stop(timeout=1.0)
+        worker.close(timeout=1.0)
 
     assert worker.evidence_blocked
     assert any("Could not persist model activation-phase" in error for error in logger.errors)

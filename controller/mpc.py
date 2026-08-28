@@ -100,6 +100,7 @@ class Controller(ControllerBase):
         initial_pair: OwnedMpcPair | None = None
         persistence: ModelPersistenceWorker | None = None
         activation_runtime: ActivationRuntime | None = None
+        owns_persistence = activation_persistence is None
         try:
             initial_pair = self._pair_factory.build(
                 self._pair_factory.configured(
@@ -121,6 +122,7 @@ class Controller(ControllerBase):
                 self._pair_factory,
                 initial_pair,
                 persistence,
+                owns_persistence=owns_persistence,
             )
             self._activation_runtime = activation_runtime
             self._sync_learning_configuration()
@@ -153,9 +155,9 @@ class Controller(ControllerBase):
                 except BaseException as cleanup_error:
                     cleanup_errors.append(cleanup_error)
             else:
-                if persistence is not None:
+                if persistence is not None and owns_persistence:
                     try:
-                        persistence.flush_and_stop(timeout=0.1)
+                        persistence.close(timeout=2.0)
                     except BaseException as cleanup_error:
                         cleanup_errors.append(cleanup_error)
                 if initial_pair is not None:
@@ -509,7 +511,7 @@ class Controller(ControllerBase):
         return self.active_control_pair.core.native_failure_diagnostics
 
     def close(self):
-        """Stop learning, persistence, and native owners exactly once."""
+        """Stop learning and only the persistence/native owners created here."""
         if self._closed:
             return
         self._closed = True

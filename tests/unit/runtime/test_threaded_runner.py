@@ -2005,7 +2005,14 @@ def test_threaded_public_reconfigure_transfers_queued_calibration_without_replay
     barrier = _ObservationBarrier()
     old = CalibrationCore("old")
     new = CalibrationCore("new")
-    monkeypatch.setattr(runner_module, "_build_core", lambda settings, control, logger=None: (new, "Active"))
+    monkeypatch.setattr(
+        runner_module,
+        "_build_core",
+        lambda settings, control, logger=None, model_persistence=None: (
+            new,
+            "Active",
+        ),
+    )
     runner = ThreadedControllerRunner(old, wait_for_period=barrier)
     try:
         assert barrier.first_waiting.wait(2.0)
@@ -2039,7 +2046,10 @@ def test_threaded_reconfigure_closes_replaced_core_only_after_atomic_install(mon
     monkeypatch.setattr(
         runner_module,
         "_build_core",
-        lambda settings, control, logger=None: (new, "Active"),
+        lambda settings, control, logger=None, model_persistence=None: (
+            new,
+            "Active",
+        ),
     )
     runner = ThreadedControllerRunner(old)
     try:
@@ -2064,7 +2074,10 @@ def test_threaded_reconfigure_closes_superseded_uninstalled_core(monkeypatch):
     monkeypatch.setattr(
         runner_module,
         "_build_core",
-        lambda settings, control, logger=None: (next(builds), "Active"),
+        lambda settings, control, logger=None, model_persistence=None: (
+            next(builds),
+            "Active",
+        ),
     )
     runner = ThreadedControllerRunner(active, wait_for_period=barrier)
     try:

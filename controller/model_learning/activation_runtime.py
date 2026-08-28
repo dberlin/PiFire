@@ -52,7 +52,7 @@ class _ActivationFlight:
 
 
 class ActivationRuntime:
-    """The sole owner of activation pairs, authority, receipts, and recovery."""
+    """Own activation pairs and optionally the persistence lifetime."""
 
     def __init__(
         self,
@@ -60,6 +60,7 @@ class ActivationRuntime:
         active_pair: OwnedMpcPair,
         persistence: ModelPersistenceWorker,
         *,
+        owns_persistence: bool = False,
         clock_ms: Callable[[], int] | None = None,
         receipt_timeout: float = 2.0,
     ) -> None:
@@ -73,8 +74,12 @@ class ActivationRuntime:
             raise TypeError("persistence must be a ModelPersistenceWorker")
         if not isinstance(receipt_timeout, (int, float)) or isinstance(receipt_timeout, bool) or receipt_timeout < 0:
             raise ValueError("receipt_timeout must be nonnegative")
+        if not isinstance(owns_persistence, bool):
+            raise TypeError("owns_persistence must be a bool")
         self._pair_factory = pair_factory
         self._persistence = persistence
+        self._owns_persistence = owns_persistence
+        self._persistence_close_pending = owns_persistence
         self._clock_ms = (lambda: time.time_ns() // 1_000_000) if clock_ms is None else clock_ms
         self._receipt_timeout = float(receipt_timeout)
         self._lock = threading.RLock()
@@ -923,9 +928,26 @@ class ActivationRuntime:
                 except BaseException:
                     self._retired_pairs.append(current)
 
+    def _close_owned_persistence_locked(self) -> BaseException | None:
+        if not self._persistence_close_pending:
+            return None
+        try:
+            if self._persistence.close(timeout=2.0) is not True:
+                return RuntimeError("model persistence close timed out")
+        except BaseException as error:
+            return error
+        self._persistence_close_pending = False
+        return None
+
+
     def close(self) -> None:
         with self._lock:
             if self._closed:
+                persistence_error = self._close_owned_persistence_locked()
+                if persistence_error is not None:
+                    raise RuntimeError(
+                        "could not close complete activation runtime ownership"
+                    ) from persistence_error
                 return
             aborts_durable = self._retry_pending_aborts_locked(wait_for_completion=True)
             self._closed = True
@@ -944,10 +966,9 @@ class ActivationRuntime:
             errors: list[BaseException] = []
             if not aborts_durable:
                 errors.append(RuntimeError("unresolved activation abort transactions remain"))
-            try:
-                self._persistence.flush_and_stop(timeout=0.1)
-            except BaseException as error:
-                errors.append(error)
+            persistence_error = self._close_owned_persistence_locked()
+            if persistence_error is not None:
+                errors.append(persistence_error)
             closed_ids: set[int] = set()
             self._retired_pairs.clear()
             for pair in pairs:
