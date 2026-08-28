@@ -39,6 +39,7 @@ class FakeControllerRunner:
         self._configuration_revision = 0
         self.applied = []
         self.restored = []
+        self.seeds = []
         self.activation_restores = []
         self.activation_failures = []
         self.activation_rollbacks = []
@@ -73,6 +74,10 @@ class FakeControllerRunner:
 
     def set_target(self, setpoint):
         self.target = setpoint
+
+    def seed_operating_state(self, seed):
+        self.seeds.append(seed)
+        self.calls.append(("seed", seed))
 
     def set_safety_ceiling_c(self, ceiling_c):
         self.safety_ceiling_c = ceiling_c

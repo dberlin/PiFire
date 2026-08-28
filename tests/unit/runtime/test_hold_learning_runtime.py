@@ -2264,7 +2264,7 @@ def test_publish_final_checkpoint_bounds_authoritative_retry_and_is_idempotent()
     assert not runtime.evidence_available
 
 
-def test_finish_teardown_orders_retire_runner_finish_barrier_trace_close_once() -> None:
+def test_finish_teardown_orders_retire_barrier_trace_close_runner_finish_once() -> None:
     events: list[object] = []
     runner = _LifecycleRunner(events=events)
     persistence = _Persistence(events=events)
@@ -2282,9 +2282,9 @@ def test_finish_teardown_orders_retire_runner_finish_barrier_trace_close_once() 
 
     assert events == [
         ("runner:retire", 4),
-        "runner:finish",
         "persistence:barrier",
         "trace:close",
+        "runner:finish",
     ]
     assert runner.retirements == [4]
     assert persistence.barrier_calls == 1

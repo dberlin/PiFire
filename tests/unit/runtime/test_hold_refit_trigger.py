@@ -598,7 +598,10 @@ def test_final_checkpoint_failure_is_terminal_and_is_not_retried(hold_cycle):
     ]
 
 
-def test_production_teardown_retries_only_authoritative_checkpoint_before_flush_and_close(hold_cycle, monkeypatch):
+def test_production_teardown_retries_only_authoritative_checkpoint_before_barrier_and_runner_close(
+    hold_cycle,
+    monkeypatch,
+):
     import controller.runtime.modes.hold as hold_module
 
     runner = _FinalLifecycleRunner(
@@ -623,8 +626,9 @@ def test_production_teardown_retries_only_authoritative_checkpoint_before_flush_
         def submit_evidence_batch(self, _records):
             raise AssertionError("evidence submission was not expected")
 
-        def flush_and_stop(self):
-            runner.lifecycle.append("flush")
+        def barrier(self, timeout=2.0):
+            del timeout
+            runner.lifecycle.append("barrier")
             return True
 
     queue = _Queue()
@@ -642,8 +646,8 @@ def test_production_teardown_retries_only_authoritative_checkpoint_before_flush_
         "checkpoint-failure",
     ]
     assert runner.final_outcomes[-1] is TeardownRefitOutcome.CHECKPOINT_FAILURE
-    assert runner.lifecycle.index("checkpoint:checkpoint-failure") < runner.lifecycle.index("flush")
-    assert runner.lifecycle.index("flush") < runner.lifecycle.index("close")
+    assert runner.lifecycle.index("checkpoint:checkpoint-failure") < runner.lifecycle.index("barrier")
+    assert runner.lifecycle.index("barrier") < runner.lifecycle.index("close")
 
 
 def test_finalize_exception_never_queues_a_stale_snapshot(
@@ -668,7 +672,7 @@ def test_finalize_exception_never_queues_a_stale_snapshot(
             True,
         )[1],
         submit_evidence_batch=lambda _records: None,
-        flush_and_stop=lambda: True,
+        barrier=lambda **_kwargs: True,
     )
     monkeypatch.setattr(
         hold_module,

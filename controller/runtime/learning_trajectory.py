@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import math
+import threading
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
+from functools import wraps
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 from uuid import uuid4
 
 from common.learning_trajectory import (
@@ -17,18 +19,30 @@ from common.learning_trajectory import (
     LearningTrajectoryFrame,
     LearningTrajectorySegment,
     TrajectoryBreakReason,
+    canonical_trajectory_digest,
 )
 from common.persistence.learning_trajectory import SegmentCursor
 from controller.runtime.actuation_delivery import DeliveredActuationIntegral
 
 if TYPE_CHECKING:
     from controller.model_learning.contracts import FrameObservation
+    from controller.mpc_model import EstimatorSeed
     from controller.runtime.model_persistence import TrajectoryAppendBatch
 
 
 _FRAME_MS = 20_000
 _MAX_PRE_ROLL_PER_SEGMENT = 180
+_MAX_REPLAY_INTERVALS = _MAX_PRE_ROLL_PER_SEGMENT + 1
 _DEFAULT_SAMPLE_AGE_LIMIT_MS = 51
+
+
+def _replay_synchronized(method):
+    @wraps(method)
+    def locked(runtime, *args, **kwargs):
+        with runtime._replay_lock:
+            return method(runtime, *args, **kwargs)
+
+    return locked
 _DEFAULT_TIMEOUT = 2.0
 
 def _append_batch(**values: object) -> TrajectoryAppendBatch:
@@ -234,11 +248,251 @@ class LearningTrajectoryRuntime:
         default=None,
     )
     _reset_boundary_open: bool = field(init=False, default=False)
+    _replay_frames: list[LearningTrajectoryFrame] = field(
+        init=False,
+        default_factory=list,
+    )
+    _replay_mode: ModeEntered | None = field(init=False, default=None)
+    _replay_segment_id: str | None = field(init=False, default=None)
+    _replay_uncertain: bool = field(init=False, default=False)
+    _replay_lock: object = field(
+        init=False,
+        default_factory=threading.RLock,
+        repr=False,
+    )
 
     def __post_init__(self) -> None:
         if isinstance(self.sample_age_limit_ms, bool) or self.sample_age_limit_ms < 0:
             raise ValueError("sample age limit must be a non-negative integer")
 
+    def _discard_replay_suffix(self, *, uncertain: bool = False) -> None:
+        with self._replay_lock:
+            self._replay_frames.clear()
+            self._replay_mode = None
+            self._replay_segment_id = None
+            self._replay_uncertain = uncertain
+
+    def _retain_replay_frame(self, frame: LearningTrajectoryFrame) -> None:
+        with self._replay_lock:
+            if frame.effective_mode not in {"Smoke", "Hold"}:
+                return
+            if self._replay_mode is None:
+                self._replay_mode = self._mode
+                self._replay_segment_id = self._segment_id
+            self._replay_frames.append(frame)
+            if len(self._replay_frames) > _MAX_REPLAY_INTERVALS:
+                del self._replay_frames[:-_MAX_REPLAY_INTERVALS]
+            self._replay_uncertain = False
+
+    def _seed_digest(
+        self,
+        *,
+        theta: float,
+        n_delay: int,
+        selected_count: int,
+        status: str,
+    ) -> str:
+        mode = self._replay_mode
+        identity = (
+            {}
+            if mode is None
+            else {
+                "cadence": mode.cadence_digest,
+                "model_structure": mode.model_structure_digest,
+                "held_physics": mode.held_physics_digest,
+                "delay_input_mapping": mode.delay_input_mapping_digest,
+                "actuation_mapping": mode.actuation_mapping_digest,
+            }
+        )
+        return canonical_trajectory_digest(
+            {
+                "schema": "mpc-estimator-seed-v1",
+                "segment_id": self._replay_segment_id or "no-compatible-pre-roll",
+                "candidate": {"theta": float(theta), "n_delay": n_delay},
+                "status": status,
+                "selected_suffix_count": selected_count,
+                "identity": identity,
+                "prefix": [
+                    {
+                        "sequence": frame.sequence,
+                        "monotonic_start_ms": frame.monotonic_start_ms,
+                        "monotonic_end_ms": frame.monotonic_end_ms,
+                        "normalized_combustion_load": frame.normalized_combustion_load,
+                    }
+                    for frame in self._replay_frames
+                ],
+            }
+        )
+
+    @_replay_synchronized
+    def estimator_seed_anchor(self) -> tuple[int, float] | None:
+        if self._mode is None or self._mode.effective_mode != "Hold":
+            return None
+        if self._replay_frames and self._replay_frames[-1].effective_mode == "Hold":
+            frame = self._replay_frames[-1]
+            return frame.monotonic_end_ms, frame.chamber_temperature_c
+        if self._hold_entry is None:
+            return None
+        return self._hold_entry.monotonic_ms, self._hold_entry.chamber_temperature_c
+
+    @_replay_synchronized
+    def seed_for(
+        self,
+        theta: float,
+        n_delay: int,
+        at_ms: int,
+        measured_temp_c: float,
+    ) -> EstimatorSeed:
+        """Return the candidate-specific replay suffix anchored by the Hold sample."""
+
+        from controller.mpc_model import EstimatorSeed, replay_delay_chain
+
+        if isinstance(n_delay, bool) or not isinstance(n_delay, int):
+            raise TypeError("delay-state count must be an integer")
+        if n_delay < 0:
+            raise ValueError("delay-state count must be nonnegative")
+        if isinstance(theta, bool) or not isinstance(theta, (int, float)):
+            raise TypeError("delay-chain theta must be numeric")
+        theta_value = float(theta)
+        if n_delay > 0 and (not math.isfinite(theta_value) or theta_value <= 0.0):
+            raise ValueError("delay-chain theta must be positive and finite")
+        if isinstance(at_ms, bool) or not isinstance(at_ms, int):
+            raise TypeError("estimator seed anchor must be an integer")
+        if at_ms < 0:
+            raise ValueError("estimator seed anchor must be nonnegative")
+        measured = float(measured_temp_c)
+        if not math.isfinite(measured):
+            raise ValueError("estimator seed chamber temperature must be finite")
+        required = (
+            0
+            if n_delay == 0
+            else min(
+                _MAX_PRE_ROLL_PER_SEGMENT,
+                math.ceil((3.0 * theta_value) / (_FRAME_MS / 1_000)),
+            )
+        )
+        segment_id = self._replay_segment_id or "no-compatible-pre-roll"
+        anchor = self.estimator_seed_anchor()
+        anchor_exact = anchor is not None and anchor[0] == at_ms
+        if anchor_exact:
+            measured = anchor[1]
+        replay_compatible = (
+            anchor_exact
+            and self._replay_mode is not None
+            and self._compatible(self._replay_mode, self._mode)
+        )
+
+        if self._replay_uncertain or (
+            self._replay_frames and not replay_compatible
+        ):
+            status: Literal["uncertain"] = "uncertain"
+            return EstimatorSeed(
+                delay_states=(),
+                chamber_temperature_c=measured,
+                disturbance=0.0,
+                segment_id=segment_id,
+                pre_roll_digest=self._seed_digest(
+                    theta=theta_value,
+                    n_delay=n_delay,
+                    selected_count=0,
+                    status=status,
+                ),
+                pre_roll_frame_count=0,
+                required_frame_count=required,
+                status=status,
+            )
+        if not anchor_exact or (n_delay > 0 and not self._replay_frames):
+            status_absent: Literal["absent"] = "absent"
+            return EstimatorSeed(
+                delay_states=(),
+                chamber_temperature_c=measured,
+                disturbance=0.0,
+                segment_id=segment_id,
+                pre_roll_digest=self._seed_digest(
+                    theta=theta_value,
+                    n_delay=n_delay,
+                    selected_count=0,
+                    status=status_absent,
+                ),
+                pre_roll_frame_count=0,
+                required_frame_count=required,
+                status=status_absent,
+            )
+
+        if n_delay == 0:
+            selected: tuple[LearningTrajectoryFrame, ...] = ()
+            replayed_ms = 0
+        else:
+            target_ms = required * _FRAME_MS
+            suffix: list[LearningTrajectoryFrame] = []
+            replayed_ms = 0
+            for frame in reversed(self._replay_frames):
+                suffix.append(frame)
+                replayed_ms += frame.monotonic_end_ms - frame.monotonic_start_ms
+                if replayed_ms >= target_ms:
+                    break
+            selected = tuple(reversed(suffix))
+            expected_end_ms = (
+                at_ms
+                if selected[-1].effective_mode == "Hold"
+                else self._mode.monotonic_ms
+            )
+            if selected[-1].monotonic_end_ms != expected_end_ms:
+                status_uncertain: Literal["uncertain"] = "uncertain"
+                return EstimatorSeed(
+                    delay_states=(),
+                    chamber_temperature_c=measured,
+                    disturbance=0.0,
+                    segment_id=segment_id,
+                    pre_roll_digest=self._seed_digest(
+                        theta=theta_value,
+                        n_delay=n_delay,
+                        selected_count=0,
+                        status=status_uncertain,
+                    ),
+                    pre_roll_frame_count=0,
+                    required_frame_count=required,
+                    status=status_uncertain,
+                )
+        selected_count = len(selected)
+        remaining_frames = (
+            0
+            if required == 0
+            else math.ceil(
+                max(0, required * _FRAME_MS - replayed_ms) / _FRAME_MS
+            )
+        )
+        reported_frame_count = required - remaining_frames
+        seed_status: Literal["exact", "short"] = (
+            "exact" if remaining_frames == 0 else "short"
+        )
+        delay_states = replay_delay_chain(
+            selected,
+            theta=theta_value,
+            n_delay=n_delay,
+            initial_load=(
+                0.0
+                if not selected
+                else selected[0].normalized_combustion_load
+            ),
+        )
+        return EstimatorSeed(
+            delay_states=delay_states,
+            chamber_temperature_c=measured,
+            disturbance=0.0,
+            segment_id=segment_id,
+            pre_roll_digest=self._seed_digest(
+                theta=theta_value,
+                n_delay=n_delay,
+                selected_count=selected_count,
+                status=seed_status,
+            ),
+            pre_roll_frame_count=reported_frame_count,
+            required_frame_count=required,
+            status=seed_status,
+        )
+
+    @_replay_synchronized
     def mode_entered(self, event: ModeEntered) -> None:
         if self._closed:
             return
@@ -252,17 +506,27 @@ class LearningTrajectoryRuntime:
                     event.wall_ms,
                     replacement=event,
                 )
-            elif not (
-                previous.effective_mode == "Smoke"
-                and event.effective_mode == "Hold"
-                and self._compatible(previous, event)
-            ):
+                self._discard_replay_suffix()
+            elif previous.effective_mode == "Smoke" and event.effective_mode == "Hold":
+                if not self._compatible(previous, event):
+                    physical_pre_roll = bool(self._replay_frames)
+                    self._split_at(
+                        TrajectoryBreakReason.STRUCTURE_CHANGED,
+                        event.monotonic_ms,
+                        event.wall_ms,
+                        replacement=event,
+                    )
+                    self._discard_replay_suffix(uncertain=physical_pre_roll)
+            else:
                 self._split_at(
                     TrajectoryBreakReason.STRUCTURE_CHANGED,
                     event.monotonic_ms,
                     event.wall_ms,
                     replacement=event,
                 )
+                self._discard_replay_suffix()
+        elif previous is None and event.effective_mode == "Smoke":
+            self._discard_replay_suffix()
         self._mode = event
         self._enabled = True
         self._gap = False
@@ -276,6 +540,7 @@ class LearningTrajectoryRuntime:
         self._samples.clear()
         self._last_sample_ms = None
 
+    @_replay_synchronized
     def mode_exited(self, event: ModeExited) -> None:
         if self._closed:
             return
@@ -318,6 +583,7 @@ class LearningTrajectoryRuntime:
             self._last_break_reason = reason
         self.barrier()
 
+    @_replay_synchronized
     def observe_temperature(self, sample: ThermalSample) -> None:
         if self._closed or not self._enabled or self._mode is None:
             return
@@ -351,7 +617,13 @@ class LearningTrajectoryRuntime:
         if self._mode.effective_mode == "Smoke":
             self._close_due_smoke_frames(sample.monotonic_ms)
 
-    def observe_hold_frame(self, observation: FrameObservation) -> None:
+    @_replay_synchronized
+    def observe_hold_frame(
+        self,
+        observation: FrameObservation,
+        *,
+        replay_only: bool = False,
+    ) -> None:
         if self._closed or not self._enabled or self._mode is None:
             return
         if self._mode.effective_mode != "Hold":
@@ -444,9 +716,15 @@ class LearningTrajectoryRuntime:
             self._finalize(TrajectoryBreakReason.RECORDER_GAP)
             self._last_break_reason = TrajectoryBreakReason.RECORDER_GAP
             return
-        if self._submit_frame(frame, scored=True, hold_entry=self._hold_entry):
+        if replay_only or self._submit_frame(
+            frame,
+            scored=True,
+            hold_entry=self._hold_entry,
+        ):
+            self._retain_replay_frame(frame)
             self._seen_hold_frames.add(identity)
 
+    @_replay_synchronized
     def intervention(self, boundary: TrajectoryBoundary) -> None:
         signature = (
             boundary.reason,
@@ -488,6 +766,7 @@ class LearningTrajectoryRuntime:
             replacement=boundary.replacement_mode,
         )
 
+    @_replay_synchronized
     def configuration_changed(self, boundary: TrajectoryBoundary) -> None:
         self._split_at(
             boundary.reason,
@@ -668,6 +947,7 @@ class LearningTrajectoryRuntime:
                 or integral.fan_certainty is not FrameDeliveryCertainty.EXACT
             ):
                 self._finalize(TrajectoryBreakReason.ACTUATION_UNKNOWN)
+                self._discard_replay_suffix(uncertain=True)
                 self._last_break_reason = TrajectoryBreakReason.ACTUATION_UNKNOWN
                 self._reset_capture_at(
                     end_ms,
@@ -714,6 +994,7 @@ class LearningTrajectoryRuntime:
             or integral.fan_certainty is not FrameDeliveryCertainty.EXACT
         ):
             self._last_break_reason = TrajectoryBreakReason.ACTUATION_UNKNOWN
+            self._discard_replay_suffix(uncertain=True)
             return False
         frame = self._frame_from_integral(
             start_ms=start_ms,
@@ -840,6 +1121,8 @@ class LearningTrajectoryRuntime:
             self._pending_break = None
             self._reset_boundary_open = False
             self._next_sequence = 1
+            if not scored:
+                self._retain_replay_frame(frame)
             return True
         cursor = self._cursor
         if cursor is None:
@@ -862,6 +1145,8 @@ class LearningTrajectoryRuntime:
             return False
         self._reset_boundary_open = False
         self._next_sequence += 1
+        if not scored:
+            self._retain_replay_frame(frame)
         return True
 
     def _segment_from_first_frame(
@@ -1010,6 +1295,9 @@ class LearningTrajectoryRuntime:
             self._draining_boundary = False
 
     def _finalize(self, reason: TrajectoryBreakReason) -> None:
+        self._discard_replay_suffix(
+            uncertain=reason is TrajectoryBreakReason.ACTUATION_UNKNOWN
+        )
         if self._segment_id is None:
             pending_break = self._pending_break
             if pending_break is not None:
@@ -1057,6 +1345,7 @@ class LearningTrajectoryRuntime:
         *,
         replacement: ModeEntered | None,
     ) -> None:
+        self._discard_replay_suffix()
         if self._segment_id is not None and self._cursor is not None:
             self._pending_break = (self._cursor, reason)
         self._lineage_token += 1
@@ -1140,6 +1429,7 @@ class LearningTrajectoryRuntime:
             self._smoke_frame_start_wall_ms = None
 
     def _persistence_failed(self, error: str) -> None:
+        self._discard_replay_suffix()
         self._enabled = False
         self._gap = True
         self._last_break_reason = TrajectoryBreakReason.RECORDER_GAP

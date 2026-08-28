@@ -98,6 +98,8 @@ class ActivationRuntime:
         self._events: deque[ModelEvidenceRecord] = deque()
         self._terminated_reason: str | None = None
         self._role_generation = active_pair.descriptor.role_generation
+        self._estimator_seed_source: Callable[[float, int], object] | None = None
+        self._last_seed_refresh_status: str | None = None
         self._closed = False
 
     @property
@@ -155,6 +157,39 @@ class ActivationRuntime:
     def terminated_reason(self) -> str | None:
         with self._lock:
             return self._terminated_reason
+
+    def bind_estimator_seed_source(
+        self,
+        source: Callable[[float, int], object] | None,
+    ) -> None:
+        if source is not None and not callable(source):
+            raise TypeError("estimator seed source must be callable")
+        with self._lock:
+            self._estimator_seed_source = source
+
+    def _refresh_pair_seed(self, pair: OwnedMpcPair) -> bool:
+        source = self._estimator_seed_source
+        if source is None:
+            status = getattr(pair.core, "estimator_seed_status", None)
+            self._last_seed_refresh_status = status
+            return status == "exact"
+        try:
+            theta, n_delay = pair.core.estimator_seed_requirements()
+            pair.core.seed_from_trajectory(source(theta, n_delay))
+        except Exception:
+            self._last_seed_refresh_status = "uncertain"
+            return False
+        self._last_seed_refresh_status = getattr(
+            pair.core,
+            "estimator_seed_status",
+            None,
+        )
+        return self._last_seed_refresh_status is not None
+    @property
+    def last_seed_refresh_status(self) -> str | None:
+        with self._lock:
+            return self._last_seed_refresh_status
+
 
     @staticmethod
     def _receipt_is_durable(receipt: DurableActivationReceipt) -> bool:
@@ -518,6 +553,17 @@ class ActivationRuntime:
                 return False
             if self._inert_record is not None:
                 return self._inert_record.transaction_id == record.transaction_id
+            if getattr(pair.core, "estimator_seed_status", None) != "exact":
+                source = self._estimator_seed_source
+                if source is None:
+                    return False
+                try:
+                    theta, n_delay = pair.core.estimator_seed_requirements()
+                    pair.core.seed_from_trajectory(source(theta, n_delay))
+                except Exception:
+                    return False
+                if getattr(pair.core, "estimator_seed_status", None) != "exact":
+                    return False
             displaced = self._rollback_pair
             if displaced is not None:
                 try:
@@ -526,7 +572,9 @@ class ActivationRuntime:
                     return False
             incumbent = self._active_pair
             try:
-                pair.core.adopt_operating_state(incumbent.core.capture_operating_state())
+                pair.core.adopt_model_independent_state(
+                    incumbent.core.capture_model_independent_state()
+                )
             except Exception:
                 return False
             pair.revoke_output()
@@ -580,8 +628,12 @@ class ActivationRuntime:
             ):
                 return False
             try:
-                rollback.core.adopt_operating_state(pair.core.capture_operating_state())
+                rollback.core.adopt_model_independent_state(
+                    pair.core.capture_model_independent_state()
+                )
             except Exception:
+                return False
+            if not self._refresh_pair_seed(rollback):
                 return False
             pair.revoke_output()
             try:
@@ -665,8 +717,12 @@ class ActivationRuntime:
             failed = self._active_pair
             active_record = self._active_record
             try:
-                rollback.core.adopt_operating_state(failed.core.capture_operating_state())
+                rollback.core.adopt_model_independent_state(
+                    failed.core.capture_model_independent_state()
+                )
             except Exception:
+                return False
+            if not self._refresh_pair_seed(rollback):
                 return False
             failed.revoke_output()
             try:
@@ -816,7 +872,9 @@ class ActivationRuntime:
                         pair.close()
                 return False
             try:
-                restored.core.adopt_operating_state(self._active_pair.core.capture_operating_state())
+                restored.core.adopt_model_independent_state(
+                    self._active_pair.core.capture_model_independent_state()
+                )
             except Exception:
                 restored.close()
                 if rollback is not None:
@@ -861,7 +919,9 @@ class ActivationRuntime:
             current = self._active_pair
             if pair is current:
                 raise ValueError("replacement pair must be a distinct owner")
-            pair.core.adopt_operating_state(current.core.capture_operating_state())
+            pair.core.adopt_model_independent_state(
+                current.core.capture_model_independent_state()
+            )
             pair.revoke_output()
             displaced_rollback = self._rollback_pair
             pending = self._pending

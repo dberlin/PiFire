@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import copy
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -44,6 +44,7 @@ from controller.runtime.model_persistence import (
 if TYPE_CHECKING:
     from controller.acados import SolverDiagnostics
     from controller.mpc_calibration import CalibrationCommand, CompletedCalibrationResult
+    from controller.mpc_model import EstimatorSeed
 
 
 class Controller(ControllerBase):
@@ -198,7 +199,9 @@ class Controller(ControllerBase):
 
     def _synchronize_active_core(self) -> None:
         self._sync_learning_configuration()
-        self.active_control_pair.core.set_target(self.set_point)
+        core = self.active_control_pair.core
+        if core.estimator_seed_status is not None:
+            core.set_target(self.set_point)
 
     def _synchronize_activation_transition(self, *, exact: bool = False) -> None:
         self._synchronize_active_core()
@@ -218,6 +221,18 @@ class Controller(ControllerBase):
         generation_changed = runtime.role_generation != previous_generation
         pair_changed = runtime.active_pair is not previous_pair
         return generation_changed or (pair_change_is_commit and pair_changed)
+
+    def estimator_seed_requirements(self) -> tuple[float, int]:
+        return self.active_control_pair.core.estimator_seed_requirements()
+
+    def seed_from_trajectory(self, seed: EstimatorSeed) -> None:
+        self.active_control_pair.core.seed_from_trajectory(seed)
+
+    def bind_estimator_seed_source(
+        self,
+        source: Callable[[float, int], object] | None,
+    ) -> None:
+        self._activation_runtime.bind_estimator_seed_source(source)
 
     def set_target(self, set_point):
         self.set_point = set_point
@@ -437,6 +452,7 @@ class Controller(ControllerBase):
                 "role_generation": active_pair.descriptor.role_generation,
                 "failed_digest": None,
                 "failed_generation": None,
+                "seed_refresh_status": self._activation_runtime.last_seed_refresh_status,
                 "last_safe_command": finite_float(core.last_combustion_load),
                 "fallback_kind": (_snapshot.GREY_BOX_KIND if terminated_reason is not None else None),
                 "fallback_reason": terminated_reason,

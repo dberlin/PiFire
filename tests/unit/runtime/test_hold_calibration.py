@@ -326,7 +326,8 @@ def test_active_zero_probe_dwell_does_not_claim_completed_probe_evidence(hold_cy
         def submit_checkpoint(self, name, snapshot):
             return True
 
-        def flush_and_stop(self):
+        def barrier(self, timeout=2.0):
+            del timeout
             return True
 
     class _SilentLogger:
@@ -1294,7 +1295,7 @@ def test_cancelled_frame_persists_matching_raw_and_compact_evidence_once(hold_cy
     hold.state.lid.open_detected = True
     hold.on_tick(23.0, 200.0, hold.grill.get_output_status())
     hold.on_tick(25.0, 200.0, hold.grill.get_output_status())
-    assert workers[0].flush_and_stop(timeout=1.0)
+    assert workers[0].barrier(timeout=1.0)
 
     raw = [record.payload for record in recorder.records if record.event_kind is TraceEventKind.MODEL_OBSERVATION]
     compact = [record.payload for record in persisted if record.kind is EvidenceKind.CALIBRATION_SUMMARY]
@@ -1391,7 +1392,7 @@ def test_current_stale_probe_result_does_not_claim_prior_interval_evidence(
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
     hold.on_tick(25.0, 200.0, hold.grill.get_output_status())
-    assert workers[0].flush_and_stop(timeout=1.0)
+    assert workers[0].barrier(timeout=1.0)
 
     current_observations = [observation for observation in runner.observations if observation.result_revision == 2]
     assert current_observations == []
@@ -1499,7 +1500,7 @@ def test_hold_persists_measured_completed_stages_on_coast_evidence(hold_cycle, m
     assert runner.observations
     assert runner.observations[-1].calibration_stage == "coast"
     assert runner.observations[-1].calibration_command_revision == 1
-    assert workers[0].flush_and_stop(timeout=1.0)
+    assert workers[0].barrier(timeout=1.0)
 
     coast = [
         record.payload

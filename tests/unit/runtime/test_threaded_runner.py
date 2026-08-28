@@ -809,6 +809,97 @@ def test_threaded_runner_set_target_and_reconfigure_applied_by_thread():
         r.stop()
 
 
+def test_failed_exact_seed_stays_closed_until_acknowledged_cold_seed_succeeds():
+    class SeedCore(FakeCore):
+        def __init__(self):
+            super().__init__()
+            self.seed_statuses = []
+
+        def seed_from_trajectory(self, seed):
+            self.seed_statuses.append(seed.status)
+            if seed.status == "exact":
+                raise ValueError("incompatible exact seed")
+
+    core = SeedCore()
+    runner = ThreadedControllerRunner(core)
+    try:
+        with pytest.raises(RuntimeError, match="incompatible exact seed"):
+            runner.seed_operating_state(SimpleNamespace(status="exact"))
+        runner.submit(70.0)
+        assert not core.updated.wait(0.05)
+
+        runner.seed_operating_state(SimpleNamespace(status="absent"))
+        assert core.updated.wait(2.0)
+        assert core.seed_statuses == ["exact", "absent"]
+    finally:
+        runner.stop()
+
+
+def test_hold_waits_for_real_threaded_completed_first_solve(
+    hold_cycle,
+    monkeypatch,
+):
+    class BlockingFirstSolveCore(FakeCore):
+        def __init__(self):
+            super().__init__(period=10.0)
+            self.solve_entered = threading.Event()
+            self.solve_release = threading.Event()
+            self.activation_events = []
+
+        def estimator_seed_requirements(self):
+            return 60.0, 8
+
+        def seed_from_trajectory(self, _seed):
+            return None
+
+        def set_safety_ceiling_c(self, _ceiling_c):
+            return None
+
+        def request_calibration(self, _command):
+            return None
+
+        def cancel_calibration(self, _reason):
+            return None
+
+        def update(self, temp):
+            self.solve_entered.set()
+            assert self.solve_release.wait(2.0)
+            return super().update(temp)
+
+    core = BlockingFirstSolveCore()
+    runner = ThreadedControllerRunner(
+        core,
+        controller_type=ControllerType.MPC,
+    )
+    reported = []
+    set_output = runner.set_output
+
+    def record_output(applied):
+        reported.append(applied)
+        set_output(applied)
+
+    monkeypatch.setattr(runner, "set_output", record_output)
+    hold = hold_cycle(runner, controller="mpc")
+    try:
+        hold.setup()
+        hold.on_tick(1.0, 110.0, hold.grill.get_output_status())
+
+        assert core.solve_entered.wait(2.0)
+        assert runner.latest().revision == 0
+        assert hold._first_solve_pending
+        assert reported == []
+
+        core.solve_release.set()
+        assert _wait_for(lambda: runner.latest().revision >= 1)
+        hold.on_tick(2.0, 110.0, hold.grill.get_output_status())
+
+        assert not hold._first_solve_pending
+        assert reported[0].source is OutputSource.SEED
+    finally:
+        core.solve_release.set()
+        hold.teardown(110.0)
+
+
 def test_threaded_runner_never_exposes_core_internals_before_first_result():
     core = FakeCore()
     r = ThreadedControllerRunner(core)

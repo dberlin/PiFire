@@ -108,8 +108,16 @@
 *****************************************
 """
 
+from dataclasses import dataclass
+from typing import Literal
+
 import numpy as np
 from scipy.linalg import expm
+
+from common.learning_trajectory import (
+    FrameDeliveryCertainty,
+    LearningTrajectoryFrame,
+)
 
 # Runtime estimators depend only on NumPy/SciPy. Native solver generation owns
 # CasADi and acados-template in the isolated codegen dependency group.
@@ -127,6 +135,62 @@ _KELVIN = 273.15
 #: Version 3 is interpreted only by the one-shot startup migration.  Runtime
 #: restore and every current writer accept/emit version 4 exclusively.
 MODEL_SCHEMA = 4
+
+
+@dataclass(frozen=True, slots=True)
+class EstimatorSeed:
+    """Immutable trajectory-derived state used before an MPC estimator first runs."""
+
+    delay_states: tuple[float, ...]
+    chamber_temperature_c: float
+    disturbance: float
+    segment_id: str
+    pre_roll_digest: str
+    pre_roll_frame_count: int
+    required_frame_count: int
+    status: Literal["exact", "short", "absent", "uncertain"]
+
+    def __post_init__(self) -> None:
+        states = tuple(float(value) for value in self.delay_states)
+        if not all(np.isfinite(value) and 0.0 <= value <= 1.0 for value in states):
+            raise ValueError("estimator seed delay states must be finite and within [0, 1]")
+        object.__setattr__(self, "delay_states", states)
+        chamber = float(self.chamber_temperature_c)
+        disturbance = float(self.disturbance)
+        if not np.isfinite(chamber):
+            raise ValueError("estimator seed chamber temperature must be finite")
+        if not np.isfinite(disturbance) or disturbance != 0.0:
+            raise ValueError("trajectory estimator seed disturbance must be zero")
+        object.__setattr__(self, "chamber_temperature_c", chamber)
+        object.__setattr__(self, "disturbance", disturbance)
+        if not isinstance(self.segment_id, str) or not self.segment_id:
+            raise ValueError("estimator seed segment id must be non-blank")
+        if (
+            not isinstance(self.pre_roll_digest, str)
+            or len(self.pre_roll_digest) != 64
+            or any(character not in "0123456789abcdef" for character in self.pre_roll_digest)
+        ):
+            raise ValueError("estimator seed pre-roll digest must be lowercase SHA-256")
+        counts = (self.pre_roll_frame_count, self.required_frame_count)
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in counts
+        ):
+            raise ValueError("estimator seed frame counts must be nonnegative integers")
+        if self.pre_roll_frame_count > self.required_frame_count:
+            raise ValueError("estimator seed cannot contain more than its required suffix")
+        if self.status not in {"exact", "short", "absent", "uncertain"}:
+            raise ValueError("unsupported estimator seed status")
+        if self.status == "exact" and self.pre_roll_frame_count != self.required_frame_count:
+            raise ValueError("exact estimator seed must contain its complete suffix")
+        if self.status == "short" and not (
+            0 < self.pre_roll_frame_count < self.required_frame_count
+        ):
+            raise ValueError("short estimator seed must contain an incomplete suffix")
+        if self.status in {"absent", "uncertain"} and (
+            self.pre_roll_frame_count != 0 or states
+        ):
+            raise ValueError("absent or uncertain estimator seed cannot fabricate delay state")
 
 
 def _rad_loss(T_c, T_amb, sigma):
@@ -256,6 +320,58 @@ def _erlang_coefficients(n, a):
     for m in range(1, n):
         coef[:, m] = coef[:, m - 1] * a / m
     return coef
+
+
+def replay_delay_chain(
+    intervals: tuple[LearningTrajectoryFrame, ...],
+    *,
+    theta: float,
+    n_delay: int,
+    initial_load: float,
+) -> tuple[float, ...]:
+    """Replay exact delivered load through an Erlang chain without integration."""
+
+    initial = _normalized_load(initial_load)
+    if isinstance(n_delay, bool) or not isinstance(n_delay, int) or n_delay < 0:
+        raise ValueError("delay-state count must be a nonnegative integer")
+    if n_delay == 0:
+        return ()
+    if (
+        isinstance(theta, bool)
+        or not isinstance(theta, (int, float))
+        or not np.isfinite(float(theta))
+        or float(theta) <= 0.0
+    ):
+        raise ValueError("delay-chain theta must be positive and finite")
+
+    states = np.full(n_delay, initial, dtype=float)
+    stage_rate = n_delay / float(theta)
+    previous_end_ms: int | None = None
+    for frame in intervals:
+        if not isinstance(frame, LearningTrajectoryFrame):
+            raise TypeError("delay replay intervals must be LearningTrajectoryFrame values")
+        start_ms = frame.monotonic_start_ms
+        end_ms = frame.monotonic_end_ms
+        if (
+            isinstance(start_ms, bool)
+            or isinstance(end_ms, bool)
+            or not isinstance(start_ms, int)
+            or not isinstance(end_ms, int)
+            or end_ms <= start_ms
+        ):
+            raise ValueError("delay replay intervals must have positive chronology")
+        if previous_end_ms is not None and start_ms < previous_end_ms:
+            raise ValueError("delay replay intervals must not overlap or reverse")
+        if frame.auger_delivery_certainty is not FrameDeliveryCertainty.EXACT:
+            raise ValueError("delay replay requires exact auger delivery")
+        load = _normalized_load(frame.normalized_combustion_load)
+        coefficients = _erlang_coefficients(
+            n_delay,
+            np.asarray([stage_rate * ((end_ms - start_ms) / 1_000)], dtype=float),
+        )[0]
+        states = load + np.convolve(coefficients, states - load)[:n_delay]
+        previous_end_ms = end_ms
+    return tuple(float(value) for value in states)
 
 
 def simulate_grey_box(

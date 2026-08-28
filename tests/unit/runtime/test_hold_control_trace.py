@@ -902,10 +902,28 @@ def test_reconfigure_finishes_the_old_pid_session_before_opening_coherent_mpc_se
     assert new_session_events[0].payload.model_revision == 8
     assert new_session_events[0].payload.model_provenance == "restore_submitted"
     assert new_session_events[1].payload.event.value == "restore"
-    assert not any(
-        record.event_kind is TraceEventKind.APPLIED_OUTPUT and record.payload.result_revision == 0
+    seed_records = [
+        record
         for record in new_session_events
+        if record.event_kind is TraceEventKind.APPLIED_OUTPUT
+        and record.payload.result_revision == 0
+    ]
+    assert len(seed_records) == 1
+    seed_record = seed_records[0]
+    assert seed_record.payload.output_source is OutputSource.SEED
+    assert seed_record.payload.sample_complete is True
+    result_two = next(
+        record
+        for record in new_session_events
+        if record.event_kind is TraceEventKind.CONTROL_UPDATE
+        and record.payload.result_revision == 2
     )
+    assert new_session_events.index(result_two) < new_session_events.index(seed_record)
+    old_session_events = [
+        record for record in recorder.records if record.session_id == old_session_id
+    ]
+    assert validate_records(old_session_events).valid
+    assert validate_records(new_session_events).valid
     assert (
         next(
             record
@@ -1347,9 +1365,23 @@ def test_base_manual_auger_on_reasserts_manual_output_after_framed_reset(hold_cy
     seeds = [
         record.payload
         for record in recorder.records
-        if record.event_kind is TraceEventKind.APPLIED_OUTPUT and record.payload.output_source is OutputSource.SEED
+        if record.event_kind is TraceEventKind.APPLIED_OUTPUT
+        and record.payload.output_source is OutputSource.SEED
     ]
-    assert len(seeds) == 1 and seeds[0].sample_complete is True
+    assert seeds == []
+    manual = [
+        record.payload
+        for record in recorder.records
+        if record.event_kind is TraceEventKind.APPLIED_OUTPUT
+        and record.payload.output_source is OutputSource.MANUAL_OVERRIDE
+    ]
+    assert len(manual) == 1 and manual[0].sample_complete is True
+    assert manual[0].result_revision == 1
+    assert (manual[0].interval_start_ms, manual[0].interval_end_ms) == (
+        2_000,
+        3_000,
+    )
+    assert _trace(mode).applied_state.output_source is OutputSource.MANUAL_OVERRIDE
     assert validate_records(recorder.records).valid
 
 
@@ -1670,8 +1702,10 @@ def test_threaded_stop_timeout_rotates_reserved_generation_gaps_and_fences_late_
             self.batches.append(records)
             return EvidenceSubmission(accepted=True)
 
-        def flush_and_stop(self):
+        def barrier(self, timeout=2.0):
+            del timeout
             self.stopped = True
+            return True
 
     from controller.runtime.logic.pulse import PulseFrameResult
 

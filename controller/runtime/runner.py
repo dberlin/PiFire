@@ -60,6 +60,7 @@ if TYPE_CHECKING:
     from controller.model_learning.calibration import CalibrationDecision
     from controller.model_learning.contracts import FrameObservation
     from controller.mpc_calibration import CalibrationCommand
+    from controller.mpc_model import EstimatorSeed
 
 
 StatusScalar: TypeAlias = None | bool | int | float | str
@@ -513,6 +514,17 @@ def _capture_completed_result(core, temp, revision, *, monotonic_clock, wall_clo
 class ControllerRunner(ABC, ModelLifecycleRunner):
     @abstractmethod
     def set_target(self, setpoint): ...
+    @abstractmethod
+    def seed_operating_state(self, seed: EstimatorSeed) -> None: ...
+
+    def estimator_seed_requirements(self) -> tuple[float, int] | None:
+        return None
+
+    def bind_estimator_seed_source(
+        self,
+        source: Callable[[float, int], object] | None,
+    ) -> None:
+        del source
 
     @abstractmethod
     def set_safety_ceiling_c(self, ceiling_c): ...
@@ -641,6 +653,21 @@ class SyncControllerRunner(ControllerRunner):
 
     def set_target(self, setpoint):
         self._core.set_target(setpoint)
+
+    def seed_operating_state(self, seed: EstimatorSeed) -> None:
+        self._core.seed_from_trajectory(seed)
+
+    def estimator_seed_requirements(self) -> tuple[float, int] | None:
+        requirements = getattr(self._core, "estimator_seed_requirements", None)
+        return None if not callable(requirements) else requirements()
+
+    def bind_estimator_seed_source(
+        self,
+        source: Callable[[float, int], object] | None,
+    ) -> None:
+        bind = getattr(self._core, "bind_estimator_seed_source", None)
+        if callable(bind):
+            bind(source)
 
     def set_safety_ceiling_c(self, ceiling_c):
         self._core.set_safety_ceiling_c(ceiling_c)
@@ -902,6 +929,10 @@ class ThreadedControllerRunner(ControllerRunner):
         )
         self._revision = 0
         self._pending_target = _UNSET
+        self._pending_seed = _UNSET
+        self._pending_seed_source = _UNSET
+        self._seed_pending_for_solve = False
+        self._seed_failure: str | None = None
         self._pending_safety_ceiling_c = _UNSET
         self._pending_core = None
         self._pending_controller_type = None
@@ -938,7 +969,15 @@ class ThreadedControllerRunner(ControllerRunner):
         self._learning_stop_event = threading.Event()
         self._learning_condition = threading.Condition(self._lock)
         self._learning_poll_core = None
-        self._wait_for_period = self._stop_event.wait if wait_for_period is None else wait_for_period
+        self._work_event = threading.Event()
+        if wait_for_period is None:
+            def wait_for_work(period: float) -> None:
+                self._work_event.wait(period)
+                self._work_event.clear()
+
+            self._wait_for_period = wait_for_work
+        else:
+            self._wait_for_period = wait_for_period
         self._retain_core_for_refit = False
         self._final_core_closed = False
         self._learning_thread = threading.Thread(target=self._learning_loop, daemon=True)
@@ -1034,6 +1073,10 @@ class ThreadedControllerRunner(ControllerRunner):
             with self._lock:
                 target = self._pending_target
                 self._pending_target = _UNSET
+                seed = self._pending_seed
+                self._pending_seed = _UNSET
+                seed_source = self._pending_seed_source
+                self._pending_seed_source = _UNSET
                 safety_ceiling_c = self._pending_safety_ceiling_c
                 self._pending_safety_ceiling_c = _UNSET
                 new_core = None
@@ -1053,6 +1096,27 @@ class ThreadedControllerRunner(ControllerRunner):
                 adopted = self._core.restore_model(restore)
                 with self._lock:
                     self._restore_outcome = bool(adopted)
+            if seed_source is not _UNSET:
+                bind_seed_source = getattr(
+                    self._core,
+                    "bind_estimator_seed_source",
+                    None,
+                )
+                if callable(bind_seed_source):
+                    bind_seed_source(seed_source)
+            if seed is not _UNSET:
+                seed_value, seed_ack, seed_outcome = seed
+                seed_failure: str | None = None
+                try:
+                    self._core.seed_from_trajectory(seed_value)
+                except Exception as error:
+                    seed_failure = f"{type(error).__name__}: {error}"
+                with self._lock:
+                    self._seed_failure = seed_failure
+                    if seed_failure is None and self._pending_seed is _UNSET:
+                        self._seed_pending_for_solve = False
+                seed_outcome.append(seed_failure)
+                seed_ack.set()
             if safety_ceiling_c is not _UNSET:
                 self._core.set_safety_ceiling_c(safety_ceiling_c)
             if target is not _UNSET:
@@ -1124,11 +1188,17 @@ class ThreadedControllerRunner(ControllerRunner):
                             self._observations_discontinuous.discard(generation)
                         for sequence, _, _ in pending_observations:
                             self._inflight_observations.add(sequence)
-                        update_temp = _UNSET if pending_observations else self._temp
+                        update_temp = (
+                            _UNSET
+                            if pending_observations or self._seed_pending_for_solve
+                            else self._temp
+                        )
                     else:
                         pending_observations = []
                         handoff_batch = False
-                        update_temp = self._temp
+                        update_temp = (
+                            _UNSET if self._seed_pending_for_solve else self._temp
+                        )
                 if pending_observations:
                     observe = getattr(self._core, "observe_frame", None)
                     for sequence, generation, observation in pending_observations:
@@ -1176,6 +1246,9 @@ class ThreadedControllerRunner(ControllerRunner):
                     self._commands_fan = new_core.commands_fan()
                     self._actuation_mode = _actuation_mode_for(new_core)
                     self._controller_type = new_controller_type
+                    if new_controller_type is ControllerType.MPC:
+                        self._seed_pending_for_solve = True
+                        self._seed_failure = None
                     self._quality.control_period = _control_period_seconds(self._control_period)
                     self._configuration_revision += 1
                     handoff_output = self._latest_delivered_output
@@ -1243,6 +1316,32 @@ class ThreadedControllerRunner(ControllerRunner):
         with self._lock:
             self._pending_target = setpoint
 
+    def seed_operating_state(self, seed: EstimatorSeed) -> None:
+        acknowledgement = threading.Event()
+        outcome: list[str | None] = []
+        with self._lock:
+            self._pending_seed = (seed, acknowledgement, outcome)
+            self._seed_pending_for_solve = True
+            self._seed_failure = None
+            timeout = max(2.0, 2.0 * float(self._control_period or 1.0))
+        self._work_event.set()
+        if not acknowledgement.wait(timeout):
+            raise TimeoutError("threaded MPC estimator seed acknowledgement timed out")
+        if outcome[0] is not None:
+            raise RuntimeError(f"threaded MPC estimator seed failed: {outcome[0]}")
+
+    def estimator_seed_requirements(self) -> tuple[float, int] | None:
+        with self._lock:
+            requirements = getattr(self._core, "estimator_seed_requirements", None)
+            return None if not callable(requirements) else requirements()
+
+    def bind_estimator_seed_source(
+        self,
+        source: Callable[[float, int], object] | None,
+    ) -> None:
+        with self._lock:
+            self._pending_seed_source = source
+
     def set_safety_ceiling_c(self, ceiling_c):
         with self._lock:
             self._pending_safety_ceiling_c = ceiling_c
@@ -1302,6 +1401,9 @@ class ThreadedControllerRunner(ControllerRunner):
     def submit(self, temp):
         with self._lock:
             self._temp = temp
+            wake_first_solve = self._revision == 0
+        if wake_first_solve:
+            self._work_event.set()
 
     def latest(self) -> ControllerUpdateResult:
         with self._lock:
@@ -1519,6 +1621,7 @@ class ThreadedControllerRunner(ControllerRunner):
         with self._lock:
             self._stop_event.set()
             self._learning_stop_event.set()
+            self._work_event.set()
             self._accept_observations = False
         close_wait = getattr(self._wait_for_period, "close", None)
         if callable(close_wait):
@@ -1646,7 +1749,8 @@ def _build_core(
             settings["cycle_data"],
             **controller_kwargs,
         )
-        core.set_target(control["primary_setpoint"])
+        if controller_type != "mpc":
+            core.set_target(control["primary_setpoint"])
     except Exception:
         if logger is not None:
             logger.exception(f"Error occurred building the [{controller_type}] controller. Trace dump: ")

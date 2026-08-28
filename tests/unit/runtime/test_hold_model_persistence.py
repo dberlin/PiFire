@@ -4,7 +4,11 @@ import itertools
 import threading
 import time
 from copy import deepcopy
+from dataclasses import replace
+from hashlib import sha256
+from math import ceil
 from types import SimpleNamespace
+from typing import ClassVar
 
 import pytest
 
@@ -34,6 +38,7 @@ from controller.model_learning.activation import (
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
 from controller.mpc import Controller as MpcController
 from controller.mpc_config import DEFAULT_MPC_CONFIG as MPC_DEFAULTS
+from controller.mpc_model import EstimatorSeed
 from controller.mpc_snapshot import migrate_grey_learning_snapshot
 from controller.runtime.model_persistence import EvidenceSubmission, ModelPersistenceWorker
 from controller.runtime.runner import (
@@ -332,7 +337,18 @@ def test_mpc_setup_uses_default_migration_config_when_selected_config_is_malform
         "migrate_mpc_learning_authority",
         lambda *, defaults: migrated_defaults.append(defaults),
     )
-    runner = FakeControllerRunner(period=0.01).script([_output(0.5)])
+    runner = FakeControllerRunner(period=0.01).script(
+        [
+            replace(
+                _output(0.5),
+                revision=1,
+                solve_start_monotonic=1.0,
+                solve_end_monotonic=1.125,
+                solve_duration_seconds=0.125,
+                completed_wall_time=1.125,
+            )
+        ]
+    )
     hold = hold_cycle(
         runner,
         model_store=_FakeModelStore(),
@@ -367,7 +383,18 @@ def test_mpc_setup_keeps_control_live_when_authority_migration_fails(
         "migrate_mpc_learning_authority",
         migration_unavailable,
     )
-    runner = FakeControllerRunner(period=0.01)
+    runner = FakeControllerRunner(period=0.01).script(
+        [
+            replace(
+                _output(0.0),
+                revision=1,
+                solve_start_monotonic=1.0,
+                solve_end_monotonic=1.125,
+                solve_duration_seconds=0.125,
+                completed_wall_time=1.125,
+            )
+        ]
+    )
     hold = hold_cycle(
         runner,
         model_store=_FakeModelStore(),
@@ -375,11 +402,14 @@ def test_mpc_setup_keeps_control_live_when_authority_migration_fails(
     )
 
     hold.setup()
+    assert runner.applied == []
+    hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
 
     learning = hold._hold_learning
     assert learning is not None
     assert learning.evidence_available is False
-    assert [applied.source for applied in runner.applied] == [OutputSource.SEED]
+    assert runner.applied[0].source is OutputSource.SEED
+    assert runner.applied[-1].source is OutputSource.CONTROLLER
 
 
 @pytest.mark.parametrize(
@@ -914,7 +944,7 @@ def test_timed_out_checkpoint_worker_cannot_overwrite_newer_replacement_checkpoi
 
 
 class _CrashRecoveryEstimator:
-    created = []
+    created: ClassVar[list[_CrashRecoveryEstimator]] = []
 
     def __init__(self, **_kwargs):
         self.closed = 0
@@ -941,8 +971,8 @@ class _CrashRecoveryEstimator:
 
 
 class _CrashRecoverySolver:
-    created = []
-    solve_order = []
+    created: ClassVar[list[_CrashRecoverySolver]] = []
+    solve_order: ClassVar[list[_CrashRecoverySolver]] = []
 
     def __init__(self, config):
         self.config = config
@@ -1184,6 +1214,22 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
     )
     incumbent_pair = first_core.active_control_pair
     incumbent = incumbent_pair.descriptor
+    incumbent_theta = float(first_core.cfg["theta"])
+    incumbent_seed_frames = ceil(3.0 * incumbent_theta / 20.0)
+    incumbent_pair.core.seed_from_trajectory(
+        EstimatorSeed(
+            delay_states=(0.0,) * int(first_core.cfg["n_delay"]),
+            chamber_temperature_c=225.0,
+            disturbance=0.0,
+            segment_id="crash-recovery-incumbent",
+            pre_roll_digest=sha256(
+                f"crash-recovery:{incumbent.model_digest}".encode()
+            ).hexdigest(),
+            pre_roll_frame_count=incumbent_seed_frames,
+            required_frame_count=incumbent_seed_frames,
+            status="exact",
+        )
+    )
     candidate_controller_config = dict(first_core.cfg)
     candidate_controller_config["theta"] = float(candidate_controller_config["theta"]) + 1.0
     candidate_estimator, candidate_solver = _mpc_core.MpcCore.build_components(
@@ -1202,6 +1248,22 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
         candidate_estimator,
         candidate_solver,
         authorized=False,
+    )
+    candidate_theta = float(candidate_controller_config["theta"])
+    required_seed_frames = ceil(3.0 * candidate_theta / 20.0)
+    candidate_pair.core.seed_from_trajectory(
+        EstimatorSeed(
+            delay_states=(0.0,) * int(candidate_controller_config["n_delay"]),
+            chamber_temperature_c=225.0,
+            disturbance=0.0,
+            segment_id="crash-recovery-test",
+            pre_roll_digest=sha256(
+                f"crash-recovery:{candidate.model_digest}".encode()
+            ).hexdigest(),
+            pre_roll_frame_count=required_seed_frames,
+            required_frame_count=required_seed_frames,
+            status="exact",
+        )
     )
     prepared = PreparedActivationRecord.prepared(
         timestamp_ms=1_000,

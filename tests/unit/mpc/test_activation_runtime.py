@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from hashlib import sha256
+from math import ceil
 from types import SimpleNamespace
 
 import pytest
@@ -15,6 +17,7 @@ from common.model_evidence import (
     ModelEvidenceRecord,
 )
 from controller.acados import GreyBoxMPCConfig
+from controller.applied_output import AppliedOutput, OutputSource
 from controller.model_learning.activation import (
     ActivationPhase,
     GreyControlPairDescriptor,
@@ -26,6 +29,7 @@ from controller.model_learning.contracts import ActivationPolicy, CandidateOrigi
 from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.mpc_core import MpcCore
 from controller.mpc_factory import MpcPairFactory, OwnedMpcPair
+from controller.mpc_model import EstimatorSeed
 from controller.runtime.model_persistence import (
     DurableActivationReceipt,
     EvidenceSubmission,
@@ -126,17 +130,47 @@ def _descriptor(theta: float, *, candidate_generation: int, role_generation: int
     )
 
 
+def _activation_seed(
+    descriptor: GreyControlPairDescriptor,
+    *,
+    status: str = "exact",
+    delay_states: tuple[float, ...] | None = None,
+) -> EstimatorSeed:
+    theta = float(descriptor.configuration["parameters"]["theta"])
+    required = ceil(3 * theta / 20.0)
+    if delay_states is None:
+        base = theta / 1_000.0
+        delay_states = tuple(base + index / 100.0 for index in range(8))
+    frame_count = required if status == "exact" else max(0, required - 1)
+    if status in {"absent", "uncertain"}:
+        delay_states = ()
+        frame_count = 0
+    return EstimatorSeed(
+        delay_states=delay_states,
+        chamber_temperature_c=110.0,
+        disturbance=0.0,
+        segment_id="segment-activation",
+        pre_roll_digest=sha256(
+            f"segment-activation:{descriptor.model_digest}:{status}".encode()
+        ).hexdigest(),
+        pre_roll_frame_count=frame_count,
+        required_frame_count=required,
+        status=status,
+    )
+
+
 def _pair(descriptor: GreyControlPairDescriptor) -> OwnedMpcPair:
     native = GreyBoxMPCConfig()
-    return OwnedMpcPair(
-        MpcCore(
-            _config(),
-            "C",
-            dict(CYCLE),
-            components=(_Estimator(), _Solver(native)),
-        ),
-        descriptor,
+    theta = float(descriptor.configuration["parameters"]["theta"])
+    n_delay = int(descriptor.configuration["n_delay"])
+    core = MpcCore(
+        _config(theta=theta, n_delay=n_delay),
+        "C",
+        dict(CYCLE),
+        components=(_Estimator(), _Solver(native)),
     )
+    core.seed_from_trajectory(_activation_seed(descriptor))
+    return OwnedMpcPair(core, descriptor)
 
 
 def _factory() -> MpcPairFactory:
@@ -1091,3 +1125,93 @@ def test_duplicate_transaction_disposes_distinct_same_descriptor_owner_once(
     assert close_calls == [duplicate]
     runtime.close()
     assert close_calls == [duplicate]
+
+
+def test_different_theta_candidate_keeps_its_candidate_replay_and_never_copies_incumbent_delay_state(
+    monkeypatch,
+) -> None:
+    runtime, incumbent, candidate, prepared, _persistence = _runtime()
+    incumbent_state = incumbent.core.capture_operating_state()
+    candidate_state = candidate.core.capture_operating_state()
+    assert candidate.descriptor.configuration["parameters"]["theta"] != (
+        incumbent.descriptor.configuration["parameters"]["theta"]
+    )
+    assert candidate_state.delay_states != incumbent_state.delay_states
+
+    def forbidden_copy(*_args, **_kwargs):
+        raise AssertionError("activation must not copy an incumbent delay chain")
+
+    monkeypatch.setattr(
+        incumbent.core,
+        "capture_operating_state",
+        forbidden_copy,
+    )
+    monkeypatch.setattr(
+        candidate.core,
+        "adopt_operating_state",
+        forbidden_copy,
+    )
+
+    assert runtime.install_candidate_pair_inert(candidate, prepared)
+    installed = candidate.core.capture_operating_state()
+    assert installed.delay_states == candidate_state.delay_states
+    assert installed.measured_temperature_c == pytest.approx(110.0)
+    assert runtime.active_pair is candidate
+    assert runtime.rollback_pair is incumbent
+    runtime.close()
+
+
+@pytest.mark.parametrize("status", ("short", "absent", "uncertain"))
+def test_nonexact_candidate_seed_stays_inert_and_cannot_displace_active_incumbent(
+    status: str,
+) -> None:
+    runtime, incumbent, candidate, prepared, _persistence = _runtime()
+    candidate.core.seed_from_trajectory(
+        _activation_seed(candidate.descriptor, status=status)
+    )
+
+    assert not runtime.install_candidate_pair_inert(candidate, prepared)
+    assert runtime.active_pair is incumbent
+    assert incumbent.authorized
+    assert not candidate.authorized
+    runtime.close()
+
+
+def test_rollback_absent_seed_is_explicitly_reported_as_conservative_cold_start() -> None:
+    runtime, incumbent, _candidate, _prepared, _persistence = _runtime()
+    runtime.bind_estimator_seed_source(
+        lambda _theta, _n_delay: _activation_seed(
+            incumbent.descriptor,
+            status="absent",
+        )
+    )
+
+    assert runtime._refresh_pair_seed(incumbent)
+    assert runtime.last_seed_refresh_status == "absent"
+    assert incumbent.core.estimator_seed_status == "absent"
+    runtime.close()
+
+
+def test_rollback_cold_seed_uses_failed_pairs_current_applied_load() -> None:
+    runtime, incumbent, candidate, prepared, _persistence = _runtime()
+    assert runtime.install_candidate_pair_inert(candidate, prepared)
+    candidate.core.set_output(
+        AppliedOutput(
+            ratio=0.45,
+            source=OutputSource.CONTROLLER,
+            timestamp=2.0,
+        )
+    )
+    runtime.bind_estimator_seed_source(
+        lambda _theta, _n_delay: _activation_seed(
+            incumbent.descriptor,
+            status="absent",
+        )
+    )
+
+    assert runtime.compensate_candidate_pair(candidate, prepared, "test-cold-start")
+    state = incumbent.core.capture_operating_state()
+    assert state.applied_combustion_load == pytest.approx(0.5)
+    assert state.delay_states == pytest.approx((0.5,) * 8)
+    assert runtime.last_seed_refresh_status == "absent"
+    runtime.close()

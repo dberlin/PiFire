@@ -291,6 +291,7 @@ class HoldLearningRuntime:
         self._generation = initial_generation
         self._pending: dict[int, _PendingObservation] = {}
         self._evidence_available = True
+        self._seed_warmup_remaining = 0
         self._activation_state_identity: _ActivationIdentity | None = None
         self._retired_generations: set[int] = set()
         self._activation_lifecycle_evidence_id: str | None = None
@@ -310,7 +311,20 @@ class HoldLearningRuntime:
 
     @property
     def evidence_available(self) -> bool:
-        return self._evidence_available
+        return self._evidence_available and self._seed_warmup_remaining == 0
+
+    @property
+    def seed_warmup_remaining(self) -> int:
+        return self._seed_warmup_remaining
+
+    def set_seed_warmup_remaining(self, frame_count: int) -> None:
+        if (
+            isinstance(frame_count, bool)
+            or not isinstance(frame_count, int)
+            or frame_count < 0
+        ):
+            raise ValueError("seed warm-up count must be a nonnegative integer")
+        self._seed_warmup_remaining = frame_count
 
     def mark_evidence_unavailable(self) -> None:
         self._evidence_available = False
@@ -753,13 +767,6 @@ class HoldLearningRuntime:
                 self.retire_generation(generation)
             except Exception as error:
                 self._logger.warning(f"Controller evidence retirement failed: {error}")
-        if not self._runner_finished:
-            self._runner_finished = True
-            if runner is not None:
-                try:
-                    runner.finish_teardown()
-                except Exception as error:
-                    self._logger.warning(f"Controller teardown close failed: {error}")
         persistence = self._persistence
         if not self._persistence_finished:
             self._persistence_finished = True
@@ -788,6 +795,13 @@ class HoldLearningRuntime:
                     trace.close()
                 except Exception as error:
                     self._logger.warning(f"Control trace close failed: {error}")
+        if not self._runner_finished:
+            self._runner_finished = True
+            if runner is not None:
+                try:
+                    runner.finish_teardown()
+                except Exception as error:
+                    self._logger.warning(f"Controller teardown close failed: {error}")
 
     def submit_completed_observation(
         self,
@@ -796,6 +810,33 @@ class HoldLearningRuntime:
         feedback: AppliedOutput | None = None,
     ) -> None:
         """Submit one completed frame while retaining its exact immutable identity."""
+        if self._seed_warmup_remaining > 0:
+            trajectory = self._learning_trajectory
+            replay = (
+                None
+                if trajectory is None
+                else getattr(trajectory, "observe_hold_frame", None)
+            )
+            replayed_exactly = False
+            if callable(replay):
+                replay(observation, replay_only=True)
+                anchor_reader = getattr(
+                    trajectory,
+                    "estimator_seed_anchor",
+                    None,
+                )
+                anchor = anchor_reader() if callable(anchor_reader) else None
+                replayed_exactly = (
+                    isinstance(anchor, tuple)
+                    and anchor[0] == round(observation.frame_end_s * 1_000)
+                )
+            if (
+                replayed_exactly
+                and observation.probe_valid
+                and observation.continuous
+            ):
+                self._seed_warmup_remaining -= 1
+            return
         self._submit_calibration_frame_evidence(observation)
         if not observation.probe_valid:
             # The observation trace is telemetry about the frame, never part of

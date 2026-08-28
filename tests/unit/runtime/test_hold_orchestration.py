@@ -122,9 +122,10 @@ class _OrderedPersistence:
         self.events.append("persistence:checkpoint")
         return self.failure != "checkpoint"
 
-    def flush_and_stop(self):
-        self.events.append("persistence:flush")
-        return self.failure != "persistence-flush"
+    def barrier(self, timeout=2.0):
+        del timeout
+        self.events.append("persistence:barrier")
+        return self.failure != "persistence-barrier"
 
 
 class _OrderedTrace:
@@ -306,8 +307,8 @@ def test_reconfigure_retires_old_frame_and_generation_before_replacement_is_used
             ("runner:retire-evidence", 0),
             "runner:restore",
             ("runner:bind-evidence", 1),
-            seed,
             "runner:result",
+            seed,
         ],
     )
     assert events.count(("runner:retire-evidence", 0)) == 1
@@ -352,7 +353,10 @@ def test_activation_lifecycle_evidence_keeps_fifo_ahead_of_checkpoint_and_trace_
 
     hold.ctx.clock.advance(3.0)
     hold.teardown(200.0)
-    _assert_relative_order(events, [evidence, "persistence:flush", "trace:close", "runner:finish"])
+    _assert_relative_order(
+        events,
+        [evidence, "persistence:barrier", "trace:close", "runner:finish"],
+    )
 
 
 @pytest.mark.parametrize(
@@ -360,12 +364,12 @@ def test_activation_lifecycle_evidence_keeps_fifo_ahead_of_checkpoint_and_trace_
     [
         (None, False),
         ("runner-stop", True),
-        ("persistence-flush", False),
+        ("persistence-barrier", False),
         ("trace-close", False),
         ("refit", False),
         ("checkpoint", False),
     ],
-    ids=["success", "runner-stop", "persistence-flush", "trace-close", "refit", "checkpoint"],
+    ids=["success", "runner-stop", "persistence-barrier", "trace-close", "refit", "checkpoint"],
 )
 def test_teardown_orders_cleanup_and_owns_each_resource_at_most_once(hold_cycle, monkeypatch, failure, propagates):
     events = []
@@ -408,14 +412,23 @@ def test_teardown_orders_cleanup_and_owns_each_resource_at_most_once(hold_cycle,
     if failure != "runner-stop":
         _assert_relative_order(
             events,
-            ["runner:stop", "runner:refit", "persistence:flush", "trace:close", "runner:finish"],
+            [
+                "runner:stop",
+                "runner:refit",
+                "persistence:barrier",
+                "trace:close",
+                "runner:finish",
+            ],
         )
     else:
-        _assert_relative_order(events, ["runner:stop", "persistence:flush", "trace:close", "runner:finish"])
+        _assert_relative_order(
+            events,
+            ["runner:stop", "persistence:barrier", "trace:close", "runner:finish"],
+        )
 
     assert events.count("runner:stop") == 1
     assert events.count("runner:refit") <= 1
-    assert events.count("persistence:flush") == 1
+    assert events.count("persistence:barrier") == 1
     assert events.count("trace:close") == 1
     assert events.count("runner:finish") == 1
     assert (
@@ -837,12 +850,12 @@ def test_factory_failure_after_persistence_creation_closes_all_created_owners(
         hold.setup()
     trace = hold._control_trace
     assert trace is not None
-    assert "persistence:flush" not in events
+    assert "persistence:barrier" not in events
 
     hold.teardown(200.0)
 
     assert events.count("trace:close") == 1
-    assert events.count("persistence:flush") == 1
+    assert events.count("persistence:barrier") == 1
     assert trace_recorder is not None
 
 
@@ -875,7 +888,7 @@ def test_runner_revision_failure_before_learning_closes_every_created_owner(
 
     assert events.count("runner:stop") == 1
     assert events.count("runner:finish") == 1
-    assert events.count("persistence:flush") == 1
+    assert events.count("persistence:barrier") == 1
     assert events.count("trace:close") == 1
     assert hold.grill.get_output_status()["auger"] is False
 
@@ -884,8 +897,8 @@ def test_runner_revision_failure_before_learning_closes_every_created_owner(
     ("failure", "expected_warning"),
     (
         (
-            "persistence-flush",
-            "Model persistence close failed: persistence flush failed",
+            "persistence-barrier",
+            "Model persistence barrier failed: persistence barrier failed",
         ),
         (
             "trace-flush",
@@ -922,13 +935,14 @@ def test_partial_setup_cleanup_attempts_every_owner_once_after_boundary_failure(
     warnings = []
     hold.ctx.control_log = SimpleNamespace(warning=warnings.append)
 
-    if failure == "persistence-flush":
+    if failure == "persistence-barrier":
 
-        def fail_persistence_flush():
-            events.append("persistence:flush")
-            raise RuntimeError("persistence flush failed")
+        def fail_persistence_flush(timeout=2.0):
+            del timeout
+            events.append("persistence:barrier")
+            raise RuntimeError("persistence barrier failed")
 
-        monkeypatch.setattr(persistence, "flush_and_stop", fail_persistence_flush)
+        monkeypatch.setattr(persistence, "barrier", fail_persistence_flush)
     elif failure == "trace-flush":
 
         def fail_trace_flush():
@@ -949,7 +963,7 @@ def test_partial_setup_cleanup_attempts_every_owner_once_after_boundary_failure(
     hold.teardown(200.0)
 
     assert events.count("runner:stop") == 1
-    assert events.count("persistence:flush") == 1
+    assert events.count("persistence:barrier") == 1
     assert events.count("trace:flush-pending") == (1 if failure == "trace-flush" else 0)
     assert trace_recorder.close_calls == 1
     assert trace.status.closed
