@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
 import logging
 import time
@@ -858,7 +859,7 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
     ]
     wins = [evaluation.consecutive_wins for evaluation in evaluations]
     assert wins[:2] == [1, 2]
-    assert all(earlier < later for earlier, later in zip(wins, wins[1:], strict=False))
+    assert all(earlier < later for earlier, later in itertools.pairwise(wins))
     assert all(not evaluation.rejection_reasons for evaluation in evaluations)
     assert all(
         {score.horizon_steps for score in evaluation.horizon_scores} == _REQUIRED_HORIZONS
