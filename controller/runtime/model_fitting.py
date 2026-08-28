@@ -33,10 +33,7 @@ FIT_VALUE_BOUNDS = {
     "K_Q": (1e-3, 1e4),
     "theta": (25.0, 1200.0),
 }
-FIT_LOG_BOUNDS = {
-    key: (math.log(lower), math.log(upper))
-    for key, (lower, upper) in FIT_VALUE_BOUNDS.items()
-}
+FIT_LOG_BOUNDS = {key: (math.log(lower), math.log(upper)) for key, (lower, upper) in FIT_VALUE_BOUNDS.items()}
 FIT_CADENCE_S = 20.0
 MAX_FIT_OBSERVATIONS = 8640
 MAX_FIT_SEGMENTS = 256
@@ -203,11 +200,7 @@ class GreyFitSegmentArrays:
         )
 
         pre_roll_count = len(self.pre_roll_load)
-        if not (
-            len(self.pre_roll_duration_s)
-            == len(self.pre_roll_temperature_c)
-            == pre_roll_count
-        ):
+        if not (len(self.pre_roll_duration_s) == len(self.pre_roll_temperature_c) == pre_roll_count):
             raise ValueError("pre-roll arrays must have the same length")
         scored_count = len(self.scored_load)
         if scored_count == 0:
@@ -226,9 +219,7 @@ class GreyFitSegmentArrays:
         if np.any(self.pre_roll_duration_s <= 0.0) or np.any(self.scored_duration_s <= 0.0):
             raise ValueError("segment durations must be positive")
         if np.any(self.pre_roll_duration_s > FIT_CADENCE_S + _TIMESTAMP_TOLERANCE_S):
-            raise ValueError(
-                f"pre-roll intervals must not exceed the {FIT_CADENCE_S:g}-second cadence"
-            )
+            raise ValueError(f"pre-roll intervals must not exceed the {FIT_CADENCE_S:g}-second cadence")
         if not all(
             math.isclose(
                 float(duration),
@@ -238,9 +229,7 @@ class GreyFitSegmentArrays:
             )
             for duration in self.scored_duration_s
         ):
-            raise ValueError(
-                f"scored intervals must match the nominal {FIT_CADENCE_S:g}-second cadence"
-            )
+            raise ValueError(f"scored intervals must match the nominal {FIT_CADENCE_S:g}-second cadence")
         if np.any((self.pre_roll_load < 0.0) | (self.pre_roll_load > 1.0)) or np.any(
             (self.scored_load < 0.0) | (self.scored_load > 1.0)
         ):
@@ -384,8 +373,7 @@ class GreyFitMetrics:
         by_segment = tuple(self.by_segment)
         by_cook = tuple(self.by_cook)
         if not by_segment or not all(
-            isinstance(metric, GreyFitMetric) and metric.segment_id is not None
-            for metric in by_segment
+            isinstance(metric, GreyFitMetric) and metric.segment_id is not None for metric in by_segment
         ):
             raise ValueError("by_segment must contain identified GreyFitMetric values")
         if not by_cook or not all(
@@ -394,6 +382,7 @@ class GreyFitMetrics:
             raise ValueError("by_cook must contain identified GreyFitMetric values")
         object.__setattr__(self, "by_segment", by_segment)
         object.__setattr__(self, "by_cook", by_cook)
+
 
 @dataclass(frozen=True, slots=True)
 class GreyFitComparison:
@@ -406,9 +395,7 @@ class GreyFitComparison:
     rejection_reasons: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        if not isinstance(self.metrics, GreyFitMetrics) or not isinstance(
-            self.incumbent_metrics, GreyFitMetrics
-        ):
+        if not isinstance(self.metrics, GreyFitMetrics) or not isinstance(self.incumbent_metrics, GreyFitMetrics):
             raise TypeError("comparison metrics must be GreyFitMetrics")
         masks = tuple(_owned_bool_array(mask, "effective_masks") for mask in self.effective_masks)
         object.__setattr__(self, "effective_masks", masks)
@@ -463,9 +450,7 @@ class GreyFitSuccess:
         object.__setattr__(self, "nfev", _nonnegative_int(self.nfev, "nfev"))
         if self.metrics is not None and not isinstance(self.metrics, GreyFitMetrics):
             raise TypeError("metrics must be GreyFitMetrics when present")
-        if self.incumbent_metrics is not None and not isinstance(
-            self.incumbent_metrics, GreyFitMetrics
-        ):
+        if self.incumbent_metrics is not None and not isinstance(self.incumbent_metrics, GreyFitMetrics):
             raise TypeError("incumbent_metrics must be GreyFitMetrics when present")
         masks = tuple(_owned_bool_array(mask, "effective_masks") for mask in self.effective_masks)
         object.__setattr__(self, "effective_masks", masks)
@@ -540,7 +525,7 @@ def _fit_failure(
 def _parameter_values(log_parameters: Any) -> tuple[float, float, float] | None:
     try:
         logs = tuple(float(value) for value in log_parameters)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if len(logs) != len(FITTED_PARAMETERS) or not all(math.isfinite(value) for value in logs):
         return None
@@ -617,7 +602,7 @@ def _simulate_segments(
             if not np.all(np.isfinite(trajectory)):
                 return None
             predicted.append(trajectory)
-    except (FloatingPointError, OverflowError, ValueError):
+    except FloatingPointError, OverflowError, ValueError:
         return None
     return tuple(predicted)
 
@@ -660,10 +645,7 @@ def _cook_evidence_supported(metric: GreyFitMetric) -> bool:
 
 
 def _cook_supported(metric: GreyFitMetric) -> bool:
-    return (
-        _cook_evidence_supported(metric)
-        and metric.identifiability >= TriggerConfig().min_identifiability
-    )
+    return _cook_evidence_supported(metric) and metric.identifiability >= TriggerConfig().min_identifiability
 
 
 def supported_segmented_cooks(
@@ -713,9 +695,7 @@ def _grouped_metrics(
     loads_by_segment: list[Any] = []
     by_segment: list[GreyFitMetric] = []
     cook_indices: dict[str, list[int]] = {}
-    for index, (segment, trajectory, mask) in enumerate(
-        zip(job.segments, predicted, masks, strict=True)
-    ):
+    for index, (segment, trajectory, mask) in enumerate(zip(job.segments, predicted, masks, strict=True)):
         errors = (trajectory - segment.scored_temperature_c)[mask]
         temperatures = segment.scored_temperature_c[mask]
         loads = segment.scored_load[mask]
@@ -770,8 +750,7 @@ def _identifiability_columns(
             if upper_prediction is None or base_prediction is None or actual_step <= 0.0:
                 return None
             derivative = tuple(
-                (high - base) / actual_step
-                for high, base in zip(upper_prediction, base_prediction, strict=True)
+                (high - base) / actual_step for high, base in zip(upper_prediction, base_prediction, strict=True)
             )
         elif distance_to_upper < _IDENTIFIABILITY_STEP:
             step = min(_IDENTIFIABILITY_STEP, distance_to_lower)
@@ -786,8 +765,7 @@ def _identifiability_columns(
             if lower_prediction is None or base_prediction is None or actual_step <= 0.0:
                 return None
             derivative = tuple(
-                (base - low) / actual_step
-                for base, low in zip(base_prediction, lower_prediction, strict=True)
+                (base - low) / actual_step for base, low in zip(base_prediction, lower_prediction, strict=True)
             )
         else:
             upper = list(parameters)
@@ -816,15 +794,7 @@ def _score_identifiability(
     if row_count < len(FITTED_PARAMETERS):
         return 0.0
     jacobian = np.column_stack(
-        [
-            np.concatenate(
-                [
-                    values[mask]
-                    for values, mask in zip(column, masks, strict=True)
-                ]
-            )
-            for column in columns
-        ]
+        [np.concatenate([values[mask] for values, mask in zip(column, masks, strict=True)]) for column in columns]
     ) / math.sqrt(row_count)
     singular_values = np.linalg.svd(jacobian, compute_uv=False)
     return float(singular_values[-1])
@@ -894,9 +864,7 @@ def compare_segmented_grey(
 
     if not isinstance(job, GreyFitJob):
         raise TypeError("job must be a GreyFitJob")
-    if not isinstance(candidate, GreyBoxMPCConfig) or not isinstance(
-        incumbent, GreyBoxMPCConfig
-    ):
+    if not isinstance(candidate, GreyBoxMPCConfig) or not isinstance(incumbent, GreyBoxMPCConfig):
         raise TypeError("candidate and incumbent must be GreyBoxMPCConfig values")
     for config in (candidate, incumbent):
         if (
@@ -906,12 +874,8 @@ def compare_segmented_grey(
         ):
             raise ValueError("comparison configs must match the fit partition's held physics")
 
-    candidate_parameters = tuple(
-        float(getattr(candidate, key)) for key in FITTED_PARAMETERS
-    )
-    incumbent_parameters = tuple(
-        float(getattr(incumbent, key)) for key in FITTED_PARAMETERS
-    )
+    candidate_parameters = tuple(float(getattr(candidate, key)) for key in FITTED_PARAMETERS)
+    incumbent_parameters = tuple(float(getattr(incumbent, key)) for key in FITTED_PARAMETERS)
     candidate_prediction = _simulate_segments(job, candidate_parameters)
     incumbent_prediction = _simulate_segments(job, incumbent_parameters)
     if candidate_prediction is None or incumbent_prediction is None:
@@ -933,9 +897,7 @@ def compare_segmented_grey(
         )
     )
     incomplete = [
-        segment.segment_id
-        for segment, mask in zip(job.segments, common_masks, strict=True)
-        if not np.any(mask)
+        segment.segment_id for segment, mask in zip(job.segments, common_masks, strict=True) if not np.any(mask)
     ]
     if incomplete:
         raise ValueError(f"segment-warmup-incomplete:{incomplete[0]}")
@@ -952,15 +914,11 @@ def compare_segmented_grey(
         common_masks,
     )
 
-    supported = tuple(
-        metric for metric in candidate_metrics.by_cook if metric.supports_regression_gate
-    )
+    supported = tuple(metric for metric in candidate_metrics.by_cook if metric.supports_regression_gate)
     if not supported:
         rejection_reasons = ("insufficient-supported-cooks",)
     else:
-        incumbent_by_cook = {
-            metric.cook_id: metric for metric in incumbent_metrics.by_cook
-        }
+        incumbent_by_cook = {metric.cook_id: metric for metric in incumbent_metrics.by_cook}
         rejection_reasons = tuple(
             f"per-cook-regression:{metric.cook_id}"
             for metric in supported
@@ -1002,13 +960,8 @@ def _result_digest(
         "candidate": {key: getattr(config, key) for key in FITTED_PARAMETERS},
         "effective_masks": [[bool(value) for value in mask] for mask in masks],
         "pooled": metric_payload(metrics.pooled),
-        "segments": [
-            {"segment_id": metric.segment_id, **metric_payload(metric)}
-            for metric in metrics.by_segment
-        ],
-        "cooks": [
-            {"cook_id": metric.cook_id, **metric_payload(metric)} for metric in metrics.by_cook
-        ],
+        "segments": [{"segment_id": metric.segment_id, **metric_payload(metric)} for metric in metrics.by_segment],
+        "cooks": [{"cook_id": metric.cook_id, **metric_payload(metric)} for metric in metrics.by_cook],
         "identifiability": identifiability,
     }
     encoded = json.dumps(
@@ -1071,9 +1024,10 @@ def fit_segmented_grey(job: GreyFitJob) -> GreyFitSuccess | GreyFitError:
             str(error) or repr(error),
             error_type=type(error).__name__,
         )
-    if not bool(getattr(first, "success", int(getattr(first, "status", 0)) > 0)) or int(
-        getattr(first, "status", 0)
-    ) <= 0:
+    if (
+        not bool(getattr(first, "success", int(getattr(first, "status", 0)) > 0))
+        or int(getattr(first, "status", 0)) <= 0
+    ):
         return _fit_failure(job, "bounded grey fit did not converge", error_type="FitConvergenceError")
     first_parameters = _parameter_values(first.x)
     if first_parameters is None:
@@ -1116,18 +1070,17 @@ def fit_segmented_grey(job: GreyFitJob) -> GreyFitSuccess | GreyFitError:
             str(error) or repr(error),
             error_type=type(error).__name__,
         )
-    if not bool(getattr(polished, "success", int(getattr(polished, "status", 0)) > 0)) or int(
-        getattr(polished, "status", 0)
-    ) <= 0:
+    if (
+        not bool(getattr(polished, "success", int(getattr(polished, "status", 0)) > 0))
+        or int(getattr(polished, "status", 0)) <= 0
+    ):
         return _fit_failure(job, "bounded grey polish did not converge", error_type="FitConvergenceError")
     parameters = _parameter_values(polished.x)
     if parameters is None:
         return _fit_failure(job, "bounded grey polish produced non-finite parameters")
     polished_log = tuple(float(value) for value in polished.x)
     parameters = tuple(
-        float(getattr(job.config, key))
-        if log_value == math.log(float(getattr(job.config, key)))
-        else parameter
+        float(getattr(job.config, key)) if log_value == math.log(float(getattr(job.config, key))) else parameter
         for key, log_value, parameter in zip(
             FITTED_PARAMETERS,
             polished_log,
@@ -1137,8 +1090,7 @@ def fit_segmented_grey(job: GreyFitJob) -> GreyFitSuccess | GreyFitError:
     )
     polished_masks = _warmup_masks(job.segments, parameters[FITTED_PARAMETERS.index("theta")])
     if any(
-        not np.array_equal(frozen, recomputed)
-        for frozen, recomputed in zip(frozen_masks, polished_masks, strict=True)
+        not np.array_equal(frozen, recomputed) for frozen, recomputed in zip(frozen_masks, polished_masks, strict=True)
     ):
         return _fit_failure(
             job,
@@ -1163,9 +1115,7 @@ def fit_segmented_grey(job: GreyFitJob) -> GreyFitSuccess | GreyFitError:
             job,
             detail,
             error_type=(
-                "InsufficientWarmup"
-                if detail.startswith("segment-warmup-incomplete:")
-                else type(error).__name__
+                "InsufficientWarmup" if detail.startswith("segment-warmup-incomplete:") else type(error).__name__
             ),
         )
     candidate_metrics = comparison.metrics
@@ -1174,10 +1124,7 @@ def fit_segmented_grey(job: GreyFitJob) -> GreyFitSuccess | GreyFitError:
     identifiability = comparison.identifiability
     rejection_reasons = comparison.rejection_reasons
     pooled_temperatures = np.concatenate(
-        [
-            segment.scored_temperature_c[mask]
-            for segment, mask in zip(job.segments, common_masks, strict=True)
-        ]
+        [segment.scored_temperature_c[mask] for segment, mask in zip(job.segments, common_masks, strict=True)]
     )
     digest = _result_digest(
         job,
@@ -1468,11 +1415,7 @@ def persistent_corpus_trigger(
         raise TypeError("snapshot must be a FitCorpusSnapshot")
     if not isinstance(resolved, TriggerConfig):
         raise TypeError("config must be a TriggerConfig")
-    frames = tuple(
-        frame
-        for segment in snapshot.segments
-        for frame in segment.scored_hold_frames
-    )
+    frames = tuple(frame for segment in snapshot.segments for frame in segment.scored_hold_frames)
     loads = tuple(float(frame.normalized_combustion_load) for frame in frames)
     if loads:
         mean = sum(loads) / len(loads)
@@ -1489,22 +1432,12 @@ def persistent_corpus_trigger(
             input_levels,
         )
     blockers: list[str] = []
-    if (
-        input_variance < resolved.min_input_variance
-        or input_levels < resolved.min_input_levels
-    ):
+    if input_variance < resolved.min_input_variance or input_levels < resolved.min_input_levels:
         blockers.append("insufficient-excitation")
     temperatures = tuple(float(frame.chamber_temperature_c) for frame in frames)
-    if (
-        not temperatures
-        or max(temperatures) - min(temperatures)
-        < resolved.min_temperature_span_c
-    ):
+    if not temperatures or max(temperatures) - min(temperatures) < resolved.min_temperature_span_c:
         blockers.append("insufficient-coverage")
-    if any(
-        not frame.complete or not frame.continuous or frame.partial
-        for frame in frames
-    ):
+    if any(not frame.complete or not frame.continuous or frame.partial for frame in frames):
         blockers.append("discontinuity")
     return TriggerDecision(
         not blockers,
@@ -1964,9 +1897,7 @@ def segmented_corpus_fit_job(
         pre_roll = tuple(segment.pre_roll_frames)
         scored = tuple(segment.scored_hold_frames)
         if not scored or segment.hold_entry is None:
-            raise ValueError(
-                f"fit corpus segment {segment.segment_id} has no scored Hold anchor"
-            )
+            raise ValueError(f"fit corpus segment {segment.segment_id} has no scored Hold anchor")
         oldest = pre_roll[0] if pre_roll else scored[0]
         arrays.append(
             GreyFitSegmentArrays(
@@ -1978,32 +1909,18 @@ def segmented_corpus_fit_job(
                 observation_sequences=tuple(frame.sequence for frame in scored),
                 initial_load=oldest.normalized_combustion_load,
                 pre_roll_duration_s=tuple(
-                    (frame.monotonic_end_ms - frame.monotonic_start_ms) / 1_000.0
-                    for frame in pre_roll
+                    (frame.monotonic_end_ms - frame.monotonic_start_ms) / 1_000.0 for frame in pre_roll
                 ),
-                pre_roll_load=tuple(
-                    frame.normalized_combustion_load for frame in pre_roll
-                ),
-                pre_roll_temperature_c=tuple(
-                    frame.chamber_temperature_c for frame in pre_roll
-                ),
+                pre_roll_load=tuple(frame.normalized_combustion_load for frame in pre_roll),
+                pre_roll_temperature_c=tuple(frame.chamber_temperature_c for frame in pre_roll),
                 hold_anchor_c=segment.hold_entry.chamber_temperature_c,
                 scored_duration_s=tuple(
-                    (frame.monotonic_end_ms - frame.monotonic_start_ms) / 1_000.0
-                    for frame in scored
+                    (frame.monotonic_end_ms - frame.monotonic_start_ms) / 1_000.0 for frame in scored
                 ),
-                scored_load=tuple(
-                    frame.normalized_combustion_load for frame in scored
-                ),
-                scored_ambient_c=tuple(
-                    frame.ambient_temperature_c for frame in scored
-                ),
-                scored_temperature_c=tuple(
-                    frame.chamber_temperature_c for frame in scored
-                ),
-                calibration_origin=tuple(
-                    frame.calibration_origin for frame in scored
-                ),
+                scored_load=tuple(frame.normalized_combustion_load for frame in scored),
+                scored_ambient_c=tuple(frame.ambient_temperature_c for frame in scored),
+                scored_temperature_c=tuple(frame.chamber_temperature_c for frame in scored),
+                calibration_origin=tuple(frame.calibration_origin for frame in scored),
             )
         )
     return GreyFitJob(
@@ -2077,6 +1994,7 @@ class GreyLearningOrchestrator:
         self._evaluator: Any | None = None
         self._evaluation_cursor = 0
         self._consecutive_wins = 0
+        self._evaluation_epoch = 0
         self._last_evaluation: Any | None = None
         self._handoff: CandidateHandoff | None = None
         self._started = False
@@ -2094,6 +2012,10 @@ class GreyLearningOrchestrator:
     @property
     def last_evaluation(self) -> Any | None:
         return self._last_evaluation
+
+    @property
+    def evaluation_epoch(self) -> int:
+        return self._evaluation_epoch
 
     @property
     def handoff(self) -> CandidateHandoff | None:
@@ -2132,16 +2054,13 @@ class GreyLearningOrchestrator:
         self,
         expected: CandidatePreparation,
     ) -> bool:
-        return (
-            self._prepared is expected
-            and expected.accepted
-            and not self._ownership_transferred
-        )
+        return self._prepared is expected and expected.accepted and not self._ownership_transferred
 
     def _reset_prepared_evaluation(self) -> None:
         self._evaluator = None
         self._evaluation_cursor = 0
         self._consecutive_wins = 0
+        self._evaluation_epoch = 0
         self._last_evaluation = None
         self._handoff = None
 
@@ -2157,11 +2076,7 @@ class GreyLearningOrchestrator:
             raise TypeError("job must be a GreyFitJob")
         if not callable(persist):
             raise TypeError("persist must be callable")
-        if (
-            self._pending_request is not None
-            or self._prepared is not expected
-            or not expected.accepted
-        ):
+        if self._pending_request is not None or self._prepared is not expected or not expected.accepted:
             return FitSubmission.BUSY, False
         ownership_transferred = self._ownership_transferred
         submission = self.worker.submit(job)
@@ -2211,6 +2126,7 @@ class GreyLearningOrchestrator:
         self._evaluator = None
         self._evaluation_cursor = 0
         self._consecutive_wins = 0
+        self._evaluation_epoch = 0
         self._last_evaluation = None
         self._handoff = None
 
@@ -2284,11 +2200,7 @@ class GreyLearningOrchestrator:
             raise TypeError("frame must be a FrameObservation")
         del identifiability
         self.start()
-        completed = (
-            ()
-            if self._evaluator is None or frame.calibration_fit
-            else self._evaluator.observe(frame)
-        )
+        completed = () if self._evaluator is None or frame.calibration_fit else self._evaluator.observe(frame)
         reason = self._frame_rejection(frame, self.identity.role_generation)
         decision = HistoryDecision(reason is None, () if reason is None else (reason,))
         trigger = TriggerDecision(False, ("persistent-corpus",), 0.0, 0)
@@ -2304,9 +2216,7 @@ class GreyLearningOrchestrator:
         """Submit the one repository-materialized job to this owner's worker."""
         if not isinstance(job, GreyFitJob):
             raise TypeError("job must be a GreyFitJob")
-        if self._pending_request is not None or (
-            self._prepared is not None and self._prepared.accepted
-        ):
+        if self._pending_request is not None or (self._prepared is not None and self._prepared.accepted):
             return FitSubmission.BUSY
         submission = self.worker.submit(job)
         if submission is FitSubmission.ACCEPTED:
@@ -2385,7 +2295,46 @@ class GreyLearningOrchestrator:
                 candidate_generation=request.candidate_generation,
             )
             self._evaluation_cursor = 0
+            self._evaluation_epoch = 0
+            self._consecutive_wins = 0
         return GreyLearningDelivery(message, (), prepared)
+
+    def restore_persisted_challenger(
+        self,
+        preparation: CandidatePreparation,
+        *,
+        evaluation_epoch: int,
+        consecutive_wins: int,
+    ) -> None:
+        """Restore complete durable progress into a fresh empty evaluator."""
+
+        from controller.model_learning.evaluation import CausalForecastEvaluator
+
+        if not isinstance(preparation, CandidatePreparation) or not preparation.accepted:
+            raise ValueError("persisted challenger requires an accepted preparation")
+        if isinstance(evaluation_epoch, bool) or not isinstance(evaluation_epoch, int) or evaluation_epoch < 0:
+            raise ValueError("evaluation_epoch must be a non-negative integer")
+        if (
+            isinstance(consecutive_wins, bool)
+            or not isinstance(consecutive_wins, int)
+            or consecutive_wins < 0
+            or consecutive_wins > self.evaluation_config.required_consecutive_wins
+        ):
+            raise ValueError("consecutive_wins is outside the evaluation requirement")
+        if self._prepared is not preparation:
+            self._release_prepared()
+            self._prepared = preparation
+        request = preparation.candidate.request
+        self._evaluator = CausalForecastEvaluator(
+            role_generation=request.window.role_generation,
+            candidate_generation=request.candidate_generation,
+        )
+        self._evaluation_cursor = 0
+        self._evaluation_epoch = evaluation_epoch
+        self._consecutive_wins = consecutive_wins
+        self._last_evaluation = None
+        self._handoff = None
+        self._ownership_transferred = False
 
     def register_causal_forecasts(
         self,

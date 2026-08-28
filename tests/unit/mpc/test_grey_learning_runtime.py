@@ -11,8 +11,17 @@ from typing import ClassVar
 
 import pytest
 
+from common.control_trace import AmbientSource
 from common.controller_model_state import CheckpointSaveOutcome
+from common.learning_trajectory import FitCorpusIdentity, ModelFitLineage
 from common.persistence.learning_trajectory import LearningTrajectoryRepository
+from common.persistence.model_challenger import (
+    ModelChallengerState,
+    abort_model_challenger_activation,
+    create_model_challenger,
+    read_model_challenger,
+    retire_model_challenger,
+)
 from controller.acados import GreyBoxMPCConfig
 from controller.model_learning.activation import (
     GreyControlPairDescriptor,
@@ -27,8 +36,10 @@ from controller.model_learning.contracts import (
     LearningStatus,
 )
 from controller.model_learning.evaluation import (
+    CompletedForecastOrigin,
     EvaluationConfig,
     EvaluationDecision,
+    ForecastOrigin,
     HorizonScore,
 )
 from controller.model_learning.grey_runtime import (
@@ -59,12 +70,47 @@ from controller.runtime.model_persistence import (
     ModelPersistenceWorker,
 )
 from tests.unit.common.test_learning_trajectory_store import _finalize_segment, _segment
+from tests.unit.common.test_model_challenger_store import _corpus
 from tests.unit.mpc._solver_fixtures import (
     CYCLE,
     _Estimator,
     _Solver,
     inactive_calibration,
 )
+
+_REQUIRED_HORIZONS = (3, 15, 45, 90, 180)
+_COMPLETE_SCORES = tuple(HorizonScore(horizon, 1.0, 0.5, 1) for horizon in _REQUIRED_HORIZONS)
+
+
+def _complete_origins(
+    *,
+    incumbent_digest: str,
+    challenger_digest: str,
+    role_generation: int,
+    candidate_generation: int,
+) -> tuple[CompletedForecastOrigin, ...]:
+    return tuple(
+        CompletedForecastOrigin(
+            forecast=ForecastOrigin(
+                origin_sequence=index,
+                origin_time_s=100.0,
+                horizon_steps=horizon,
+                role_generation=role_generation,
+                candidate_generation=candidate_generation,
+                incumbent_digest=incumbent_digest,
+                challenger_digest=challenger_digest,
+                incumbent_prediction_c=101.0,
+                challenger_prediction_c=100.5,
+                temperature_band="middle",
+                phase="heating",
+                ambient_source=AmbientSource.CONFIGURED,
+                calibration_fit=False,
+            ),
+            completion_time_s=100.0 + horizon,
+            observed_temperature_c=100.0,
+        )
+        for index, horizon in enumerate(_REQUIRED_HORIZONS, start=1)
+    )
 
 
 class _Persistence(ModelPersistenceWorker):
@@ -166,11 +212,7 @@ def _metric_bundle(job, rmse_c: float) -> GreyFitMetrics:
 def _fit_success(job, *, rmse_c: float = 0.5) -> GreyFitSuccess:
     metrics = _metric_bundle(job, rmse_c)
     incumbent_metrics = _metric_bundle(job, 5.0)
-    temperatures = tuple(
-        float(value)
-        for segment in job.segments
-        for value in segment.scored_temperature_c
-    )
+    temperatures = tuple(float(value) for segment in job.segments for value in segment.scored_temperature_c)
     return GreyFitSuccess(
         request=job.request,
         config=GreyBoxMPCConfig(
@@ -433,6 +475,91 @@ def _harness(
     return _Harness(runtime, activation, active, persistence, factory, published)
 
 
+def _seed_durable_challenger(
+    harness: _Harness,
+    preparation,
+    *,
+    phase: str,
+    decision_id: str | None = None,
+    fit_corpus: FitCorpusIdentity | None = None,
+) -> ModelChallengerState:
+    request = preparation.candidate.request
+    incumbent = harness.activation.active_pair.descriptor
+    candidate = harness.runtime._prepared_candidate_descriptor(preparation)
+    request_id = getattr(request, "request_id", None) or decision_id or ("f" * 64)
+    corpus = _corpus(request_id) if fit_corpus is None else fit_corpus
+    qualified = phase == "qualified"
+    state = ModelChallengerState(
+        schema_version=1,
+        challenger_id=f"challenger-{request_id}",
+        revision=0,
+        phase=phase,
+        origin=request.origin,
+        policy={
+            CandidateOrigin.PASSIVE_ONLINE: ActivationPolicy.PASSIVE_AUTO,
+            CandidateOrigin.OPERATOR_CALIBRATION: ActivationPolicy.OPERATOR_REVIEWED,
+            CandidateOrigin.COOK_REFIT: ActivationPolicy.COOK_REFIT,
+        }[request.origin],
+        fit_corpus=corpus,
+        fit_lineage=ModelFitLineage(
+            request_id=request_id,
+            parent_incumbent_digest=incumbent.model_digest,
+            parent_incumbent_generation=incumbent.role_generation,
+            candidate_generation=candidate.candidate_generation,
+            fit_corpus=corpus,
+            fit_corpus_digest=corpus.corpus_digest,
+            trigger_origin=request.origin.value,
+            result_status="succeeded",
+            candidate_digest=candidate.model_digest,
+        ),
+        fit_preparation={
+            "request_id": request_id,
+            "accepted": True,
+            "candidate_digest": candidate.model_digest,
+            "native_build": "passed",
+            "dry_solve": "passed",
+        },
+        controller_configuration_digest=getattr(
+            request.window,
+            "configuration_digest",
+            harness.runtime.learning_identity().configuration_digest,
+        ),
+        incumbent=incumbent,
+        candidate=candidate,
+        calibration_manifest=None,
+        evaluation_epoch=0,
+        evaluation_round=1 if qualified else 0,
+        consecutive_wins=1 if qualified else 0,
+        required_wins=1,
+        last_decision_id=decision_id if qualified else None,
+        last_evidence_id=(f"challenger-round-{decision_id}" if qualified else None),
+        activation_transaction_id=None,
+        retirement_reason=None,
+        created_ms=1,
+        updated_ms=1,
+        retired_ms=None,
+    )
+    current = read_model_challenger()
+    if current is not None and current != state and current.phase != "retired":
+        retired_ms = current.updated_ms + 1
+        if current.phase == "activating":
+            abort_model_challenger_activation(
+                expected_revision=current.revision,
+                activation_transaction_id=current.activation_transaction_id,
+                reason="legacy-harness-replaced",
+                retired_ms=retired_ms,
+            )
+        else:
+            retire_model_challenger(
+                expected_revision=current.revision,
+                reason="legacy-harness-replaced",
+                retired_ms=retired_ms,
+            )
+    durable = create_model_challenger(state)
+    harness.runtime._challenger_state = durable
+    return durable
+
+
 def _automatic_candidate(harness: _Harness):
     native = GreyBoxMPCConfig(
         C_c=425.0,
@@ -465,17 +592,20 @@ def _automatic_candidate(harness: _Harness):
     evaluation = SimpleNamespace(
         decision_id="a" * 64,
         consecutive_wins=1,
-        scores=(
-            HorizonScore(3, 0.0, 0.0, 0),
-            HorizonScore(15, 0.0, 0.0, 0),
-        ),
+        scores=_COMPLETE_SCORES,
         accepted=True,
         blockers=(),
         role_generation=active_descriptor.role_generation,
         candidate_generation=request.candidate_generation,
         incumbent_digest=harness.activation.active_pair.descriptor.model_digest,
         challenger_digest=descriptor.model_digest,
-        completed_origins=(),
+        completed_origins=_complete_origins(
+            incumbent_digest=active_descriptor.model_digest,
+            challenger_digest=descriptor.model_digest,
+            role_generation=active_descriptor.role_generation,
+            candidate_generation=request.candidate_generation,
+        ),
+        completed_horizons=_REQUIRED_HORIZONS,
     )
     return preparation, evaluation, components
 
@@ -539,12 +669,15 @@ def _reviewed_candidate(harness: _Harness):
         candidate_generation=identity.candidate_generation,
         incumbent_digest=harness.active.descriptor.model_digest,
         challenger_digest=descriptor.model_digest,
-        scores=(
-            HorizonScore(3, 0.0, 0.0, 0),
-            HorizonScore(15, 0.0, 0.0, 0),
-        ),
+        scores=_COMPLETE_SCORES,
         consecutive_wins=1,
         blockers=(),
+        completed_origins=_complete_origins(
+            incumbent_digest=harness.active.descriptor.model_digest,
+            challenger_digest=descriptor.model_digest,
+            role_generation=identity.role_generation,
+            candidate_generation=identity.candidate_generation,
+        ),
     )
     return preparation, evaluation, components
 
@@ -636,7 +769,11 @@ def _reopened_ready_passive_corpus(tmp_path):
     return repository, ready.fit_partition_digest
 
 
-def test_accepted_fit_lineage_advances_once_per_request() -> None:
+def test_accepted_fit_lineage_advances_once_and_blocks_passive_refit_until_retired(
+    ds,
+    tmp_path,
+) -> None:
+    repository, partition = _reopened_ready_passive_corpus(tmp_path)
     harness = _harness()
     reviewed, _evaluation, components = _reviewed_candidate(harness)
     request = replace(
@@ -666,6 +803,7 @@ def test_accepted_fit_lineage_advances_once_per_request() -> None:
             self.handoff = None
             self.worker = SimpleNamespace(busy=False)
             self.delivery = delivery_for(preparation)
+            self.evaluation_config = EvaluationConfig(required_consecutive_wins=2)
 
         def poll_fit_off_path(self, **_kwargs):
             return self.delivery
@@ -680,11 +818,23 @@ def test_accepted_fit_lineage_advances_once_per_request() -> None:
     learning = _Learning()
     harness.runtime._learning = learning
     before = harness.runtime.get_model_snapshot()
+    first_corpus = _corpus(request.request_id)
+    harness.runtime._fit_corpus_identities[request.request_id] = first_corpus
 
     harness.runtime.poll_learning_off_path(
         live_origin=CandidateOrigin.PASSIVE_ONLINE,
     )
     first = harness.runtime.get_model_snapshot()
+    first_challenger = read_model_challenger()
+    assert first_challenger is not None
+    harness.runtime._trajectory_repository = repository
+    harness.runtime._fit_partition_digest = lambda: partition
+    harness.runtime._learning_enabled = True
+    assert not harness.runtime.request_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+    harness.runtime._trajectory_repository = None
+    harness.runtime._fit_partition_digest = None
+    harness.runtime._learning_enabled = False
+    harness.runtime._fit_corpus_identities[request.request_id] = first_corpus
     harness.runtime.poll_learning_off_path(
         live_origin=CandidateOrigin.PASSIVE_ONLINE,
     )
@@ -707,10 +857,15 @@ def test_accepted_fit_lineage_advances_once_per_request() -> None:
     learning.prepared = next_preparation
     learning.pending_request = next_request
     learning.delivery = delivery_for(next_preparation)
+    next_corpus = _corpus(next_request.request_id)
+    harness.runtime._fit_corpus_identities[next_request.request_id] = next_corpus
     harness.runtime.poll_learning_off_path(
         live_origin=CandidateOrigin.PASSIVE_ONLINE,
     )
     third = harness.runtime.get_model_snapshot()
+    third_challenger = read_model_challenger()
+    assert third_challenger is not None
+    harness.runtime._fit_corpus_identities[next_request.request_id] = next_corpus
     harness.runtime.poll_learning_off_path(
         live_origin=CandidateOrigin.PASSIVE_ONLINE,
     )
@@ -718,16 +873,24 @@ def test_accepted_fit_lineage_advances_once_per_request() -> None:
 
     assert first == second
     assert first["revision"] == before["revision"] + 1
-    assert first["origin"] == CandidateOrigin.PASSIVE_ONLINE.value
-    assert first["policy"] == ActivationPolicy.PASSIVE_AUTO.value
-    assert first["window"] == asdict(request.window)
-    assert first["identities"]["candidate_digest"] == preparation.candidate_digest
-    assert first["identities"]["candidate_generation"] == request.candidate_generation
+    assert first["challenger_authority"] == {
+        "challenger_id": first_challenger.challenger_id,
+        "revision": first_challenger.revision,
+    }
+    assert first_challenger.origin is CandidateOrigin.PASSIVE_ONLINE
+    assert first_challenger.policy is ActivationPolicy.PASSIVE_AUTO
+    assert first_challenger.fit_preparation["window"] == asdict(request.window)
+    assert first_challenger.candidate.model_digest == preparation.candidate_digest
+    assert first_challenger.candidate.candidate_generation == request.candidate_generation
     assert third == fourth
     assert third["revision"] == first["revision"] + 1
-    assert third["window"] == asdict(next_request.window)
-    assert third["identities"]["candidate_digest"] == preparation.candidate_digest
-    assert third["identities"]["candidate_generation"] == request.candidate_generation
+    assert third["challenger_authority"] == {
+        "challenger_id": third_challenger.challenger_id,
+        "revision": third_challenger.revision,
+    }
+    assert third_challenger.fit_preparation["window"] == asdict(next_request.window)
+    assert third_challenger.candidate.model_digest == preparation.candidate_digest
+    assert third_challenger.candidate.candidate_generation == request.candidate_generation
     harness.runtime.close()
     assert components.estimator.closed
     assert components.controller.closed
@@ -858,14 +1021,8 @@ def test_two_reopened_cooks_submit_one_ordered_persistent_corpus_job_off_path(
     assert tuple(job.segments[0].calibration_origin) == (False, False)
     assert job.segments[0].prefix_digest == job.corpus.slices[0].prefix_digest
     assert tuple(job.segments[1].calibration_origin) == (False, True)
-    assert (
-        job.request.window.configuration_digest
-        == harness.runtime.learning_identity().configuration_digest
-    )
-    assert (
-        job.request.window.configuration_digest
-        != job.corpus.fit_partition_digest
-    )
+    assert job.request.window.configuration_digest == harness.runtime.learning_identity().configuration_digest
+    assert job.request.window.configuration_digest != job.corpus.fit_partition_digest
     assert harness.activation.active_pair is incumbent
     assert harness.activation.rollback_pair is None
     harness.runtime.close()
@@ -902,6 +1059,8 @@ def test_passive_mid_cook_corpus_submission_follows_only_online_adaptation(
 
     submitted = bool(_CorpusWorker.instances and _CorpusWorker.instances[-1].job)
     assert submitted is scheduled
+    if scheduled:
+        assert not harness.runtime.request_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
     assert repository.snapshot_fit_corpus(partition).identity == corpus_before
     harness.runtime.close()
     harness.activation.close()
@@ -1117,6 +1276,43 @@ def test_incompatible_rebind_before_fit_delivery_terminalizes_stale_without_cand
     owner.close()
 
 
+def test_rebound_runtime_rejects_duplicate_passive_fit_while_process_fit_is_pending(
+    ds,
+    tmp_path,
+) -> None:
+    repository, partition = _reopened_ready_passive_corpus(tmp_path)
+    owner = GreyLearningProcessOwner()
+    _ControlledDeliveryCorpusWorker.instances.clear()
+    first = _harness(
+        trajectory_repository=_CorpusRepositoryProbe(repository),
+        fit_partition_digest=lambda: partition,
+        fit_worker_factory=_ControlledDeliveryCorpusWorker,
+        process_owner=owner,
+        learning_enabled=True,
+    )
+    first.runtime.bind_learning_identity("session-a", "cook-a", 0)
+    assert first.runtime.request_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+    first.runtime.poll_learning_off_path()
+    assert owner.learning is not None
+    assert owner.learning.pending_request is not None
+
+    second = _harness(
+        trajectory_repository=_CorpusRepositoryProbe(repository),
+        fit_partition_digest=lambda: partition,
+        fit_worker_factory=_ControlledDeliveryCorpusWorker,
+        process_owner=owner,
+        learning_enabled=True,
+    )
+    second.runtime.bind_learning_identity("session-b", "cook-b", 0)
+
+    assert not second.runtime.request_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+    first.runtime.close()
+    first.activation.close()
+    second.runtime.close()
+    second.activation.close()
+    owner.close()
+
+
 def test_newer_stop_fit_supersedes_owned_prepared_stop_candidate(
     tmp_path,
 ) -> None:
@@ -1158,9 +1354,7 @@ def test_newer_stop_fit_supersedes_owned_prepared_stop_candidate(
     assert old_pair.controller.closed
     assert worker.job.request.request_id == newer_ticket
     supersession = second.persistence.evidence[-1].payload
-    assert supersession.rejection_reasons == (
-        "superseded-by-newer-cumulative-fit",
-    )
+    assert supersession.rejection_reasons == ("superseded-by-newer-cumulative-fit",)
 
     newer_delivery, _ = second.runtime.poll_learning_off_path()
     assert newer_delivery.message.request.request_id == newer_ticket
@@ -1216,14 +1410,10 @@ def test_supersession_persistence_failure_preserves_old_and_stales_new_fit(
     second.persistence.accept_evidence = True
     delivery, _ = second.runtime.poll_learning_off_path()
     assert delivery.message.request.request_id == newer_ticket
-    assert delivery.stale_reasons == (
-        "candidate-supersession-persistence-failed",
-    )
+    assert delivery.stale_reasons == ("candidate-supersession-persistence-failed",)
     assert owner.learning.prepared is prepared
     assert old_pair.controller.closed is False
-    assert second.runtime._corpus_fit_failure[0] == (
-        "candidate-supersession-persistence-failed"
-    )
+    assert second.runtime._corpus_fit_failure[0] == ("candidate-supersession-persistence-failed")
     assert second.runtime._consume_terminal_fit_ticket(
         newer_ticket,
         CandidateOrigin.COOK_REFIT,
@@ -1302,16 +1492,10 @@ def test_corpus_failures_disable_learning_without_changing_control_authority(
     repository, partition = _reopened_corpus(tmp_path)
     probe = _CorpusRepositoryProbe(
         repository,
-        snapshot_error=(
-            RuntimeError("corpus corrupt") if failure_stage == "snapshot" else None
-        ),
-        record_error=(
-            RuntimeError("fit lineage unavailable") if failure_stage == "record" else None
-        ),
+        snapshot_error=(RuntimeError("corpus corrupt") if failure_stage == "snapshot" else None),
+        record_error=(RuntimeError("fit lineage unavailable") if failure_stage == "record" else None),
     )
-    worker_factory = (
-        _SubmissionFailureWorker if failure_stage == "submission" else _CorpusWorker
-    )
+    worker_factory = _SubmissionFailureWorker if failure_stage == "submission" else _CorpusWorker
     _CorpusWorker.instances.clear()
     harness = _harness(
         trajectory_repository=probe,
@@ -1334,7 +1518,7 @@ def test_corpus_failures_disable_learning_without_changing_control_authority(
     harness.activation.close()
 
 
-def test_promotion_and_rollback_preserve_the_compatible_fit_corpus(tmp_path) -> None:
+def test_promotion_and_rollback_preserve_the_compatible_fit_corpus(ds, tmp_path) -> None:
     repository, partition = _reopened_corpus(tmp_path)
     harness = _harness(
         trajectory_repository=_CorpusRepositoryProbe(repository),
@@ -1426,8 +1610,6 @@ def test_automatic_activation_rejects_wrong_policy_or_incomplete_preparation(
     harness.activation.close()
 
 
-
-
 def test_orchestrator_start_failure_closes_partial_learning_owner(monkeypatch) -> None:
     instances = []
 
@@ -1475,11 +1657,8 @@ def test_rejected_evaluation_persists_failure_checks_and_projects_once(monkeypat
         candidate_generation=1,
         incumbent_digest=_descriptor().model_digest,
         challenger_digest="d" * 64,
-        scores=(
-            HorizonScore(3, 0.0, 0.0, 0),
-            HorizonScore(15, 0.0, 0.0, 0),
-        ),
-        consecutive_wins=1,
+        scores=_COMPLETE_SCORES,
+        consecutive_wins=0,
         blockers=("candidate-confidence-low",),
     )
     request = SimpleNamespace(origin=CandidateOrigin.PASSIVE_ONLINE)
@@ -1530,6 +1709,21 @@ def test_rejected_evaluation_persists_failure_checks_and_projects_once(monkeypat
         _Learning,
     )
     harness = _harness(learning_enabled=True)
+    candidate_preparation, candidate_evaluation, _components = _automatic_candidate(harness)
+    preparation.candidate = candidate_preparation.candidate
+    evaluation = replace(
+        evaluation,
+        role_generation=candidate_evaluation.role_generation,
+        candidate_generation=candidate_evaluation.candidate_generation,
+        incumbent_digest=candidate_evaluation.incumbent_digest,
+        challenger_digest=candidate_evaluation.challenger_digest,
+        completed_origins=candidate_evaluation.completed_origins,
+    )
+    _seed_durable_challenger(
+        harness,
+        preparation,
+        phase="evaluating",
+    )
 
     delivery, projected = harness.runtime.poll_learning_off_path()
     outcome = harness.runtime.observe_frame(_frame())
@@ -1566,11 +1760,8 @@ def test_candidate_assessment_uses_activation_fifo_when_unrelated_evidence_is_re
         candidate_generation=1,
         incumbent_digest=_descriptor().model_digest,
         challenger_digest="f" * 64,
-        scores=(
-            HorizonScore(3, 0.0, 0.0, 0),
-            HorizonScore(15, 0.0, 0.0, 0),
-        ),
-        consecutive_wins=1,
+        scores=_COMPLETE_SCORES,
+        consecutive_wins=0,
         blockers=("stale-session",),
     )
     preparation = SimpleNamespace(
@@ -1603,6 +1794,21 @@ def test_candidate_assessment_uses_activation_fifo_when_unrelated_evidence_is_re
         _Learning,
     )
     harness = _harness(learning_enabled=True)
+    candidate_preparation, candidate_evaluation, _components = _automatic_candidate(harness)
+    preparation.candidate = candidate_preparation.candidate
+    evaluation = replace(
+        evaluation,
+        role_generation=candidate_evaluation.role_generation,
+        candidate_generation=candidate_evaluation.candidate_generation,
+        incumbent_digest=candidate_evaluation.incumbent_digest,
+        challenger_digest=candidate_evaluation.challenger_digest,
+        completed_origins=candidate_evaluation.completed_origins,
+    )
+    _seed_durable_challenger(
+        harness,
+        preparation,
+        phase="evaluating",
+    )
     harness.persistence.accept_evidence = False
 
     harness.runtime.poll_learning_off_path()
@@ -1650,6 +1856,11 @@ def test_successful_poll_hands_off_once_and_deduplicates_confidence(monkeypatch)
     preparation, evaluation, _components = _automatic_candidate(harness)
     instances[0].prepared = preparation
     instances[0].evaluation = evaluation
+    _seed_durable_challenger(
+        harness,
+        preparation,
+        phase="evaluating",
+    )
 
     first = harness.runtime.poll_learning_off_path()
     second = harness.runtime.poll_learning_off_path()
@@ -1702,6 +1913,11 @@ def test_trace_projection_failure_terminates_activation_without_losing_evidence(
     preparation, evaluation, _components = _automatic_candidate(harness)
     instances[0].prepared = preparation
     instances[0].evaluation = evaluation
+    _seed_durable_challenger(
+        harness,
+        preparation,
+        phase="evaluating",
+    )
 
     harness.runtime.poll_learning_off_path()
 
@@ -1715,6 +1931,7 @@ def test_trace_projection_failure_terminates_activation_without_losing_evidence(
 
 def test_reviewed_checkpoint_is_durable_idempotent_and_confidence_ordered(
     monkeypatch,
+    ds,
 ) -> None:
     instances = []
 
@@ -1749,6 +1966,11 @@ def test_reviewed_checkpoint_is_durable_idempotent_and_confidence_ordered(
     preparation, evaluation, components = _reviewed_candidate(harness)
     instances[0].prepared = preparation
     instances[0].evaluation = evaluation
+    _seed_durable_challenger(
+        harness,
+        preparation,
+        phase="evaluating",
+    )
 
     harness.runtime.poll_learning_off_path()
     harness.runtime.poll_learning_off_path()
@@ -1764,7 +1986,13 @@ def test_reviewed_checkpoint_is_durable_idempotent_and_confidence_ordered(
     assert confidence.payload.decision_id == evaluation.decision_id
     assert harness.runtime.model_authority()[0] == 2
     assert store.snapshots[0][1]["evidence"]["confidence_decision_id"] == (evaluation.decision_id)
-    assert store.snapshots[0][1]["identities"]["candidate_digest"] == (evaluation.challenger_digest)
+    durable = read_model_challenger()
+    assert durable is not None
+    assert durable.candidate.model_digest == evaluation.challenger_digest
+    assert store.snapshots[0][1]["challenger_authority"] == {
+        "challenger_id": durable.challenger_id,
+        "revision": durable.revision,
+    }
     harness.runtime.close()
     assert components.estimator.closed
     assert components.controller.closed
@@ -1786,6 +2014,7 @@ def test_reviewed_checkpoint_is_durable_idempotent_and_confidence_ordered(
 )
 def test_reviewed_checkpoint_failures_preserve_active_owner_and_close_candidate(
     monkeypatch,
+    ds,
     failure,
     message,
 ) -> None:
@@ -1827,8 +2056,17 @@ def test_reviewed_checkpoint_failures_preserve_active_owner_and_close_candidate(
         snapshot_parameters=snapshot_parameters,
     )
     preparation, evaluation, components = _reviewed_candidate(harness)
+    _seed_durable_challenger(
+        harness,
+        preparation,
+        phase="evaluating",
+    )
     if failure == "identity":
-        evaluation = replace(evaluation, challenger_digest="f" * 64)
+        monkeypatch.setattr(
+            harness.runtime,
+            "_prepared_candidate_descriptor",
+            lambda _preparation: harness.active.descriptor,
+        )
     elif failure == "confidence":
         harness.persistence.accept_confidence = False
     elif failure == "confidence-not-durable":
@@ -2005,10 +2243,17 @@ def test_observation_and_adoption_reject_invalid_public_inputs_without_owner_cha
 @pytest.mark.parametrize("estimator_kind", ("ekf", "kf"))
 def test_automatic_activation_prepares_one_inert_owner_without_installing_output(
     estimator_kind,
+    ds,
 ) -> None:
     harness = _harness(estimator_kind=estimator_kind)
     incumbent = harness.activation.active_pair
     preparation, evaluation, components = _automatic_candidate(harness)
+    _seed_durable_challenger(
+        harness,
+        preparation,
+        phase="qualified",
+        decision_id=evaluation.decision_id,
+    )
 
     transaction_id = harness.runtime.prepare_automatic_activation(
         preparation,
@@ -2027,9 +2272,15 @@ def test_automatic_activation_prepares_one_inert_owner_without_installing_output
     assert components.controller.closed
 
 
-def test_automatic_activation_reuses_already_durable_confidence_decision() -> None:
+def test_automatic_activation_reuses_already_durable_confidence_decision(ds) -> None:
     harness = _harness()
     preparation, evaluation, _components = _automatic_candidate(harness)
+    _seed_durable_challenger(
+        harness,
+        preparation,
+        phase="qualified",
+        decision_id=evaluation.decision_id,
+    )
     harness.activation.mark_confidence_persisted(evaluation.decision_id)
 
     transaction_id = harness.runtime.prepare_automatic_activation(
@@ -2052,15 +2303,23 @@ def test_automatic_activation_reuses_already_durable_confidence_decision() -> No
         ("evaluation", "activation-confidence-changed"),
         ("missing-evaluation", "activation-confidence-changed"),
         ("confidence", "activation-confidence-not-durable"),
-        ("phase", "activation-persistence-unavailable"),
+        ("phase", "activation-persistence-not-durable"),
     ),
 )
 def test_automatic_activation_failure_closes_transferred_candidate_components(
+    monkeypatch,
     failure,
     message,
+    ds,
 ) -> None:
     harness = _harness()
     preparation, evaluation, components = _automatic_candidate(harness)
+    _seed_durable_challenger(
+        harness,
+        preparation,
+        phase="qualified",
+        decision_id=evaluation.decision_id,
+    )
     if failure == "digest":
         preparation.candidate_digest = "f" * 64
     elif failure == "evaluation":
@@ -2070,7 +2329,14 @@ def test_automatic_activation_failure_closes_transferred_candidate_components(
     elif failure == "confidence":
         harness.persistence.accept_confidence = False
     else:
-        harness.persistence.accept_phase = False
+
+        def fail_prepared_activation(**_kwargs):
+            raise RuntimeError("activation-persistence-unavailable")
+
+        monkeypatch.setattr(
+            "controller.model_learning.grey_runtime.prepare_model_challenger_activation",
+            fail_prepared_activation,
+        )
 
     with pytest.raises((RuntimeError, ValueError), match=message):
         harness.runtime.prepare_automatic_activation(
@@ -2088,6 +2354,7 @@ def test_automatic_activation_failure_closes_transferred_candidate_components(
 
 def test_real_orchestrator_detaches_raw_owner_after_queued_lifecycle_abort(
     tmp_path,
+    ds,
 ) -> None:
     harness = _harness()
     repository, partition = _reopened_corpus(tmp_path)
@@ -2152,11 +2419,7 @@ def test_real_orchestrator_detaches_raw_owner_after_queued_lifecycle_abort(
         evaluation_config=EvaluationConfig(required_consecutive_wins=2),
         worker=_ImmediateWorker(),
     )
-    scored_sequences = tuple(
-        frame.sequence
-        for segment in snapshot.segments
-        for frame in segment.scored_hold_frames
-    )
+    scored_sequences = tuple(frame.sequence for segment in snapshot.segments for frame in segment.scored_hold_frames)
     request = FitRequest(
         request_id="e" * 64,
         origin=CandidateOrigin.PASSIVE_ONLINE,
@@ -2198,6 +2461,13 @@ def test_real_orchestrator_detaches_raw_owner_after_queued_lifecycle_abort(
         orchestrator.observe_completed_frame(_frame(sequence), identifiability=0.8)
     evaluation = orchestrator.evaluate_ready_off_path()
     assert evaluation.accepted
+    _seed_durable_challenger(
+        harness,
+        delivery.preparation,
+        phase="qualified",
+        decision_id=evaluation.decision_id,
+        fit_corpus=snapshot.identity,
+    )
     harness.persistence.accept_evidence = False
 
     with pytest.raises(
@@ -2221,9 +2491,15 @@ def test_real_orchestrator_detaches_raw_owner_after_queued_lifecycle_abort(
     harness.activation.close()
 
 
-def test_lifecycle_rejection_aborts_durable_prepared_owner_transactionally() -> None:
+def test_lifecycle_rejection_aborts_durable_prepared_owner_transactionally(ds) -> None:
     harness = _harness()
     preparation, evaluation, components = _automatic_candidate(harness)
+    _seed_durable_challenger(
+        harness,
+        preparation,
+        phase="qualified",
+        decision_id=evaluation.decision_id,
+    )
     harness.persistence.accept_evidence = False
 
     with pytest.raises(
@@ -2245,9 +2521,15 @@ def test_lifecycle_rejection_aborts_durable_prepared_owner_transactionally() -> 
     harness.activation.close()
 
 
-def test_automatic_activation_queue_rejection_closes_inert_candidate(monkeypatch) -> None:
+def test_automatic_activation_queue_rejection_closes_inert_candidate(monkeypatch, ds) -> None:
     harness = _harness()
     preparation, evaluation, components = _automatic_candidate(harness)
+    _seed_durable_challenger(
+        harness,
+        preparation,
+        phase="qualified",
+        decision_id=evaluation.decision_id,
+    )
     monkeypatch.setattr(
         harness.activation,
         "queue_prepared_activation",
@@ -2276,7 +2558,12 @@ def test_automatic_activation_queue_rejection_closes_inert_candidate(monkeypatch
         ("activation", "phase", "active"),
     ),
 )
-def test_restore_preserves_each_supported_checkpoint_state(section, key, value) -> None:
+def test_restore_preserves_each_supported_checkpoint_state(
+    ds,
+    section,
+    key,
+    value,
+) -> None:
     source = _harness()
     snapshot = source.runtime.get_model_snapshot()
     snapshot[section][key] = value
@@ -2285,7 +2572,14 @@ def test_restore_preserves_each_supported_checkpoint_state(section, key, value) 
     assert target.runtime.restore_model(snapshot)
     restored = target.runtime.get_model_snapshot()
     assert restored[section][key] == value
-    assert restored == snapshot
+    if value == "active" and snapshot["challenger_authority"] is not None:
+        assert restored == {
+            **snapshot,
+            "revision": snapshot["revision"] + 1,
+            "challenger_authority": None,
+        }
+    else:
+        assert restored == snapshot
 
     target.runtime.close()
     target.activation.close()
@@ -2337,29 +2631,27 @@ def test_restore_replace_failure_closes_new_pair_and_keeps_incumbent(monkeypatch
     source.activation.close()
 
 
-def test_runtime_snapshot_is_exact_json_safe_v4_without_process_jobs() -> None:
+def test_runtime_snapshot_is_exact_json_safe_v5_without_process_jobs() -> None:
     harness = _harness()
     snapshot = harness.runtime.get_model_snapshot()
     assert snapshot is not None
-    assert snapshot["version"] == 4
+    assert snapshot["version"] == 5
     assert set(snapshot) == {
         "version",
         "schema",
         "revision",
         "structure",
         "active",
-        "challenger",
         "evidence",
         "origin",
         "policy",
         "identification",
         "cook_refit",
-        "window",
         "identities",
         "activation",
         "failure",
         "active_pair",
-        "candidate_pair",
+        "challenger_authority",
     }
     encoded = json.dumps(snapshot, sort_keys=True, allow_nan=False)
     assert "process" not in encoded
@@ -2394,8 +2686,6 @@ def test_restore_parameter_mismatch_closes_built_pair_and_keeps_incumbent(
     target.activation.close()
     source.runtime.close()
     source.activation.close()
-
-
 
 
 @pytest.mark.parametrize("failure", ("start", "replace"))
@@ -2537,8 +2827,6 @@ def test_invalid_restore_is_atomic_and_leaves_active_owner_authorized(invalid) -
     assert harness.runtime.get_model_snapshot() == before
     harness.runtime.close()
     harness.activation.close()
-
-
 
 
 def test_close_is_idempotent_and_leaves_injected_activation_persistence_open() -> None:

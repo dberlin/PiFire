@@ -11,7 +11,7 @@ from pathlib import Path
 _HERE = os.path.dirname(os.path.abspath(__file__))
 DB_PATH: str = os.environ.get("PIFIRE_DB_PATH", os.path.join(_HERE, "..", "pifire.db"))
 _ORIGINAL_DB_PATH: str = DB_PATH
-DB_SCHEMA_VERSION = 9
+DB_SCHEMA_VERSION = 10
 
 _local = threading.local()
 
@@ -380,10 +380,7 @@ CREATE TABLE IF NOT EXISTS learning_fit_run (
         "CREATE INDEX IF NOT EXISTS ix_learning_operation_source "
         "ON learning_trajectory_operation_receipt(source_segment_id, created_corpus_revision, operation_key)"
     ),
-    (
-        "CREATE INDEX IF NOT EXISTS ix_learning_fit_terminal "
-        "ON learning_fit_run(status, completed_ms, request_id)"
-    ),
+    ("CREATE INDEX IF NOT EXISTS ix_learning_fit_terminal ON learning_fit_run(status, completed_ms, request_id)"),
     """
 INSERT OR IGNORE INTO learning_trajectory_corpus(
     singleton, schema_version, corpus_revision, segment_count,
@@ -392,6 +389,26 @@ INSERT OR IGNORE INTO learning_trajectory_corpus(
     quarantined_segment_count
 ) VALUES(1, 1, 0, 0, 0, 0, 0, 0, 0, 0)
 """,
+)
+
+# Singleton durable challenger authority (schema v10).  The canonical JSON
+# owns the complete immutable state; the repeated identity columns make
+# revision CAS and corruption detection possible without trusting that JSON.
+_MODEL_CHALLENGER_V10_DDL = (
+    """
+CREATE TABLE model_challenger_state (
+    singleton      INTEGER PRIMARY KEY CHECK(singleton = 1),
+    challenger_id  TEXT NOT NULL,
+    revision       INTEGER NOT NULL CHECK(revision >= 0),
+    phase          TEXT NOT NULL
+                   CHECK(phase IN ('built', 'evaluating', 'qualified',
+                                   'activating', 'retired')),
+    schema_version INTEGER NOT NULL CHECK(schema_version = 1),
+    state_json     TEXT NOT NULL CHECK(json_valid(state_json)),
+    updated_ms     INTEGER NOT NULL CHECK(updated_ms >= 0)
+)
+""",
+    ("CREATE UNIQUE INDEX ix_model_challenger_identity ON model_challenger_state(challenger_id)"),
 )
 
 # one table per queue; JSON queues carry a json_valid CHECK, raw lists do not
@@ -527,6 +544,14 @@ def _ensure_schema(conn):
             for statement in _LEARNING_TRAJECTORY_V9_DDL:
                 conn.execute(statement)
             conn.execute("PRAGMA user_version=9")
+    if version < 10:
+        # Schema v10 adds the independent challenger singleton. Keep its DDL
+        # and the version bump in one transaction so v9 authority is unchanged
+        # if either operation fails.
+        with transaction(conn):
+            for statement in _MODEL_CHALLENGER_V10_DDL:
+                conn.execute(statement)
+            conn.execute("PRAGMA user_version=10")
 
 
 def connection():

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass as std_dataclass
 from enum import StrEnum
-from typing import Annotated, ClassVar, Literal, TypeAlias
+from typing import Annotated, ClassVar, Literal
 
 from pydantic import (
     BaseModel,
@@ -21,14 +21,14 @@ from pydantic.dataclasses import dataclass
 
 from common.control_trace import AllocationClampReason, AmbientSource
 
-MODEL_EVIDENCE_SCHEMA_VERSION = 3
+MODEL_EVIDENCE_SCHEMA_VERSION = 4
 
-FiniteFloat: TypeAlias = Annotated[float, Field(allow_inf_nan=False, strict=True)]
-NonNegativeFloat: TypeAlias = Annotated[FiniteFloat, Field(ge=0)]
-NonNegativeInt: TypeAlias = Annotated[int, Field(ge=0, strict=True)]
-PositiveInt: TypeAlias = Annotated[int, Field(gt=0, strict=True)]
-NonBlankString: TypeAlias = Annotated[str, StringConstraints(strict=True, strip_whitespace=True, min_length=1)]
-Digest: TypeAlias = Annotated[str, StringConstraints(strict=True, pattern=r"^[0-9a-f]{64}$")]
+type FiniteFloat = Annotated[float, Field(allow_inf_nan=False, strict=True)]
+type NonNegativeFloat = Annotated[FiniteFloat, Field(ge=0)]
+type NonNegativeInt = Annotated[int, Field(ge=0, strict=True)]
+type PositiveInt = Annotated[int, Field(gt=0, strict=True)]
+type NonBlankString = Annotated[str, StringConstraints(strict=True, strip_whitespace=True, min_length=1)]
+type Digest = Annotated[str, StringConstraints(strict=True, pattern=r"^[0-9a-f]{64}$")]
 _DATACLASS_CONFIG = ConfigDict(extra="forbid", strict=True, validate_default=True)
 
 
@@ -48,6 +48,7 @@ class EvidenceKind(StrEnum):
     FALLBACK = "fallback"
     RECORDER_GAP = "recorder_gap"
     SCHEMA_INVALIDATION = "schema_invalidation"
+    CHALLENGER_ROUND = "challenger_round"
 
 
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
@@ -331,6 +332,34 @@ class ConfidenceDecisionEvidence:
 
 
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
+class ChallengerRoundEvidence:
+    """One complete all-horizon causal decision for a durable challenger."""
+
+    challenger_id: NonBlankString
+    evaluation_epoch: NonNegativeInt
+    evaluation_round: PositiveInt
+    decision_id: NonBlankString
+    accepted: bool
+    required_horizons: tuple[PositiveInt, ...]
+    completed_horizons: tuple[PositiveInt, ...]
+    incumbent_digest: Digest
+    candidate_digest: Digest
+    payload_type: Literal["challenger_round"] = "challenger_round"
+
+    @model_validator(mode="after")
+    def validate_complete_round(self) -> ChallengerRoundEvidence:
+        if not self.required_horizons:
+            raise ValueError("challenger round requires at least one horizon")
+        if len(set(self.required_horizons)) != len(self.required_horizons):
+            raise ValueError("challenger round horizons must be unique")
+        if tuple(sorted(self.required_horizons)) != self.required_horizons:
+            raise ValueError("challenger round horizons must be ordered")
+        if self.completed_horizons != self.required_horizons:
+            raise ValueError("challenger round must complete every required horizon")
+        return self
+
+
+@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
 class ActivationEvidence:
     decision_id: NonBlankString
     active_snapshot_json: NonBlankString
@@ -385,7 +414,7 @@ class SchemaInvalidationEvidence:
     payload_type: Literal["schema_invalidation"] = "schema_invalidation"
 
 
-ModelEvidencePayload: TypeAlias = Annotated[
+type ModelEvidencePayload = Annotated[
     SessionSummaryEvidence
     | CalibrationSummaryEvidence
     | ForecastOriginEvidence
@@ -396,6 +425,7 @@ ModelEvidencePayload: TypeAlias = Annotated[
     | RefreshDiagnosticsEvidence
     | TimingDistributionEvidence
     | ConfidenceDecisionEvidence
+    | ChallengerRoundEvidence
     | ActivationEvidence
     | RollbackEvidence
     | FallbackEvidence
@@ -434,7 +464,7 @@ class ModelEvidenceRecord(BaseModel):
     role_generation: NonNegativeInt
     model_digest: Digest | None
     provenance_digest: Digest | None
-    schema_version: Literal[1, 2, 3] = MODEL_EVIDENCE_SCHEMA_VERSION
+    schema_version: Literal[1, 2, 3, 4] = MODEL_EVIDENCE_SCHEMA_VERSION
     payload: ModelEvidencePayload
 
     @model_validator(mode="after")
@@ -455,6 +485,14 @@ class ModelEvidenceRecord(BaseModel):
                 or self.provenance_digest != self.payload.incumbent_digest
             ):
                 raise ValueError("forecast envelope digests must match precommitted payload digests")
+        if isinstance(self.payload, ChallengerRoundEvidence):
+            if self.schema_version != MODEL_EVIDENCE_SCHEMA_VERSION:
+                raise ValueError("challenger round evidence requires the current schema")
+            if (
+                self.model_digest != self.payload.candidate_digest
+                or self.provenance_digest != self.payload.incumbent_digest
+            ):
+                raise ValueError("challenger round envelope digests must match its causal payload")
         if (
             self.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION
             and isinstance(self.payload, TimingDistributionEvidence)

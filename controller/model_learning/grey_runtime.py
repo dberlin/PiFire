@@ -29,10 +29,11 @@ from common.control_trace import (
     TraceEventKind,
 )
 from common.controller_model_state import MAX_SNAPSHOT_BYTES, ControllerModelStore
-from common.learning_trajectory import ModelFitLineage
+from common.learning_trajectory import FitCorpusIdentity, ModelFitLineage, trajectory_json_value
 from common.model_evidence import (
     ActivationLifecycleEvidence,
     CandidateAssessmentEvidence,
+    ChallengerRoundEvidence,
     ConfidenceDecisionEvidence,
     EvidenceKind,
     FitLifecycleEvidence,
@@ -40,6 +41,18 @@ from common.model_evidence import (
     ModelEvidenceRecord,
 )
 from common.persistence.learning_trajectory import FitCorpusSnapshot
+from common.persistence.model_challenger import (
+    ModelChallengerConflictError,
+    ModelChallengerState,
+    abort_model_challenger_activation,
+    complete_model_challenger_round,
+    create_model_challenger,
+    prepare_model_challenger_activation,
+    qualify_model_challenger,
+    read_model_challenger,
+    recover_model_challenger,
+    retire_model_challenger,
+)
 from common.web_contracts.learning import ModelActivationRequest
 from controller import mpc_snapshot as _snapshot
 from controller.acados import GreyBoxMPCConfig
@@ -79,6 +92,7 @@ from controller.runtime.model_fitting import (
     GreyFitWorker,
     GreyLearningOrchestrator,
     LiveLearningIdentity,
+    TargetTimingEvidence,
     grey_config_digest,
     persistent_corpus_trigger,
     segmented_corpus_fit_job,
@@ -139,6 +153,11 @@ class GreyLearningProcessOwner:
         with self._lock:
             return self._learning
 
+    def has_pending_fit(self) -> bool:
+        with self._lock:
+            learning = self._learning
+            return learning is not None and (learning.pending_request is not None or learning.worker.busy)
+
     def bind(
         self,
         builder: Callable[[], GreyLearningOrchestrator],
@@ -198,13 +217,7 @@ class GreyLearningProcessOwner:
         ],
     ):
         with self._lock:
-            if (
-                self._closed
-                or self._learning is None
-                or self._identity is None
-                or lease <= 0
-                or lease > self._lease
-            ):
+            if self._closed or self._learning is None or self._identity is None or lease <= 0 or lease > self._lease:
                 return None
             return operation(self._learning, self._identity)
 
@@ -234,7 +247,6 @@ class GreyLearningProcessOwner:
             if self._closed or self._learning is None or lease != self._lease:
                 return None
             return self._learning.prepared
-
 
     def close(self) -> None:
         with self._lock:
@@ -315,14 +327,12 @@ class GreyLearningRuntime:
         self._corpus_fit_intents: deque[_CorpusFitIntent] = deque()
         self._corpus_fit_failure: tuple[str, str] | None = None
         self._terminal_fit_tickets: dict[str, CandidateOrigin] = {}
+        self._fit_corpus_identities: dict[str, FitCorpusIdentity] = {}
+        self._challenger_state: ModelChallengerState | None = None
         self._checkpoint_origin: CandidateOrigin | None = None
         self._checkpoint_policy: ActivationPolicy | None = None
         self._checkpoint_rollback_identity: tuple[str, int] | None = None
         self._checkpoint_decision_id: str | None = None
-        self._checkpoint_challenger: dict[str, JsonValue] | None = None
-        self._checkpoint_candidate_identity: tuple[str, int] | None = None
-        self._checkpoint_candidate_descriptor: GreyControlPairDescriptor | None = None
-        self._checkpoint_window: FitWindowIdentity | None = None
         self._checkpoint_preparation: CandidatePreparation | None = None
         self._checkpoint_preparation_key: tuple[FitRequest, str] | None = None
         self._checkpoint_cook_refit: tuple[Literal["idle", "succeeded", "failed"], str | None] = ("idle", None)
@@ -375,6 +385,23 @@ class GreyLearningRuntime:
         generation = self._activation_runtime.role_generation
         self._model_revision = generation if exact else max(self._model_revision, generation)
         self._rotate_learning_role_generation(self._model_revision)
+        state = self._challenger_state
+        if state is None:
+            try:
+                state = read_model_challenger()
+            except ValueError:
+                state = None
+        if state is None or state.phase == "retired":
+            return
+        active = self._active_pair().descriptor
+        if active == state.candidate:
+            with self._learning_lock:
+                self._challenger_state = state
+            self._retire_durable_challenger("activated")
+        elif active != state.incumbent:
+            with self._learning_lock:
+                self._challenger_state = state
+            self._retire_durable_challenger("active-authority-changed")
 
     def _learning_identity_for(
         self,
@@ -585,9 +612,7 @@ class GreyLearningRuntime:
         if learning is None or self._corpus_fit_failure is not None:
             return None
         operator_frame = (
-            observation.calibration_fit
-            or observation.calibration_stage is not None
-            or observation.probe_q != 0.0
+            observation.calibration_fit or observation.calibration_stage is not None or observation.probe_q != 0.0
         )
         with self._learning_evaluation_lock:
             result = learning.observe_completed_frame(
@@ -613,15 +638,10 @@ class GreyLearningRuntime:
             confidence_already_persisted = isinstance(
                 evaluation_decision_id,
                 str,
-            ) and self._activation_runtime.consume_confidence_persisted(
-                evaluation_decision_id
-            )
+            ) and self._activation_runtime.consume_confidence_persisted(evaluation_decision_id)
         if result.history.accepted and not operator_frame:
             self.request_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
-        forecasts = tuple(
-            self._completed_forecast_evidence(value)
-            for value in result.completed_forecasts
-        )
+        forecasts = tuple(self._completed_forecast_evidence(value) for value in result.completed_forecasts)
         reasons = tuple(result.history.reasons)
         trigger = result.trigger
         return {
@@ -631,9 +651,7 @@ class GreyLearningRuntime:
             "input_variance": trigger.input_variance,
             "input_levels": trigger.input_levels,
             "effective_updates": self._learning_eligible_updates,
-            "model_digest": grey_config_digest(
-                self._active_components().controller.config
-            ),
+            "model_digest": grey_config_digest(self._active_components().controller.config),
             "forecast_origin_evidence": forecasts,
             "learning_evaluation": evaluation,
             "evaluation_payload": evaluation,
@@ -653,9 +671,7 @@ class GreyLearningRuntime:
             "input_variance": 0.0,
             "input_levels": 0,
             "effective_updates": self._learning_eligible_updates,
-            "model_digest": grey_config_digest(
-                self._active_components().controller.config
-            ),
+            "model_digest": grey_config_digest(self._active_components().controller.config),
             "learner_error": f"{type(error).__name__}: {error}",
             "forecast_origin_evidence": (),
         }
@@ -699,9 +715,7 @@ class GreyLearningRuntime:
                         if self._process_owner is None:
                             prepared = learning.prepared
                             self._learning_candidate_pair = (
-                                prepared.candidate_pair
-                                if prepared is not None and prepared.accepted
-                                else None
+                                prepared.candidate_pair if prepared is not None and prepared.accepted else None
                             )
 
     def request_corpus_fit(self, origin: CandidateOrigin) -> bool:
@@ -716,16 +730,27 @@ class GreyLearningRuntime:
             or self._corpus_fit_failure is not None
             or self._trajectory_repository is None
             or self._fit_partition_digest is None
-            or (
-                origin is CandidateOrigin.PASSIVE_ONLINE
-                and not self._learning_enabled
-            )
+            or (origin is CandidateOrigin.PASSIVE_ONLINE and not self._learning_enabled)
         ):
             return None
+        process_fit_pending = (
+            origin is CandidateOrigin.PASSIVE_ONLINE
+            and self._process_owner is not None
+            and self._process_owner.has_pending_fit()
+        )
         with self._learning_lock:
             for intent in self._corpus_fit_intents:
                 if intent.origin is origin:
                     return intent.ticket
+            if origin is CandidateOrigin.PASSIVE_ONLINE:
+                challenger = self._challenger_state
+                if (
+                    process_fit_pending
+                    or self._learning_pending_origin is origin
+                    or challenger is not None
+                    and challenger.phase != "retired"
+                ):
+                    return None
             intent = _CorpusFitIntent(secrets.token_hex(32), origin)
             self._corpus_fit_intents.append(intent)
             self._learning_pending_origin = origin
@@ -733,6 +758,7 @@ class GreyLearningRuntime:
 
     def _fail_corpus_learning(self, code: str, error: BaseException | str) -> None:
         detail = error if isinstance(error, str) else f"{type(error).__name__}: {error}"
+        self._logger.warning(f"[mpc] cumulative learning failed closed ({code}): {detail}")
         with self._learning_lock:
             self._corpus_fit_failure = (code, detail)
             self._corpus_fit_intents.clear()
@@ -759,6 +785,7 @@ class GreyLearningRuntime:
             identifiability_accepted=True,
             preparation=prepared,
         )
+        self._retire_durable_challenger("superseded-by-newer-cumulative-fit")
 
     def _clear_superseded_prepared_candidate(
         self,
@@ -771,10 +798,6 @@ class GreyLearningRuntime:
                 self._model_revision += 1
                 self._checkpoint_preparation = None
                 self._checkpoint_preparation_key = None
-                self._checkpoint_challenger = None
-                self._checkpoint_candidate_identity = None
-                self._checkpoint_candidate_descriptor = None
-                self._checkpoint_window = None
                 self._checkpoint_decision_id = None
                 self._checkpoint_origin = None
                 self._checkpoint_policy = None
@@ -846,10 +869,7 @@ class GreyLearningRuntime:
         if repository is None or partition_resolver is None:
             return None
         with self._learning_lock:
-            if (
-                not self._corpus_fit_intents
-                or learning.pending_request is not None
-            ):
+            if not self._corpus_fit_intents or learning.pending_request is not None:
                 return None
             intent = self._corpus_fit_intents[0]
             origin = intent.origin
@@ -858,16 +878,13 @@ class GreyLearningRuntime:
         prepared = learning.prepared
         if prepared is not None and prepared.accepted:
             prepared_is_owned_operator = (
-                prepared.candidate.request.origin
-                is CandidateOrigin.OPERATOR_CALIBRATION
+                prepared.candidate.request.origin is CandidateOrigin.OPERATOR_CALIBRATION
                 and learning._can_supersede_prepared_candidate(prepared)
             )
             if intent.origin is not CandidateOrigin.COOK_REFIT:
                 terminal_rejection_reason = "superseded-by-prepared-candidate"
             elif prepared_is_owned_operator:
-                terminal_rejection_reason = (
-                    "superseded-by-prepared-operator-calibration-candidate"
-                )
+                terminal_rejection_reason = "superseded-by-prepared-operator-calibration-candidate"
             else:
                 prepared_to_replace = prepared
         try:
@@ -889,11 +906,9 @@ class GreyLearningRuntime:
                 config=learning.trigger_config,
             )
             if not trigger.ready:
+                self._logger.info("[mpc] cumulative corpus fit is not ready: " + ", ".join(trigger.blockers))
                 with self._learning_lock:
-                    if (
-                        self._corpus_fit_intents
-                        and self._corpus_fit_intents[0] is intent
-                    ):
+                    if self._corpus_fit_intents and self._corpus_fit_intents[0] is intent:
                         self._corpus_fit_intents.popleft()
                     if self._learning_pending_origin is origin:
                         self._learning_pending_origin = None
@@ -901,9 +916,7 @@ class GreyLearningRuntime:
                 return None
         identity = self.learning_identity() if identity is None else identity
         scored_sequences = tuple(
-            frame.sequence
-            for segment in snapshot.segments
-            for frame in segment.scored_hold_frames
+            frame.sequence for segment in snapshot.segments for frame in segment.scored_hold_frames
         )
         if not scored_sequences:
             self._fail_corpus_learning(
@@ -1004,6 +1017,8 @@ class GreyLearningRuntime:
                 self._corpus_fit_intents.popleft()
             self._learning_pending_origin = origin
             self._learning_pending_fit_transition = request
+            self._fit_corpus_identities[request.request_id] = snapshot.identity
+        self._logger.info(f"[mpc] submitted cumulative corpus fit {request.request_id} for {request.origin.value}")
         return request
 
     def _complete_corpus_fit(self, delivery: object) -> bool:
@@ -1044,7 +1059,150 @@ class GreyLearningRuntime:
                 completion_error,
             )
             return False
+        self._logger.info(
+            f"[mpc] completed cumulative corpus fit {message.request.request_id}: "
+            + ("succeeded" if error is None else f"failed ({error})")
+        )
         return True
+
+    def _persist_durable_challenger(
+        self,
+        learning: GreyLearningOrchestrator,
+        preparation: CandidatePreparation,
+    ) -> ModelChallengerState:
+        request = preparation.candidate.request
+        with self._learning_lock:
+            fit_corpus = self._fit_corpus_identities.get(request.request_id)
+        if fit_corpus is None:
+            raise RuntimeError("prepared challenger lost its exact fit corpus")
+        incumbent = self._active_pair().descriptor
+        candidate = self._prepared_candidate_descriptor(preparation)
+        lineage = ModelFitLineage(
+            request_id=request.request_id,
+            parent_incumbent_digest=incumbent.model_digest,
+            parent_incumbent_generation=incumbent.role_generation,
+            candidate_generation=candidate.candidate_generation,
+            fit_corpus=fit_corpus,
+            fit_corpus_digest=fit_corpus.corpus_digest,
+            trigger_origin=request.origin.value,
+            result_status="succeeded",
+            candidate_digest=candidate.model_digest,
+        )
+        current = read_model_challenger()
+        if (
+            current is not None
+            and current.phase != "retired"
+            and current.fit_lineage == lineage
+            and current.fit_corpus == fit_corpus
+            and current.incumbent == incumbent
+            and current.candidate == candidate
+            and current.origin is request.origin
+            and current.controller_configuration_digest == request.window.configuration_digest
+        ):
+            with self._learning_lock:
+                self._challenger_state = current
+                self._fit_corpus_identities.pop(request.request_id, None)
+            self._adopt_prepared_checkpoint_lineage(preparation)
+            return current
+        timing = preparation.timing
+        now_ms = self._clock_ms()
+        state = ModelChallengerState(
+            schema_version=1,
+            challenger_id=f"challenger-{secrets.token_hex(16)}",
+            revision=0,
+            phase="evaluating",
+            origin=request.origin,
+            policy=self._policy_for_learning_origin(request.origin),
+            fit_corpus=fit_corpus,
+            fit_lineage=lineage,
+            fit_preparation={
+                "request_id": request.request_id,
+                "accepted": True,
+                "candidate_digest": candidate.model_digest,
+                "native_build": "passed",
+                "dry_solve": "passed" if preparation.dry_solve_finite else "failed",
+                "target_timing": (None if timing is None else trajectory_json_value(asdict(timing))),
+                "window": asdict(request.window),
+                "fit_result": {
+                    "rmse_c": preparation.candidate.rmse_c,
+                    "max_error_c": preparation.candidate.max_error_c,
+                    "identifiability": preparation.candidate.identifiability,
+                    "sample_count": preparation.candidate.sample_count,
+                    "temperature_band_c": list(preparation.candidate.temperature_band_c),
+                    "nfev": preparation.candidate.nfev,
+                    "result_digest": preparation.candidate.result_digest,
+                },
+            },
+            controller_configuration_digest=request.window.configuration_digest,
+            incumbent=incumbent,
+            candidate=candidate,
+            calibration_manifest=None,
+            evaluation_epoch=0,
+            evaluation_round=0,
+            consecutive_wins=0,
+            required_wins=learning.evaluation_config.required_consecutive_wins,
+            last_decision_id=None,
+            last_evidence_id=None,
+            activation_transaction_id=None,
+            retirement_reason=None,
+            created_ms=now_ms,
+            updated_ms=now_ms,
+            retired_ms=None,
+        )
+        if current is not None and current.phase != "retired":
+            retire_model_challenger(
+                expected_revision=current.revision,
+                reason="superseded-by-new-cumulative-fit",
+                retired_ms=now_ms,
+            )
+        durable = create_model_challenger(state)
+        with self._learning_lock:
+            self._challenger_state = durable
+            self._fit_corpus_identities.pop(request.request_id, None)
+        self._adopt_prepared_checkpoint_lineage(preparation)
+        return durable
+
+    def _retire_durable_challenger(self, reason: str) -> None:
+        state = self._challenger_state
+        if state is None:
+            try:
+                state = read_model_challenger()
+            except ValueError:
+                return
+        if state is None or state.phase == "retired":
+            return
+        try:
+            retired = retire_model_challenger(
+                expected_revision=state.revision,
+                reason=reason,
+                retired_ms=self._clock_ms(),
+            )
+        except ModelChallengerConflictError:
+            return
+        with self._learning_lock:
+            self._challenger_state = retired
+            self._model_revision += 1
+
+    def _abort_durable_challenger_activation(
+        self,
+        record: PreparedActivationRecord,
+        reason: str,
+    ) -> None:
+        state = self._challenger_state
+        if state is None or state.phase != "activating" or state.activation_transaction_id != record.transaction_id:
+            return
+        try:
+            retired = abort_model_challenger_activation(
+                expected_revision=state.revision,
+                activation_transaction_id=record.transaction_id,
+                reason=reason,
+                retired_ms=self._clock_ms(),
+            )
+        except ModelChallengerConflictError:
+            return
+        with self._learning_lock:
+            self._challenger_state = retired
+            self._model_revision += 1
 
     def _record_terminal_fit_intent(self, intent: _CorpusFitIntent) -> None:
         self._record_terminal_fit_identity(intent.ticket, intent.origin)
@@ -1201,39 +1359,13 @@ class GreyLearningRuntime:
         with self._learning_lock:
             request = preparation.candidate.request
             descriptor = self._prepared_candidate_descriptor(preparation)
-            identity = (descriptor.model_digest, descriptor.candidate_generation)
             preparation_key = (request, descriptor.model_digest)
-            candidate_config = preparation.candidate.config
-            candidate_parameters = {
-                key: (
-                    candidate_config.delay_states
-                    if key == "n_delay"
-                    else getattr(candidate_config, key)
-                )
-                for key in self.MODEL_PARAM_KEYS
-            }
             if preparation_key != self._checkpoint_preparation_key:
                 self._model_revision += 1
             self._checkpoint_preparation = preparation
             self._checkpoint_preparation_key = preparation_key
-            self._checkpoint_candidate_identity = identity
             self._checkpoint_origin = request.origin
-            self._checkpoint_policy = self._policy_for_learning_origin(
-                request.origin
-            )
-            self._checkpoint_challenger = {
-                "parameters": _snapshot.normalize_grey_parameters(
-                    candidate_parameters
-                ),
-                "metadata": {
-                    "rmse": preparation.candidate.rmse_c,
-                    "samples": preparation.candidate.sample_count,
-                    "band_c": list(preparation.candidate.temperature_band_c),
-                    "nfev": preparation.candidate.nfev,
-                },
-            }
-            self._checkpoint_window = request.window
-            self._checkpoint_candidate_descriptor = descriptor
+            self._checkpoint_policy = self._policy_for_learning_origin(request.origin)
 
     def _clear_prepared_checkpoint_lineage(self) -> None:
         with self._learning_lock:
@@ -1271,23 +1403,100 @@ class GreyLearningRuntime:
             ControllerModelStore,
         )
 
-        previous_revision = self._model_revision
-        self._model_revision = max(
-            previous_revision + 1,
-            candidate_descriptor.role_generation,
-        )
         checkpoint = self.get_model_snapshot()
         if checkpoint is None:
-            self._model_revision = previous_revision
             raise RuntimeError("reviewed-candidate-checkpoint-invalid")
         checkpoint["evidence"]["confidence_decision_id"] = evaluation.decision_id
         checkpoint["origin"] = CandidateOrigin.OPERATOR_CALIBRATION.value
         checkpoint["policy"] = ActivationPolicy.OPERATOR_REVIEWED.value
         outcome = self._checkpoint_store.save_outcome("mpc", checkpoint)
         if outcome is not CheckpointSaveOutcome.SAVED:
-            self._model_revision = previous_revision
             raise RuntimeError("reviewed-candidate-checkpoint-not-durable")
         persisted.add(evaluation.decision_id)
+
+    def _persist_durable_evaluation_round(
+        self,
+        evaluation: EvaluationDecision,
+        preparation: CandidatePreparation | None,
+    ) -> ModelChallengerState:
+        state = self._challenger_state
+        if state is None:
+            state = read_model_challenger()
+        if state is None or preparation is None:
+            raise RuntimeError("durable challenger authority is absent")
+        timestamp_ms = max(
+            state.updated_ms,
+            max(
+                (int(origin.completion_time_s * 1_000) for origin in evaluation.completed_origins),
+                default=self._clock_ms(),
+            ),
+        )
+        evaluation_config = getattr(self._learning, "evaluation_config", None)
+        required_horizons = tuple(
+            getattr(
+                evaluation_config,
+                "required_horizons",
+                evaluation.completed_horizons,
+            )
+        )
+        completed_horizons = evaluation.completed_horizons
+        if completed_horizons != required_horizons:
+            raise RuntimeError("partial causal evaluation round cannot persist")
+        if state.last_decision_id == evaluation.decision_id:
+            if (
+                evaluation.role_generation != state.incumbent.role_generation
+                or evaluation.candidate_generation != state.candidate.candidate_generation
+                or evaluation.incumbent_digest != state.incumbent.model_digest
+                or evaluation.challenger_digest != state.candidate.model_digest
+            ):
+                raise RuntimeError("durable challenger evaluation lineage changed")
+            if state.phase == "evaluating" and state.consecutive_wins >= state.required_wins:
+                state = qualify_model_challenger(
+                    expected_revision=state.revision,
+                    qualified_ms=timestamp_ms,
+                )
+                with self._learning_lock:
+                    self._challenger_state = state
+                    self._model_revision += 1
+            return state
+        round_number = state.evaluation_round + 1
+        evidence = ModelEvidenceRecord(
+            evidence_id=(
+                f"challenger-round:{state.challenger_id}:"
+                f"{state.evaluation_epoch}:{round_number}:{evaluation.decision_id}"
+            ),
+            kind=EvidenceKind.CHALLENGER_ROUND,
+            session_id=self._learning_session_id or "mpc-learning",
+            cook_id=self._learning_cook_id,
+            timestamp_ms=timestamp_ms,
+            role_generation=evaluation.role_generation,
+            model_digest=evaluation.challenger_digest,
+            provenance_digest=evaluation.incumbent_digest,
+            payload=ChallengerRoundEvidence(
+                challenger_id=state.challenger_id,
+                evaluation_epoch=state.evaluation_epoch,
+                evaluation_round=round_number,
+                decision_id=evaluation.decision_id,
+                accepted=not bool(evaluation.blockers),
+                required_horizons=required_horizons,
+                completed_horizons=completed_horizons,
+                incumbent_digest=evaluation.incumbent_digest,
+                candidate_digest=evaluation.challenger_digest,
+            ),
+        )
+        progressed = complete_model_challenger_round(
+            expected_revision=state.revision,
+            evidence=evidence,
+        )
+        if progressed.phase == "evaluating" and progressed.consecutive_wins >= progressed.required_wins:
+            progressed = qualify_model_challenger(
+                expected_revision=progressed.revision,
+                qualified_ms=timestamp_ms,
+            )
+        with self._learning_lock:
+            self._challenger_state = progressed
+            self._model_revision += 1
+        return progressed
 
     def _persist_candidate_evaluation(self, evaluation, preparation):
         if self._activation_runtime.confidence_persisted(evaluation.decision_id):
@@ -1305,7 +1514,17 @@ class GreyLearningRuntime:
         native_build = "passed" if candidate_pair is not None else "failed"
         native_dry_solve = "passed" if bool(getattr(preparation, "dry_solve_finite", False)) else "failed"
         target_timing = "passed" if bool(getattr(timing, "accepted", False)) else "failed"
-        confidence_accepted = bool(getattr(evaluation, "accepted", False)) and not blockers
+        durable = self._challenger_state
+        durable_passive_confidence = (
+            durable is not None
+            and durable.last_decision_id == evaluation.decision_id
+            and durable.phase in {"qualified", "activating"}
+        )
+        confidence_accepted = (
+            bool(getattr(evaluation, "accepted", False))
+            and not blockers
+            and (origin is not CandidateOrigin.PASSIVE_ONLINE or durable_passive_confidence)
+        )
         reasons = list(blockers)
         if native_build == "failed":
             reasons.append("native-build-failed")
@@ -1521,7 +1740,23 @@ class GreyLearningRuntime:
         def persist_prepared(
             record: PreparedActivationRecord,
         ) -> DurableActivationReceipt:
-            receipt = self._activation_runtime.submit_prepared_phase(record)
+            receipt = DurableActivationReceipt(accepted=True)
+            try:
+                state = self._challenger_state
+                if state is None:
+                    state = read_model_challenger()
+                if state is None:
+                    raise RuntimeError("durable challenger authority is absent")
+                activating = prepare_model_challenger_activation(
+                    expected_revision=state.revision,
+                    activation=record,
+                )
+                with self._learning_lock:
+                    self._challenger_state = activating
+            except BaseException as error:
+                receipt._complete(durable=False, error=error)
+            else:
+                receipt._complete(durable=True)
             receipts.append(receipt)
             return receipt
 
@@ -1606,6 +1841,10 @@ class GreyLearningRuntime:
             decision.candidate_pair,
             receipts[0],
         ):
+            self._abort_durable_challenger_activation(
+                decision.record,
+                "activation-transition-rejected",
+            )
             decision.candidate_pair.close()
             raise RuntimeError("activation-transition-rejected")
         activation_lifecycle = ActivationLifecycleEvidence(
@@ -1629,6 +1868,10 @@ class GreyLearningRuntime:
                 provenance_digest=decision.record.incumbent.model_digest,
             )
         except BaseException as error:
+            self._abort_durable_challenger_activation(
+                decision.record,
+                "learning-lifecycle-persistence-failed",
+            )
             self._activation_runtime.abort_prepared_activation(
                 decision.record,
                 "learning-lifecycle-persistence-failed",
@@ -1648,11 +1891,7 @@ class GreyLearningRuntime:
     ):
         """Run one lifecycle poll while identity mutation is fenced."""
         with self._learning_lock:
-            learning = (
-                self._learning
-                if authoritative_learning is None
-                else authoritative_learning
-            )
+            learning = self._learning if authoritative_learning is None else authoritative_learning
             if learning is None:
                 return None, None
             queued = self._learning_pending_fit_transition
@@ -1661,14 +1900,16 @@ class GreyLearningRuntime:
             if origin is not None:
                 origin = origin if isinstance(origin, CandidateOrigin) else CandidateOrigin(origin)
 
-        if self._submit_requested_corpus_fit(
-            learning,
-            identity=authoritative_identity,
-        ) is not None:
+        if (
+            self._submit_requested_corpus_fit(
+                learning,
+                identity=authoritative_identity,
+            )
+            is not None
+        ):
             return None, None
         with self._learning_lock:
             self._learning_preparing = origin is not None
-
 
         if queued is not None:
             self._persist_fit_transition(
@@ -1682,9 +1923,7 @@ class GreyLearningRuntime:
             if origin is not None:
                 delivery = learning.poll_fit_off_path(
                     live_identity=(
-                        self.learning_identity()
-                        if authoritative_identity is None
-                        else authoritative_identity
+                        self.learning_identity() if authoritative_identity is None else authoritative_identity
                     ),
                     live_origin=origin,
                 )
@@ -1692,23 +1931,41 @@ class GreyLearningRuntime:
             with self._learning_lock:
                 self._learning_preparing = False
 
+        delivered_preparation = (
+            None
+            if delivery is None
+            else getattr(
+                delivery,
+                "preparation",
+                getattr(delivery, "prepared", None),
+            )
+        )
         with self._learning_lock:
             if learning is not self._learning:
                 return delivery, None
             if delivery is not None:
                 self._learning_pending_origin = None
-                prepared = getattr(delivery, "preparation", getattr(delivery, "prepared", None))
-                if (
-                    self._process_owner is None
-                    and prepared is not None
-                    and prepared.accepted
-                ):
-                    self._learning_candidate_pair = prepared.candidate_pair
-                    self._adopt_prepared_checkpoint_lineage(prepared)
 
         if delivery is not None:
             if not self._complete_corpus_fit(delivery):
                 return delivery, None
+            if delivered_preparation is not None and delivered_preparation.accepted:
+                try:
+                    self._persist_durable_challenger(
+                        learning,
+                        delivered_preparation,
+                    )
+                except Exception as error:
+                    learning._release_prepared()
+                    learning._reset_prepared_evaluation()
+                    self._fail_corpus_learning(
+                        "challenger-persistence-failed",
+                        error,
+                    )
+                    return delivery, None
+                if self._process_owner is None:
+                    with self._learning_lock:
+                        self._learning_candidate_pair = delivered_preparation.candidate_pair
             terminal_request = getattr(
                 getattr(delivery, "message", None),
                 "request",
@@ -1749,10 +2006,7 @@ class GreyLearningRuntime:
                     status="stale",
                     model_digest=candidate_digest,
                 )
-                if (
-                    "candidate-supersession-persistence-failed"
-                    in stale_reasons
-                ):
+                if "candidate-supersession-persistence-failed" in stale_reasons:
                     self._fail_corpus_learning(
                         "candidate-supersession-persistence-failed",
                         "durable rejection of the superseded candidate failed",
@@ -1782,11 +2036,22 @@ class GreyLearningRuntime:
         evaluation_started = self._monotonic()
         with self._learning_evaluation_lock:
             evaluation = learning.evaluate_ready_off_path()
+            durable = self._challenger_state
+            if (
+                evaluation is not None
+                and durable is not None
+                and durable.phase in {"qualified", "activating"}
+                and durable.last_decision_id != evaluation.decision_id
+            ):
+                evaluation = None
             blockers = () if evaluation is None else tuple(evaluation.blockers)
             preparation = getattr(learning, "prepared", None)
             if evaluation is not None:
+                self._persist_durable_evaluation_round(
+                    evaluation,
+                    preparation,
+                )
                 self._persist_reviewed_candidate_checkpoint(evaluation, preparation)
-            if evaluation is not None:
                 self._persist_candidate_evaluation(evaluation, preparation)
             if blockers:
                 retire = getattr(learning, "retire_evaluated_candidate", None)
@@ -1947,6 +2212,18 @@ class GreyLearningRuntime:
             pair,
             retain_current=True,
         )
+        state = self._challenger_state
+        if state is None:
+            try:
+                state = read_model_challenger()
+            except ValueError:
+                state = None
+        if state is not None and state.phase != "retired":
+            with self._learning_lock:
+                self._challenger_state = state
+            self._retire_durable_challenger(
+                "activated" if pair.descriptor == state.candidate else "active-authority-changed"
+            )
         self._sync_configuration()
         with self._learning_lock:
             self._checkpoint_preparation = None
@@ -1957,10 +2234,6 @@ class GreyLearningRuntime:
                 previous.descriptor.model_digest,
                 previous.descriptor.role_generation,
             )
-            self._checkpoint_challenger = None
-            self._checkpoint_candidate_identity = None
-            self._checkpoint_candidate_descriptor = None
-            self._checkpoint_window = None
             self._checkpoint_decision_id = None
             self._checkpoint_activation = ("aborted", False, False)
             self._checkpoint_failure = None
@@ -1972,15 +2245,36 @@ class GreyLearningRuntime:
             self._rotate_learning_role_generation(self._model_revision)
 
     def get_model_snapshot(self):
-        """Return the complete grey-only v4 checkpoint; process jobs stay live-only."""
+        """Return the grey-only v5 checkpoint with one challenger authority reference."""
+
         metadata = (
             {"rmse": None, "samples": 0, "band_c": [0.0, 0.0], "nfev": None}
             if self._model_meta is None
             else self._model_meta
         )
         with self._learning_lock:
-            checkpoint_preparation = self._checkpoint_preparation
             model_revision = self._model_revision
+            checkpoint_decision_id = self._checkpoint_decision_id
+            checkpoint_origin = self._checkpoint_origin
+            checkpoint_policy = self._checkpoint_policy
+            checkpoint_activation = self._checkpoint_activation
+            checkpoint_failure = self._checkpoint_failure
+            checkpoint_rollback_identity = self._checkpoint_rollback_identity
+        try:
+            durable_challenger = read_model_challenger()
+        except ValueError:
+            durable_challenger = None
+        if durable_challenger is not None:
+            with self._learning_lock:
+                self._challenger_state = durable_challenger
+        challenger_authority = (
+            None
+            if durable_challenger is None or durable_challenger.phase == "retired"
+            else {
+                "challenger_id": durable_challenger.challenger_id,
+                "revision": durable_challenger.revision,
+            }
+        )
         try:
             snapshot = _snapshot.new_grey_learning_snapshot(
                 revision=int(model_revision),
@@ -1989,79 +2283,49 @@ class GreyLearningRuntime:
             )
             live = self._learning_live_status()
             active = self._active_pair().descriptor
-            inert_record = self._activation_runtime.inert_record
             active_record = self._activation_runtime.active_record
-            candidate = inert_record.candidate if inert_record is not None else None
             rollback_pair = self._activation_runtime.rollback_pair
             if rollback_pair is not None:
                 rollback_digest = rollback_pair.descriptor.model_digest
                 rollback_generation = rollback_pair.descriptor.role_generation
-            elif self._checkpoint_rollback_identity is not None:
-                rollback_digest, rollback_generation = self._checkpoint_rollback_identity
+            elif checkpoint_rollback_identity is not None:
+                rollback_digest, rollback_generation = checkpoint_rollback_identity
             else:
                 rollback_digest = None
                 rollback_generation = None
-            prepared = checkpoint_preparation
-            candidate_descriptor = self._checkpoint_candidate_descriptor
-            if candidate is None and prepared is not None:
-                candidate_config = prepared.candidate.config
-                candidate_parameters = {
-                    key: (candidate_config.delay_states if key == "n_delay" else getattr(candidate_config, key))
-                    for key in self.MODEL_PARAM_KEYS
-                }
-                snapshot["challenger"] = {
-                    "parameters": _snapshot.normalize_grey_parameters(candidate_parameters),
-                    "metadata": {
-                        "rmse": prepared.candidate.rmse_c,
-                        "samples": prepared.candidate.sample_count,
-                        "band_c": list(prepared.candidate.temperature_band_c),
-                        "nfev": prepared.candidate.nfev,
-                    },
-                }
-                snapshot["window"] = asdict(prepared.candidate.request.window)
-                candidate_descriptor = self._prepared_candidate_descriptor(prepared)
-            elif candidate is None and self._checkpoint_challenger is not None:
-                snapshot["challenger"] = copy.deepcopy(self._checkpoint_challenger)
-                snapshot["window"] = (
-                    None
-                    if self._checkpoint_window is None
-                    else asdict(self._checkpoint_window)
-                )
             snapshot["evidence"] = {
                 "eligible": int(self._learning_eligible_updates),
                 "rejected": int(self._learning_rejected_updates),
                 "confidence_decision_id": (
-                    self._checkpoint_decision_id
-                    if self._checkpoint_decision_id is not None
+                    durable_challenger.last_decision_id
+                    if challenger_authority is not None
+                    else checkpoint_decision_id
+                    if checkpoint_decision_id is not None
                     else None
                     if active_record is None
                     else active_record.decision_id
                 ),
             }
-            prepared_request = (
-                None
-                if candidate is not None or prepared is None
-                else prepared.candidate.request
-            )
-            checkpoint_origin = (
-                prepared_request.origin
-                if prepared_request is not None
-                else self._checkpoint_origin
-            )
-            snapshot["origin"] = checkpoint_origin.value if checkpoint_origin is not None else live["origin"]
-            snapshot["policy"] = (
-                self._policy_for_learning_origin(prepared_request.origin).value
-                if prepared_request is not None
-                else self._checkpoint_policy.value
-                if self._checkpoint_policy is not None
-                else inert_record.policy.value
-                if inert_record is not None
-                else active_record.policy.value
+            snapshot["origin"] = (
+                active_record.origin.value
                 if active_record is not None
+                else None
+                if challenger_authority is not None
+                else checkpoint_origin.value
+                if checkpoint_origin is not None
+                else live["origin"]
+            )
+            snapshot["policy"] = (
+                active_record.policy.value
+                if active_record is not None
+                else None
+                if challenger_authority is not None
+                else checkpoint_policy.value
+                if checkpoint_policy is not None
                 else None
             )
             snapshot["identification"] = {
-                "status": "identified" if self._model_meta is not None else "unidentified",
+                "status": ("identified" if self._model_meta is not None else "unidentified"),
             }
             refit_status, refit_latest = self._checkpoint_cook_refit
             snapshot["cook_refit"] = {
@@ -2071,24 +2335,6 @@ class GreyLearningRuntime:
             snapshot["identities"] = {
                 "active_digest": active.model_digest,
                 "active_generation": active.role_generation,
-                "candidate_digest": (
-                    candidate.model_digest
-                    if candidate is not None
-                    else candidate_descriptor.model_digest
-                    if isinstance(candidate_descriptor, GreyControlPairDescriptor)
-                    else self._checkpoint_candidate_identity[0]
-                    if self._checkpoint_candidate_identity is not None
-                    else live["candidate_digest"]
-                ),
-                "candidate_generation": (
-                    candidate.candidate_generation
-                    if candidate is not None
-                    else candidate_descriptor.candidate_generation
-                    if isinstance(candidate_descriptor, GreyControlPairDescriptor)
-                    else self._checkpoint_candidate_identity[1]
-                    if self._checkpoint_candidate_identity is not None
-                    else live["candidate_generation"]
-                ),
                 "rollback_digest": rollback_digest,
                 "rollback_generation": rollback_generation,
             }
@@ -2097,9 +2343,7 @@ class GreyLearningRuntime:
                 live["pending_persistence"],
                 live["pending_swap"],
             )
-            activation = (
-                self._checkpoint_activation if live_activation == ("aborted", False, False) else live_activation
-            )
+            activation = checkpoint_activation if live_activation == ("aborted", False, False) else live_activation
             snapshot["activation"] = {
                 "phase": activation[0],
                 "pending_persistence": activation[1],
@@ -2110,21 +2354,15 @@ class GreyLearningRuntime:
                     "code": live["failure"]["code"],
                     "detail": live["failure"]["detail"],
                 }
-            elif self._checkpoint_failure is not None:
+            elif checkpoint_failure is not None:
                 snapshot["failure"] = {
-                    "code": self._checkpoint_failure[0],
-                    "detail": self._checkpoint_failure[1],
+                    "code": checkpoint_failure[0],
+                    "detail": checkpoint_failure[1],
                 }
             else:
                 snapshot["failure"] = None
             snapshot["active_pair"] = active.to_dict()
-            snapshot["candidate_pair"] = (
-                candidate.to_dict()
-                if candidate is not None
-                else candidate_descriptor.to_dict()
-                if isinstance(candidate_descriptor, GreyControlPairDescriptor)
-                else None
-            )
+            snapshot["challenger_authority"] = challenger_authority
             encoded = json.dumps(snapshot, allow_nan=False).encode()
         except AttributeError, TypeError, ValueError, OverflowError:
             return None
@@ -2147,10 +2385,72 @@ class GreyLearningRuntime:
             return
         self._model_revision = max(self._model_revision, revision)
 
+    def _restore_challenger_preparation(
+        self,
+        state: ModelChallengerState,
+        incumbent_pair: CandidatePair,
+    ) -> CandidatePreparation:
+        """Rebuild one exact candidate owner solely from durable challenger lineage."""
+
+        preparation = state.fit_preparation
+        window_value = preparation.get("window")
+        fit_result = preparation.get("fit_result")
+        timing_value = preparation.get("target_timing")
+        if (
+            not isinstance(window_value, Mapping)
+            or not isinstance(fit_result, Mapping)
+            or not isinstance(timing_value, Mapping)
+        ):
+            raise TypeError("durable challenger preparation is incomplete")
+        window = FitWindowIdentity(**dict(window_value))
+        request = FitRequest(
+            request_id=state.fit_lineage.request_id,
+            origin=state.origin,
+            window=window,
+            candidate_generation=state.candidate.candidate_generation,
+        )
+        candidate_owner = self._pair_factory.restore(state.candidate)
+        candidate = GreyFitSuccess(
+            request=request,
+            config=candidate_owner.solver.config,
+            rmse_c=fit_result["rmse_c"],
+            max_error_c=fit_result["max_error_c"],
+            identifiability=fit_result["identifiability"],
+            sample_count=fit_result["sample_count"],
+            temperature_band_c=tuple(fit_result["temperature_band_c"]),
+            nfev=fit_result["nfev"],
+            result_digest=fit_result["result_digest"],
+        )
+        timing = TargetTimingEvidence(
+            target=timing_value["target"],
+            samples=timing_value["samples"],
+            p99_ms=timing_value["p99_ms"],
+            limit_ms=timing_value["limit_ms"],
+        )
+        restored = CandidatePreparation(
+            candidate=candidate,
+            incumbent_pair=incumbent_pair,
+            accepted=True,
+            blockers=(),
+            candidate_pair=CandidatePair(
+                candidate_owner.estimator,
+                candidate_owner.solver,
+            ),
+            dry_solve_finite=True,
+            timing=timing,
+        )
+        if restored.candidate_digest != state.candidate.model_digest:
+            candidate_owner.close()
+            raise ValueError(
+                "durable challenger candidate digest changed "
+                f"({restored.candidate_digest} != {state.candidate.model_digest})"
+            )
+        return restored
+
     def restore_model(self, snapshot):
         version = snapshot.get("version") if isinstance(snapshot, dict) else None
         if not isinstance(snapshot, dict) or version != self.MODEL_SCHEMA:
-            if version == 3:
+            if version in (3, 4):
                 try:
                     _snapshot.migrate_grey_learning_snapshot(snapshot)
                 except _snapshot.GreySnapshotInvalid:
@@ -2159,7 +2459,7 @@ class GreyLearningRuntime:
                     self._adopt_persisted_revision(snapshot)
             self._logger.warning(
                 f"[mpc] discarding a version {version!r} model snapshot: runtime restore "
-                f"accepts only grey schema {self.MODEL_SCHEMA}; version 3 is migration input only."
+                f"accepts only grey schema {self.MODEL_SCHEMA}; versions 3 and 4 are migration input only."
             )
             return False
         try:
@@ -2176,16 +2476,13 @@ class GreyLearningRuntime:
         if configured_n_delay != 8 or snapshot_n_delay != 8:
             self._logger.warning("[mpc] discarding an incompatible grey snapshot (incompatible-delay).")
             return False
-        # A null active pair is well-formed v4: it is what the grey migration
-        # writes when no prior authority survived, carrying shipped defaults
-        # that no fit ever produced. There is no owner to rebuild, so say that
-        # rather than discovering it as an attribute error on the null below.
         if owned["active_pair"] is None:
             self._logger.warning(
                 "[mpc] discarding a grey snapshot with no active pair: the record holds "
                 "parameters but no model to restore. This cook starts from the configured model."
             )
             return False
+        recovery_configuration_digest = self.learning_identity().configuration_digest
         try:
             restored_descriptor = GreyControlPairDescriptor.from_dict(owned["active_pair"])
             active_identity = owned["identities"]
@@ -2194,40 +2491,6 @@ class GreyLearningRuntime:
                 or active_identity["active_generation"] != restored_descriptor.role_generation
             ):
                 raise ValueError("restored active identity does not match its pair descriptor")
-            candidate_pair_value = owned["candidate_pair"]
-            restored_candidate_descriptor = (
-                None if candidate_pair_value is None else GreyControlPairDescriptor.from_dict(candidate_pair_value)
-            )
-            candidate_digest = active_identity["candidate_digest"]
-            candidate_generation = active_identity["candidate_generation"]
-            if restored_candidate_descriptor is not None and (
-                candidate_digest != restored_candidate_descriptor.model_digest
-                or candidate_generation != restored_candidate_descriptor.candidate_generation
-            ):
-                raise ValueError("restored candidate identity does not match its pair descriptor")
-            restored_candidate_identity = (
-                None
-                if candidate_digest is None or candidate_generation is None
-                else (candidate_digest, candidate_generation)
-            )
-            challenger_value = owned["challenger"]
-            restored_challenger: dict[str, JsonValue] | None = (
-                None if challenger_value is None else copy.deepcopy(challenger_value)
-            )
-            window_value = owned["window"]
-            restored_window = (
-                None
-                if window_value is None
-                else FitWindowIdentity(
-                    session_id=window_value["session_id"],
-                    cook_id=window_value["cook_id"],
-                    first_observation_sequence=window_value["first_observation_sequence"],
-                    last_observation_sequence=window_value["last_observation_sequence"],
-                    configuration_digest=window_value["configuration_digest"],
-                    incumbent_digest=window_value["incumbent_digest"],
-                    role_generation=window_value["role_generation"],
-                )
-            )
             cook_refit_value = owned["cook_refit"]
             raw_refit_status = cook_refit_value["status"]
             if raw_refit_status == "idle":
@@ -2238,7 +2501,10 @@ class GreyLearningRuntime:
                 restored_refit_status = "failed"
             else:
                 raise ValueError("unsupported restored cook-refit status")
-            restored_cook_refit = (restored_refit_status, cook_refit_value["latest"])
+            restored_cook_refit = (
+                restored_refit_status,
+                cook_refit_value["latest"],
+            )
             activation_value = owned["activation"]
             raw_activation_phase = activation_value["phase"]
             if raw_activation_phase == "prepared":
@@ -2288,8 +2554,8 @@ class GreyLearningRuntime:
                 except BaseException as error:
                     restored_pair.close()
                     self._logger.warning(
-                        f"[mpc] restored learning could not start ({error}); "
-                        "keeping the model this controller started with."
+                        f"[mpc] restored learning could not start ({error}); keeping "
+                        "the model this controller started with."
                     )
                     return False
         old_learning = self._learning
@@ -2313,11 +2579,7 @@ class GreyLearningRuntime:
             self._learning = staged_learning
             if old_learning is not None:
                 old_learning.close()
-        elif (
-            old_learning is not None
-            and restored_components is not None
-            and restored_identity is not None
-        ):
+        elif old_learning is not None and restored_components is not None and restored_identity is not None:
             binding = self._process_owner.rebind(
                 identity=restored_identity,
                 config=restored_components.controller.config,
@@ -2325,11 +2587,6 @@ class GreyLearningRuntime:
             )
             self._learning = binding.learning
             self._process_lease = binding.lease
-        # Said for the model that will actually solve. __init__'s own call saw
-        # only the configured parameters, which for a grill that has been
-        # learning are not the ones about to steer it. A restored model is
-        # calibrated by its own fit record, so pass the metadata rather than
-        # letting parameter distance stand in for it.
         warn_about_model(self._configuration(), metadata, logger=self._logger)
         self._model_meta = {
             "rmse": metadata["rmse"],
@@ -2346,11 +2603,7 @@ class GreyLearningRuntime:
         self._checkpoint_rollback_identity = (
             None if rollback_digest is None or rollback_generation is None else (rollback_digest, rollback_generation)
         )
-        self._checkpoint_challenger = restored_challenger
         self._clear_prepared_checkpoint_lineage()
-        self._checkpoint_candidate_descriptor = restored_candidate_descriptor
-        self._checkpoint_window = restored_window
-        self._checkpoint_candidate_identity = restored_candidate_identity
         self._checkpoint_decision_id = owned["evidence"]["confidence_decision_id"]
         self._checkpoint_cook_refit = restored_cook_refit
         self._checkpoint_activation = restored_activation
@@ -2360,9 +2613,88 @@ class GreyLearningRuntime:
         self._learning_eligible_updates = owned["evidence"]["eligible"]
         self._learning_rejected_updates = owned["evidence"]["rejected"]
         self._rotate_learning_role_generation(restored_descriptor.role_generation)
+
+        authority = owned["challenger_authority"]
+        try:
+            durable = read_model_challenger()
+        except ValueError:
+            durable = None
+        authority_matches = (
+            durable is not None
+            and authority is not None
+            and durable.phase != "retired"
+            and authority["challenger_id"] == durable.challenger_id
+            and authority["revision"] == durable.revision
+        )
+        if durable is not None and durable.phase != "retired" and not authority_matches:
+            with self._learning_lock:
+                self._challenger_state = durable
+            self._retire_durable_challenger("checkpoint-reference-mismatch")
+        elif (
+            authority_matches
+            and durable is not None
+            and restored_components is not None
+            and restored_identity is not None
+            and self._learning is not None
+            and self._trajectory_repository is not None
+        ):
+            preparation = None
+            try:
+                live_corpus = self._trajectory_repository.snapshot_fit_corpus(
+                    durable.fit_corpus.fit_partition_digest,
+                    through_revision=durable.fit_corpus.corpus_revision,
+                ).identity
+                preparation = self._restore_challenger_preparation(
+                    durable,
+                    restored_components,
+                )
+                recovered = recover_model_challenger(
+                    incumbent=restored_descriptor,
+                    candidate=durable.candidate,
+                    controller_configuration_digest=(recovery_configuration_digest),
+                    fit_corpus=live_corpus,
+                    calibration_manifest=durable.calibration_manifest,
+                    recovered_ms=self._clock_ms(),
+                )
+                if recovered is None:
+                    for component in (
+                        preparation.candidate_pair.controller,
+                        preparation.candidate_pair.estimator,
+                    ):
+                        close = getattr(component, "close", None)
+                        if callable(close):
+                            close()
+                else:
+                    self._learning.restore_persisted_challenger(
+                        preparation,
+                        evaluation_epoch=recovered.evaluation_epoch,
+                        consecutive_wins=recovered.consecutive_wins,
+                    )
+                    with self._learning_lock:
+                        self._challenger_state = recovered
+                        if self._process_owner is None:
+                            self._learning_candidate_pair = preparation.candidate_pair
+                    self._adopt_prepared_checkpoint_lineage(preparation)
+            except Exception as error:
+                if self._learning is not None:
+                    self._learning._release_prepared()
+                try:
+                    latest = read_model_challenger()
+                except ValueError:
+                    latest = None
+                if latest is not None:
+                    with self._learning_lock:
+                        self._challenger_state = latest
+                self._retire_durable_challenger("challenger-reconstruction-failed")
+                self._logger.warning(
+                    f"[mpc] durable challenger recovery failed ({error}); keeping the restored active model."
+                )
+        elif authority_matches and durable is not None:
+            with self._learning_lock:
+                self._challenger_state = durable
+            self._retire_durable_challenger("challenger-recovery-prerequisite-missing")
         self.get_model_snapshot()
         return True
-
 
     def close(self) -> None:
         if self._closed:

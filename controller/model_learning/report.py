@@ -50,12 +50,12 @@ def _json_value(value: object) -> object:
         return value.value
     if isinstance(value, ModelEvidenceRecord):
         return value.model_dump(mode="json")
-    if is_dataclass(value) and not isinstance(value, type):
-        return _json_value(asdict(value))
     if isinstance(value, Mapping):
         if not all(isinstance(key, str) for key in value):
             raise ValueError("report mappings must have string keys")
         return {key: _json_value(item) for key, item in value.items()}
+    if is_dataclass(value) and not isinstance(value, type):
+        return _json_value(asdict(value))
     if isinstance(value, (tuple, list)):
         return [_json_value(item) for item in value]
     if value is None or isinstance(value, (str, int, float, bool)):
@@ -117,7 +117,6 @@ def _superseded_invalidation(
     )
 
 
-
 def _latest_payload[PayloadT](
     records: Sequence[ModelEvidenceRecord],
     payload_type: type[PayloadT],
@@ -148,12 +147,7 @@ def _candidate_identity(
 ) -> tuple[str, int] | None:
     digest = authority.get("candidate_digest")
     generation = authority.get("candidate_generation")
-    if (
-        not isinstance(digest, str)
-        or isinstance(generation, bool)
-        or not isinstance(generation, int)
-        or generation < 0
-    ):
+    if not isinstance(digest, str) or isinstance(generation, bool) or not isinstance(generation, int) or generation < 0:
         return None
     return digest, generation
 
@@ -162,6 +156,43 @@ def _validated_checkpoint(checkpoint: dict[str, object]) -> dict[str, object]:
     from controller.mpc_snapshot import migrate_grey_learning_snapshot
 
     return migrate_grey_learning_snapshot(checkpoint)
+
+
+def _challenger_projection(value: object) -> dict[str, object]:
+    if value is None:
+        return {}
+    from common.persistence.model_challenger import ModelChallengerState
+
+    if not isinstance(value, ModelChallengerState):
+        raise TypeError("challenger_state must be a ModelChallengerState")
+    preparation = _json_value(value.fit_preparation)
+    if not isinstance(preparation, dict):
+        raise TypeError("challenger fit preparation must be an object")
+    window = preparation.get("window")
+    configuration = _json_value(value.candidate.configuration)
+    if not isinstance(configuration, dict):
+        raise TypeError("challenger candidate configuration must be an object")
+    nested_parameters = configuration.get("parameters")
+    parameter_source = nested_parameters if isinstance(nested_parameters, dict) else configuration
+    candidate_parameters = {name: parameter_source[name] for name in ("C_c", "K_Q", "T_amb", "h_amb", "sigma", "theta")}
+    candidate_parameters["n_delay"] = configuration.get(
+        "n_delay",
+        configuration.get("delay_states"),
+    )
+    return {
+        "challenger_id": value.challenger_id,
+        "revision": value.revision,
+        "phase": value.phase,
+        "origin": value.origin.value,
+        "policy": value.policy.value,
+        "candidate_digest": value.candidate.model_digest,
+        "candidate_generation": value.candidate.candidate_generation,
+        "candidate_parameters": candidate_parameters,
+        "incumbent_digest": value.incumbent.model_digest,
+        "role_generation": value.incumbent.role_generation,
+        "decision_id": value.last_decision_id,
+        "window": window,
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,6 +226,7 @@ def build_learning_report(
     checkpoint_required: bool = False,
     calibration_command_high_water: int,
     checkpoint: object = None,
+    challenger_state: object = None,
 ) -> LearningReport:
     """Project ledger, durable authorities, live phases, and calibration once."""
 
@@ -220,6 +252,22 @@ def build_learning_report(
             schema_invalidated = True
     elif checkpoint_required or (not activation and not live):
         errors.append("checkpoint-missing")
+    challenger = _challenger_projection(challenger_state)
+    if challenger.get("phase") == "retired":
+        challenger = {}
+    challenger_reference = checkpoint_map.get("challenger_authority")
+    expected_reference = (
+        None
+        if not challenger
+        else {
+            "challenger_id": challenger["challenger_id"],
+            "revision": challenger["revision"],
+        }
+    )
+    if challenger_reference != expected_reference:
+        if challenger_reference is not None or challenger:
+            errors.append("challenger-reference-mismatch")
+        challenger = {}
 
     try:
         status = _enum_value(
@@ -250,8 +298,7 @@ def build_learning_report(
     )
     cook_refit_latest = cook_refit_value["latest"]
     if cook_refit_latest is not None and (
-        not isinstance(cook_refit_latest, str)
-        or cook_refit_latest not in _LEGACY_COOK_REFIT_OUTCOMES
+        not isinstance(cook_refit_latest, str) or cook_refit_latest not in _LEGACY_COOK_REFIT_OUTCOMES
     ):
         raise ValueError("invalid cook_refit latest")
     if cook_refit_latest is None:
@@ -263,29 +310,21 @@ def build_learning_report(
 
     identities = checkpoint_map.get("identities")
     identities = identities if isinstance(identities, Mapping) else {}
-    checkpoint_candidate_identity = _candidate_identity(identities)
+    challenger_candidate_identity = _candidate_identity(challenger)
     live_candidate_identity = _candidate_identity(live)
     activation_candidate_identity = _candidate_identity(activation)
     current_candidate_identities = tuple(
         identity
         for identity in (
-            checkpoint_candidate_identity,
+            challenger_candidate_identity,
             live_candidate_identity,
         )
         if identity is not None
     )
-    activation_matches_candidate = (
-        activation_candidate_identity is not None
-        and all(
-            activation_candidate_identity == identity
-            for identity in current_candidate_identities
-        )
+    activation_matches_candidate = activation_candidate_identity is not None and all(
+        activation_candidate_identity == identity for identity in current_candidate_identities
     )
-    activation_authority = (
-        activation
-        if not current_candidate_identities or activation_matches_candidate
-        else {}
-    )
+    activation_authority = activation if not current_candidate_identities or activation_matches_candidate else {}
     phase = activation_authority.get(
         "phase",
         live.get("activation_phase", "aborted"),
@@ -295,14 +334,16 @@ def build_learning_report(
         if phase == "active"
         else _pair_digest(activation_authority, "incumbent_pair")
     )
-    incumbent_digest = activation_authority.get("incumbent_digest")
+    incumbent_digest = challenger.get("incumbent_digest")
+    if not isinstance(incumbent_digest, str):
+        incumbent_digest = activation_authority.get("incumbent_digest")
     if not isinstance(incumbent_digest, str):
         incumbent_digest = _pair_digest(activation_authority, "incumbent_pair")
     if not isinstance(incumbent_digest, str):
         incumbent_digest = identities.get("active_digest")
-    candidate_digest = activation_authority.get("candidate_digest")
+    candidate_digest = challenger.get("candidate_digest")
     if not isinstance(candidate_digest, str):
-        candidate_digest = identities.get("candidate_digest")
+        candidate_digest = activation_authority.get("candidate_digest")
     if not isinstance(candidate_digest, str):
         candidate_digest = live.get("candidate_digest")
     active_digest = (
@@ -310,13 +351,16 @@ def build_learning_report(
         if isinstance(active_pair_digest, str)
         else (candidate_digest if phase == "active" else incumbent_digest)
     )
-    role_generation = activation_authority.get(
+    role_generation = challenger.get(
         "role_generation",
-        identities.get("active_generation", live.get("role_generation")),
+        activation_authority.get(
+            "role_generation",
+            identities.get("active_generation", live.get("role_generation")),
+        ),
     )
-    candidate_generation = activation_authority.get(
+    candidate_generation = challenger.get(
         "candidate_generation",
-        identities.get(
+        activation_authority.get(
             "candidate_generation",
             live.get("candidate_generation"),
         ),
@@ -340,7 +384,7 @@ def build_learning_report(
         errors.append("live-checkpoint-digest-mismatch")
 
     live_origin = live.get("origin")
-    durable_origin = activation_authority.get("origin", checkpoint_map.get("origin"))
+    durable_origin = challenger.get("origin", activation_authority.get("origin"))
     try:
         normalized_live_origin = (
             None if live_origin is None else _enum_value(live_origin, CandidateOrigin, "live candidate origin")
@@ -359,7 +403,7 @@ def build_learning_report(
         origin = None
         errors.append("candidate-origin-invalid")
 
-    durable_policy = activation_authority.get("policy", checkpoint_map.get("policy"))
+    durable_policy = challenger.get("policy", activation_authority.get("policy"))
     try:
         candidate_policy = (
             None
@@ -428,10 +472,8 @@ def build_learning_report(
     elif errors:
         status = LearningStatus.ERROR.value
 
-    candidate_checkpoint = checkpoint_map.get("challenger")
-    candidate_checkpoint = candidate_checkpoint if isinstance(candidate_checkpoint, Mapping) else {}
-    candidate_metadata = candidate_checkpoint.get("metadata")
-    candidate_metadata = candidate_metadata if isinstance(candidate_metadata, Mapping) else {}
+    candidate_parameters = challenger.get("candidate_parameters")
+    candidate_metadata: Mapping[str, object] = {}
     rejection_reasons = [] if assessment is None else list(assessment.rejection_reasons)
     assessment_policy = None
     if assessment is not None:
@@ -443,9 +485,12 @@ def build_learning_report(
             errors.append("assessment-candidate-digest-mismatch")
         elif origin is not None and assessment.origin != origin:
             errors.append("assessment-candidate-origin-mismatch")
+        elif challenger and assessment.policy != candidate_policy:
+            errors.append("assessment-candidate-policy-mismatch")
         else:
             assessment_policy = assessment.policy
-            candidate_policy = assessment_policy
+            if not challenger:
+                candidate_policy = assessment_policy
     if errors and not schema_invalidated:
         status = LearningStatus.ERROR.value
     if (
@@ -463,10 +508,12 @@ def build_learning_report(
     ):
         status = LearningStatus.READY_FOR_REVIEW.value
     blockers = list(dict.fromkeys([*rejection_reasons, *errors]))
-    decision_id = activation_authority.get(
-        "evidence_decision_id",
-        activation_authority.get("decision_id"),
-    )
+    decision_id = challenger.get("decision_id")
+    if not isinstance(decision_id, str):
+        decision_id = activation_authority.get(
+            "evidence_decision_id",
+            activation_authority.get("decision_id"),
+        )
     if not isinstance(decision_id, str) and assessment is not None:
         decision_id = assessment.decision_id
     if not isinstance(decision_id, str) and confidence is not None:
@@ -498,7 +545,7 @@ def build_learning_report(
             "authorization": cook_refit_authorization,
             "next_cook": False,
         },
-        "window": checkpoint_map.get("window"),
+        "window": challenger.get("window"),
         "checks": checks,
         "candidate": {
             "digest": candidate_digest,
@@ -506,7 +553,7 @@ def build_learning_report(
             "policy": candidate_policy,
             "role_generation": role_generation,
             "candidate_generation": candidate_generation,
-            "parameters": candidate_checkpoint.get("parameters"),
+            "parameters": candidate_parameters,
             "parameter_deltas": live.get("parameter_deltas"),
             "fit_quality": candidate_metadata.get("rmse"),
             "identifiability": live.get("identifiability"),
@@ -529,8 +576,7 @@ def build_learning_report(
             "candidate_digest": candidate_digest,
             "candidate_generation": candidate_generation,
             "rollback_digest": (
-                _pair_digest(activation_authority, "rollback_pair")
-                or identities.get("rollback_digest")
+                _pair_digest(activation_authority, "rollback_pair") or identities.get("rollback_digest")
             ),
             "rollback_generation": identities.get("rollback_generation"),
         },
@@ -567,6 +613,7 @@ def current_learning_report(
     calibration_command_high_water: int,
     checkpoint_required: bool = False,
     checkpoint: object = None,
+    challenger_state: object = None,
 ) -> LearningReport:
     """Return the value-cached report over every authority input."""
 
@@ -575,6 +622,7 @@ def current_learning_report(
         "evidence": records,
         "activation": activation_state,
         "checkpoint": checkpoint,
+        "challenger": _challenger_projection(challenger_state),
         "live": live_status,
         "calibration_command_high_water": calibration_command_high_water,
         "checkpoint_required": checkpoint_required,
@@ -592,6 +640,7 @@ def current_learning_report(
         checkpoint_required=checkpoint_required,
         live_status=live_status,
         calibration_command_high_water=calibration_command_high_water,
+        challenger_state=challenger_state,
     )
     with _REPORT_CACHE_LOCK:
         existing = _REPORT_CACHE.get(key)
@@ -635,6 +684,7 @@ def backend_learning_report() -> tuple[LearningReport, tuple[ModelEvidenceRecord
     from common.persistence.control import (
         mpc_calibration_command_revision,
     )
+    from common.persistence.model_challenger import read_model_challenger
     from common.persistence.model_evidence import read_model_activation, read_model_evidence
     from common.persistence.runtime import (
         read_status,
@@ -648,6 +698,10 @@ def backend_learning_report() -> tuple[LearningReport, tuple[ModelEvidenceRecord
         controller = status.get("controller")
         nested = controller.get("learning") if isinstance(controller, Mapping) else None
         live = direct if isinstance(direct, Mapping) else nested
+    try:
+        challenger = read_model_challenger()
+    except ValueError:
+        challenger = None
     report = current_learning_report(
         records,
         activation_state=read_model_activation(),
@@ -655,6 +709,7 @@ def backend_learning_report() -> tuple[LearningReport, tuple[ModelEvidenceRecord
         checkpoint_required=True,
         live_status=live,
         calibration_command_high_water=mpc_calibration_command_revision(),
+        challenger_state=challenger,
     )
     return report, records
 

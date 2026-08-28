@@ -238,8 +238,8 @@ def read_model_evidence(
     database_path: str | os.PathLike[str] | None = None,
 ) -> list[ModelEvidenceRecord]:
     """Return compatible compact evidence in deterministic append order."""
-    clauses = ["schema_version IN (?, ?, ?)"]
-    params: list[object] = [1, 2, MODEL_EVIDENCE_SCHEMA_VERSION]
+    clauses = ["schema_version IN (?, ?, ?, ?)"]
+    params: list[object] = [1, 2, 3, MODEL_EVIDENCE_SCHEMA_VERSION]
     if session_id is not None:
         clauses.append("session_id=?")
         params.append(_require_model_identifier(session_id, "session_id"))

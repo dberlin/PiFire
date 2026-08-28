@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
 from types import SimpleNamespace
 
 import pytest
@@ -11,6 +12,7 @@ from common.control_trace import (
     AmbientSource,
 )
 from common.controller_model_state import ControllerModelStore
+from common.learning_trajectory import ModelFitLineage
 from common.model_evidence import (
     CandidateAssessmentEvidence,
     EvidenceKind,
@@ -19,6 +21,13 @@ from common.model_evidence import (
     SchemaInvalidationEvidence,
 )
 from common.persistence.control_trace import read_control_trace_session
+from common.persistence.model_challenger import (
+    ModelChallengerState,
+    abort_model_challenger_activation,
+    create_model_challenger,
+    read_model_challenger,
+    retire_model_challenger,
+)
 from common.persistence.model_evidence import read_model_evidence
 from controller.model_learning import report as report_module
 from controller.model_learning.activation import (
@@ -49,9 +58,91 @@ from controller.runtime.model_fitting import (
     TargetTimingEvidence,
     grey_config_digest,
 )
+from tests.unit.common.test_model_challenger_store import (
+    _corpus,
+)
+from tests.unit.common.test_model_challenger_store import (
+    _state as _stored_challenger,
+)
 
 _CANDIDATE = "b" * 64
 _INCUMBENT = "a" * 64
+
+
+_REQUIRED_HORIZONS = (3, 15, 45, 90, 180)
+
+
+def _persist_evaluating_challenger(
+    incumbent: GreyControlPairDescriptor,
+    candidate: GreyControlPairDescriptor,
+    request: FitRequest,
+) -> ModelChallengerState:
+    corpus = _corpus(request.request_id)
+    policy = {
+        CandidateOrigin.PASSIVE_ONLINE: ActivationPolicy.PASSIVE_AUTO,
+        CandidateOrigin.OPERATOR_CALIBRATION: ActivationPolicy.OPERATOR_REVIEWED,
+        CandidateOrigin.COOK_REFIT: ActivationPolicy.COOK_REFIT,
+    }[request.origin]
+    state = ModelChallengerState(
+        schema_version=1,
+        challenger_id=f"challenger-{request.request_id}",
+        revision=0,
+        phase="evaluating",
+        origin=request.origin,
+        policy=policy,
+        fit_corpus=corpus,
+        fit_lineage=ModelFitLineage(
+            request_id=request.request_id,
+            parent_incumbent_digest=incumbent.model_digest,
+            parent_incumbent_generation=incumbent.role_generation,
+            candidate_generation=candidate.candidate_generation,
+            fit_corpus=corpus,
+            fit_corpus_digest=corpus.corpus_digest,
+            trigger_origin=request.origin.value,
+            result_status="succeeded",
+            candidate_digest=candidate.model_digest,
+        ),
+        fit_preparation={
+            "request_id": request.request_id,
+            "accepted": True,
+            "candidate_digest": candidate.model_digest,
+            "native_build": "passed",
+            "dry_solve": "passed",
+            "window": asdict(request.window),
+        },
+        controller_configuration_digest=request.window.configuration_digest,
+        incumbent=incumbent,
+        candidate=candidate,
+        calibration_manifest=None,
+        evaluation_epoch=0,
+        evaluation_round=0,
+        consecutive_wins=0,
+        required_wins=2,
+        last_decision_id=None,
+        last_evidence_id=None,
+        activation_transaction_id=None,
+        retirement_reason=None,
+        created_ms=1,
+        updated_ms=1,
+        retired_ms=None,
+    )
+    current = read_model_challenger()
+    if current is not None and current != state and current.phase != "retired":
+        retired_ms = current.updated_ms + 1
+        if current.phase == "activating":
+            abort_model_challenger_activation(
+                expected_revision=current.revision,
+                activation_transaction_id=current.activation_transaction_id,
+                reason="legacy-harness-replaced",
+                retired_ms=retired_ms,
+            )
+        else:
+            retire_model_challenger(
+                expected_revision=current.revision,
+                reason="legacy-harness-replaced",
+                retired_ms=retired_ms,
+            )
+    return create_model_challenger(state)
 
 
 def _evidence(evidence_id: str = "gap-1") -> ModelEvidenceRecord:
@@ -274,49 +365,38 @@ def test_prior_active_activation_does_not_override_new_evaluating_candidate(
         "_validated_checkpoint",
         lambda checkpoint: checkpoint,
     )
-    new_candidate = "c" * 64
+    challenger = _stored_challenger(phase="evaluating")
     activation = _activation(phase="active")
-    activation["policy"] = ActivationPolicy.OPERATOR_REVIEWED.value
+    activation.update(
+        {
+            "incumbent_digest": challenger.incumbent.model_digest,
+            "role_generation": challenger.incumbent.role_generation,
+            "policy": ActivationPolicy.OPERATOR_REVIEWED.value,
+        }
+    )
     live = _live(status=LearningStatus.EVALUATING)
     live.update(
         {
             "activation_phase": "aborted",
-            "candidate_digest": new_candidate,
-            "candidate_generation": 10,
+            "role_generation": challenger.incumbent.role_generation,
+            "candidate_digest": challenger.candidate.model_digest,
+            "candidate_generation": challenger.candidate.candidate_generation,
+            "checkpoint_digest": challenger.incumbent.model_digest,
             "origin": CandidateOrigin.PASSIVE_ONLINE,
         }
     )
     checkpoint = {
-        "origin": CandidateOrigin.PASSIVE_ONLINE.value,
-        "policy": ActivationPolicy.PASSIVE_AUTO.value,
+        "origin": None,
+        "policy": None,
         "identities": {
-            "active_digest": _INCUMBENT,
-            "active_generation": 4,
-            "candidate_digest": new_candidate,
-            "candidate_generation": 10,
+            "active_digest": challenger.incumbent.model_digest,
+            "active_generation": challenger.incumbent.role_generation,
             "rollback_digest": None,
             "rollback_generation": None,
         },
-        "challenger": {
-            "parameters": {
-                "C_c": 420.0,
-                "K_Q": 400.0,
-                "T_amb": 20.0,
-                "h_amb": 0.6,
-                "n_delay": 8,
-                "sigma": 1.4e-9,
-                "theta": 55.0,
-            },
-            "metadata": {"rmse": 1.0},
-        },
-        "window": {
-            "session_id": "new-session",
-            "cook_id": "new-cook",
-            "first_observation_sequence": 1,
-            "last_observation_sequence": 120,
-            "configuration_digest": "d" * 64,
-            "incumbent_digest": _INCUMBENT,
-            "role_generation": 4,
+        "challenger_authority": {
+            "challenger_id": challenger.challenger_id,
+            "revision": challenger.revision,
         },
     }
 
@@ -326,18 +406,19 @@ def test_prior_active_activation_does_not_override_new_evaluating_candidate(
         checkpoint=checkpoint,
         live_status=live,
         calibration_command_high_water=0,
+        challenger_state=challenger,
     ).as_dict()
 
     candidate = _section(payload, "candidate")
     projected_activation = _section(payload, "activation")
     assert payload["status"] == LearningStatus.EVALUATING.value
     assert payload["blockers"] == []
-    assert candidate["digest"] == new_candidate
-    assert candidate["candidate_generation"] == 10
+    assert candidate["digest"] == challenger.candidate.model_digest
+    assert candidate["candidate_generation"] == challenger.candidate.candidate_generation
     assert candidate["origin"] == CandidateOrigin.PASSIVE_ONLINE.value
     assert candidate["policy"] == ActivationPolicy.PASSIVE_AUTO.value
     assert projected_activation["phase"] == "aborted"
-    assert payload["active_model"]["digest"] == _INCUMBENT
+    assert payload["active_model"]["digest"] == challenger.incumbent.model_digest
 
 
 def test_prepared_activation_is_reported_as_activating_not_active() -> None:
@@ -509,9 +590,10 @@ def test_retired_schema_invalidation_audit_cannot_gate_current_report() -> None:
     assert payload["evidence"]["count"] == 0
 
 
-def test_completed_schema_migration_stops_gating_once_the_ledger_moves_on() -> None:
+def test_completed_schema_migration_stops_gating_once_the_ledger_moves_on(ds) -> None:
     controller = Controller(dict(DEFAULT_MPC_CONFIG), "C", {"u_min": 0.1, "u_max": 0.9})
     checkpoint = controller.get_model_snapshot()
+    controller.close()
     active_digest = checkpoint["identities"]["active_digest"]
     marker = ModelEvidenceRecord(
         evidence_id="mpc:schema-migration:1:defaults",
@@ -617,13 +699,16 @@ def test_manual_policy_comes_from_matching_current_candidate_assessment() -> Non
     assert payload["candidate"]["policy"] == "operator-reviewed"
 
 
-def test_production_live_terminal_failure_overlays_prior_active_with_exact_reason() -> None:
+def test_production_live_terminal_failure_overlays_prior_active_with_exact_reason(
+    ds,
+) -> None:
     controller = Controller(dict(DEFAULT_MPC_CONFIG), "C", {"u_min": 0.1, "u_max": 0.9})
     controller.terminate_mpc_activation("native solver crashed")
 
     checkpoint = controller.get_model_snapshot()
     active_digest = checkpoint["identities"]["active_digest"]
     live = controller._grey_learning_runtime.learning_status()
+    controller.close()
     payload = build_learning_report(
         (),
         activation_state={
@@ -713,6 +798,13 @@ def test_real_operator_evaluation_persists_reviewed_assessment_for_restart_repor
         incumbent_pair=CandidatePair(object(), object()),
         timing=TargetTimingEvidence("candidate-dry-solve", 3, 1.0, 25.0),
     )
+    durable = _persist_evaluating_challenger(
+        incumbent,
+        candidate_descriptor,
+        request,
+    )
+    controller._grey_learning_runtime._challenger_state = durable
+    controller._grey_learning_runtime._adopt_prepared_checkpoint_lineage(preparation)
     evaluation = SimpleNamespace(
         decision_id="operator-decision",
         accepted=True,
@@ -722,12 +814,14 @@ def test_real_operator_evaluation_persists_reviewed_assessment_for_restart_repor
         incumbent_digest=incumbent.model_digest,
         challenger_digest=candidate_digest,
         completed_origins=(),
+        completed_horizons=_REQUIRED_HORIZONS,
     )
 
     class _Learning:
         prepared = preparation
         handoff = None
         pending_request = None
+        evaluation_config = SimpleNamespace(required_horizons=_REQUIRED_HORIZONS)
 
         def poll_fit_off_path(self, **_kwargs):
             return None
@@ -749,7 +843,14 @@ def test_real_operator_evaluation_persists_reviewed_assessment_for_restart_repor
     assert checkpoint is not None
     assert checkpoint["revision"] == 2
     assert checkpoint["active_pair"] == incumbent.to_dict()
-    assert checkpoint["candidate_pair"] == candidate_descriptor.to_dict()
+    assert "candidate_pair" not in checkpoint
+    durable = read_model_challenger()
+    assert durable is not None
+    assert checkpoint["challenger_authority"] == {
+        "challenger_id": durable.challenger_id,
+        "revision": durable.revision,
+    }
+    assert durable.candidate == candidate_descriptor
     report, records = backend_learning_report()
     artifact = json.loads(build_learning_artifact(report, records))
 
@@ -970,6 +1071,14 @@ def test_real_evaluation_blocker_persists_rejection_context_before_retirement(ds
             configuration_digest="d" * 64,
         ),
     )
+    candidate_descriptor = GreyControlPairDescriptor(
+        model_digest=candidate_digest,
+        configuration=dict(incumbent.configuration),
+        estimator_kind=incumbent.estimator_kind,
+        solver_kind=incumbent.solver_kind,
+        candidate_generation=1,
+        role_generation=1,
+    )
     preparation = SimpleNamespace(
         accepted=True,
         candidate_digest=candidate_digest,
@@ -986,6 +1095,13 @@ def test_real_evaluation_blocker_persists_rejection_context_before_retirement(ds
         dry_solve_finite=True,
         timing=SimpleNamespace(accepted=True),
     )
+    durable = _persist_evaluating_challenger(
+        incumbent,
+        candidate_descriptor,
+        request,
+    )
+    controller._grey_learning_runtime._challenger_state = durable
+    controller._grey_learning_runtime._adopt_prepared_checkpoint_lineage(preparation)
     evaluation = SimpleNamespace(
         decision_id="blocked-evaluation-decision",
         accepted=False,
@@ -995,11 +1111,13 @@ def test_real_evaluation_blocker_persists_rejection_context_before_retirement(ds
         incumbent_digest=incumbent.model_digest,
         challenger_digest=candidate_digest,
         completed_origins=(),
+        completed_horizons=_REQUIRED_HORIZONS,
     )
 
     class _Learning:
         handoff = None
         pending_request = None
+        evaluation_config = SimpleNamespace(required_horizons=_REQUIRED_HORIZONS)
 
         def __init__(self):
             self.prepared = preparation
@@ -1025,6 +1143,13 @@ def test_real_evaluation_blocker_persists_rejection_context_before_retirement(ds
     controller._grey_learning_runtime._grey_evaluation_payload = lambda *_args, **_kwargs: SimpleNamespace()
     controller.poll_learning_off_path(
         live_origin=CandidateOrigin.OPERATOR_CALIBRATION,
+    )
+    assert (
+        ControllerModelStore().save(
+            "mpc",
+            controller.get_model_snapshot(),
+        )
+        is True
     )
     controller.close()
 

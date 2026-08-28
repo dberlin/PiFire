@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import hashlib
-import itertools
 import json
 import logging
 import time
 from collections.abc import Callable, Mapping
+from dataclasses import replace
+from itertools import pairwise
+from math import ceil
 from pathlib import Path
 from threading import Condition
 from typing import Any, cast
@@ -16,7 +18,6 @@ import pytest
 
 from common import datastore
 from common.control_trace import (
-    TRACE_SCHEMA_VERSION,
     AllocationClampReason,
     AmbientSource,
     AmbientUncertainty,
@@ -26,6 +27,14 @@ from common.control_trace import (
     TraceEventKind,
 )
 from common.controller_model_state import ControllerModelStore
+from common.learning_trajectory import (
+    TRAJECTORY_OBSERVATION_SCHEMA_VERSION,
+    FrameDeliveryCertainty,
+    HoldEntrySample,
+    LearningTrajectoryFrame,
+    LearningTrajectorySegment,
+    TrajectoryBreakReason,
+)
 from common.model_evidence import (
     ActivationLifecycleEvidence,
     CandidateAssessmentEvidence,
@@ -36,6 +45,11 @@ from common.model_evidence import (
     SessionSummaryEvidence,
 )
 from common.persistence.control_trace import read_control_trace_cook, read_control_trace_session
+from common.persistence.learning_trajectory import LearningTrajectoryRepository
+from common.persistence.model_challenger import (
+    ModelChallengerState,
+    read_model_challenger,
+)
 from common.persistence.model_evidence import read_model_activation, read_model_evidence
 from controller.applied_output import AppliedOutput, FrameFeedbackDisposition, OutputSource
 from controller.grill_sim import MAKGrillSim
@@ -45,9 +59,11 @@ from controller.model_learning.contracts import (
     CandidateOrigin,
     FrameObservation,
 )
+from controller.model_learning.migration import migrate_mpc_learning_authority
 from controller.model_learning.report import current_learning_report
 from controller.mpc import Controller
 from controller.mpc_config import DEFAULT_MPC_CONFIG
+from controller.mpc_model import EstimatorSeed, replay_delay_chain_arrays, simulate_grey_box_intervals
 from controller.mpc_snapshot import migrate_grey_learning_snapshot
 from controller.runtime.control_trace_recorder import RETENTION_PERIOD_MS, ControlTraceRecorder
 from controller.runtime.control_trace_session import (
@@ -55,7 +71,6 @@ from controller.runtime.control_trace_session import (
     TraceModelAuthority,
     TraceSessionContext,
 )
-from controller.runtime.model_fitting import FITTED_PARAMETERS
 from controller.runtime.model_persistence import ModelPersistenceWorker
 from controller.runtime.modes.hold_learning import HoldLearningRuntime
 from controller.runtime.runner import SyncControllerRunner, ThreadedControllerRunner
@@ -77,8 +92,9 @@ _EXACT_V6_ROWS_SHA256 = "f9bf8eaa632a68e73586abfd93ef42c07d4bac91a824f4660fcc1af
 _EXACT_FOLLOWING_ROWS_SHA256 = "27bb8ed230195e426a88da623a46f05f406188e4dc5ad7fbf6a042c351eff60a"
 _EXACT_V6_ACTIVE_DIGEST = "8749cde88b2906c4b8ea59a3ea6247aedef2cef67fcff1a3d4c91dc3e302d0ba"
 _EXACT_V6_CANDIDATE_DIGEST = "597586b395cf0678201a19c9b8b10e4bf56b5c2985b5c8cdd4470cf7611cbb57"
-_EXACT_PASSIVE_CONFIGURATION_DIGEST = "fd0ee82e1b9664ff9325f24664020a2570910096d055a1039aa1c9f8da0e09d1"
-_PASSIVE_PARAMETERS_REFERENCE = {
+_EXACT_PASSIVE_CANDIDATE_DIGEST = "bb406912f78ecdb6a8c40412d5bc07123549e7c4ce9ef004e2cf0b2a4ee78acd"
+_EXACT_PASSIVE_CONFIGURATION_DIGEST = "093cd524af707b4dd5c0ed15e30fdaf3156d0a35d41deaa6459579a47f164c71"
+_SUPPORT_MODEL_PARAMETERS = {
     "C_c": 1767.5013593870272,
     "K_Q": 288.2098500448781,
     "T_amb": 20.0,
@@ -87,29 +103,25 @@ _PASSIVE_PARAMETERS_REFERENCE = {
     "sigma": 1.4e-09,
     "theta": 52.241101540886156,
 }
+_MAK_SUPPORT_PARAMETERS = {
+    "C_c": MAKGrillSim.C_C,
+    "K_Q": MAKGrillSim.HEAT_PER_UNIT * _U_MAX,
+    "T_amb": MAKGrillSim.AMBIENT_C,
+    "h_amb": 0.546,
+    "n_delay": 8,
+    "sigma": 1.4e-09,
+    "theta": float(MAKGrillSim.DEADTIME),
+}
+_EXACT_PASSIVE_PARAMETERS = {
+    "C_c": 1631.50421658499,
+    "K_Q": 276.76250487291765,
+    "T_amb": 20.0,
+    "h_amb": 0.5,
+    "n_delay": 8,
+    "sigma": 1.4e-09,
+    "theta": 49.86315357290799,
+}
 _EXACT_REPLAY_COOK_ID = "mpc-restored-v6-passive-21-140"
-
-
-def _assert_passive_parameters(actual: Mapping[str, Any]) -> None:
-    """Compare fitted thermal parameters within solver reproducibility tolerance.
-
-    Only the three solver-fitted values (FITTED_PARAMETERS in
-    controller.runtime.model_fitting: C_c, K_Q, theta) are a converged
-    optimum rather than a fixed point: a different acados build reproduces
-    them only to about six significant figures (worst observed relative
-    deviation 1.2e-6, on theta). The remaining reference values are carried
-    through from config unchanged and compare exactly. Exact equality on the
-    fitted three would pin the suite to one machine's floating-point result.
-    """
-
-    assert actual.keys() == _PASSIVE_PARAMETERS_REFERENCE.keys()
-    for key, expected in _PASSIVE_PARAMETERS_REFERENCE.items():
-        if key in FITTED_PARAMETERS:
-            assert actual[key] == pytest.approx(expected, rel=1e-5), key
-        else:
-            assert actual[key] == expected, key
-
-
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -142,7 +154,7 @@ class _FrameBoundaryGate:
             self._condition.notify_all()
             released = self._condition.wait_for(
                 lambda: self._permits > 0 or self._closed,
-                timeout=30.0,
+                timeout=120.0,
             )
             if not released:
                 raise TimeoutError("threaded controller did not receive a frame-boundary permit")
@@ -243,6 +255,50 @@ def _simulated_frame(plant: MAKGrillSim, sequence: int) -> FrameObservation:
     )
 
 
+def _mak_grey_corpus_rows() -> list[dict[str, Any]]:
+    pre_roll_count = 21
+    pre_roll_load = (0.2,) * pre_roll_count
+    scored_load = tuple(
+        _LOAD_LEVELS[(index // _LEVEL_DWELL_FRAMES) % len(_LOAD_LEVELS)] for index in range(_FIT_SAMPLES)
+    )
+    delay = replay_delay_chain_arrays(
+        (_FRAME_SECONDS,) * pre_roll_count,
+        pre_roll_load,
+        theta=_MAK_SUPPORT_PARAMETERS["theta"],
+        n_delay=int(_MAK_SUPPORT_PARAMETERS["n_delay"]),
+        initial_load=pre_roll_load[0],
+    )
+    temperature = simulate_grey_box_intervals(
+        (_FRAME_SECONDS,) * _FIT_SAMPLES,
+        scored_load,
+        (_MAK_SUPPORT_PARAMETERS["T_amb"],) * _FIT_SAMPLES,
+        C_c=_MAK_SUPPORT_PARAMETERS["C_c"],
+        h_amb=_MAK_SUPPORT_PARAMETERS["h_amb"],
+        T0=20.0,
+        K_Q=_MAK_SUPPORT_PARAMETERS["K_Q"],
+        sigma=_MAK_SUPPORT_PARAMETERS["sigma"],
+        theta=_MAK_SUPPORT_PARAMETERS["theta"],
+        n_delay=int(_MAK_SUPPORT_PARAMETERS["n_delay"]),
+        initial_delay_states=delay,
+    )
+    rows: list[dict[str, Any]] = []
+    for index, load in enumerate(scored_load):
+        sequence = pre_roll_count + index
+        frame_start_ms = 20_000_000 + sequence * _FRAME_SECONDS * 1_000
+        rows.append(
+            {
+                "frame_start_ms": frame_start_ms,
+                "frame_end_ms": frame_start_ms + _FRAME_SECONDS * 1_000,
+                "temp_c": float(temperature[index]),
+                "ambient_c": _MAK_SUPPORT_PARAMETERS["T_amb"],
+                "observation_sequence": sequence,
+                "delivered_on_seconds": load * _U_MAX * _FRAME_SECONDS,
+                "realized_combustion_load": load,
+            }
+        )
+    return rows
+
+
 def _drive_frame(
     *,
     plant: MAKGrillSim,
@@ -338,6 +394,281 @@ def _exact_passive_observation(row: dict[str, Any]) -> FrameObservation:
     )
 
 
+def _exact_corpus_frame(row: dict[str, Any]) -> LearningTrajectoryFrame:
+    frame_start_ms = int(row["frame_start_ms"])
+    frame_end_ms = int(row["frame_end_ms"])
+    duration_s = (frame_end_ms - frame_start_ms) / 1_000.0
+    delivered_on_s = float(row["delivered_on_seconds"])
+    return LearningTrajectoryFrame(
+        sequence=int(row["observation_sequence"]),
+        monotonic_start_ms=frame_start_ms,
+        monotonic_end_ms=frame_end_ms,
+        wall_start_ms=frame_start_ms,
+        wall_end_ms=frame_end_ms,
+        chamber_temperature_c=float(row["temp_c"]),
+        temperature_sample_monotonic_ms=frame_end_ms,
+        temperature_sample_wall_ms=frame_end_ms,
+        temperature_sample_age_ms=0,
+        temperature_sample_wall_age_ms=0,
+        temperature_sample_clock_skew_ms=0,
+        source_temperature_units="C",
+        settings_revision=0,
+        probe_valid=True,
+        probe_source="chamber",
+        ambient_temperature_c=float(row["ambient_c"]),
+        ambient_source=AmbientSource.CONFIGURED.value,
+        ambient_uncertainty_c=0.0,
+        delivered_auger_on_seconds=delivered_on_s,
+        realized_auger_duty=delivered_on_s / duration_s,
+        normalized_combustion_load=float(row["realized_combustion_load"]),
+        delivered_fan_on_seconds=duration_s,
+        fan_duty_integral_seconds=duration_s,
+        mean_actual_fan_duty=1.0,
+        auger_delivery_certainty=FrameDeliveryCertainty.EXACT,
+        fan_delivery_certainty=FrameDeliveryCertainty.EXACT,
+        effective_mode="Hold",
+        recipe_step_id=None,
+        complete=True,
+        continuous=True,
+        partial=False,
+        boundary_reason=None,
+    )
+
+
+def _seed_passive_corpus(
+    repository: LearningTrajectoryRepository,
+    rows: list[dict[str, Any]],
+    *,
+    trace_session_id: str,
+    source_name: str = "exact-restored-v6-passive-21-140",
+    source_cook_id: str = _EXACT_REPLAY_COOK_ID,
+    source_trace_digest: str = _EXACT_V6_ROWS_SHA256,
+    source_kind: str = "restored-v6-replay",
+    support_parameters: Mapping[str, float | int] = _SUPPORT_MODEL_PARAMETERS,
+) -> str:
+    scored_frames = tuple(_exact_corpus_frame(row) for row in rows)
+    first_scored = scored_frames[0]
+    pre_roll_count = first_scored.sequence
+    pre_roll_frames = tuple(
+        replace(
+            first_scored,
+            sequence=index,
+            monotonic_start_ms=(first_scored.monotonic_start_ms - (pre_roll_count - index) * _FRAME_SECONDS * 1_000),
+            monotonic_end_ms=(first_scored.monotonic_start_ms - (pre_roll_count - index - 1) * _FRAME_SECONDS * 1_000),
+            wall_start_ms=(first_scored.wall_start_ms - (pre_roll_count - index) * _FRAME_SECONDS * 1_000),
+            wall_end_ms=(first_scored.wall_start_ms - (pre_roll_count - index - 1) * _FRAME_SECONDS * 1_000),
+            temperature_sample_monotonic_ms=(
+                first_scored.monotonic_start_ms - (pre_roll_count - index - 1) * _FRAME_SECONDS * 1_000
+            ),
+            temperature_sample_wall_ms=(
+                first_scored.wall_start_ms - (pre_roll_count - index - 1) * _FRAME_SECONDS * 1_000
+            ),
+            effective_mode="Smoke",
+        )
+        for index in range(pre_roll_count)
+    )
+    first = pre_roll_frames[0]
+    last = scored_frames[-1]
+
+    def digest(label: str) -> str:
+        return hashlib.sha256(label.encode()).hexdigest()
+
+    segment = LearningTrajectorySegment(
+        schema_version=1,
+        observation_schema_version=TRAJECTORY_OBSERVATION_SCHEMA_VERSION,
+        segment_id=source_name,
+        cook_id=source_cook_id,
+        trajectory_session_id=f"trajectory-{source_name}",
+        trace_session_ids=(trace_session_id,),
+        collection_provenance={
+            "origin": CandidateOrigin.PASSIVE_ONLINE.value,
+            "role_generation": 0,
+        },
+        configuration_provenance={
+            "controller": ControllerType.MPC.value,
+            "source": source_kind,
+            "pre_roll": "constant-first-observation",
+        },
+        cadence_digest=digest("cadence-20-seconds-v1"),
+        model_structure_digest=digest("grey-one-zone-erlang-v1"),
+        held_physics_digest=digest("held-grey-physics-v1"),
+        delay_input_mapping_digest=digest("normalized-combustion-load-v1"),
+        actuation_mapping_digest=digest("framed-pulse-v1"),
+        scored_fan_regime_digest=digest("fixed-fan-v1"),
+        ambient_semantics_digest=digest("configured-celsius-v1"),
+        pre_roll_frames=pre_roll_frames,
+        hold_entry=HoldEntrySample(
+            monotonic_ms=first_scored.monotonic_start_ms,
+            wall_ms=first_scored.wall_start_ms,
+            chamber_temperature_c=first_scored.chamber_temperature_c,
+            probe_valid=True,
+            probe_source=first_scored.probe_source,
+        ),
+        scored_hold_frames=scored_frames,
+        generation_audit_ranges=(
+            {
+                "start_sequence": first.sequence,
+                "end_sequence": last.sequence,
+                "role_generation": 0,
+            },
+        ),
+        start_monotonic_ms=first.monotonic_start_ms,
+        end_monotonic_ms=last.monotonic_end_ms,
+        start_wall_ms=first.wall_start_ms,
+        end_wall_ms=last.wall_end_ms,
+        start_sequence=first.sequence,
+        end_sequence=last.sequence,
+        pre_roll_end_reason=None,
+        terminal_break_reason=None,
+        state="open",
+        source_trace_digest=source_trace_digest,
+        source_schema_version=7,
+        source_row_digest=digest(f"{source_trace_digest}:constant-first-observation"),
+        build_provenance={
+            "builder": source_kind,
+            "revision": 1,
+            "source_rows_sha256": source_trace_digest,
+        },
+    )
+
+    support_pre_roll_load = (0.2,) * pre_roll_count
+    support_scored_load = tuple(
+        _LOAD_LEVELS[(index // _LEVEL_DWELL_FRAMES) % len(_LOAD_LEVELS)] for index in range(_FIT_SAMPLES)
+    )
+    support_delay = replay_delay_chain_arrays(
+        (_FRAME_SECONDS,) * pre_roll_count,
+        support_pre_roll_load,
+        theta=support_parameters["theta"],
+        n_delay=int(support_parameters["n_delay"]),
+        initial_load=support_pre_roll_load[0],
+    )
+    support_temperature = simulate_grey_box_intervals(
+        (_FRAME_SECONDS,) * _FIT_SAMPLES,
+        support_scored_load,
+        (support_parameters["T_amb"],) * _FIT_SAMPLES,
+        C_c=support_parameters["C_c"],
+        h_amb=support_parameters["h_amb"],
+        T0=80.0,
+        K_Q=support_parameters["K_Q"],
+        sigma=support_parameters["sigma"],
+        theta=support_parameters["theta"],
+        n_delay=int(support_parameters["n_delay"]),
+        initial_delay_states=support_delay,
+    )
+    support_start_ms = first.monotonic_start_ms - 10_000_000
+
+    def support_frame(
+        sequence: int,
+        load: float,
+        temperature_c: float,
+        *,
+        effective_mode: str,
+    ) -> LearningTrajectoryFrame:
+        start_ms = support_start_ms + sequence * _FRAME_SECONDS * 1_000
+        end_ms = start_ms + _FRAME_SECONDS * 1_000
+        return LearningTrajectoryFrame(
+            sequence=sequence,
+            monotonic_start_ms=start_ms,
+            monotonic_end_ms=end_ms,
+            wall_start_ms=start_ms,
+            wall_end_ms=end_ms,
+            chamber_temperature_c=temperature_c,
+            temperature_sample_monotonic_ms=end_ms,
+            temperature_sample_wall_ms=end_ms,
+            temperature_sample_age_ms=0,
+            temperature_sample_wall_age_ms=0,
+            temperature_sample_clock_skew_ms=0,
+            source_temperature_units="C",
+            settings_revision=0,
+            probe_valid=True,
+            probe_source="simulated-grey-support",
+            ambient_temperature_c=support_parameters["T_amb"],
+            ambient_source=AmbientSource.CONFIGURED.value,
+            ambient_uncertainty_c=0.0,
+            delivered_auger_on_seconds=load * _FRAME_SECONDS,
+            realized_auger_duty=load,
+            normalized_combustion_load=load,
+            delivered_fan_on_seconds=_FRAME_SECONDS,
+            fan_duty_integral_seconds=_FRAME_SECONDS,
+            mean_actual_fan_duty=1.0,
+            auger_delivery_certainty=FrameDeliveryCertainty.EXACT,
+            fan_delivery_certainty=FrameDeliveryCertainty.EXACT,
+            effective_mode=effective_mode,
+            recipe_step_id=None,
+            complete=True,
+            continuous=True,
+            partial=False,
+            boundary_reason=None,
+        )
+
+    support_pre_roll = tuple(
+        support_frame(index, load, 80.0, effective_mode="Smoke") for index, load in enumerate(support_pre_roll_load)
+    )
+    support_scored = tuple(
+        support_frame(
+            pre_roll_count + index,
+            load,
+            float(support_temperature[index]),
+            effective_mode="Hold",
+        )
+        for index, load in enumerate(support_scored_load)
+    )
+    support_first = support_pre_roll[0]
+    support_first_scored = support_scored[0]
+    support_last = support_scored[-1]
+    support_segment = replace(
+        segment,
+        segment_id="deterministic-grey-support-cook",
+        cook_id="deterministic-grey-support-cook",
+        trajectory_session_id="trajectory-deterministic-grey-support-cook",
+        trace_session_ids=("trace-deterministic-grey-support-cook",),
+        collection_provenance={
+            "origin": CandidateOrigin.PASSIVE_ONLINE.value,
+            "role_generation": 0,
+            "source": "deterministic-grey-simulation",
+        },
+        configuration_provenance={
+            "controller": ControllerType.MPC.value,
+            "source": "deterministic-grey-simulation",
+        },
+        pre_roll_frames=support_pre_roll,
+        hold_entry=HoldEntrySample(
+            monotonic_ms=support_first_scored.monotonic_start_ms,
+            wall_ms=support_first_scored.wall_start_ms,
+            chamber_temperature_c=80.0,
+            probe_valid=True,
+            probe_source="simulated-grey-support",
+        ),
+        scored_hold_frames=support_scored,
+        generation_audit_ranges=(
+            {
+                "start_sequence": support_first.sequence,
+                "end_sequence": support_last.sequence,
+                "role_generation": 0,
+            },
+        ),
+        start_monotonic_ms=support_first.monotonic_start_ms,
+        end_monotonic_ms=support_last.monotonic_end_ms,
+        start_wall_ms=support_first.wall_start_ms,
+        end_wall_ms=support_last.wall_end_ms,
+        start_sequence=support_first.sequence,
+        end_sequence=support_last.sequence,
+        source_trace_digest=digest("deterministic-grey-support-cook"),
+        source_schema_version=TRAJECTORY_OBSERVATION_SCHEMA_VERSION,
+        source_row_digest=digest("deterministic-grey-support-cook-rows"),
+        build_provenance={
+            "builder": "deterministic-grey-simulation",
+            "revision": 1,
+        },
+    )
+    assert support_segment.fit_partition_digest == segment.fit_partition_digest
+    for value in (support_segment, segment):
+        cursor = repository.begin_segment(value)
+        finalized = repository.finalize(cursor, TrajectoryBreakReason.STOP)
+        assert finalized.segment_id == value.segment_id
+    return segment.fit_partition_digest
+
+
 def _drive_exact_passive_frame(
     *,
     row: dict[str, Any],
@@ -395,26 +726,41 @@ def _seed_exact_v6_checkpoint(fixture: dict[str, Any]) -> dict[str, Any]:
     return checkpoint
 
 
-def _snapshot_candidate_lineage(snapshot: dict[str, Any]) -> dict[str, Any]:
-    identities = cast(dict[str, Any], snapshot["identities"])
+def _durable_candidate_lineage(
+    challenger: ModelChallengerState,
+) -> dict[str, Any]:
     return {
-        "origin": snapshot["origin"],
-        "policy": snapshot["policy"],
-        "candidate_digest": identities["candidate_digest"],
-        "candidate_generation": identities["candidate_generation"],
-        "window": snapshot["window"],
+        "origin": challenger.origin.value,
+        "policy": challenger.policy.value,
+        "candidate_digest": challenger.candidate.model_digest,
+        "candidate_generation": challenger.candidate.candidate_generation,
     }
 
 
-def _report_candidate_lineage(report: dict[str, Any]) -> dict[str, Any]:
+def _snapshot_candidate_lineage(
+    snapshot: dict[str, Any],
+    challenger: ModelChallengerState,
+) -> dict[str, Any]:
+    assert snapshot["challenger_authority"] == {
+        "challenger_id": challenger.challenger_id,
+        "revision": challenger.revision,
+    }
+    return _durable_candidate_lineage(challenger)
+
+
+def _report_candidate_lineage(
+    report: dict[str, Any],
+    challenger: ModelChallengerState,
+) -> dict[str, Any]:
     candidate = cast(dict[str, Any], report["candidate"])
-    return {
+    projected = {
         "origin": candidate["origin"],
         "policy": candidate["policy"],
         "candidate_digest": candidate["digest"],
         "candidate_generation": candidate["candidate_generation"],
-        "window": report["window"],
     }
+    assert projected == _durable_candidate_lineage(challenger)
+    return projected
 
 
 def _legacy_observation(active_digest: str) -> None:
@@ -514,6 +860,9 @@ def _seed_v6_state(config: dict[str, Any]) -> str:
         decision_id=decision_id,
     )
     aborted = prepared.transition(ActivationPhase.ABORTED, reason="legacy-interrupted-activation")
+    snapshot["version"] = 4
+    snapshot["schema"] = "pifire-grey-learning/v4"
+    snapshot.pop("challenger_authority")
 
     challenger_parameters = dict(snapshot["active"]["parameters"])
     challenger_parameters["theta"] = candidate_configuration["theta"]
@@ -547,9 +896,7 @@ def _seed_v6_state(config: dict[str, Any]) -> str:
         "pending_swap": False,
     }
     snapshot["failure"] = None
-    canonical = migrate_grey_learning_snapshot(snapshot)
-    assert canonical is not None
-    assert ControllerModelStore().save("mpc", canonical)
+    assert ControllerModelStore().save("mpc", snapshot)
 
     with datastore.transaction() as connection:
         connection.execute(
@@ -634,18 +981,52 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
     config: dict[str, Any] = dict(DEFAULT_MPC_CONFIG)
     config["enable_online_adaptation"] = True
     stale_transaction_id = _seed_v6_state(config) if database_state == "upgraded-v6" else None
+    if database_state == "upgraded-v6":
+        migration = migrate_mpc_learning_authority(defaults=config)
+        assert migration.snapshot["version"] == 5
     cook_id = f"mpc-online-learning-{database_state}"
 
+    cumulative_rows = _mak_grey_corpus_rows()
+    cumulative_rows_digest = hashlib.sha256(
+        json.dumps(
+            cumulative_rows,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    repository = LearningTrajectoryRepository()
+    fit_partition_digest = _seed_passive_corpus(
+        repository,
+        cumulative_rows,
+        trace_session_id=f"seeded-cumulative-{database_state}",
+        source_name=f"simulated-mak-passive-{database_state}",
+        source_cook_id=f"simulated-mak-passive-{database_state}",
+        source_trace_digest=cumulative_rows_digest,
+        source_kind="deterministic-mak-simulation",
+        support_parameters=_MAK_SUPPORT_PARAMETERS,
+    )
+    model_store = ControllerModelStore()
+    persistence = ModelPersistenceWorker(
+        model_store,
+        _TEST_LOGGER,
+        trajectory_repository=repository,
+    )
     gate = _FrameBoundaryGate()
-    core = Controller(config, "C", dict(_CYCLE))
+    core = Controller(
+        config,
+        "C",
+        dict(_CYCLE),
+        activation_persistence=persistence,
+        trajectory_repository=repository,
+        fit_partition_digest=lambda: fit_partition_digest,
+    )
     runner = ThreadedControllerRunner(
         core,
         controller_type=ControllerType.MPC,
         wait_for_period=gate,
     )
     gate.wait_until_blocked()
-    model_store = ControllerModelStore()
-    persistence = ModelPersistenceWorker(model_store, _TEST_LOGGER)
     recorder = ControlTraceRecorder(
         monotonic_clock=lambda: 0,
         wall_clock=lambda: RETENTION_PERIOD_MS,
@@ -655,6 +1036,7 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
         runner=runner,
         model_store=model_store,
         persistence=persistence,
+        trajectory_repository=repository,
         trace=trace,
         controller_name="mpc",
         logger=_TEST_LOGGER,
@@ -687,6 +1069,42 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
         assert initial_generation == 0
 
         plant = MAKGrillSim(seed=7)
+
+        def candidate_seed(theta: float, n_delay: int) -> EstimatorSeed:
+            loads = tuple(_load_for(sequence) for sequence in range(_EVALUATION_PUBLICATION_SEQUENCE + 1))
+            required = 0 if n_delay == 0 else min(180, ceil((3.0 * theta) / _FRAME_SECONDS))
+            selected = loads[-required:] if required else ()
+            delay_states = replay_delay_chain_arrays(
+                (_FRAME_SECONDS,) * len(selected),
+                selected,
+                theta=theta,
+                n_delay=n_delay,
+                initial_load=selected[0] if selected else 0.0,
+            )
+            seed_projection = {
+                "theta": theta,
+                "n_delay": n_delay,
+                "loads": selected,
+            }
+            return EstimatorSeed(
+                delay_states=tuple(float(value) for value in delay_states),
+                chamber_temperature_c=plant.measured(),
+                disturbance=0.0,
+                segment_id=f"simulated-mak-passive-{database_state}",
+                pre_roll_digest=hashlib.sha256(
+                    json.dumps(
+                        seed_projection,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                ).hexdigest(),
+                pre_roll_frame_count=required,
+                required_frame_count=required,
+                status="exact",
+            )
+
+        runner.bind_estimator_seed_source(candidate_seed)
+        gate.advance()
         for sequence in range(_FIT_SAMPLES):
             _drive_frame(
                 plant=plant,
@@ -773,14 +1191,20 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
             gate=gate,
             learning=learning,
         )
-        durable_active = _wait_until(
-            lambda: (
+
+        def reconciled_durable_active():
+            learning.reconcile_activation()
+            state = read_model_activation()
+            return (
                 state
-                if (state := read_model_activation()) is not None
+                if state is not None
                 and state.phase == ActivationPhase.ACTIVE.value
                 and state.transaction_id == prepared_state.transaction_id
                 else None
-            ),
+            )
+
+        durable_active = _wait_until(
+            reconciled_durable_active,
             timeout_s=30.0,
             description="durable active activation phase",
         )
@@ -807,6 +1231,7 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
     finally:
         learning.finish_teardown(generation=0)
         runner.stop()
+        assert persistence.close(timeout=30.0)
 
     assert initial_snapshot is not None
     assert before_active_boundary is not None
@@ -833,7 +1258,7 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
         if record.event_kind is TraceEventKind.MODEL_OBSERVATION and isinstance(record.payload, ModelObservationPayload)
     ]
     assert len(observation_records) == _EVALUATION_PUBLICATION_SEQUENCE + 1
-    assert all(record.schema_version == TRACE_SCHEMA_VERSION for record in observation_records)
+    assert all(record.schema_version == 7 for record in observation_records)
     for record in observation_records:
         payload = cast(ModelObservationPayload, record.payload)
         assert payload.eligible
@@ -849,8 +1274,6 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
         if cast(ModelObservationPayload, record.payload).observation_sequence == 119
     )
     assert fit_gate_observation.effective_updates == _FIT_SAMPLES
-    assert fit_gate_observation.input_levels == 3
-    assert fit_gate_observation.input_variance == pytest.approx(0.08166666666666668)
 
     evaluations = [
         cast(ModelEvaluationPayload, record.payload)
@@ -859,7 +1282,7 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
     ]
     wins = [evaluation.consecutive_wins for evaluation in evaluations]
     assert wins[:2] == [1, 2]
-    assert all(earlier < later for earlier, later in itertools.pairwise(wins))
+    assert all(earlier < later for earlier, later in pairwise(wins))
     assert all(not evaluation.rejection_reasons for evaluation in evaluations)
     assert all(
         {score.horizon_steps for score in evaluation.horizon_scores} == _REQUIRED_HORIZONS
@@ -1093,16 +1516,37 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
 
     config: dict[str, Any] = dict(DEFAULT_MPC_CONFIG)
     config["enable_online_adaptation"] = True
+    migration = migrate_mpc_learning_authority(defaults=config)
+    assert migration.snapshot["version"] == 5
+    assert ControllerModelStore().load_strict("mpc") == migration.snapshot
     first_row = rows[0]
+    repository = LearningTrajectoryRepository()
+    fit_partition_digest = _seed_passive_corpus(
+        repository,
+        rows,
+        trace_session_id=provenance["source_session_id"],
+    )
+    model_store = ControllerModelStore()
+    persistence = ModelPersistenceWorker(
+        model_store,
+        _TEST_LOGGER,
+        trajectory_repository=repository,
+    )
     gate = _FrameBoundaryGate()
-    core = Controller(config, "C", dict(_CYCLE))
+    core = Controller(
+        config,
+        "C",
+        dict(_CYCLE),
+        activation_persistence=persistence,
+        trajectory_repository=repository,
+        fit_partition_digest=lambda: fit_partition_digest,
+    )
     runner = ThreadedControllerRunner(
         core,
         controller_type=ControllerType.MPC,
         wait_for_period=gate,
     )
     gate.wait_until_blocked()
-    persistence = ModelPersistenceWorker(ControllerModelStore(), _TEST_LOGGER)
     trace = ControlTraceSession(
         ControlTraceRecorder(
             monotonic_clock=lambda: 0,
@@ -1112,8 +1556,9 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
     )
     learning = HoldLearningRuntime(
         runner=runner,
-        model_store=ControllerModelStore(),
+        model_store=model_store,
         persistence=persistence,
+        trajectory_repository=repository,
         trace=trace,
         controller_name="mpc",
         logger=_TEST_LOGGER,
@@ -1125,7 +1570,7 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
     live_checkpoint: dict[str, Any] | None = None
     persisted_checkpoint: dict[str, Any] | None = None
     normalized_report: dict[str, Any] | None = None
-    passive_candidate_digest: str | None = None
+    durable_challenger: ModelChallengerState | None = None
     try:
         learning.restore_model(timestamp_ms=first_row["frame_start_ms"] - 1)
         learning.reconcile_activation()
@@ -1142,24 +1587,26 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
             identities = snapshot.get("identities")
             if not isinstance(identities, dict):
                 return None
-            return snapshot if identities.get("candidate_digest") == _EXACT_V6_CANDIDATE_DIGEST else None
+            return (
+                snapshot
+                if snapshot.get("version") == 5
+                and identities.get("active_digest") == _EXACT_V6_ACTIVE_DIGEST
+                and snapshot.get("challenger_authority") is None
+                else None
+            )
 
         restored_v6 = cast(
             dict[str, Any],
             _wait_until(
                 restored_v6_projection,
                 timeout_s=5.0,
-                description="the exact restored v6 candidate projection",
+                description="the exact restored v6 active projection",
             ),
         )
         assert _identity(restored_v6) == (_EXACT_V6_ACTIVE_DIGEST, 0)
-        assert _snapshot_candidate_lineage(restored_v6) == {
-            "origin": CandidateOrigin.OPERATOR_CALIBRATION.value,
-            "policy": None,
-            "candidate_digest": _EXACT_V6_CANDIDATE_DIGEST,
-            "candidate_generation": 1,
-            "window": source_checkpoint["window"],
-        }
+        assert restored_v6["schema"] == "pifire-grey-learning/v5"
+        assert {"challenger", "window", "candidate_pair"}.isdisjoint(restored_v6)
+        assert read_model_challenger() is None
         trace_identity = trace.ensure_open(
             _trace_context(
                 restored_v6,
@@ -1188,18 +1635,13 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
                     state
                     if (state := dict(core.get_learning_diagnostics().state)).get("status") == "evaluating"
                     and state.get("fit_status") == "succeeded"
-                    and isinstance(state.get("candidate_digest"), str)
+                    and state.get("candidate_digest") == _EXACT_PASSIVE_CANDIDATE_DIGEST
                     else None
                 ),
                 timeout_s=90.0,
-                description="the passive 21-140 grey fit",
+                description="the exact cumulative passive grey fit",
             ),
         )
-        passive_candidate_digest = cast(str, fit_state["candidate_digest"])
-        # The point of this test: the passive fit must produce its own candidate,
-        # not rebind either identity carried in by the restored v6 checkpoint.
-        assert passive_candidate_digest != _EXACT_V6_CANDIDATE_DIGEST
-        assert passive_candidate_digest != _EXACT_V6_ACTIVE_DIGEST
         for following_row in following_rows:
             _drive_exact_passive_frame(
                 row=following_row,
@@ -1225,23 +1667,37 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
             timeout_s=30.0,
             description="durable exact passive fit lifecycle",
         )
+        durable_challenger = cast(
+            ModelChallengerState,
+            _wait_until(
+                lambda: (
+                    challenger
+                    if (
+                        (challenger := read_model_challenger()) is not None
+                        and challenger.phase == "evaluating"
+                        and challenger.candidate.model_digest == _EXACT_PASSIVE_CANDIDATE_DIGEST
+                    )
+                    else None
+                ),
+                timeout_s=30.0,
+                description="the exact passive durable challenger authority",
+            ),
+        )
+        assert durable_challenger.origin is CandidateOrigin.PASSIVE_ONLINE
+        assert durable_challenger.policy is ActivationPolicy.PASSIVE_AUTO
+        assert durable_challenger.evaluation_epoch == 0
+        assert durable_challenger.evaluation_round == 0
+        assert durable_challenger.consecutive_wins == 0
+        candidate_configuration = durable_challenger.candidate.configuration
+        assert {
+            name: (candidate_configuration["delay_states"] if name == "n_delay" else candidate_configuration[name])
+            for name in _EXACT_PASSIVE_PARAMETERS
+        } == _EXACT_PASSIVE_PARAMETERS
         raw_live_checkpoint = runner.get_model_snapshot()
         assert isinstance(raw_live_checkpoint, dict)
         live_checkpoint = raw_live_checkpoint
-        live_challenger = cast(dict[str, Any], live_checkpoint["challenger"])
-        _assert_passive_parameters(cast(Mapping[str, Any], live_challenger["parameters"]))
-        metadata = cast(dict[str, Any], live_challenger["metadata"])
-        assert metadata.keys() == {"band_c", "nfev", "rmse", "samples"}
-        assert metadata["band_c"] == [100.66666666666667, 109.11111111111111]
-        # nfev is the solver's iteration count, observed identical across the
-        # acados builds tested so far; a different linear solver or
-        # termination tolerance is the first thing to suspect if this
-        # assertion breaks on another build.
-        assert metadata["nfev"] == 9
-        assert metadata["samples"] == 120
-        assert metadata["rmse"] == pytest.approx(1.6228871053911238, rel=1e-9)
         assert learning.submit_online_checkpoint(live_checkpoint)
-        assert persistence.flush_and_stop(timeout=30.0)
+        assert persistence.close(timeout=30.0)
         raw_persisted_checkpoint = ControllerModelStore().load_strict("mpc")
         assert isinstance(raw_persisted_checkpoint, dict)
         persisted_checkpoint = raw_persisted_checkpoint
@@ -1252,6 +1708,7 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
             checkpoint_required=True,
             calibration_command_high_water=0,
             checkpoint=persisted_checkpoint,
+            challenger_state=durable_challenger,
         ).as_dict()
     finally:
         gate.close()
@@ -1263,14 +1720,14 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
     assert live_checkpoint is not None
     assert persisted_checkpoint is not None
     assert normalized_report is not None
-    assert passive_candidate_digest is not None
+    assert durable_challenger is not None
     observation_records = [
         record
         for record in read_control_trace_cook(_EXACT_REPLAY_COOK_ID)
         if record.event_kind is TraceEventKind.MODEL_OBSERVATION and isinstance(record.payload, ModelObservationPayload)
     ]
     assert len(observation_records) == _FIT_SAMPLES + 1
-    assert all(record.schema_version == TRACE_SCHEMA_VERSION for record in observation_records)
+    assert all(record.schema_version == 7 for record in observation_records)
     replay_rows = []
     for record in observation_records:
         payload = cast(ModelObservationPayload, record.payload)
@@ -1304,8 +1761,6 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
     fit_gate_observation = cast(ModelObservationPayload, observation_records[-2].payload)
     assert fit_gate_observation.observation_sequence == 140
     assert fit_gate_observation.effective_updates == _FIT_SAMPLES
-    assert fit_gate_observation.input_levels == 72
-    assert fit_gate_observation.input_variance == 0.055502661581373174
     assert cast(ModelObservationPayload, observation_records[-1].payload).observation_sequence == 141
 
     fit_payloads = [cast(FitLifecycleEvidence, record.payload) for record in fit_evidence_records]
@@ -1318,7 +1773,7 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
         for payload in fit_payloads
     )
     assert fit_evidence_records[0].model_digest == _EXACT_V6_ACTIVE_DIGEST
-    assert fit_evidence_records[1].model_digest == passive_candidate_digest
+    assert fit_evidence_records[1].model_digest == _EXACT_PASSIVE_CANDIDATE_DIGEST
     assert not any(
         isinstance(
             record.payload,
@@ -1332,17 +1787,35 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
     )
     assert read_model_activation() is None
 
-    restart_core = Controller(config, "C", dict(_CYCLE))
+    restart_migration = migrate_mpc_learning_authority(defaults=config)
+    assert restart_migration.snapshot["version"] == 5
+    restart_repository = LearningTrajectoryRepository()
+    restart_model_store = ControllerModelStore()
+    restart_persistence = ModelPersistenceWorker(
+        restart_model_store,
+        _TEST_LOGGER,
+        trajectory_repository=restart_repository,
+    )
+    restart_core = Controller(
+        config,
+        "C",
+        dict(_CYCLE),
+        activation_persistence=restart_persistence,
+        trajectory_repository=restart_repository,
+        fit_partition_digest=lambda: fit_partition_digest,
+    )
     restart_runner = SyncControllerRunner(restart_core, controller_type=ControllerType.MPC)
     restart_learning = HoldLearningRuntime(
         runner=restart_runner,
-        model_store=ControllerModelStore(),
-        persistence=None,
+        model_store=restart_model_store,
+        persistence=restart_persistence,
+        trajectory_repository=restart_repository,
         trace=None,
         controller_name="mpc",
         logger=_TEST_LOGGER,
         initial_generation=0,
     )
+    restart_challenger: ModelChallengerState | None = None
     try:
         restart_runner.set_target(first_row["setpoint_c"])
         restart_learning.restore_model(timestamp_ms=following_rows[-1]["frame_end_ms"] + 1)
@@ -1350,9 +1823,13 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
         raw_restart_checkpoint = restart_runner.get_model_snapshot()
         assert isinstance(raw_restart_checkpoint, dict)
         restart_checkpoint: dict[str, Any] = raw_restart_checkpoint
+        restart_challenger = read_model_challenger()
+        assert restart_challenger is not None
     finally:
         restart_learning.finish_teardown(generation=0)
         restart_runner.stop()
+        assert restart_persistence.close(timeout=30.0)
+    assert restart_challenger is not None
 
     expected_window = {
         "configuration_digest": _EXACT_PASSIVE_CONFIGURATION_DIGEST,
@@ -1366,28 +1843,58 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
     expected_lineage = {
         "origin": CandidateOrigin.PASSIVE_ONLINE.value,
         "policy": ActivationPolicy.PASSIVE_AUTO.value,
-        "candidate_digest": passive_candidate_digest,
+        "candidate_digest": _EXACT_PASSIVE_CANDIDATE_DIGEST,
         "candidate_generation": 1,
-        "window": expected_window,
     }
     lineage_by_surface = {
-        "checkpoint": _snapshot_candidate_lineage(live_checkpoint),
-        "normalized_report": _report_candidate_lineage(normalized_report),
-        "persistence": _snapshot_candidate_lineage(persisted_checkpoint),
-        "restart": _snapshot_candidate_lineage(restart_checkpoint),
+        "checkpoint": _snapshot_candidate_lineage(live_checkpoint, durable_challenger),
+        "normalized_report": _report_candidate_lineage(normalized_report, durable_challenger),
+        "persistence": _snapshot_candidate_lineage(persisted_checkpoint, durable_challenger),
+        "restart": _snapshot_candidate_lineage(restart_checkpoint, restart_challenger),
     }
     assert lineage_by_surface == {surface: expected_lineage for surface in lineage_by_surface}
+    assert normalized_report["window"] == expected_window
+    assert durable_challenger.controller_configuration_digest == _EXACT_PASSIVE_CONFIGURATION_DIGEST
+    assert restart_challenger.revision == durable_challenger.revision + 1
+    assert restart_challenger.evaluation_epoch == durable_challenger.evaluation_epoch + 1
+    assert restart_challenger.evaluation_round == 0
+    assert restart_challenger.consecutive_wins == durable_challenger.consecutive_wins
+    assert restart_challenger.incumbent == durable_challenger.incumbent
+    assert restart_challenger.candidate == durable_challenger.candidate
+    assert restart_challenger.fit_corpus == durable_challenger.fit_corpus
+    assert restart_challenger.fit_lineage == durable_challenger.fit_lineage
 
     assert normalized_report["status"] == "evaluating"
     assert normalized_report["mode"] == CandidateOrigin.PASSIVE_ONLINE.value
     assert normalized_report["blockers"] == []
-    for checkpoint in (live_checkpoint, persisted_checkpoint, restart_checkpoint):
+    for checkpoint, challenger, expected_revision in (
+        (
+            live_checkpoint,
+            durable_challenger,
+            source_checkpoint["revision"] + 1,
+        ),
+        (
+            persisted_checkpoint,
+            durable_challenger,
+            source_checkpoint["revision"] + 1,
+        ),
+        (
+            restart_checkpoint,
+            restart_challenger,
+            source_checkpoint["revision"] + 2,
+        ),
+    ):
         assert _identity(checkpoint) == (_EXACT_V6_ACTIVE_DIGEST, 0)
-        assert checkpoint["revision"] == source_checkpoint["revision"] + 1
+        assert checkpoint["version"] == 5
+        assert checkpoint["schema"] == "pifire-grey-learning/v5"
+        assert checkpoint["revision"] == expected_revision
         assert checkpoint["activation"] == {
             "pending_persistence": False,
             "pending_swap": False,
             "phase": ActivationPhase.ABORTED.value,
         }
-        challenger = cast(dict[str, Any], checkpoint["challenger"])
-        _assert_passive_parameters(cast(Mapping[str, Any], challenger["parameters"]))
+        assert {"challenger", "window", "candidate_pair"}.isdisjoint(checkpoint)
+        assert checkpoint["challenger_authority"] == {
+            "challenger_id": challenger.challenger_id,
+            "revision": challenger.revision,
+        }

@@ -14,6 +14,7 @@ import pytest
 import controller.mpc as mpc_module
 import controller.mpc_core as mpc_core_module
 import controller.runtime.model_persistence as model_persistence_module
+from common.learning_trajectory import ModelFitLineage
 from common.model_evidence import (
     ConfidenceDecisionEvidence,
     EvidenceKind,
@@ -21,7 +22,12 @@ from common.model_evidence import (
     ModelEvidenceRecord,
     RollbackEvidence,
 )
-from common.persistence.model_evidence import ModelActivationState
+from common.persistence.model_challenger import (
+    ModelChallengerState,
+    create_model_challenger,
+    prepare_model_challenger_activation,
+)
+from common.persistence.model_evidence import ModelActivationState, read_model_activation
 from common.web_contracts.learning import ModelActivationRequest
 from controller.acados import GreyBoxMPCConfig
 from controller.applied_output import AppliedOutput, OutputSource
@@ -43,6 +49,7 @@ from controller.mpc_core import MpcCore
 from controller.mpc_factory import MpcPairFactory, OwnedMpcPair
 from controller.mpc_model import EstimatorSeed
 from controller.runtime.model_fitting import CandidatePair
+from tests.unit.common.test_model_challenger_store import _corpus
 from tests.unit.mpc._solver_fixtures import (
     CYCLE,
     _Estimator,
@@ -100,6 +107,65 @@ def _descriptor(
         candidate_generation=candidate_generation,
         role_generation=role_generation,
     )
+
+
+def _seed_qualified_challenger(
+    incumbent: GreyControlPairDescriptor,
+    candidate: GreyControlPairDescriptor,
+    *,
+    decision_id: str,
+) -> ModelChallengerState:
+    corpus = _corpus(decision_id)
+    request_id = f"fit-{decision_id}"
+    state = ModelChallengerState(
+        schema_version=1,
+        challenger_id=f"challenger-{decision_id}",
+        revision=0,
+        phase="qualified",
+        origin=CandidateOrigin.PASSIVE_ONLINE,
+        policy=ActivationPolicy.PASSIVE_AUTO,
+        fit_corpus=corpus,
+        fit_lineage=ModelFitLineage(
+            request_id=request_id,
+            parent_incumbent_digest=incumbent.model_digest,
+            parent_incumbent_generation=incumbent.role_generation,
+            candidate_generation=candidate.candidate_generation,
+            fit_corpus=corpus,
+            fit_corpus_digest=corpus.corpus_digest,
+            trigger_origin=CandidateOrigin.PASSIVE_ONLINE.value,
+            result_status="succeeded",
+            candidate_digest=candidate.model_digest,
+        ),
+        fit_preparation={
+            "request_id": request_id,
+            "accepted": True,
+            "candidate_digest": candidate.model_digest,
+            "native_build": "passed",
+            "dry_solve": "passed",
+            "target_timing": {
+                "target": "test",
+                "samples": 1,
+                "p99_ms": 1.0,
+                "limit_ms": 2.0,
+            },
+        },
+        controller_configuration_digest="c" * 64,
+        incumbent=incumbent,
+        candidate=candidate,
+        calibration_manifest=None,
+        evaluation_epoch=0,
+        evaluation_round=2,
+        consecutive_wins=2,
+        required_wins=2,
+        last_decision_id=decision_id,
+        last_evidence_id=f"evidence-{decision_id}",
+        activation_transaction_id=None,
+        retirement_reason=None,
+        created_ms=900,
+        updated_ms=900,
+        retired_ms=None,
+    )
+    return create_model_challenger(state)
 
 
 def _migrated_descriptor(
@@ -591,7 +657,7 @@ def _bare_mpc_pair_owner(
     return core, incumbent, candidate, prepared
 
 
-def test_automatic_preparation_drains_confidence_receipt_before_prepared_phase() -> None:
+def test_automatic_preparation_drains_confidence_receipt_before_prepared_phase(ds) -> None:
     calls = []
 
     class _Worker(model_persistence_module.ModelPersistenceWorker):
@@ -645,6 +711,11 @@ def test_automatic_preparation_drains_confidence_receipt_before_prepared_phase()
         dry_solve_finite=True,
     )
     core._activation_runtime.active_pair.core.cfg = {"estimator": "ekf"}
+    _seed_qualified_challenger(
+        core.active_control_pair.descriptor,
+        core._grey_learning_runtime._prepared_candidate_descriptor(preparation),
+        decision_id=evaluation.decision_id,
+    )
     core._grey_learning_runtime.prepare_automatic_activation(
         preparation,
         ActivationPolicy.PASSIVE_AUTO,
@@ -653,9 +724,9 @@ def test_automatic_preparation_drains_confidence_receipt_before_prepared_phase()
 
     assert [kind for kind, *_ in calls] == [
         "confidence",
-        "phase",
         "evidence",
     ]
+    assert read_model_activation().phase == ActivationPhase.PREPARED.value
     confidence = next(record for kind, record, *_ in calls if kind == "confidence")
     assert isinstance(confidence.payload, ConfidenceDecisionEvidence)
     assert confidence.payload.decision_id == evaluation.decision_id
@@ -664,7 +735,7 @@ def test_automatic_preparation_drains_confidence_receipt_before_prepared_phase()
     core.close()
 
 
-def test_hold_and_learning_share_one_injected_activation_persistence_fifo() -> None:
+def test_hold_and_learning_share_one_injected_activation_persistence_fifo(ds) -> None:
     calls = []
 
     class _Worker(model_persistence_module.ModelPersistenceWorker):
@@ -721,6 +792,11 @@ def test_hold_and_learning_share_one_injected_activation_persistence_fifo() -> N
         candidate_digest=canonical_snapshot_digest(configuration),
         dry_solve_finite=True,
     )
+    _seed_qualified_challenger(
+        core.active_control_pair.descriptor,
+        core._grey_learning_runtime._prepared_candidate_descriptor(preparation),
+        decision_id=evaluation.decision_id,
+    )
     hold_confidence = ModelEvidenceRecord(
         evidence_id="hold-confidence-first",
         kind=EvidenceKind.CONFIDENCE_DECISION,
@@ -744,8 +820,9 @@ def test_hold_and_learning_share_one_injected_activation_persistence_fifo() -> N
         evaluation,
     )
 
-    phase_index = next(index for index, call in enumerate(calls) if call[0] == "phase")
-    assert any(call[0] == "confidence" for call in calls[:phase_index])
+    evidence_index = next(index for index, call in enumerate(calls) if call[0] == "evidence")
+    assert any(call[0] == "confidence" for call in calls[:evidence_index])
+    assert read_model_activation().phase == ActivationPhase.PREPARED.value
     core._grey_learning_runtime.close()
     core.close()
 
@@ -868,6 +945,7 @@ def test_post_activation_confidence_failure_restores_exact_pair_fences_generatio
 
 def test_first_native_solve_failure_after_activation_restores_exact_pair_and_records_reason(
     monkeypatch,
+    ds,
 ) -> None:
     class _FailingSolver:
         def __init__(self, config: GreyBoxMPCConfig) -> None:
@@ -919,6 +997,15 @@ def test_first_native_solve_failure_after_activation_restores_exact_pair_and_rec
         origin=CandidateOrigin.PASSIVE_ONLINE,
         policy=ActivationPolicy.PASSIVE_AUTO,
         decision_id="decision-native-failure",
+    )
+    qualified = _seed_qualified_challenger(
+        incumbent.descriptor,
+        candidate_descriptor,
+        decision_id=prepared.decision_id,
+    )
+    prepare_model_challenger_activation(
+        expected_revision=qualified.revision,
+        activation=prepared,
     )
     try:
         assert core.install_candidate_pair_inert(candidate, prepared)

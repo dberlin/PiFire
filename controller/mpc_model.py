@@ -130,11 +130,12 @@ _KELVIN = 273.15
 #: same event as a parameter being recalibrated.
 #:
 #: 3  migration input only: variable-delay grey snapshot with retired nested learners
-#: 4  fixed eight-delay grey-only adaptation record
+#: 4  migration input only: fixed-delay checkpoint with inline challenger authority
+#: 5  fixed eight-delay grey checkpoint with a durable challenger reference
 #:
-#: Version 3 is interpreted only by the one-shot startup migration.  Runtime
-#: restore and every current writer accept/emit version 4 exclusively.
-MODEL_SCHEMA = 4
+#: Versions 3 and 4 are interpreted only by startup migration. Runtime restore
+#: and every current writer accept/emit version 5 exclusively.
+MODEL_SCHEMA = 5
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,10 +173,7 @@ class EstimatorSeed:
         ):
             raise ValueError("estimator seed pre-roll digest must be lowercase SHA-256")
         counts = (self.pre_roll_frame_count, self.required_frame_count)
-        if any(
-            isinstance(value, bool) or not isinstance(value, int) or value < 0
-            for value in counts
-        ):
+        if any(isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in counts):
             raise ValueError("estimator seed frame counts must be nonnegative integers")
         if self.pre_roll_frame_count > self.required_frame_count:
             raise ValueError("estimator seed cannot contain more than its required suffix")
@@ -183,13 +181,9 @@ class EstimatorSeed:
             raise ValueError("unsupported estimator seed status")
         if self.status == "exact" and self.pre_roll_frame_count != self.required_frame_count:
             raise ValueError("exact estimator seed must contain its complete suffix")
-        if self.status == "short" and not (
-            0 < self.pre_roll_frame_count < self.required_frame_count
-        ):
+        if self.status == "short" and not (0 < self.pre_roll_frame_count < self.required_frame_count):
             raise ValueError("short estimator seed must contain an incomplete suffix")
-        if self.status in {"absent", "uncertain"} and (
-            self.pre_roll_frame_count != 0 or states
-        ):
+        if self.status in {"absent", "uncertain"} and (self.pre_roll_frame_count != 0 or states):
             raise ValueError("absent or uncertain estimator seed cannot fabricate delay state")
 
 
@@ -489,11 +483,7 @@ def _simulate_grey_intervals(
             delayed_load = load if heat is None else float(heat[substep])
             chamber += (
                 dt
-                * (
-                    gain * delayed_load
-                    - loss * (chamber - ambient)
-                    - _rad_loss(chamber, ambient, radiation)
-                )
+                * (gain * delayed_load - loss * (chamber - ambient) - _rad_loss(chamber, ambient, radiation))
                 / capacitance
             )
         out[index] = chamber
