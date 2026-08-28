@@ -15,6 +15,7 @@ import pytest
 
 from common import datastore
 from common.control_trace import (
+    TRACE_SCHEMA_VERSION,
     AllocationClampReason,
     AmbientSource,
     AmbientUncertainty,
@@ -47,12 +48,13 @@ from controller.model_learning.report import current_learning_report
 from controller.mpc import Controller
 from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.mpc_snapshot import migrate_grey_learning_snapshot
-from controller.runtime.control_trace_recorder import ControlTraceRecorder, RETENTION_PERIOD_MS
+from controller.runtime.control_trace_recorder import RETENTION_PERIOD_MS, ControlTraceRecorder
 from controller.runtime.control_trace_session import (
     ControlTraceSession,
     TraceModelAuthority,
     TraceSessionContext,
 )
+from controller.runtime.model_fitting import FITTED_PARAMETERS
 from controller.runtime.model_persistence import ModelPersistenceWorker
 from controller.runtime.modes.hold_learning import HoldLearningRuntime
 from controller.runtime.runner import SyncControllerRunner, ThreadedControllerRunner
@@ -90,15 +92,18 @@ _EXACT_REPLAY_COOK_ID = "mpc-restored-v6-passive-21-140"
 def _assert_passive_parameters(actual: Mapping[str, Any]) -> None:
     """Compare fitted thermal parameters within solver reproducibility tolerance.
 
-    The values are a converged optimum, not a fixed point: a different acados
-    build reproduces them only to about six significant figures (worst observed
-    relative deviation 1.2e-6, on theta). Exact equality would pin the suite to
-    one machine's floating-point result.
+    Only the three solver-fitted values (FITTED_PARAMETERS in
+    controller.runtime.model_fitting: C_c, K_Q, theta) are a converged
+    optimum rather than a fixed point: a different acados build reproduces
+    them only to about six significant figures (worst observed relative
+    deviation 1.2e-6, on theta). The remaining reference values are carried
+    through from config unchanged and compare exactly. Exact equality on the
+    fitted three would pin the suite to one machine's floating-point result.
     """
 
     assert actual.keys() == _PASSIVE_PARAMETERS_REFERENCE.keys()
     for key, expected in _PASSIVE_PARAMETERS_REFERENCE.items():
-        if isinstance(expected, float):
+        if key in FITTED_PARAMETERS:
             assert actual[key] == pytest.approx(expected, rel=1e-5), key
         else:
             assert actual[key] == expected, key
@@ -827,7 +832,7 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
         if record.event_kind is TraceEventKind.MODEL_OBSERVATION and isinstance(record.payload, ModelObservationPayload)
     ]
     assert len(observation_records) == _EVALUATION_PUBLICATION_SEQUENCE + 1
-    assert all(record.schema_version == 7 for record in observation_records)
+    assert all(record.schema_version == TRACE_SCHEMA_VERSION for record in observation_records)
     for record in observation_records:
         payload = cast(ModelObservationPayload, record.payload)
         assert payload.eligible
@@ -1119,6 +1124,7 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
     live_checkpoint: dict[str, Any] | None = None
     persisted_checkpoint: dict[str, Any] | None = None
     normalized_report: dict[str, Any] | None = None
+    passive_candidate_digest: str | None = None
     try:
         learning.restore_model(timestamp_ms=first_row["frame_start_ms"] - 1)
         learning.reconcile_activation()
@@ -1226,6 +1232,10 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
         metadata = cast(dict[str, Any], live_challenger["metadata"])
         assert metadata.keys() == {"band_c", "nfev", "rmse", "samples"}
         assert metadata["band_c"] == [100.66666666666667, 109.11111111111111]
+        # nfev is the solver's iteration count, observed identical across the
+        # acados builds tested so far; a different linear solver or
+        # termination tolerance is the first thing to suspect if this
+        # assertion breaks on another build.
         assert metadata["nfev"] == 9
         assert metadata["samples"] == 120
         assert metadata["rmse"] == pytest.approx(1.6228871053911238, rel=1e-9)
@@ -1252,13 +1262,14 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
     assert live_checkpoint is not None
     assert persisted_checkpoint is not None
     assert normalized_report is not None
+    assert passive_candidate_digest is not None
     observation_records = [
         record
         for record in read_control_trace_cook(_EXACT_REPLAY_COOK_ID)
         if record.event_kind is TraceEventKind.MODEL_OBSERVATION and isinstance(record.payload, ModelObservationPayload)
     ]
     assert len(observation_records) == _FIT_SAMPLES + 1
-    assert all(record.schema_version == 7 for record in observation_records)
+    assert all(record.schema_version == TRACE_SCHEMA_VERSION for record in observation_records)
     replay_rows = []
     for record in observation_records:
         payload = cast(ModelObservationPayload, record.payload)

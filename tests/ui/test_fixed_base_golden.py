@@ -14,6 +14,10 @@ guarded behaviorally by
 tests/ui/test_fixed_base_harness_smoke.py::test_long_text_fits_inside_every_fixed_viewport;
 these hashes only detect unintended change. The five `current:shutdown`
 cases do not route through `_display_text` and must never move with it.
+By construction, the pixel hashes here are pinned to this machine's Pillow
+build and installed fonts and will differ on another machine; they are
+only valid where these golden tests actually run rather than skip, and
+must never be recaptured there.
 
 Determinism note on time-based branches: `_display_current` computes
 countdown/lid-pause text from `time.time() - status_data["start_time"]`

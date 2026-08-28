@@ -483,7 +483,7 @@ def test_identity_rebind_fences_and_discards_an_inflight_old_generation_candidat
             self.prepared = None
             self.identities = []
 
-        def poll_fit_off_path(self, *, live_identity=None, **_kwargs):
+        def poll_fit_off_path(self, *, live_identity, **_kwargs):
             self.calls += 1
             pair = old_pair if self.calls == 1 else new_pair
             if self.calls == 1:
