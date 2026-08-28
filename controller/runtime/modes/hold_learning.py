@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import Literal, Protocol, cast
@@ -42,16 +42,12 @@ from controller.applied_output import (
     OutputSource,
 )
 from controller.model_learning.calibration import CalibrationDecision
-from controller.model_learning.contracts import FrameObservation
+from controller.model_learning.contracts import CandidateOrigin, FrameObservation
 from controller.mpc_allocator import AllocationResult
 from controller.runtime.control_trace_session import (
     ControlTraceSession,
     TraceModelContext,
     TraceSessionIdentity,
-)
-from controller.runtime.model_fitting import (
-    TeardownRefitOutcome,
-    TeardownRefitResult,
 )
 from controller.runtime.model_lifecycle import ModelLifecycleRunner
 from controller.runtime.model_persistence import EvidenceSubmission
@@ -187,7 +183,11 @@ class _HoldLearningRunner(ModelLifecycleRunner, Protocol):
 
     def controller_state(self) -> object: ...
 
-    def refit_from_cook(self) -> object: ...
+    def _schedule_corpus_fit_after_barrier(
+        self,
+        origin: CandidateOrigin,
+        before_schedule: Callable[[], bool],
+    ) -> bool: ...
 
     def get_model_snapshot(self) -> object: ...
 
@@ -226,11 +226,6 @@ class _LifecycleLogger(Protocol):
 
     def error(self, message: str, /) -> None: ...
 
-
-@dataclass(frozen=True, slots=True)
-class HoldRefitResult:
-    outcome: TeardownRefitOutcome
-    verdict: TeardownRefitResult | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -295,19 +290,18 @@ class HoldLearningRuntime:
         self._activation_state_identity: _ActivationIdentity | None = None
         self._retired_generations: set[int] = set()
         self._activation_lifecycle_evidence_id: str | None = None
-        self._refit_result: HoldRefitResult | None = None
         self._submitted_restore: dict[str, object] | None = None
-        self._final_checkpoint_attempted = False
         self._last_checkpoint_succeeded = False
-        self._final_checkpoint_succeeded = False
-        self._final_checkpoint_outcome: TeardownRefitOutcome | None = None
         self._last_checkpoint_snapshot: dict[str, object] | None = None
+        self._teardown_checkpoint_retried = False
         self._teardown_started = False
         self._generation_retired = False
         self._trace_flushed = False
         self._persistence_finished = False
+        self._persistence_drained = False
         self._trace_finished = False
         self._runner_finished = False
+        self._calibration_fit_authorizations: set[int] = set()
 
     @property
     def evidence_available(self) -> bool:
@@ -329,6 +323,44 @@ class HoldLearningRuntime:
     def mark_evidence_unavailable(self) -> None:
         self._evidence_available = False
 
+    def _calibration_fit_barrier(self) -> bool:
+        persistence = self._persistence
+        if persistence is None:
+            self.mark_evidence_unavailable()
+            return False
+        try:
+            durable = persistence.barrier(timeout=2.0) and not persistence.failed
+        except Exception as error:
+            self.mark_evidence_unavailable()
+            self._logger.warning(
+                f"Calibration trajectory barrier failed: {error}"
+            )
+            return False
+        if not durable:
+            self.mark_evidence_unavailable()
+        return durable
+
+    def _schedule_completed_calibration_fit(
+        self,
+        decision: CalibrationDecision,
+    ) -> None:
+        generation = decision.command_generation
+        if any(event.kind == "start_accepted" for event in decision.events):
+            self._calibration_fit_authorizations.add(generation)
+        outcome = decision.outcome
+        if outcome is None:
+            return
+        authorized = generation in self._calibration_fit_authorizations
+        self._calibration_fit_authorizations.discard(generation)
+        if outcome != "completed" or not authorized:
+            return
+        runner = self._runner
+        if runner is None or not runner._schedule_corpus_fit_after_barrier(
+            CandidateOrigin.OPERATOR_CALIBRATION,
+            self._calibration_fit_barrier,
+        ):
+            self.mark_evidence_unavailable()
+
     def handoff_calibration(
         self,
         decision: CalibrationDecision | None,
@@ -336,6 +368,8 @@ class HoldLearningRuntime:
         result_revision: int,
         timestamp_ms: int,
     ) -> CalibrationHandoff:
+        if decision is not None:
+            self._schedule_completed_calibration_fit(decision)
         trace = self._trace
         if decision is not None and trace is not None:
             command_action = cast(
@@ -585,201 +619,80 @@ class HoldLearningRuntime:
             raise TypeError("selected controller config is not a mapping")
         return selected.get("enable_identification") is True
 
-    def refit_once(
-        self,
-        settings: Mapping[str, JsonValue],
-    ) -> HoldRefitResult:
-        if self._refit_result is not None:
-            return self._refit_result
+    def schedule_stop_fit(self, settings: Mapping[str, JsonValue]) -> bool:
+        """Schedule an identification-authorized cumulative fit after the Stop barrier."""
         try:
             enabled = self._identification_enabled(
                 settings,
                 self._controller_name,
             )
         except Exception as error:
-            self._logger.error(f"Model refit failed at cook end: {error}")
-            result = HoldRefitResult(TeardownRefitOutcome.DISABLED, None)
-            self._refit_result = result
-            return result
+            self.mark_evidence_unavailable()
+            self._logger.error(f"Model fit scheduling failed at cook end: {error}")
+            return False
         if not enabled:
-            self._logger.info("Model refit skipped at cook end: Learn This Grill is disabled.")
-            result = HoldRefitResult(TeardownRefitOutcome.DISABLED, None)
-            self._refit_result = result
-            return result
+            return False
+        if not self._evidence_available:
+            return False
         runner = self._runner
         if runner is None:
-            result = HoldRefitResult(TeardownRefitOutcome.INSUFFICIENT, None)
-            self._refit_result = result
-            return result
+            self.mark_evidence_unavailable()
+            return False
         try:
-            verdict = runner.refit_from_cook()
+            scheduled = runner.schedule_corpus_fit(CandidateOrigin.COOK_REFIT)
         except Exception as error:
-            self._logger.error(f"Model refit failed at cook end: {error}")
-            result = HoldRefitResult(TeardownRefitOutcome.FAILED, None)
-            self._refit_result = result
-            return result
-        if verdict is None:
-            outcome = TeardownRefitOutcome.INSUFFICIENT
-            reason = "no reason recorded"
-        elif isinstance(verdict, TeardownRefitResult):
-            outcome = verdict.outcome
-            reason = verdict.reason
-        else:
-            self._logger.error("Model refit failed at cook end: invalid refit result")
-            result = HoldRefitResult(TeardownRefitOutcome.FAILED, None)
-            self._refit_result = result
-            return result
-        self._logger.info(f"Model refit at cook end: {outcome.value} ({reason}).")
-        result = HoldRefitResult(outcome, verdict)
-        self._refit_result = result
-        return result
-
-    def _finalize_outcome(self, outcome: TeardownRefitOutcome) -> bool:
-        runner = self._runner
-        if runner is None:
+            self.mark_evidence_unavailable()
+            self._logger.error(f"Model fit scheduling failed at cook end: {error}")
             return False
-        self._final_checkpoint_outcome = outcome
-        try:
-            return runner.finalize_cook_refit(outcome) is not False
-        except Exception:
-            return False
-
-    def _record_final_checkpoint(
-        self,
-        result: HoldRefitResult,
-        outcome: TeardownRefitOutcome,
-        snapshot: dict[str, object],
-        timestamp_ms: int,
-    ) -> None:
-        trace = self._trace
-        if trace is None:
-            return
-        typed_snapshot = cast(Mapping[str, JsonValue], snapshot)
-        trace.clear_model_authority()
-        trace.record_model(
-            TraceModelContext(
-                event=ModelEventType.REFIT,
-                detail=f"model refit outcome: {outcome.value}",
-                snapshot=typed_snapshot,
-                provenance="persisted",
-                timestamp_ms=timestamp_ms,
-            )
-        )
-        detail = result.verdict.reason if result.verdict is not None else outcome.value
-        if outcome in {
-            TeardownRefitOutcome.READY_FOR_REVIEW,
-            TeardownRefitOutcome.ACCEPTED_NEXT_COOK,
-        }:
-            event = ModelEventType.ADOPT
-        elif outcome is TeardownRefitOutcome.DISABLED:
-            return
-        else:
-            event = ModelEventType.REJECT
-        trace.record_model(
-            TraceModelContext(
-                event=event,
-                detail=detail,
-                snapshot=typed_snapshot,
-                provenance="persisted",
-                timestamp_ms=timestamp_ms,
-            )
-        )
-
-    def _finalize_checkpoint_failure(self) -> None:
-        if self._final_checkpoint_outcome is TeardownRefitOutcome.CHECKPOINT_FAILURE:
-            return
-        self._finalize_outcome(TeardownRefitOutcome.CHECKPOINT_FAILURE)
-
-    def publish_final_checkpoint_once(
-        self,
-        result: HoldRefitResult,
-        *,
-        timestamp_ms: int,
-    ) -> bool:
-        if self._final_checkpoint_attempted:
-            return self._final_checkpoint_succeeded
-        self._final_checkpoint_attempted = True
-        outcome = result.outcome
-        if not self._finalize_outcome(outcome):
-            outcome = TeardownRefitOutcome.CHECKPOINT_FAILURE
-            if not self._finalize_outcome(outcome):
-                self.mark_evidence_unavailable()
-                return False
-        runner = self._runner
-        if runner is None:
+        if not scheduled:
             self.mark_evidence_unavailable()
             return False
-        snapshot = runner.get_model_snapshot()
-        if not isinstance(snapshot, dict):
-            self.mark_evidence_unavailable()
-            if outcome is not TeardownRefitOutcome.CHECKPOINT_FAILURE:
-                self._finalize_checkpoint_failure()
-            return False
-        self._record_final_checkpoint(
-            result,
-            outcome,
-            snapshot,
-            timestamp_ms,
-        )
-        if snapshot == self._last_checkpoint_snapshot:
-            if self._last_checkpoint_succeeded:
-                self._final_checkpoint_succeeded = True
-                return True
-            outcome = TeardownRefitOutcome.CHECKPOINT_FAILURE
-            if not self._finalize_outcome(outcome):
-                return False
-            self._record_final_checkpoint(
-                result,
-                outcome,
-                snapshot,
-                timestamp_ms,
-            )
-            self._final_checkpoint_succeeded = self.submit_online_checkpoint(snapshot)
-            return self._final_checkpoint_succeeded
-        if self.submit_online_checkpoint(snapshot):
-            self._final_checkpoint_succeeded = True
-            return True
-        if outcome is TeardownRefitOutcome.CHECKPOINT_FAILURE:
-            return False
-        outcome = TeardownRefitOutcome.CHECKPOINT_FAILURE
-        if not self._finalize_outcome(outcome):
-            return False
-        retry_snapshot = runner.get_model_snapshot()
-        if not isinstance(retry_snapshot, dict):
-            return False
-        self._record_final_checkpoint(
-            result,
-            outcome,
-            retry_snapshot,
-            timestamp_ms,
-        )
-        self._final_checkpoint_succeeded = self.submit_online_checkpoint(retry_snapshot)
-        return self._final_checkpoint_succeeded
+        return True
 
-    def finish_teardown(self, *, generation: int) -> None:
-        if self._teardown_started:
-            return
-        self._teardown_started = True
-        runner = self._runner
+    def barrier_for_teardown(self, *, generation: int) -> bool:
+        """Fence causal origins and drain process-owned persistence once."""
         if not self._generation_retired:
             self._generation_retired = True
             try:
                 self.retire_generation(generation)
             except Exception as error:
                 self._logger.warning(f"Controller evidence retirement failed: {error}")
-        persistence = self._persistence
-        if not self._persistence_finished:
-            self._persistence_finished = True
-            drained = persistence is None
-            if persistence is not None:
-                try:
-                    drained = persistence.barrier(timeout=2.0) and not persistence.failed
-                except Exception as error:
-                    drained = False
-                    self._logger.warning(f"Model persistence barrier failed: {error}")
-            if not drained:
+        if self._persistence_finished:
+            return self._persistence_drained
+        if (
+            self._persistence is not None
+            and self._last_checkpoint_snapshot is not None
+            and not self._last_checkpoint_succeeded
+            and not self._teardown_checkpoint_retried
+        ):
+            self._teardown_checkpoint_retried = True
+            try:
+                self.submit_online_checkpoint(self._last_checkpoint_snapshot)
+            except Exception as error:
                 self.mark_evidence_unavailable()
-                self._finalize_checkpoint_failure()
+                self._logger.warning(
+                    f"Final online checkpoint retry failed: {error}"
+                )
+        self._persistence_finished = True
+        persistence = self._persistence
+        drained = persistence is None
+        if persistence is not None:
+            try:
+                drained = persistence.barrier(timeout=2.0) and not persistence.failed
+            except Exception as error:
+                drained = False
+                self._logger.warning(f"Model persistence barrier failed: {error}")
+        self._persistence_drained = drained
+        if not drained:
+            self.mark_evidence_unavailable()
+        return drained
+
+    def finish_teardown(self, *, generation: int) -> None:
+        if self._teardown_started:
+            return
+        self._teardown_started = True
+        runner = self._runner
+        self.barrier_for_teardown(generation=generation)
         trace = self._trace
         if not self._trace_flushed:
             self._trace_flushed = True

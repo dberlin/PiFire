@@ -165,7 +165,7 @@ def test_report_emits_only_the_locked_status_vocabulary(status: LearningStatus) 
         ("rejected", "blocked", False),
         ("failed", "blocked", False),
         ("ready-for-review", "operator-review", False),
-        ("accepted-next-cook", "next-cook", True),
+        ("accepted-next-cook", "blocked", False),
         ("checkpoint-failure", "blocked", False),
     ),
 )

@@ -5,8 +5,7 @@ from typing import Any
 from common.control_trace import ActuationMode, ControllerType
 from common.model_evidence import ModelEvidenceRecord
 from common.persistence.model_evidence import ModelActivationState
-from controller.model_learning.contracts import FrameObservation
-from controller.runtime.model_fitting import TeardownRefitOutcome
+from controller.model_learning.contracts import CandidateOrigin, FrameObservation
 from controller.runtime.model_persistence import DurableActivationReceipt
 from controller.runtime.observation_buffer import ObservationOutcomeBuffer
 from controller.runtime.runner import (
@@ -45,7 +44,7 @@ class FakeControllerRunner:
         self.activation_rollbacks = []
         self.activation_events = []
         self.activation_confidences = []
-        self.finalized_refits = []
+        self.fit_requests = []
         self.finished_teardowns = 0
         self.snapshot: dict[str, Any] | None = None
         self.observations = []
@@ -57,14 +56,7 @@ class FakeControllerRunner:
         # `restored` and `applied` are separate lists and so cannot express
         # relative ordering between a restore and the report that follows it.
         self.calls = []
-        self.refits = 0
-        self.refit_raises = None
-        self.refit_verdict: object | None = None
         self.stops = 0
-        # How many stop() calls had happened at each refit_from_cook() call, so
-        # a test can hold the refit to after the worker was asked to stop
-        # without reading the two counters as if they were ordered.
-        self.stops_before_each_refit = []
         self.safety_ceiling_c = None
 
     def script(self, outputs):
@@ -164,8 +156,13 @@ class FakeControllerRunner:
         self.stop()
         return None
 
-    def finalize_cook_refit(self, outcome: TeardownRefitOutcome) -> bool:
-        self.finalized_refits.append(outcome)
+    def schedule_corpus_fit(self, origin: CandidateOrigin) -> bool:
+        return self._schedule_corpus_fit_after_barrier(origin, None)
+
+    def _schedule_corpus_fit_after_barrier(self, origin, before_schedule) -> bool:
+        if before_schedule is not None and not before_schedule():
+            return False
+        self.fit_requests.append(origin)
         return True
 
     def finish_teardown(self) -> None:
@@ -211,13 +208,6 @@ class FakeControllerRunner:
         self.restored.append(snapshot)
         self.calls.append(("restore", snapshot))
         return snapshot is not None
-
-    def refit_from_cook(self):
-        self.refits += 1
-        self.stops_before_each_refit.append(self.stops)
-        if self.refit_raises:
-            raise self.refit_raises
-        return self.refit_verdict
 
     def controller_state(self):
         return {"fake": True}

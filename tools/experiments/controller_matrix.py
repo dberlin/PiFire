@@ -169,22 +169,14 @@ def _report(core, ratio, source_name, t, requested=None):
 
 
 def _observe_frame(core, frame, *, sequence, temp_c, setpoint_c, fan_frac, lid_open, manual_override, revision):
-    """Hand a completed pulse frame to the controller's teardown history.
+    """Hand a completed pulse frame to the controller's corpus repository.
 
-    `refit_from_cook()` with no arguments fits the frames collected here, which
-    is the path `HoldMode._refit_model` takes in production -- so a harness that
-    never reported frames produced a cook with zero fit samples and a refit that
-    could only ever decline. This mirrors the construction in
-    `controller/runtime/modes/hold.py`, including the flags
-    `TeardownGreyHistory.observe` filters on: a frame that is skipped, reset,
-    discontinuous, lid-open, manual, stale, or carries a role generation other
-    than the history's is dropped AND clears the buffer, as is a frame whose
-    start does not abut its predecessor's end.
+    This mirrors Hold's framed observation boundary. Eligibility and
+    discontinuity decisions belong to the process-owned repository rather than
+    to an experiment-local fit buffer.
     """
     observe = getattr(core, "observe_frame", None)
-    learning_runtime = getattr(core, "_grey_learning_runtime", None)
-    history = getattr(learning_runtime, "_teardown_history", None)
-    if observe is None or history is None:
+    if observe is None:
         return
     from controller.model_learning.contracts import FrameObservation
     from controller.mpc_allocator import normalized_load_from_auger_duty
@@ -214,7 +206,7 @@ def _observe_frame(core, frame, *, sequence, temp_c, setpoint_c, fan_frac, lid_o
             skipped=frame.skipped,
             reset=frame.reset_reason is not None,
             continuous=True,
-            role_generation=history.role_generation,
+            role_generation=core.active_control_pair.descriptor.role_generation,
             observation_sequence=sequence,
             scheduled_on_s=float(frame.scheduled_on_s),
             realized_auger_duty=realized_auger_duty,
@@ -301,7 +293,6 @@ def run_scenario(
     plant="GrillSim",
     config=None,
     cycle_config=None,
-    refit=False,
     core_setup=None,
     post_target_setup=None,
     output_transform=None,
@@ -334,8 +325,8 @@ def run_scenario(
         plant_name = plant
         plant_instance = globals()[plant_name](seed=seed)
         scheduler = PulseScheduler()
-        # TeardownGreyHistory requires strictly consecutive sequence numbers on
-        # abutting frames; a gap clears the buffer rather than being skipped.
+        # Repository observations require consecutive sequence numbers on
+        # abutting completed frames.
         observation_sequence = 0
         cycle_max, controller_max, effective_max, _ = _authority(core, cycle_data)
         del cycle_max, controller_max
@@ -606,46 +597,11 @@ def run_scenario(
         cfg = getattr(core, "cfg", None)
         if cfg is not None and "n_horizon" in cfg:
             result["configured_n_horizon"] = int(cfg["n_horizon"])
-        if refit:
-            result["refit"] = _refit_after_cook(core)
         if trace_sink is not None:
             result["trace_session"] = trace_sink.close()
         return result
     finally:
         time.time = real_time_time
-
-
-def _refit_after_cook(core):
-    """Run the end-of-cook refit and report what the gate decided.
-
-    Stdout is captured rather than left to interleave across pool workers: the
-    fitter and the gate both narrate, and those lines are the evidence for why
-    a promotion was refused.
-    """
-    import contextlib
-    import io
-
-    if not hasattr(core, "refit_from_cook"):
-        return None
-    buf = io.StringIO()
-    started = time.perf_counter()
-    with contextlib.redirect_stdout(buf):
-        verdict = core.refit_from_cook()
-    snapshot = getattr(core, "get_model_snapshot", lambda: None)()
-    return {
-        "accepted": bool(verdict.accepted),
-        "reason": str(verdict.reason),
-        "samples": len(getattr(core, "cook_history", list)()),
-        "seconds": round(time.perf_counter() - started, 2),
-        # The grey-only v4 checkpoint nests these under "active"; the flat
-        # "params"/"rmse" keys belong to a schema that predates it. The old
-        # snapshot["params"] raised KeyError, and snapshot.get("rmse") silently
-        # reported None for every run rather than failing.
-        "params": None if snapshot is None else dict(snapshot["active"]["parameters"]),
-        "rmse": None if snapshot is None else snapshot["active"]["metadata"].get("rmse"),
-        "snapshot": snapshot,
-        "log": buf.getvalue().strip().splitlines(),
-    }
 
 
 def _job(arg):

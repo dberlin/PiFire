@@ -6,6 +6,7 @@ import json
 import threading
 import time
 from dataclasses import FrozenInstanceError, replace
+from math import ceil
 from types import SimpleNamespace
 
 import pytest
@@ -40,6 +41,7 @@ from controller.mpc import Controller as MpcController
 from controller.mpc_config import DEFAULT_MPC_CONFIG, MpcConfig
 from controller.mpc_core import MpcCore
 from controller.mpc_factory import MpcPairFactory, OwnedMpcPair
+from controller.mpc_model import EstimatorSeed
 from controller.runtime.model_fitting import CandidatePair
 from tests.unit.mpc._solver_fixtures import (
     CYCLE,
@@ -70,7 +72,6 @@ class _Handle:
 
     def reset(self, *args: object, **kwargs: object):
         self.resets.append((args, kwargs))
-        return None
 
     def close(self) -> None:
         self.closed += 1
@@ -514,7 +515,7 @@ def test_startup_applies_persisted_fallback_before_candidate_output_is_authorize
     assert core.rollback_control_pair is None
     assert core.activation_output_authorized
     assert core.failed_role_generations == frozenset({prepared.candidate.role_generation})
-    assert core._grey_learning_runtime.teardown_role_generation == core._grey_learning_runtime.model_authority()[0]
+    assert core._grey_learning_runtime.learning_role_generation == core._grey_learning_runtime.model_authority()[0]
     core.close()
 
 
@@ -558,6 +559,18 @@ def _bare_mpc_pair_owner(
         incumbent,
         persistence,
     )
+    core._activation_runtime.bind_estimator_seed_source(
+        lambda theta, n_delay: EstimatorSeed(
+            delay_states=(0.4,) * n_delay,
+            chamber_temperature_c=110.0,
+            disturbance=0.0,
+            segment_id="activation-fixture",
+            pre_roll_digest="c" * 64,
+            pre_roll_frame_count=ceil(3 * theta / 20.0),
+            required_frame_count=ceil(3 * theta / 20.0),
+            status="exact",
+        )
+    )
     core._grey_learning_runtime = GreyLearningRuntime(
         pair_factory=core._pair_factory,
         activation_runtime=core._activation_runtime,
@@ -571,7 +584,6 @@ def _bare_mpc_pair_owner(
         ),
         configuration=lambda: MpcConfig(core._activation_runtime.active_pair.core.config),
         snapshot_parameters=lambda: core._activation_runtime.active_pair.core.snapshot_parameters(),
-        cook_history=lambda: tuple(core._activation_runtime.active_pair.core.history),
         sync_configuration=lambda: None,
         append_trace=lambda _records: None,
     )
@@ -753,7 +765,7 @@ def test_mpc_installs_complete_pair_inertly_then_authorizes_only_the_active_rece
     assert core.active_control_pair is candidate
     assert candidate.authorized
     assert not incumbent.authorized
-    assert core._grey_learning_runtime.teardown_role_generation == prepared.candidate.role_generation
+    assert core._grey_learning_runtime.learning_role_generation == prepared.candidate.role_generation
     core.close()
 
 
@@ -840,7 +852,7 @@ def test_post_activation_confidence_failure_restores_exact_pair_fences_generatio
     assert candidate.estimator.closed == candidate.solver.closed == 1
     assert incumbent.estimator.closed == incumbent.solver.closed == 0
     assert core.failed_role_generations == frozenset({prepared.candidate.role_generation})
-    assert core._grey_learning_runtime.teardown_role_generation == core._grey_learning_runtime.model_authority()[0] == 6
+    assert core._grey_learning_runtime.learning_role_generation == core._grey_learning_runtime.model_authority()[0] == 6
     events = core.drain_activation_events()
     assert incumbent.authorized
     assert not candidate.authorized
@@ -874,6 +886,18 @@ def test_first_native_solve_failure_after_activation_restores_exact_pair_and_rec
     monkeypatch.setattr(mpc_core_module, "GreyBoxEKF", _Estimator)
     monkeypatch.setattr(mpc_core_module, "AcadosGreyBoxMPC", _Solver)
     core = MpcController(_mpc_config(), "C", dict(CYCLE))
+    core._activation_runtime.bind_estimator_seed_source(
+        lambda theta, n_delay: EstimatorSeed(
+            delay_states=(0.4,) * n_delay,
+            chamber_temperature_c=110.0,
+            disturbance=0.0,
+            segment_id="activation-fixture",
+            pre_roll_digest="c" * 64,
+            pre_roll_frame_count=ceil(3 * theta / 20.0),
+            required_frame_count=ceil(3 * theta / 20.0),
+            status="exact",
+        )
+    )
     incumbent = core.active_control_pair
     native_config = replace(core.mpc.config, theta=core.mpc.config.theta + 1.0)
     candidate = core._pair_factory.adopt(
@@ -930,5 +954,5 @@ def test_operator_rollback_restores_only_the_recorded_in_memory_rollback_owner()
     assert core.mpc is incumbent.solver
     assert incumbent.estimator.closed == incumbent.solver.closed == 0
     assert candidate.estimator.closed == candidate.solver.closed == 1
-    assert core._grey_learning_runtime.teardown_role_generation == core._grey_learning_runtime.model_authority()[0] == 6
+    assert core._grey_learning_runtime.learning_role_generation == core._grey_learning_runtime.model_authority()[0] == 6
     assert unrelated.estimator.closed == unrelated.solver.closed == 0

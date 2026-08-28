@@ -711,6 +711,7 @@ class LearningTrajectoryRuntime:
             partial=False,
             boundary_reason=None,
             normalized_load=float(observation.realized_q),
+            calibration_origin=observation.calibration_fit,
         )
         if not observation.continuous or not observation.probe_valid:
             self._finalize(TrajectoryBreakReason.RECORDER_GAP)
@@ -1031,6 +1032,7 @@ class LearningTrajectoryRuntime:
         partial: bool,
         boundary_reason: TrajectoryBreakReason | None,
         normalized_load: float | None = None,
+        calibration_origin: bool = False,
     ) -> LearningTrajectoryFrame:
         duration_seconds = (end_ms - start_ms) / 1_000
         realized = integral.auger_on_seconds / duration_seconds
@@ -1075,6 +1077,7 @@ class LearningTrajectoryRuntime:
             continuous=True,
             partial=partial,
             boundary_reason=boundary_reason,
+            calibration_origin=calibration_origin,
         )
 
     def _submit_frame(

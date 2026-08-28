@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from math import ceil
 from types import SimpleNamespace
 
 import pytest
@@ -13,6 +14,7 @@ from controller.model_learning.contracts import ActivationPolicy, CandidateOrigi
 from controller.model_learning.grey_runtime import GreyLearningRuntime
 from controller.mpc_config import MpcConfig
 from controller.mpc_factory import MpcPairFactory, OwnedMpcPair
+from controller.mpc_model import EstimatorSeed
 from controller.runtime.model_fitting import CandidatePair
 from controller.runtime.model_persistence import (
     DurableActivationReceipt,
@@ -175,6 +177,18 @@ def _activation_composition() -> _ActivationComposition:
         persistence,
         clock_ms=lambda: 2_000,
     )
+    runtime.bind_estimator_seed_source(
+        lambda theta, n_delay: EstimatorSeed(
+            delay_states=(0.4,) * n_delay,
+            chamber_temperature_c=110.0,
+            disturbance=0.0,
+            segment_id="composition-fixture",
+            pre_roll_digest="c" * 64,
+            pre_roll_frame_count=ceil(3 * theta / 20.0),
+            required_frame_count=ceil(3 * theta / 20.0),
+            status="exact",
+        )
+    )
     grey = GreyLearningRuntime(
         pair_factory=factory,
         activation_runtime=runtime,
@@ -188,7 +202,6 @@ def _activation_composition() -> _ActivationComposition:
         ),
         configuration=lambda: MpcConfig(runtime.active_pair.core.config),
         snapshot_parameters=lambda: runtime.active_pair.core.snapshot_parameters(),
-        cook_history=lambda: tuple(runtime.active_pair.core.history),
         sync_configuration=lambda: None,
         append_trace=lambda _records: None,
     )
@@ -222,7 +235,7 @@ def _assert_activation_consistency(
     assert composition.controller.cfg == expected_pair.core.config
     assert composition.controller.get_control_period() == pytest.approx(control_period)
     assert composition.runtime.role_generation == role_generation
-    assert composition.grey.teardown_role_generation == role_generation
+    assert composition.grey.learning_role_generation == role_generation
 
 
 def test_controller_constructs_and_closes_focused_owners_in_dependency_order(
@@ -521,7 +534,7 @@ def test_same_generation_activation_noop_does_not_synchronize_configuration():
         assert composition.runtime.role_generation == 4
         assert composition.controller.cfg is original_config
         assert composition.controller.get_control_period() == pytest.approx(2.0)
-        assert composition.grey.teardown_role_generation == 4
+        assert composition.grey.learning_role_generation == 4
     finally:
         composition.close()
 
@@ -538,7 +551,7 @@ def test_precommit_authorization_rejection_does_not_synchronize_configuration():
         assert composition.runtime.role_generation == 4
         assert composition.controller.cfg is original_config
         assert composition.controller.get_control_period() == pytest.approx(2.0)
-        assert composition.grey.teardown_role_generation == 4
+        assert composition.grey.learning_role_generation == 4
     finally:
         composition.close()
 
@@ -558,15 +571,15 @@ def test_rejected_precommit_transitions_do_not_synchronize_activation_identity()
             is False
         )
         assert composition.controller.cfg is original_config
-        assert composition.grey.teardown_role_generation == 4
+        assert composition.grey.learning_role_generation == 4
 
         assert composition.controller.activation_runtime_failure("solve failed") is False
         assert composition.controller.cfg is original_config
-        assert composition.grey.teardown_role_generation == 4
+        assert composition.grey.learning_role_generation == 4
 
         assert composition.controller.rollback_activation("operator rollback") is False
         assert composition.controller.cfg is original_config
-        assert composition.grey.teardown_role_generation == 4
+        assert composition.grey.learning_role_generation == 4
     finally:
         composition.close()
 
@@ -588,7 +601,7 @@ def test_advance_synchronizes_only_after_generation_commits_on_terminal_false():
         assert composition.runtime.role_generation == 4
         assert composition.controller.cfg is composition.incumbent.core.config
         assert composition.controller.get_control_period() == pytest.approx(2.0)
-        assert composition.grey.teardown_role_generation == 4
+        assert composition.grey.learning_role_generation == 4
 
         composition.persistence.phase_receipts[-1]._complete(durable=True)
         composition.persistence.reject_evidence = True
@@ -691,6 +704,7 @@ def test_successful_authorization_synchronizes_generation_and_public_configurati
             core=SimpleNamespace(
                 config=active_config,
                 set_target=lambda _target: None,
+                estimator_seed_status=None,
             )
         ),
         role_generation=5,

@@ -19,11 +19,19 @@ from common.model_evidence import ModelEvidenceRecord
 from common.persistence.model_evidence import ModelActivationState
 from controller import mpc_snapshot as _snapshot
 from controller.applied_output import AppliedOutput
-from controller.base import ControllerBase, ControllerLearningDiagnostics, MpcTraceDiagnostics
+from controller.base import (
+    ControllerBase,
+    ControllerLearningDiagnostics,
+    MpcTraceDiagnostics,
+)
 from controller.model_learning.activation import PreparedActivationRecord
 from controller.model_learning.activation_runtime import ActivationRuntime
 from controller.model_learning.calibration import CalibrationDecision
-from controller.model_learning.grey_runtime import GreyLearningRuntime
+from controller.model_learning.contracts import CandidateOrigin
+from controller.model_learning.grey_runtime import (
+    GreyLearningProcessOwner,
+    GreyLearningRuntime,
+)
 from controller.mpc_allocator import AllocationResult
 from controller.mpc_calibration import MpcCalibrationRuntime
 from controller.mpc_config import (
@@ -42,6 +50,7 @@ from controller.runtime.model_persistence import (
 )
 
 if TYPE_CHECKING:
+    from common.persistence.learning_trajectory import LearningTrajectoryRepository
     from controller.acados import SolverDiagnostics
     from controller.mpc_calibration import CalibrationCommand, CompletedCalibrationResult
     from controller.mpc_model import EstimatorSeed
@@ -55,6 +64,9 @@ class Controller(ControllerBase):
         cycle_data,
         *,
         activation_persistence: ModelPersistenceWorker | None = None,
+        trajectory_repository: LearningTrajectoryRepository | None = None,
+        fit_partition_digest: Callable[[], str | None] | None = None,
+        grey_learning_process: GreyLearningProcessOwner | None = None,
         logger=None,
     ):
         super().__init__(config, units, cycle_data, logger=logger)
@@ -142,7 +154,9 @@ class Controller(ControllerBase):
                 active_components=self._active_learning_components,
                 configuration=self._learning_configuration,
                 snapshot_parameters=self._snapshot_parameters_for_learning,
-                cook_history=self._history_for_learning,
+                trajectory_repository=trajectory_repository,
+                fit_partition_digest=fit_partition_digest,
+                process_owner=grey_learning_process,
                 sync_configuration=self._synchronize_active_core,
                 append_trace=append_control_trace,
                 logger=self._logger,
@@ -191,8 +205,6 @@ class Controller(ControllerBase):
     def _snapshot_parameters_for_learning(self):
         return copy.deepcopy(self.active_control_pair.core.snapshot_parameters())
 
-    def _history_for_learning(self):
-        return tuple(self.active_control_pair.core.history)
 
     def _sync_learning_configuration(self) -> None:
         self.cfg = self.active_control_pair.core.config
@@ -479,14 +491,29 @@ class Controller(ControllerBase):
     def restore_model(self, snapshot):
         return self._grey_learning_runtime.restore_model(snapshot)
 
-    def finalize_cook_refit(self, outcome) -> bool:
-        return self._grey_learning_runtime.finalize_cook_refit(outcome)
+    def schedule_corpus_fit(self, origin: CandidateOrigin) -> bool:
+        return self._grey_learning_runtime.request_corpus_fit(origin)
 
-    def cook_history(self):
-        return self._grey_learning_runtime.cook_history()
+    def _schedule_corpus_fit_ticket(self, origin: CandidateOrigin) -> str | None:
+        return self._grey_learning_runtime._request_corpus_fit_ticket(origin)
 
-    def refit_from_cook(self, history=None):
-        return self._grey_learning_runtime.refit_from_cook(history)
+    def _consume_terminal_corpus_fit_ticket(
+        self,
+        ticket: str,
+        origin: CandidateOrigin,
+    ) -> bool:
+        return self._grey_learning_runtime._consume_terminal_fit_ticket(
+            ticket,
+            origin,
+        )
+
+
+    def fail_corpus_fit(
+        self,
+        code: str,
+        error: BaseException | str,
+    ) -> None:
+        self._grey_learning_runtime.fail_corpus_fit(code, error)
 
     def set_safety_ceiling_c(self, ceiling_c: float) -> None:
         self._calibration.set_safety_ceiling_c(ceiling_c)

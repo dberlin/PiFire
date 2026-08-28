@@ -30,6 +30,7 @@ from controller.applied_output import (
     seed_output,
 )
 from controller.base import MpcTraceDiagnostics
+from controller.model_learning.grey_runtime import GreyLearningProcessOwner
 from controller.model_learning.migration import migrate_mpc_learning_authority
 from controller.model_promotion import ReachabilityState
 from controller.mpc_calibration import CalibrationCommand
@@ -701,6 +702,29 @@ class HoldMode(ControlMode):
         return self.state.cycle.realized_ratio
 
     name = Mode.HOLD
+
+    def _resolve_fit_partition_digest(self) -> str | None:
+        """Resolve and retain the current segment's compatible corpus partition."""
+        repository = getattr(self, "_trajectory_repository", None)
+        trajectory = getattr(self.ctx, "learning_trajectory", None)
+        if repository is None or trajectory is None:
+            return self._fit_partition_digest_cache
+        try:
+            segment_id = trajectory.status().segment_id
+            if segment_id is not None:
+                self._fit_segment_id_cache = segment_id
+            cached_segment_id = self._fit_segment_id_cache
+            segment = (
+                None
+                if cached_segment_id is None
+                else repository.read_segment(cached_segment_id)
+            )
+            if segment is not None:
+                self._fit_partition_digest_cache = segment.fit_partition_digest
+        except Exception:
+            return self._fit_partition_digest_cache
+        return self._fit_partition_digest_cache
+
     _model_store = None
 
     def setup(self):
@@ -710,6 +734,9 @@ class HoldMode(ControlMode):
         self._hold_learning = None
         self._runner = None
         self._persistence_worker = None
+        self._trajectory_repository = None
+        self._fit_partition_digest_cache = None
+        self._fit_segment_id_cache = None
         learning_evidence_available = True
         self._reachability_advisory_key = None
         self._framed_pulse = FramedPulseRuntime()
@@ -754,6 +781,14 @@ class HoldMode(ControlMode):
         self._model_store = None
         trajectory_repository = getattr(self.ctx, "trajectory_repository", None)
         persistence_worker = getattr(self.ctx, "model_persistence", None)
+        grey_learning_process = getattr(
+            self.ctx,
+            "grey_learning_process",
+            None,
+        )
+        if grey_learning_process is None:
+            grey_learning_process = GreyLearningProcessOwner()
+            self.ctx.grey_learning_process = grey_learning_process
         try:
             if trajectory_repository is None:
                 trajectory_repository = LearningTrajectoryRepository()
@@ -772,6 +807,7 @@ class HoldMode(ControlMode):
             persistence_worker = None
             trajectory_repository = None
             self._trace_warning(f"Model persistence unavailable: {error}")
+        self._trajectory_repository = trajectory_repository
         self._controller_name = self.settings["controller"]["selected"]
 
         # Load Controller Module (i.e. PID)
@@ -781,6 +817,9 @@ class HoldMode(ControlMode):
             logger=self.ctx.control_log,
             event_logger=self.ctx.event_log,
             model_persistence=persistence_worker,
+            trajectory_repository=trajectory_repository,
+            fit_partition_digest=self._resolve_fit_partition_digest,
+            grey_learning_process=grey_learning_process,
         )
         actual_type = getattr(self._runner, "controller_type", lambda: None)() if self._runner is not None else None
         if isinstance(actual_type, ControllerType):
@@ -2550,15 +2589,34 @@ class HoldMode(ControlMode):
                     stop_error = error
                 if stop_error is None:
                     if stopped is False:
-                        self._trace_warning("Controller worker did not stop; final checkpoint was not queued")
-                    elif learning is not None:
-                        refit = learning.refit_once(cast(Mapping[str, JsonValue], self.settings))
-                        learning.publish_final_checkpoint_once(
-                            refit,
-                            timestamp_ms=int(self.ctx.clock.now() * 1_000),
+                        self._trace_warning(
+                            "Controller worker did not stop; corpus fit was not scheduled"
                         )
-                if stop_error is None:
-                    self._rotate_evidence_sessions_for_reserved_runner_generations(self.ctx.clock.now())
+                    self._rotate_evidence_sessions_for_reserved_runner_generations(
+                        self.ctx.clock.now()
+                    )
+            self._resolve_fit_partition_digest()
+            self._emit_trajectory_boundary(
+                TrajectoryBreakReason.STOP,
+                now,
+                "hold-stop",
+            )
+            drained = (
+                True
+                if learning is None
+                else learning.barrier_for_teardown(
+                    generation=self._runner_configuration_revision
+                )
+            )
+            if (
+                stop_error is None
+                and stopped is not False
+                and drained
+                and learning is not None
+            ):
+                learning.schedule_stop_fit(
+                    cast(Mapping[str, JsonValue], self.settings)
+                )
         finally:
             try:
                 if trace is not None and not trace.status.closed:

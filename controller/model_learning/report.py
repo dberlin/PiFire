@@ -9,7 +9,7 @@ from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, is_dataclass
 from enum import Enum
-from typing import TypeVar, cast
+from typing import cast
 
 from common.cook_diagnostics import ControllerLearningReport
 from common.model_evidence import (
@@ -32,6 +32,17 @@ ARTIFACT_SCHEMA = "pifire-grey-learning-report/v2"
 _REPORT_CACHE_MAX_ENTRIES = 8
 _REPORT_CACHE: OrderedDict[str, LearningReport] = OrderedDict()
 _REPORT_CACHE_LOCK = threading.Lock()
+_LEGACY_COOK_REFIT_OUTCOMES = frozenset(
+    {
+        "disabled",
+        "insufficient",
+        "rejected",
+        "failed",
+        "ready-for-review",
+        "accepted-next-cook",
+        "checkpoint-failure",
+    }
+)
 
 
 def _json_value(value: object) -> object:
@@ -106,15 +117,13 @@ def _superseded_invalidation(
     )
 
 
-_PayloadT = TypeVar("_PayloadT")
 
-
-def _latest_payload(
+def _latest_payload[PayloadT](
     records: Sequence[ModelEvidenceRecord],
-    payload_type: type[_PayloadT],
-) -> _PayloadT | None:
+    payload_type: type[PayloadT],
+) -> PayloadT | None:
     record = _latest(records, payload_type)
-    return None if record is None else cast(_PayloadT, record.payload)
+    return None if record is None else cast(PayloadT, record.payload)
 
 
 def _pair_digest(activation: Mapping[str, object], name: str):
@@ -231,8 +240,6 @@ def build_learning_report(
         fit_status = FitStatus.FAILED.value
         errors.append("live-fit-status-invalid")
 
-    from controller.runtime.model_fitting import TeardownRefitOutcome
-
     cook_refit_value = checkpoint_map.get("cook_refit", {"status": FitStatus.IDLE.value, "latest": None})
     if not isinstance(cook_refit_value, Mapping) or set(cook_refit_value) != {"status", "latest"}:
         raise ValueError("invalid cook_refit")
@@ -241,26 +248,18 @@ def build_learning_report(
         FitStatus,
         "cook_refit status",
     )
-    cook_refit_latest_value = cook_refit_value["latest"]
-    if cook_refit_latest_value is None:
-        cook_refit_latest = None
+    cook_refit_latest = cook_refit_value["latest"]
+    if cook_refit_latest is not None and (
+        not isinstance(cook_refit_latest, str)
+        or cook_refit_latest not in _LEGACY_COOK_REFIT_OUTCOMES
+    ):
+        raise ValueError("invalid cook_refit latest")
+    if cook_refit_latest is None:
+        cook_refit_authorization = "not-run"
+    elif cook_refit_latest == "ready-for-review":
+        cook_refit_authorization = "operator-review"
     else:
-        try:
-            cook_refit_latest = TeardownRefitOutcome(cook_refit_latest_value).value
-        except (TypeError, ValueError) as error:
-            raise ValueError("invalid cook_refit latest") from error
-    #: A refit that never ran is reported apart from one that ran and
-    #: authorized nothing. Both leave the next cook on the incumbent model,
-    #: but only the second is a verdict, and only it should read as one.
-    cook_refit_authorization = (
-        "not-run"
-        if cook_refit_latest is None
-        else "next-cook"
-        if cook_refit_latest == TeardownRefitOutcome.ACCEPTED_NEXT_COOK.value
-        else "operator-review"
-        if cook_refit_latest == TeardownRefitOutcome.READY_FOR_REVIEW.value
-        else "blocked"
-    )
+        cook_refit_authorization = "blocked"
 
     identities = checkpoint_map.get("identities")
     identities = identities if isinstance(identities, Mapping) else {}
@@ -497,7 +496,7 @@ def build_learning_report(
             "latest": cook_refit_latest,
             "final_status": cook_refit_latest or cook_refit_status,
             "authorization": cook_refit_authorization,
-            "next_cook": cook_refit_latest == TeardownRefitOutcome.ACCEPTED_NEXT_COOK.value,
+            "next_cook": False,
         },
         "window": checkpoint_map.get("window"),
         "checks": checks,

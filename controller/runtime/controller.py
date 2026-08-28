@@ -20,7 +20,9 @@ can monkeypatch them.
 """
 
 import copy
+from collections.abc import Callable
 from os.path import exists
+from typing import ClassVar
 
 from common.common import ErrorKind
 from common.defaults import default_control
@@ -230,6 +232,19 @@ class Controller:
                 logger.info("Control Script Exiting.")
             except Exception:  # noqa: S110 -- exit logging cannot preempt owner cleanup
                 pass
+        grey_learning = getattr(self.ctx, "grey_learning_process", None)
+        if grey_learning is not None:
+            try:
+                grey_learning.close()
+            except Exception as error:
+                error_log = getattr(self.eventLogger, "error", None)
+                if callable(error_log):
+                    try:
+                        error_log(
+                            f"Grey learning process shutdown failed: {error}"
+                        )
+                    except Exception:  # noqa: S110 -- cleanup must continue after logging failure
+                        pass
         trajectory = getattr(self.ctx, "learning_trajectory", None)
         persistence = getattr(self.ctx, "model_persistence", None)
         owner = trajectory if trajectory is not None else persistence
@@ -747,7 +762,7 @@ class Controller:
         self.work_cycle(Mode.REIGNITE)
         self.next_mode(self.control["next_mode"], setpoint=setpoint)
 
-    _MODE_DISPATCH = {
+    _MODE_DISPATCH: ClassVar[dict[Mode, Callable[[Controller], None]]] = {
         Mode.PRIME: _dispatch_prime,
         Mode.STARTUP: _dispatch_startup,
         Mode.SMOKE: _dispatch_smoke,

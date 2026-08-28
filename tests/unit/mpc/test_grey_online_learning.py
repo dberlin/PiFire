@@ -1,4 +1,4 @@
-"""RED contracts for off-path grey candidate collection, evaluation, and handoff."""
+"""Off-path grey candidate preparation, evaluation, and handoff contracts."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 from common.control_trace import AmbientSource
+from common.persistence.learning_trajectory import LearningTrajectoryRepository
 from controller.acados.contracts import GreyBoxMPCConfig
 from controller.model_learning.contracts import (
     ActivationPolicy,
@@ -28,15 +29,16 @@ from controller.runtime.model_fitting import (
     GreyFitSuccess,
     GreyLearningOrchestrator,
     LiveLearningIdentity,
-    PassiveGreyHistory,
     TargetTimingEvidence,
     TriggerConfig,
     fit_trigger,
     handoff_candidate,
     paired_forecast_origin,
     prepare_candidate_off_path,
+    segmented_corpus_fit_job,
     stale_result_reasons,
 )
+from tests.unit.common.test_learning_trajectory_store import _finalize_segment, _segment
 
 _INCUMBENT = "1" * 64
 _CHALLENGER = "2" * 64
@@ -112,45 +114,38 @@ def _fit(origin=CandidateOrigin.PASSIVE_ONLINE) -> GreyFitSuccess:
     )
 
 
-def test_passive_history_accepts_only_completed_normal_current_generation_hold_frames() -> None:
-    history = PassiveGreyHistory(role_generation=4, max_observations=12)
-    decision = history.observe(_frame(0))
-    assert decision.accepted is True
-    assert decision.reasons == ()
-    assert history.observations == (_frame(0),)
-
-
-@pytest.mark.parametrize(
-    "changes, reason",
-    [
-        ({"output_source": "manual-override", "manual_override": True}, "manual"),
-        ({"lid_open": True}, "lid-open"),
-        ({"safety_inhibited": True}, "safety"),
-        ({"stale": True}, "stale"),
-        ({"skipped": True}, "skipped-or-reset"),
-        ({"reset": True}, "skipped-or-reset"),
-        ({"continuous": False}, "discontinuity"),
-        ({"role_generation": 3}, "stale-generation"),
-        ({"allocation_join_reason": "missing-allocation"}, "unknown-actuation"),
-        ({"calibration_stage": "low", "calibration_fit": True}, "calibration-frame"),
-        ({"output_source": "unknown"}, "non-controller-output"),
-    ],
-)
-def test_passive_history_reports_each_exact_rejection_reason_without_retaining_the_frame(changes, reason) -> None:
-    history = PassiveGreyHistory(role_generation=4, max_observations=12)
-    decision = history.observe(_frame(0, **changes))
-    assert decision.accepted is False
-    assert decision.reasons == (reason,)
-    assert history.observations == ()
-
-
-def test_passive_history_starts_a_fresh_contiguous_segment_after_a_rejected_gap() -> None:
-    history = PassiveGreyHistory(role_generation=4, max_observations=12)
-    assert history.observe(_frame(0)).accepted
-    assert not history.observe(_frame(1, lid_open=True)).accepted
-    assert history.observations == ()
-    assert history.observe(_frame(2)).accepted
-    assert history.observations == (_frame(2),)
+def _persistent_fit_job(tmp_path, *, origin, config):
+    repository = LearningTrajectoryRepository(str(tmp_path / "corpus.sqlite"))
+    segment = replace(
+        _segment("online-fit", scored_count=9),
+        collection_provenance={
+            "origin": origin.value,
+            "role_generation": 4,
+        },
+    )
+    _finalize_segment(repository, segment)
+    snapshot = repository.snapshot_fit_corpus(segment.fit_partition_digest)
+    identity = LiveLearningIdentity(
+        session_id="session-a",
+        cook_id="cook-a",
+        configuration_digest=segment.fit_partition_digest,
+        incumbent_digest=_INCUMBENT,
+        role_generation=4,
+        candidate_generation=9,
+    )
+    scored_sequences = tuple(
+        frame.sequence
+        for corpus_segment in snapshot.segments
+        for frame in corpus_segment.scored_hold_frames
+    )
+    request = _request(
+        origin=origin,
+        window=identity.window(
+            min(scored_sequences),
+            max(scored_sequences),
+        ),
+    )
+    return identity, segmented_corpus_fit_job(snapshot, request, config)
 
 
 def test_trigger_retains_minimum_sample_excitation_coverage_continuity_and_identifiability_gates() -> None:
@@ -311,90 +306,31 @@ class _ImmediateFitWorker:
         self.closed = True
 
 
-@pytest.mark.parametrize(
-    "changes, origin",
-    [
-        ({}, CandidateOrigin.PASSIVE_ONLINE),
-        (
-            {"calibration_stage": "low", "calibration_fit": True, "probe_q": 0.05},
-            CandidateOrigin.OPERATOR_CALIBRATION,
-        ),
-    ],
-)
-def test_orchestrator_connects_completed_history_to_fit_and_off_path_preparation_without_swap(changes, origin) -> None:
-    worker = _ImmediateFitWorker()
-    incumbent = object()
-    identity = LiveLearningIdentity(
-        session_id="session-a",
-        cook_id="cook-a",
-        configuration_digest=_CONFIG,
-        incumbent_digest=_INCUMBENT,
-        role_generation=4,
-        candidate_generation=9,
+class _ControlledSupersedingWorker(_ImmediateFitWorker):
+    def __init__(self):
+        super().__init__()
+        self.next_submission: FitSubmission | BaseException = FitSubmission.ACCEPTED
+
+    def submit(self, job):
+        disposition = self.next_submission
+        if isinstance(disposition, BaseException):
+            raise disposition
+        if disposition is FitSubmission.BUSY:
+            return disposition
+        return super().submit(job)
+
+
+def _prepared_supersession_harness(tmp_path):
+    worker = _ControlledSupersedingWorker()
+    config = GreyBoxMPCConfig(horizon_steps=12)
+    identity, job = _persistent_fit_job(
+        tmp_path,
+        origin=CandidateOrigin.PASSIVE_ONLINE,
+        config=config,
     )
     orchestrator = GreyLearningOrchestrator(
         identity=identity,
-        config=GreyBoxMPCConfig(horizon_steps=12),
-        incumbent_pair=incumbent,
-        estimator_factory=_Estimator,
-        controller_factory=_Native,
-        timing_probe=lambda _native: _timing(),
-        trigger_config=TriggerConfig(
-            min_samples=9,
-            min_input_variance=0.02,
-            min_input_levels=3,
-            min_temperature_span_c=8.0,
-            min_identifiability=0.5,
-        ),
-        worker=worker,
-        max_observations=12,
-    )
-    submitted = None
-    for sequence in range(9):
-        submitted = orchestrator.observe_completed_frame(
-            _frame(sequence, **changes),
-            identifiability=0.8,
-        )
-    assert submitted.submission is FitSubmission.ACCEPTED
-    assert submitted.trigger.input_variance == pytest.approx(0.08166666666666667)
-    assert submitted.trigger.input_levels == 3
-    while_pending = orchestrator.observe_completed_frame(
-        _frame(9, **changes),
-        identifiability=0.8,
-    )
-    assert while_pending.submission is None
-    assert while_pending.trigger.input_variance == pytest.approx(0.084525)
-    assert while_pending.trigger.input_levels == 3
-    assert worker.job.request.origin is origin
-    delivery = orchestrator.poll_fit_off_path(live_identity=identity, live_origin=origin)
-    assert delivery.stale_reasons == ()
-    assert delivery.preparation.accepted is True
-    assert delivery.preparation.incumbent_pair is incumbent
-    while_prepared = orchestrator.observe_completed_frame(
-        _frame(10, **changes),
-        identifiability=0.8,
-    )
-    assert while_prepared.submission is None
-    assert while_prepared.trigger.input_variance > 0.02
-    assert while_prepared.trigger.input_levels == 3
-    assert orchestrator.incumbent_pair is incumbent
-    orchestrator.close()
-    assert worker.closed is True
-
-
-def test_orchestrator_rechecks_actual_fit_identifiability_before_candidate_preparation() -> None:
-    worker = _ImmediateFitWorker(identifiability=0.49)
-    identity = LiveLearningIdentity(
-        session_id="session-a",
-        cook_id="cook-a",
-        configuration_digest=_CONFIG,
-        incumbent_digest=_INCUMBENT,
-        role_generation=4,
-        candidate_generation=9,
-    )
-    orchestrator = GreyLearningOrchestrator(
-        identity=identity,
-        config=GreyBoxMPCConfig(horizon_steps=12),
+        config=config,
         incumbent_pair=object(),
         estimator_factory=_Estimator,
         controller_factory=_Native,
@@ -407,31 +343,122 @@ def test_orchestrator_rechecks_actual_fit_identifiability_before_candidate_prepa
             min_identifiability=0.5,
         ),
         worker=worker,
-        max_observations=12,
     )
-    for sequence in range(9):
-        orchestrator.observe_completed_frame(_frame(sequence), identifiability=0.8)
+    assert orchestrator.submit_corpus_fit(job) is FitSubmission.ACCEPTED
     delivery = orchestrator.poll_fit_off_path(
         live_identity=identity,
         live_origin=CandidateOrigin.PASSIVE_ONLINE,
     )
-    assert delivery.blockers == ("identifiability",)
-    assert delivery.preparation is None
-    assert orchestrator.prepared is None
+    prepared = delivery.preparation
+    assert prepared is not None and prepared.accepted
+    replacement_request = replace(
+        job.request,
+        request_id="fit-b",
+        origin=CandidateOrigin.COOK_REFIT,
+    )
+    return (
+        orchestrator,
+        worker,
+        identity,
+        prepared,
+        replace(job, request=replacement_request),
+    )
+
+
+@pytest.mark.parametrize(
+    "worker_disposition",
+    (
+        FitSubmission.BUSY,
+        RuntimeError("worker submission failed"),
+    ),
+)
+def test_superseding_submission_failure_preserves_prepared_candidate_and_evaluator(
+    tmp_path,
+    worker_disposition,
+) -> None:
+    orchestrator, worker, _, prepared, replacement_job = (
+        _prepared_supersession_harness(tmp_path)
+    )
+    evaluator = orchestrator._evaluator
+    persisted = []
+    worker.next_submission = worker_disposition
+
+    if isinstance(worker_disposition, BaseException):
+        with pytest.raises(RuntimeError, match="worker submission failed"):
+            orchestrator.submit_superseding_corpus_fit(
+                replacement_job,
+                prepared,
+                persist=lambda: persisted.append(True),
+            )
+    else:
+        assert orchestrator.submit_superseding_corpus_fit(
+            replacement_job,
+            prepared,
+            persist=lambda: persisted.append(True),
+        ) == (FitSubmission.BUSY, False)
+
+    assert orchestrator.pending_request is None
+    assert orchestrator.prepared is prepared
+    assert orchestrator._evaluator is evaluator
+    assert prepared.candidate_pair.controller.closed is False
+    assert persisted == []
     orchestrator.close()
 
 
-def test_identity_digest_changes_require_atomic_config_and_incumbent_replacement_and_release_candidate() -> None:
+def test_superseding_persistence_failure_preserves_candidate_and_stales_accepted_fit(
+    tmp_path,
+) -> None:
+    orchestrator, _, identity, prepared, replacement_job = (
+        _prepared_supersession_harness(tmp_path)
+    )
+    evaluator = orchestrator._evaluator
+
+    def reject_persistence() -> None:
+        raise RuntimeError("candidate rejection is not durable")
+
+    assert orchestrator.submit_superseding_corpus_fit(
+        replacement_job,
+        prepared,
+        persist=reject_persistence,
+    ) == (FitSubmission.ACCEPTED, False)
+    assert orchestrator.pending_request is replacement_job.request
+    assert orchestrator.prepared is prepared
+    assert orchestrator._evaluator is evaluator
+    assert prepared.candidate_pair.controller.closed is False
+
+    delivery = orchestrator.poll_fit_off_path(
+        live_identity=identity,
+        live_origin=CandidateOrigin.COOK_REFIT,
+    )
+    assert delivery.stale_reasons == (
+        "candidate-supersession-persistence-failed",
+    )
+    assert delivery.preparation is None
+    assert orchestrator.pending_request is None
+    assert orchestrator.prepared is prepared
+    assert orchestrator._evaluator is evaluator
+    assert prepared.candidate_pair.controller.closed is False
+    orchestrator.close()
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        CandidateOrigin.PASSIVE_ONLINE,
+        CandidateOrigin.OPERATOR_CALIBRATION,
+    ],
+)
+def test_orchestrator_connects_persistent_job_to_off_path_preparation_without_swap(
+    tmp_path,
+    origin,
+) -> None:
     worker = _ImmediateFitWorker()
     incumbent = object()
     config = GreyBoxMPCConfig(horizon_steps=12)
-    identity = LiveLearningIdentity(
-        session_id="session-a",
-        cook_id="cook-a",
-        configuration_digest=_CONFIG,
-        incumbent_digest=_INCUMBENT,
-        role_generation=4,
-        candidate_generation=9,
+    identity, job = _persistent_fit_job(
+        tmp_path,
+        origin=origin,
+        config=config,
     )
     orchestrator = GreyLearningOrchestrator(
         identity=identity,
@@ -448,10 +475,85 @@ def test_identity_digest_changes_require_atomic_config_and_incumbent_replacement
             min_identifiability=0.5,
         ),
         worker=worker,
-        max_observations=12,
     )
-    for sequence in range(9):
-        orchestrator.observe_completed_frame(_frame(sequence), identifiability=0.8)
+    assert orchestrator.submit_corpus_fit(job) is FitSubmission.ACCEPTED
+    assert orchestrator.submit_corpus_fit(job) is FitSubmission.BUSY
+    assert worker.job.request.origin is origin
+    delivery = orchestrator.poll_fit_off_path(live_identity=identity, live_origin=origin)
+    assert delivery.stale_reasons == ()
+    assert delivery.preparation.accepted is True
+    assert delivery.preparation.incumbent_pair is incumbent
+    assert orchestrator.submit_corpus_fit(job) is FitSubmission.BUSY
+    assert orchestrator.incumbent_pair is incumbent
+    orchestrator.close()
+    assert worker.closed is True
+
+
+def test_orchestrator_rechecks_actual_fit_identifiability_before_candidate_preparation(
+    tmp_path,
+) -> None:
+    worker = _ImmediateFitWorker(identifiability=0.49)
+    config = GreyBoxMPCConfig(horizon_steps=12)
+    identity, job = _persistent_fit_job(
+        tmp_path,
+        origin=CandidateOrigin.PASSIVE_ONLINE,
+        config=config,
+    )
+    orchestrator = GreyLearningOrchestrator(
+        identity=identity,
+        config=config,
+        incumbent_pair=object(),
+        estimator_factory=_Estimator,
+        controller_factory=_Native,
+        timing_probe=lambda _native: _timing(),
+        trigger_config=TriggerConfig(
+            min_samples=9,
+            min_input_variance=0.02,
+            min_input_levels=3,
+            min_temperature_span_c=8.0,
+            min_identifiability=0.5,
+        ),
+        worker=worker,
+    )
+    assert orchestrator.submit_corpus_fit(job) is FitSubmission.ACCEPTED
+    delivery = orchestrator.poll_fit_off_path(
+        live_identity=identity,
+        live_origin=CandidateOrigin.PASSIVE_ONLINE,
+    )
+    assert delivery.blockers == ("identifiability",)
+    assert delivery.preparation is None
+    assert orchestrator.prepared is None
+    orchestrator.close()
+
+
+def test_identity_digest_changes_require_atomic_config_and_incumbent_replacement_and_release_candidate(
+    tmp_path,
+) -> None:
+    worker = _ImmediateFitWorker()
+    incumbent = object()
+    config = GreyBoxMPCConfig(horizon_steps=12)
+    identity, job = _persistent_fit_job(
+        tmp_path,
+        origin=CandidateOrigin.PASSIVE_ONLINE,
+        config=config,
+    )
+    orchestrator = GreyLearningOrchestrator(
+        identity=identity,
+        config=config,
+        incumbent_pair=incumbent,
+        estimator_factory=_Estimator,
+        controller_factory=_Native,
+        timing_probe=lambda _native: _timing(),
+        trigger_config=TriggerConfig(
+            min_samples=9,
+            min_input_variance=0.02,
+            min_input_levels=3,
+            min_temperature_span_c=8.0,
+            min_identifiability=0.5,
+        ),
+        worker=worker,
+    )
+    assert orchestrator.submit_corpus_fit(job) is FitSubmission.ACCEPTED
     delivery = orchestrator.poll_fit_off_path(
         live_identity=identity,
         live_origin=CandidateOrigin.PASSIVE_ONLINE,
@@ -492,19 +594,17 @@ def test_identity_digest_changes_require_atomic_config_and_incumbent_replacement
     orchestrator.close()
 
 
-def test_close_releases_an_untransferred_prepared_candidate_pair() -> None:
+def test_close_releases_an_untransferred_prepared_candidate_pair(tmp_path) -> None:
     worker = _ImmediateFitWorker()
-    identity = LiveLearningIdentity(
-        session_id="session-a",
-        cook_id="cook-a",
-        configuration_digest=_CONFIG,
-        incumbent_digest=_INCUMBENT,
-        role_generation=4,
-        candidate_generation=9,
+    config = GreyBoxMPCConfig(horizon_steps=12)
+    identity, job = _persistent_fit_job(
+        tmp_path,
+        origin=CandidateOrigin.PASSIVE_ONLINE,
+        config=config,
     )
     orchestrator = GreyLearningOrchestrator(
         identity=identity,
-        config=GreyBoxMPCConfig(horizon_steps=12),
+        config=config,
         incumbent_pair=object(),
         estimator_factory=_Estimator,
         controller_factory=_Native,
@@ -517,10 +617,8 @@ def test_close_releases_an_untransferred_prepared_candidate_pair() -> None:
             min_identifiability=0.5,
         ),
         worker=worker,
-        max_observations=12,
     )
-    for sequence in range(9):
-        orchestrator.observe_completed_frame(_frame(sequence), identifiability=0.8)
+    assert orchestrator.submit_corpus_fit(job) is FitSubmission.ACCEPTED
     delivery = orchestrator.poll_fit_off_path(
         live_identity=identity,
         live_origin=CandidateOrigin.PASSIVE_ONLINE,
@@ -530,20 +628,20 @@ def test_close_releases_an_untransferred_prepared_candidate_pair() -> None:
     assert candidate_controller.closed is True
 
 
-def test_orchestrator_carries_prepared_candidate_through_causal_evaluation_and_handoff_without_install() -> None:
+def test_orchestrator_carries_prepared_candidate_through_causal_evaluation_and_handoff_without_install(
+    tmp_path,
+) -> None:
     worker = _ImmediateFitWorker()
     incumbent = object()
-    identity = LiveLearningIdentity(
-        session_id="session-a",
-        cook_id="cook-a",
-        configuration_digest=_CONFIG,
-        incumbent_digest=_INCUMBENT,
-        role_generation=4,
-        candidate_generation=9,
+    config = GreyBoxMPCConfig(horizon_steps=12)
+    identity, job = _persistent_fit_job(
+        tmp_path,
+        origin=CandidateOrigin.PASSIVE_ONLINE,
+        config=config,
     )
     orchestrator = GreyLearningOrchestrator(
         identity=identity,
-        config=GreyBoxMPCConfig(horizon_steps=12),
+        config=config,
         incumbent_pair=incumbent,
         estimator_factory=_Estimator,
         controller_factory=_Native,
@@ -557,10 +655,8 @@ def test_orchestrator_carries_prepared_candidate_through_causal_evaluation_and_h
         ),
         evaluation_config=EvaluationConfig(required_consecutive_wins=2),
         worker=worker,
-        max_observations=12,
     )
-    for sequence in range(9):
-        orchestrator.observe_completed_frame(_frame(sequence), identifiability=0.8)
+    assert orchestrator.submit_corpus_fit(job) is FitSubmission.ACCEPTED
     delivery = orchestrator.poll_fit_off_path(
         live_identity=identity,
         live_origin=CandidateOrigin.PASSIVE_ONLINE,

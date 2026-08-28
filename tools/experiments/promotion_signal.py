@@ -73,12 +73,12 @@
  the probe alone.
 
  EVERYTHING THE RECOMMENDATION RESTS ON IS SCOPED TO WHAT THE GATE CAN SEE.
- GreyLearningRuntime refuses a refit below `_REFIT_MIN_SAMPLES` rows before
- `evaluate` is ever called, so a shorter record never produces a verdict at all
- and nothing derived from one belongs in a bound. Every count, correlation,
- threshold and confusion matrix below is over records at or above that floor;
- the shorter ones are still fitted and still printed, labelled out of scope, and
- they are informative about the fitter without being evidence about the gate.
+ The persistent trigger requires `TriggerConfig().min_samples` scored effective
+ rows before a fit may be submitted. These are nominal 20-second corpus rows,
+ not raw 5-second source samples. Every count, correlation, threshold and
+ confusion matrix below is over records whose successful segmented fit reports
+ at least that many effective rows; shorter records remain printed as fitter
+ diagnostics but cannot contribute evidence about the live gate.
  Records that are byte-identical to another (profiles that share their opening
  segments truncate to the same data) are collapsed to one, with the collapses
  listed, so no count is inflated by the same record appearing twice.
@@ -103,10 +103,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 
 from controller import model_promotion as promo  # noqa: E402
 from controller.grill_sim import DT, GrillSim, MAKGrillSim  # noqa: E402
-from controller.model_learning.grey_runtime import (  # noqa: E402
-    _REFIT_MIN_SAMPLES,
-    GreyLearningRuntime,
-)
+from controller.model_learning.grey_runtime import GreyLearningRuntime  # noqa: E402
 from controller.mpc import Controller  # noqa: E402
 from controller.mpc_config import DEFAULT_MPC_CONFIG  # noqa: E402
 from controller.mpc_model import (  # noqa: E402
@@ -117,6 +114,7 @@ from controller.runtime.model_fitting import (  # noqa: E402
     FIT_VALUE_BOUNDS,
     FITTED_PARAMETERS,
     GreyFitSuccess,
+    TriggerConfig,
     fit_segmented_grey,
 )
 from controller.update_mpc import trace_fit_job  # noqa: E402
@@ -132,16 +130,18 @@ LOG_STRIDE = round(LOG_PERIOD_S / DT)
 MODEL_KEYS = GreyLearningRuntime.MODEL_PARAM_KEYS
 SHIPPED = {k: float(DEFAULT_MPC_CONFIG[k]) for k in MODEL_KEYS}
 _FREE = FITTED_PARAMETERS
+_EFFECTIVE_ROW_GATE = TriggerConfig().min_samples
+_EFFECTIVE_ROW_PERIOD_S = 20.0
+_NOMINAL_GATE_DURATION_S = _EFFECTIVE_ROW_GATE * _EFFECTIVE_ROW_PERIOD_S
 
 #: Where a record is split for the held-out measurement. Two thirds fitted, one
 #: third scored: enough record left to fit from, and a third of a cook is long
 #: against the ~110 s dead time the suffix has to exercise.
 SPLIT_FRAC = 2.0 / 3.0
 
-#: Truncation lengths in seconds. 600 s is where a log at the shipped cadence
-#: first reaches GreyLearningRuntime's `_REFIT_MIN_SAMPLES`, so the two shorter
-#: ones are below the floor the runtime already enforces. They are marked rather
-#: than dropped: what they show is how much of the inversion that floor covers.
+#: Truncation lengths in seconds. The persistent trigger requires 120 nominal
+#: 20-second effective rows, or 2400 seconds before any additional warm-up
+#: exclusion. Shorter records remain visible as out-of-scope fitter diagnostics.
 LENGTHS_S = (300, 450, 600, 900, 1200, 1800, 2400, 3600)
 
 RECORD_S = 3600
@@ -343,7 +343,7 @@ def shipped_fit(t, y, Q):
     )
     outcome = fit_segmented_grey(job)
     if not isinstance(outcome, GreyFitSuccess):
-        return dict(SHIPPED, converged=False, nfev=0)
+        return dict(SHIPPED, converged=False, nfev=0, effective_rows=0)
     fitted = {
         key: (
             outcome.config.delay_states
@@ -352,7 +352,11 @@ def shipped_fit(t, y, Q):
         )
         for key in MODEL_KEYS
     }
-    fitted.update(converged=True, nfev=outcome.nfev)
+    fitted.update(
+        converged=True,
+        nfev=outcome.nfev,
+        effective_rows=outcome.sample_count,
+    )
     return fitted
 
 
@@ -481,6 +485,7 @@ def measure(rec, incumbents):
     }
 
     fitted = shipped_fit(t, y, Q)
+    out["effective_rows"] = int(fitted["effective_rows"])
     out["converged"] = bool(fitted["converged"])
     out["nfev"] = int(fitted["nfev"])
     out["fit"] = {k: float(fitted[k]) for k in MODEL_KEYS}
@@ -614,14 +619,13 @@ def deduplicate(cuts):
 
 
 def in_scope(row):
-    """Whether the live gate could ever reach a verdict about this record.
+    """Whether the persistent effective-row gate can reach this record.
 
-    GreyLearningRuntime refuses the refit below `_REFIT_MIN_SAMPLES` rows,
-    BEFORE `evaluate` is called, so a shorter record produces no verdict to be right or
-    wrong about. Bounds, correlations and confusion matrices drawn from one
-    would describe a decision path that does not exist.
+    A successful segmented fit reports the scored effective-row count after
+    resampling and exclusions. Records below the live trigger's minimum cannot
+    reach candidate evaluation; raw source-row count remains diagnostic only.
     """
-    return int(row["n"]) >= _REFIT_MIN_SAMPLES
+    return int(row.get("effective_rows") or 0) >= _EFFECTIVE_ROW_GATE
 
 
 def _job(args):
@@ -670,14 +674,17 @@ def gate_verdict(row, incumbent, cand_rmse, inc_rmse):
     thing varied is which pair of numbers is handed in as the two RMSEs. The
     candidate model is always the FULL-record fit even when a held-out signal is
     used, because that is the model a gate would adopt -- the prefix fit exists
-    only to produce a number about a record, not to be installed. Both of
-    mpc.py's own vetoes sit in front of evaluate on the real path -- the sample
-    count at :634 and the convergence flag at :670 -- so both are applied here,
-    and a record the controller would never have fitted cannot be accepted by
+    only to produce a number about a record, not to be installed.
+    The persistent trigger's effective-row count and the convergence veto both
+    sit in front of candidate evaluation, so both are applied here. A record
+    the runtime would never submit or successfully fit cannot be accepted by
     any rule measured below.
     """
     if not in_scope(row):
-        return False, f"only {row['n']} samples; need {_REFIT_MIN_SAMPLES}"
+        return False, (
+            f"only {row.get('effective_rows', 0)} effective rows; "
+            f"need {_EFFECTIVE_ROW_GATE}"
+        )
     if not row["converged"]:
         return False, "solve did not converge"
     if not (math.isfinite(cand_rmse) and math.isfinite(inc_rmse)):
@@ -721,8 +728,9 @@ def main():
         f"sigma={SIGMA:g} n_delay={N_DELAY} free={list(_FREE)}"
     )
     say(
-        f"log cadence    : {LOG_PERIOD_S:g}s;  refit floor {_REFIT_MIN_SAMPLES} samples "
-        f"(= {_REFIT_MIN_SAMPLES * LOG_PERIOD_S:.0f}s at that cadence)"
+        f"source cadence : {LOG_PERIOD_S:g}s; effective-row gate {_EFFECTIVE_ROW_GATE} "
+        f"x {_EFFECTIVE_ROW_PERIOD_S:.0f}s (= {_NOMINAL_GATE_DURATION_S:.0f}s nominal, "
+        "before additional exclusions)"
     )
     say(f"held-out split : {SPLIT_FRAC:.4f} of the record")
     say("shipped incumb.: " + " ".join(f"{k}={SHIPPED[k]:g}" for k in MODEL_KEYS))
@@ -802,18 +810,19 @@ def main():
 
     all_rows = rows
     out_of_scope = [r for r in all_rows if not in_scope(r)]
-    #: EVERY population below is in-scope only. See `in_scope`: the controller
-    #: refuses a shorter record before evaluate() is reached, so one cannot bind
-    #: a threshold, appear in a confusion matrix, or move a correlation the
-    #: recommendation rests on.
+    #: EVERY population below is in-scope only. See `in_scope`: the persistent
+    #: trigger cannot submit a below-gate corpus for candidate evaluation, so
+    #: such a record cannot bind a threshold, enter a confusion matrix, or move
+    #: a correlation the recommendation rests on.
     rows = [r for r in all_rows if in_scope(r)]
     sim_rows = [r for r in rows if r["plant"] is not None]
     real_rows = [r for r in rows if r["profile"] == "real_mak_cook"]
     real_all = [r for r in all_rows if r["profile"] == "real_mak_cook"]
     flat_all = [r for r in all_rows if str(r["profile"]).startswith("flat_synth")]
     say(
-        f"    {len(rows)} of {len(all_rows)} records are at or above the {_REFIT_MIN_SAMPLES}-sample refit floor "
-        f"and carry every number below; the other {len(out_of_scope)} are reported separately as out of scope."
+        f"    {len(rows)} of {len(all_rows)} records report at least "
+        f"{_EFFECTIVE_ROW_GATE} effective rows and carry every number below; "
+        f"the other {len(out_of_scope)} are reported separately as out of scope."
     )
     incumbents = {"shipped": lambda r: SHIPPED, "calibrated": lambda r: calibrated[r["plant"]]}
     inc_truth_of = {"shipped": inc_truth, "calibrated": cal_truth}
@@ -847,11 +856,14 @@ def main():
     say("profiles; d_err/c_err = model minus plant dead time and coast on cq_probe, so a NEGATIVE")
     say("c_err is a model that believes the grill stops sooner than it does. s_min = C RMS per e-fold")
     say("of the worst-determined direction of (log K_Q, log C_c, log theta).")
-    say(f"'sc' marks scope: 'y' = at or above the {_REFIT_MIN_SAMPLES}-sample refit floor and used in every")
-    say("population below; '-' = the controller refuses it before evaluate() is reached, so it is shown")
+    say(
+        f"'sc' marks scope: 'y' = at least {_EFFECTIVE_ROW_GATE} scored "
+        "20-second effective rows and used in every"
+    )
+    say("population below; '-' = the persistent trigger cannot reach candidate evaluation, so it is shown")
     say("for what it says about the FITTER and enters no bound, matrix or correlation.")
     hdr = (
-        f"{'plant':8s} {'profile':15s} {'len_s':>6s} {'n':>4s} {'sc':>3s} {'cv':>3s} "
+        f"{'plant':8s} {'profile':15s} {'len_s':>6s} {'raw_n':>5s} {'eff_n':>5s} {'sc':>3s} {'cv':>3s} "
         f"{'insamp_c':>8s} {'insamp_i':>8s} {'ho_cold_c':>9s} {'ho_cold_i':>9s} "
         f"{'ho_warm_c':>9s} {'ho_warm_i':>9s} {'truth_c':>8s} {'truth_pr':>8s} "
         f"{'d_err':>6s} {'c_err':>7s} {'s_min':>9s} {'cond':>9s} {'L/tau':>6s} {'q_std':>6s} {'Tspan':>6s}"
@@ -860,7 +872,8 @@ def main():
     say("-" * len(hdr))
     for r in sorted(all_rows, key=lambda r: (str(r["plant"]), r["profile"], -r["length_s"])):
         say(
-            f"{r['plant']!s:8s} {r['profile']:15s} {r['length_s']:>6d} {r['n']:>4d} "
+            f"{r['plant']!s:8s} {r['profile']:15s} {r['length_s']:>6d} "
+            f"{r['n']:>5d} {r['effective_rows']:>5d} "
             f"{('y' if in_scope(r) else '-'):>3s} {('y' if r['converged'] else 'N'):>3s} "
             f"{fmt(r['insample']['cand'])} {fmt(r['insample']['shipped'])} "
             f"{fmt(r['cold'].get('cand'), 9)} {fmt(r['cold'].get('shipped'), 9)} "
@@ -910,10 +923,18 @@ def main():
     sim_all = [r for r in all_rows if r["plant"] is not None]
     bands = [
         ("all in-scope lengths", sim_rows, lambda r: True),
-        ("600-1200s (the real cook's band)", sim_rows, lambda r: 600 <= r["length_s"] <= 1200),
-        ("1800-3600s", sim_rows, lambda r: r["length_s"] > 1200),
         (
-            f"OUT OF SCOPE: <{_REFIT_MIN_SAMPLES} samples",
+            f"nominal {_NOMINAL_GATE_DURATION_S:.0f}s gate duration",
+            sim_rows,
+            lambda r: r["length_s"] <= _NOMINAL_GATE_DURATION_S,
+        ),
+        (
+            f"longer than {_NOMINAL_GATE_DURATION_S:.0f}s nominal",
+            sim_rows,
+            lambda r: r["length_s"] > _NOMINAL_GATE_DURATION_S,
+        ),
+        (
+            f"OUT OF SCOPE: <{_EFFECTIVE_ROW_GATE} effective rows",
             sim_all,
             lambda r: not in_scope(r),
         ),
@@ -921,8 +942,8 @@ def main():
     say("The last three columns are not fit-quality signals at all -- they are the informativeness")
     say("statistics, correlated against the same truth error. A negative s_min correlation is the")
     say("right sign: more information in the record, less error in the model it yields.")
-    say("The final row is the sub-floor population the controller never fits. It is printed because it")
-    say("says something about the fitter, and it is excluded from every other row and every section.")
+    say("The final row is the below-gate population the runtime never submits for candidate evaluation.")
+    say("It remains fitter evidence only and is excluded from every other row and every section.")
     say()
     say(
         f"{'band':40s} {'n':>4s} {'in-sample':>10s} {'ho_cold':>10s} {'ho_warm':>10s} | "
@@ -945,17 +966,16 @@ def main():
 
     say()
     say("The inversion laid out per profile: in-sample RMSE / truth error against record length.")
-    say("An inversion is in-sample falling while truth rises. The 300s and 450s columns are marked")
-    say("[out of scope] -- they are below the refit floor and are shown only so the shape of the")
-    say("inversion is visible across the whole range; nothing is derived from them. Blank cells at the")
-    say("in-scope lengths are records collapsed as duplicates of another profile's, listed above.")
+    say("An inversion is in-sample falling while truth rises. Columns below the nominal 2400-second")
+    say("effective-row duration are marked [out of scope] and shown only so the shape remains visible;")
+    say("the actual 'sc' column also accounts for additional resampling and warm-up exclusions.")
     for plant in ("mak", "generic"):
         say()
         say(f"  === {plant} ===  (each cell insample/truth, C)")
         say(
             f"  {'profile':15s} "
             + " ".join(
-                f"{str(L) + ('s*' if L < _REFIT_MIN_SAMPLES * LOG_PERIOD_S else 's'):>15s}" for L in sorted(LENGTHS_S)
+                f"{str(L) + ('s*' if L < _NOMINAL_GATE_DURATION_S else 's'):>15s}" for L in sorted(LENGTHS_S)
             )
         )
         for profile in profiles():
@@ -965,7 +985,7 @@ def main():
                 cells.append(f"{m[0]['insample']['cand']:6.2f}/{m[0]['truth_cand']:8.2f}" if m else "--")
             say(f"  {profile:15s} " + " ".join(f"{c:>15s}" for c in cells))
     say()
-    say("  * out of scope (below the refit floor)")
+    say("  * out of scope by nominal duration; actual scope uses the reported effective-row count")
 
     # ------------------------------------------------- confusion matrices
     say()
@@ -976,7 +996,10 @@ def main():
     say("better than the incumbent does, truth_rmse(candidate) < truth_rmse(incumbent). No threshold")
     say("and no constant enters that label. Everything below is model_promotion.evaluate itself,")
     say("with only the pair of RMSEs handed to it varied.")
-    say(f"Population: in-scope records only (n >= {_REFIT_MIN_SAMPLES} samples), duplicates collapsed.")
+    say(
+        f"Population: in-scope records only (effective_rows >= {_EFFECTIVE_ROW_GATE}), "
+        "duplicates collapsed."
+    )
     say()
     say(
         f"{'incumbent':11s} {'signal':20s} {'n':>4s} {'TP':>4s} {'FP':>4s} {'TN':>4s} {'FN':>4s} {'wrong':>7s} {'worst FP c_err':>15s} {'worst FP truth':>15s}"
@@ -1025,7 +1048,10 @@ def main():
     say("transient-free operating point by construction. INFORM (behavioural, constant-free): the")
     say("fit beats the shipped incumbent's truth error and does not worsen its coast reading, i.e.")
     say("a record the gate ought to let through. 'other' records are shown but do not draw the line.")
-    say(f"Population: in-scope records only (n >= {_REFIT_MIN_SAMPLES} samples), duplicates collapsed.")
+    say(
+        f"Population: in-scope records only (effective_rows >= {_EFFECTIVE_ROW_GATE}), "
+        "duplicates collapsed."
+    )
     say("Read the s_min row carefully: the two classes OVERLAP, so no threshold on it separates them")
     say("outright. That is the direct answer to 'give a statistic that puts the flat cook on one side")
     say("and every promotable cook on the other' -- none does. What SECTION 9's floor buys is measured")
@@ -1084,14 +1110,17 @@ def main():
     say("cook, so scoring a fit of it against that plant would be the identification talking.")
     say()
     say(
-        f"{'len_s':>6s} {'n':>4s} {'cv':>3s} {'insamp_c':>9s} {'insamp_i':>9s} {'ho_cold_c':>9s} {'ho_cold_i':>9s} "
-        f"{'ho_warm_c':>9s} {'ho_warm_i':>9s} {'s_min':>10s} {'cond':>9s} {'L/tau':>6s} {'C_c':>9s} {'K_Q':>8s} {'theta':>7s}"
+        f"{'len_s':>6s} {'raw_n':>5s} {'eff_n':>5s} {'sc':>3s} "
+        f"{'insamp_c':>9s} {'insamp_i':>9s} {'ho_cold_c':>9s} {'ho_cold_i':>9s} "
+        f"{'ho_warm_c':>9s} {'ho_warm_i':>9s} {'s_min':>10s} {'cond':>9s} "
+        f"{'L/tau':>6s} {'C_c':>9s} {'K_Q':>8s} {'theta':>7s}"
     )
     say("-" * 128)
     for r in sorted(real_all, key=lambda r: -r["length_s"]):
         f_ = r["fit"]
         say(
-            f"{r['length_s']:>6d} {r['n']:>4d} {('y' if in_scope(r) else '-'):>3s} "
+            f"{r['length_s']:>6d} {r['n']:>5d} {r['effective_rows']:>5d} "
+            f"{('y' if in_scope(r) else '-'):>3s} "
             f"{fmt(r['insample']['cand'], 9)} {fmt(r['insample']['shipped'], 9)} "
             f"{fmt(r['cold'].get('cand'), 9)} {fmt(r['cold'].get('shipped'), 9)} "
             f"{fmt(r['warm'].get('cand'), 9)} {fmt(r['warm'].get('shipped'), 9)} "
@@ -1099,8 +1128,8 @@ def main():
             f"{fmt(f_['C_c'], 9, 1)} {fmt(f_['K_Q'], 8, 3)} {fmt(f_['theta'], 7, 1)}"
         )
     say()
-    say("what the gate says about the full cook, today and with each signal swapped in:")
-    full = max(real_rows, key=lambda r: r["length_s"])
+    say("what the effective-row gate says about the full recorded cook:")
+    full = max(real_all, key=lambda r: r["length_s"])
     for sig_label, sig_key in SIGNALS:
         cand, inc = full[sig_key].get("cand", float("nan")), full[sig_key].get("shipped", float("nan"))
         acc, reason = gate_verdict(full, SHIPPED, cand, inc)
@@ -1119,8 +1148,8 @@ def main():
     say("steady_hold is the plant's own version: warmed to steady state at 50% duty, then logged, so")
     say("it carries a truth error the synthetic one cannot.")
     say()
-    say("The 'gate today' column already carries mpc.py's sample-count veto, so an out-of-scope row")
-    say("reads 'refuse' for that reason alone -- which is exactly what the controller would do.")
+    say("The 'gate today' column carries the persistent effective-row veto, so an out-of-scope row")
+    say("reads 'refuse' for that reason alone -- exactly as the runtime does before evaluation.")
     say(
         f"{'plant':8s} {'profile':15s} {'len_s':>6s} {'sc':>3s} {'insamp':>8s} {'s_min':>11s} {'cond':>10s} {'theta':>8s} "
         f"{'C_c':>9s} {'truth':>8s} {'c_err':>7s} {'gate today':>11s}"
@@ -1160,7 +1189,7 @@ def main():
         say(
             "  real MAK cook    : "
             + ", ".join(
-                f"{stat_of(r, st):.5g}@{r['length_s']}s" for r in sorted(real_rows, key=lambda r: r["length_s"])
+                f"{stat_of(r, st):.5g}@{r['length_s']}s" for r in sorted(real_all, key=lambda r: r["length_s"])
             )
         )
     say()
@@ -1340,8 +1369,8 @@ def main():
                 )
         say("'best threshold' minimises wrong decisions, then DANGER. 'zero-DANGER thr' is the loosest")
         say("threshold at which no accepted model reads a shorter coast than the one it replaced, and")
-        say("'wrong there' is what that costs in total wrong decisions. 'real cook' is the full 1240 s")
-        say("MAK cook's value of the statistic and whether it clears the zero-DANGER threshold.")
+        say("'wrong there' is what that costs in total wrong decisions. 'real cook' is the full")
+        say("record's diagnostic statistic; the effective-row gate may still keep it out of scope.")
 
     say()
     say("Where the real MAK cook sits on every statistic, at each truncation:")
@@ -1415,7 +1444,10 @@ def main():
                 f"{dg:>7d} {dgen:>6d} {wc:>+12.2f} {wt:>+15.2f}"
             )
     say()
-    say("And what each rule would do with the real MAK cook (full 1240 s, shipped incumbent):")
+    say(
+        f"And what each rule would do with the full real MAK cook "
+        f"({full['length_s']}s, effective_rows={full['effective_rows']}, shipped incumbent):"
+    )
     say(f"  s_min={full['s_min']:.4g} (needs >= {T_S:.4g})")
     say(f"  split_disagree={full['split_disagree']:.4g} C between its own two halves' fits over the fixed probe")
     for label, sig_key, pred in RULES:
@@ -1428,8 +1460,15 @@ def main():
     say("=" * 104)
     say("SECTION 9 -- the operating point, derived from a two-sided interval")
     say("=" * 104)
-    say("The floor is bracketed from below and from above, and both ends are records the live gate")
-    say("can actually reach (n >= _REFIT_MIN_SAMPLES). Nothing here rests on a sub-floor record.")
+    say("The floor is bracketed from below and from above, using only records the persistent trigger")
+    say(f"can reach (effective_rows >= {_EFFECTIVE_ROW_GATE}). Nothing rests on a below-gate record.")
+    if not real_rows:
+        say(
+            "No real-cook truncation reaches the persistent effective-row gate; "
+            "a real-cook upper bound and two-sided recommended floor cannot be derived."
+        )
+        say(f"total elapsed {time.time() - started:.0f}s")
+        return
     say()
     b_uninform_row = max(
         (r for r in rows if klass(r) == "UNINFORM" and math.isfinite(r["s_min"])), key=lambda r: r["s_min"]
@@ -1440,7 +1479,13 @@ def main():
     b_safe = {}
     for inc_name in incumbents:
         for sig_label, sig_key in SIGNALS:
-            vals = sorted({r["s_min"] for r in population(inc_name) if math.isfinite(r["s_min"])})
+            vals = sorted(
+                {
+                    r["s_min"]
+                    for r in population(inc_name)
+                    if math.isfinite(r["s_min"])
+                }
+            )
             hit = None
             for thr in vals + [math.inf]:
 
@@ -1454,21 +1499,23 @@ def main():
     say("LOWER bound -- the floor must exclude every record that determines nothing:")
     say(
         f"  worst uninformative in-scope record: s_min = {b_uninform:.6g}   "
-        f"({b_uninform_row['plant']}/{b_uninform_row['profile']}/{b_uninform_row['length_s']}s, n={b_uninform_row['n']})"
+        f"({b_uninform_row['plant']}/{b_uninform_row['profile']}/{b_uninform_row['length_s']}s, "
+        f"raw_n={b_uninform_row['n']}, effective_rows={b_uninform_row['effective_rows']})"
     )
     say()
     say("UPPER bound -- the floor must keep the only real record there is, at the shortest length the")
-    say("controller will fit it at, or the learning feature never promotes anything on a real grill:")
+    say("persistent trigger can fit it at, or learning never promotes anything on a real grill:")
     say(
         f"  weakest in-scope real-cook truncation: s_min = {b_realcook:.6g}   "
-        f"({b_realcook_row['length_s']}s, n={b_realcook_row['n']} -- which is _REFIT_MIN_SAMPLES itself)"
+        f"({b_realcook_row['length_s']}s, raw_n={b_realcook_row['n']}, "
+        f"effective_rows={b_realcook_row['effective_rows']})"
     )
     say()
     say("NOT a bound, and this is the correction to the first version of this experiment -- the")
     say("zero-DANGER thresholds. Scoped to what the gate can reach, they no longer bind: every")
     say("in-scope record that would shorten the coast has s_min at or near zero, so any positive")
-    say("floor clears them. The 0.491118 the unscoped run reported came from 450 s records the")
-    say("controller refuses at mpc.py:634 before evaluate() is ever called.")
+    say("floor clears them. The 0.491118 the unscoped run reported came from 450 s records below")
+    say("the persistent trigger's effective-row gate, before candidate evaluation.")
     for (inc_name, sig_key), v in b_safe.items():
         say(f"  zero DANGER, incumbent={inc_name:10s} signal={sig_key:9s}: s_min >= {v:.6g}")
     say()

@@ -143,7 +143,7 @@ def _canonical_json(value: object) -> str:
 
 
 def _frame_payload(frame: LearningTrajectoryFrame) -> dict[str, object]:
-    return {
+    payload: dict[str, object] = {
         "sequence": frame.sequence,
         "monotonic_start_ms": frame.monotonic_start_ms,
         "monotonic_end_ms": frame.monotonic_end_ms,
@@ -176,13 +176,19 @@ def _frame_payload(frame: LearningTrajectoryFrame) -> dict[str, object]:
         "continuous": frame.continuous,
         "partial": frame.partial,
         "boundary_reason": (
-            frame.boundary_reason.value if frame.boundary_reason is not None else None
+            frame.boundary_reason.value
+            if frame.boundary_reason is not None
+            else None
         ),
     }
+    if frame.calibration_origin:
+        payload["calibration_origin"] = True
+    return payload
 
 
 def _frame_from_json(canonical_json: str) -> LearningTrajectoryFrame:
     payload = json.loads(canonical_json)
+    payload.setdefault("calibration_origin", False)
     payload["auger_delivery_certainty"] = FrameDeliveryCertainty(
         payload["auger_delivery_certainty"]
     )
@@ -1916,6 +1922,36 @@ class LearningTrajectoryRepository:
             if row is None:
                 raise RuntimeError("fit request was not stored")
             return self._fit_run(row)
+
+    def mark_fit_stale(self, request_id: str) -> FitRun:
+        """Terminalize a queued/running fit whose live lineage no longer matches."""
+        with self._write() as connection:
+            now_ms = self._next_fit_timestamp(connection)
+            row = connection.execute(
+                "SELECT * FROM learning_fit_run WHERE request_id=?",
+                (request_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(request_id)
+            if row["status"] == "stale":
+                return self._fit_run(row)
+            if row["status"] not in ("queued", "running"):
+                raise LearningTrajectoryConflictError(
+                    f"fit stale completion conflict from {row['status']}: {request_id}"
+                )
+            connection.execute(
+                "UPDATE learning_fit_run SET status='stale',candidate_digest=NULL,"
+                "result_error=NULL,completed_ms=? WHERE request_id=?",
+                (now_ms, request_id),
+            )
+            self._prune_fit_manifests(connection)
+            completed = connection.execute(
+                "SELECT * FROM learning_fit_run WHERE request_id=?",
+                (request_id,),
+            ).fetchone()
+            if completed is None:
+                raise RuntimeError("stale fit completion disappeared")
+            return self._fit_run(completed)
 
     def complete_fit(
         self,

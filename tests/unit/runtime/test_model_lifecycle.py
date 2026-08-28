@@ -8,7 +8,7 @@ from typing import get_type_hints
 
 from common.model_evidence import ModelEvidenceRecord
 from common.persistence.model_evidence import ModelActivationState
-from controller.runtime.model_fitting import TeardownRefitOutcome
+from controller.model_learning.contracts import CandidateOrigin
 from controller.runtime.model_lifecycle import ModelLifecycleRunner
 from controller.runtime.model_persistence import DurableActivationReceipt
 
@@ -30,7 +30,7 @@ def test_model_lifecycle_runner_publishes_exact_fixed_contract() -> None:
             DurableActivationReceipt | None,
         ),
         "stop_for_refit": ({}, bool | None),
-        "finalize_cook_refit": ({"outcome": TeardownRefitOutcome}, bool),
+        "schedule_corpus_fit": ({"origin": CandidateOrigin}, bool),
         "finish_teardown": ({}, type(None)),
     }
 

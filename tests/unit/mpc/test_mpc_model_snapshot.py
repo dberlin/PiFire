@@ -19,7 +19,6 @@ from controller.mpc import Controller
 from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.mpc_snapshot import GreySnapshotInvalid, migrate_grey_learning_snapshot
 from controller.runtime.context import EVENT_LOG_NAME
-from controller.runtime.model_fitting import TeardownRefitOutcome
 from tests.unit.runtime._persistence_helpers import _pair_phase_state
 
 CURRENT_SCHEMA = 4
@@ -139,7 +138,6 @@ def test_revision_advances_on_adoption_and_restored_revision_is_carried_forward(
 
     assert restored.restore_model(snapshot) is True
     _adopt(restored, rmse=1.2, samples=500, band_c=(90.0, 210.0), nfev=None)
-    assert restored.finalize_cook_refit(TeardownRefitOutcome.ACCEPTED_NEXT_COOK) is True
     assert restored.get_model_snapshot()["revision"] == 43
 
 
@@ -232,7 +230,7 @@ def test_restore_round_trips_complete_validated_v4_checkpoint_state() -> None:
     snapshot["policy"] = "operator-reviewed"
     snapshot["cook_refit"] = {
         "status": "succeeded",
-        "latest": TeardownRefitOutcome.READY_FOR_REVIEW.value,
+        "latest": "ready-for-review",
     }
     snapshot["identities"]["candidate_digest"] = candidate_descriptor.model_digest
     snapshot["identities"]["candidate_generation"] = candidate_descriptor.candidate_generation
@@ -304,8 +302,7 @@ def test_restore_rotates_learning_to_the_restored_pair_generation():
 
     try:
         assert restored.restore_model(snapshot) is True
-        assert restored._grey_learning_runtime._learning_role_generation == 7
-        assert restored._grey_learning_runtime._teardown_history.role_generation == 7
+        assert restored._grey_learning_runtime.learning_role_generation == 7
     finally:
         restored.close()
         source.close()
@@ -367,7 +364,7 @@ def _restarted_store(blobs):
     ),
     ids=("migrated-v4-carrying-no-restorable-pair", "superseded-v3-record"),
 )
-def test_a_refused_checkpoint_still_saves_the_refit_it_falls_back_to(unrestorable):
+def test_a_refused_checkpoint_still_saves_the_adoption_it_falls_back_to(unrestorable):
     blobs = {}
     assert _restarted_store(blobs).save("mpc", unrestorable) is True
 
@@ -377,7 +374,6 @@ def test_a_refused_checkpoint_still_saves_the_refit_it_falls_back_to(unrestorabl
         assert controller.restore_model(restarted.load("mpc")) is False
 
         _adopt(controller)
-        assert controller.finalize_cook_refit(TeardownRefitOutcome.ACCEPTED_NEXT_COOK) is True
         checkpoint = controller.get_model_snapshot()
 
         assert checkpoint["revision"] == 10

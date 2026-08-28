@@ -16,7 +16,6 @@ import os
 import queue
 import threading
 import time
-from collections import deque
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
@@ -281,8 +280,6 @@ class GreyFitJob:
             raise TypeError("config must be a GreyBoxMPCConfig")
         if len(self.corpus.slices) != len(segments):
             raise ValueError("fit corpus slices must match segments")
-        if self.request.window.configuration_digest != self.corpus.fit_partition_digest:
-            raise ValueError("request and corpus fit partition must match")
 
         segment_ids: set[str] = set()
         total_pre_roll = 0
@@ -1393,244 +1390,6 @@ class HistoryDecision:
     reasons: tuple[str, ...]
 
 
-class TeardownRefitOutcome(StrEnum):
-    DISABLED = "disabled"
-    INSUFFICIENT = "insufficient"
-    REJECTED = "rejected"
-    FAILED = "failed"
-    READY_FOR_REVIEW = "ready-for-review"
-    ACCEPTED_NEXT_COOK = "accepted-next-cook"
-    CHECKPOINT_FAILURE = "checkpoint-failure"
-
-
-@dataclass(frozen=True, slots=True)
-class TeardownRefitResult:
-    outcome: TeardownRefitOutcome
-    reason: str
-    origin: Any
-    policy: Any
-    candidate_digest: str | None = None
-
-    def __post_init__(self) -> None:
-        from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
-
-        if not isinstance(self.outcome, TeardownRefitOutcome):
-            object.__setattr__(self, "outcome", TeardownRefitOutcome(self.outcome))
-        if not isinstance(self.reason, str) or not self.reason.strip():
-            raise ValueError("reason must be non-blank")
-        if not isinstance(self.origin, CandidateOrigin):
-            object.__setattr__(self, "origin", CandidateOrigin(self.origin))
-        if not isinstance(self.policy, ActivationPolicy):
-            object.__setattr__(self, "policy", ActivationPolicy(self.policy))
-        if self.candidate_digest is not None:
-            value = self.candidate_digest
-            if (
-                not isinstance(value, str)
-                or len(value) != 64
-                or any(character not in "0123456789abcdef" for character in value)
-            ):
-                raise ValueError("candidate_digest must be a lowercase SHA-256 digest")
-
-    @property
-    def accepted(self) -> bool:
-        return self.outcome in {
-            TeardownRefitOutcome.READY_FOR_REVIEW,
-            TeardownRefitOutcome.ACCEPTED_NEXT_COOK,
-        }
-
-    @classmethod
-    def insufficient(cls, reason: str) -> TeardownRefitResult:
-        from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
-
-        return cls(
-            TeardownRefitOutcome.INSUFFICIENT,
-            reason,
-            CandidateOrigin.COOK_REFIT,
-            ActivationPolicy.COOK_REFIT,
-        )
-
-    @classmethod
-    def rejected(cls, reason: str, *, origin: Any) -> TeardownRefitResult:
-        from controller.model_learning.contracts import (
-            ActivationPolicy,
-            CandidateOrigin,
-        )
-
-        resolved = origin if isinstance(origin, CandidateOrigin) else CandidateOrigin(origin)
-        policy = (
-            ActivationPolicy.OPERATOR_REVIEWED
-            if resolved is CandidateOrigin.OPERATOR_CALIBRATION
-            else ActivationPolicy.COOK_REFIT
-        )
-        return cls(TeardownRefitOutcome.REJECTED, reason, resolved, policy)
-
-    @classmethod
-    def failed(cls, reason: str, *, origin: Any) -> TeardownRefitResult:
-        from controller.model_learning.contracts import (
-            ActivationPolicy,
-            CandidateOrigin,
-        )
-
-        resolved = origin if isinstance(origin, CandidateOrigin) else CandidateOrigin(origin)
-        policy = (
-            ActivationPolicy.OPERATOR_REVIEWED
-            if resolved is CandidateOrigin.OPERATOR_CALIBRATION
-            else ActivationPolicy.COOK_REFIT
-        )
-        return cls(TeardownRefitOutcome.FAILED, reason, resolved, policy)
-
-    @classmethod
-    def ready_for_review(cls, reason: str, *, candidate_digest: str) -> TeardownRefitResult:
-        from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
-
-        return cls(
-            TeardownRefitOutcome.READY_FOR_REVIEW,
-            reason,
-            CandidateOrigin.OPERATOR_CALIBRATION,
-            ActivationPolicy.OPERATOR_REVIEWED,
-            candidate_digest,
-        )
-
-    @classmethod
-    def accepted_next_cook(cls, reason: str, *, candidate_digest: str) -> TeardownRefitResult:
-        from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
-
-        return cls(
-            TeardownRefitOutcome.ACCEPTED_NEXT_COOK,
-            reason,
-            CandidateOrigin.COOK_REFIT,
-            ActivationPolicy.COOK_REFIT,
-            candidate_digest,
-        )
-
-
-class TeardownGreyHistory:
-    """Complete bounded contiguous fit evidence, including applied probes."""
-
-    def __init__(self, *, role_generation: int, max_observations: int = MAX_FIT_OBSERVATIONS) -> None:
-        self.role_generation = _nonnegative_int(role_generation, "role_generation")
-        self.max_observations = _positive_int(max_observations, "max_observations")
-        if self.max_observations > MAX_FIT_OBSERVATIONS:
-            raise ValueError(f"max_observations must be bounded to {MAX_FIT_OBSERVATIONS}")
-        self._observations: deque[Any] = deque(maxlen=self.max_observations)
-        self._continuity_broken = False
-
-    @property
-    def observations(self) -> tuple[Any, ...]:
-        return tuple(self._observations)
-
-    @property
-    def origin(self) -> Any:
-        from controller.model_learning.contracts import CandidateOrigin
-
-        return (
-            CandidateOrigin.OPERATOR_CALIBRATION
-            if any(
-                frame.calibration_fit
-                and frame.probe_valid
-                and not math.isclose(frame.probe_q, 0.0, rel_tol=0.0, abs_tol=1e-12)
-                for frame in self._observations
-            )
-            else CandidateOrigin.COOK_REFIT
-        )
-
-    def observe(self, frame: Any) -> HistoryDecision:
-        from controller.model_learning.contracts import FrameObservation
-
-        if not isinstance(frame, FrameObservation):
-            raise TypeError("frame must be a FrameObservation")
-        reason: str | None = None
-        if frame.manual_override or frame.output_source == "manual-override":
-            reason = "manual"
-        elif frame.lid_open:
-            reason = "lid-open"
-        elif frame.safety_inhibited:
-            reason = "safety"
-        elif frame.stale:
-            reason = "stale"
-        elif frame.skipped or frame.reset:
-            reason = "skipped-or-reset"
-        elif not frame.continuous:
-            reason = "discontinuity"
-        elif frame.role_generation != self.role_generation:
-            reason = "stale-generation"
-        elif frame.allocation_join_reason is not None:
-            reason = "unknown-actuation"
-        elif frame.output_source != "controller":
-            reason = "non-controller-output"
-        elif frame.calibration_fit and not frame.probe_valid:
-            reason = "invalid-probe"
-        if reason is not None:
-            self._continuity_broken = True
-            return HistoryDecision(False, (reason,))
-        if self._continuity_broken:
-            self._observations.clear()
-            self._continuity_broken = False
-        elif self._observations:
-            previous = self._observations[-1]
-            adjacent = frame.observation_sequence == previous.observation_sequence + 1 and math.isclose(
-                frame.frame_start_s, previous.frame_end_s, rel_tol=0.0, abs_tol=1e-9
-            )
-            if not adjacent:
-                self._observations.clear()
-        self._observations.append(frame)
-        return HistoryDecision(True, ())
-
-
-class PassiveGreyHistory:
-    """Bounded passive Hold evidence with explicit single-cause rejection."""
-
-    def __init__(self, *, role_generation: int, max_observations: int = MAX_FIT_OBSERVATIONS) -> None:
-        self.role_generation = _nonnegative_int(role_generation, "role_generation")
-        self.max_observations = _positive_int(max_observations, "max_observations")
-        if self.max_observations > MAX_FIT_OBSERVATIONS:
-            raise ValueError(f"max_observations must be bounded to {MAX_FIT_OBSERVATIONS}")
-        self._observations: deque[Any] = deque(maxlen=self.max_observations)
-
-    @property
-    def observations(self) -> tuple[Any, ...]:
-        return tuple(self._observations)
-
-    def observe(self, frame: Any) -> HistoryDecision:
-        from controller.model_learning.contracts import FrameObservation
-
-        if not isinstance(frame, FrameObservation):
-            raise TypeError("frame must be a FrameObservation")
-        reason: str | None = None
-        if frame.manual_override or frame.output_source == "manual-override":
-            reason = "manual"
-        elif frame.lid_open:
-            reason = "lid-open"
-        elif frame.safety_inhibited:
-            reason = "safety"
-        elif frame.stale:
-            reason = "stale"
-        elif frame.skipped or frame.reset:
-            reason = "skipped-or-reset"
-        elif not frame.continuous:
-            reason = "discontinuity"
-        elif frame.role_generation != self.role_generation:
-            reason = "stale-generation"
-        elif frame.allocation_join_reason is not None:
-            reason = "unknown-actuation"
-        elif frame.calibration_fit or frame.calibration_stage is not None or frame.probe_q != 0.0:
-            reason = "calibration-frame"
-        elif frame.output_source != "controller":
-            reason = "non-controller-output"
-        if reason is not None:
-            self._observations.clear()
-            return HistoryDecision(False, (reason,))
-        if self._observations:
-            previous = self._observations[-1]
-            adjacent = frame.observation_sequence == previous.observation_sequence + 1 and math.isclose(
-                frame.frame_start_s, previous.frame_end_s, rel_tol=0.0, abs_tol=1e-9
-            )
-            if not adjacent:
-                self._observations.clear()
-        self._observations.append(frame)
-        return HistoryDecision(True, ())
-
-
 @dataclass(frozen=True, slots=True)
 class TriggerConfig:
     min_samples: int = 120
@@ -1694,6 +1453,65 @@ def fit_trigger(
     if score < resolved.min_identifiability:
         blockers.append("identifiability")
     return TriggerDecision(not blockers, tuple(blockers), input_variance, input_levels)
+
+
+def persistent_corpus_trigger(
+    snapshot: Any,
+    *,
+    config: TriggerConfig | None = None,
+) -> TriggerDecision:
+    """Evaluate passive-fit readiness over durable scored rows by segment."""
+    from common.persistence.learning_trajectory import FitCorpusSnapshot
+
+    resolved = TriggerConfig() if config is None else config
+    if not isinstance(snapshot, FitCorpusSnapshot):
+        raise TypeError("snapshot must be a FitCorpusSnapshot")
+    if not isinstance(resolved, TriggerConfig):
+        raise TypeError("config must be a TriggerConfig")
+    frames = tuple(
+        frame
+        for segment in snapshot.segments
+        for frame in segment.scored_hold_frames
+    )
+    loads = tuple(float(frame.normalized_combustion_load) for frame in frames)
+    if loads:
+        mean = sum(loads) / len(loads)
+        input_variance = sum((value - mean) ** 2 for value in loads) / len(loads)
+        input_levels = len({round(value, 9) for value in loads})
+    else:
+        input_variance = 0.0
+        input_levels = 0
+    if len(frames) < resolved.min_samples:
+        return TriggerDecision(
+            False,
+            ("minimum-samples",),
+            input_variance,
+            input_levels,
+        )
+    blockers: list[str] = []
+    if (
+        input_variance < resolved.min_input_variance
+        or input_levels < resolved.min_input_levels
+    ):
+        blockers.append("insufficient-excitation")
+    temperatures = tuple(float(frame.chamber_temperature_c) for frame in frames)
+    if (
+        not temperatures
+        or max(temperatures) - min(temperatures)
+        < resolved.min_temperature_span_c
+    ):
+        blockers.append("insufficient-coverage")
+    if any(
+        not frame.complete or not frame.continuous or frame.partial
+        for frame in frames
+    ):
+        blockers.append("discontinuity")
+    return TriggerDecision(
+        not blockers,
+        tuple(blockers),
+        input_variance,
+        input_levels,
+    )
 
 
 def stale_result_reasons(
@@ -2121,100 +1939,77 @@ class LiveLearningIdentity:
         )
 
 
-def volatile_segmented_job(
+def segmented_corpus_fit_job(
+    snapshot: Any,
     request: Any,
-    observations: Sequence[Any],
     config: Any,
 ) -> GreyFitJob:
-    """Translate the temporary contiguous Hold window into one honest segment."""
+    """Materialize one immutable persistent-corpus snapshot for the fit worker."""
+    from common.persistence.learning_trajectory import FitCorpusSnapshot
+    from controller.model_learning.contracts import FitRequest
 
-    from common.learning_trajectory import (
-        FitCorpusIdentity,
-        FitCorpusSlice,
-        canonical_trajectory_digest,
-    )
-    from controller.model_learning.contracts import CandidateOrigin, FrameObservation
+    if not isinstance(snapshot, FitCorpusSnapshot):
+        raise TypeError("snapshot must be a FitCorpusSnapshot")
+    if not isinstance(request, FitRequest):
+        raise TypeError("request must be a FitRequest")
+    if len(snapshot.identity.slices) != len(snapshot.segments):
+        raise ValueError("fit corpus snapshot slices must match segments")
 
-    frames = tuple(observations)
-    if len(frames) < 2 or not all(isinstance(frame, FrameObservation) for frame in frames):
-        raise ValueError("volatile segmented fitting requires an anchor and scored Hold rows")
-    anchor = frames[0]
-    scored = frames[1:]
-    segment_id = f"volatile-{request.request_id}"
-    durations = tuple(
-        later.frame_end_s - earlier.frame_end_s
-        for earlier, later in itertools.pairwise(frames)
-    )
-    calibration = request.origin is CandidateOrigin.OPERATOR_CALIBRATION
-    prefix_payload = {
-        "schema_version": 1,
-        "segment_id": segment_id,
-        "cook_id": request.window.cook_id or request.window.session_id,
-        "fit_partition_digest": request.window.configuration_digest,
-        "observation_sequences": [frame.observation_sequence for frame in scored],
-        "initial_load": anchor.realized_q,
-        "hold_anchor_c": anchor.temp_c,
-        "scored_duration_s": list(durations),
-        "scored_load": [frame.realized_q for frame in scored],
-        "scored_ambient_c": [frame.ambient_c for frame in scored],
-        "scored_temperature_c": [frame.temp_c for frame in scored],
-        "calibration_origin": [
-            bool(calibration or frame.calibration_fit) for frame in scored
-        ],
-    }
-    prefix_digest = canonical_trajectory_digest(prefix_payload)
-    segment = GreyFitSegmentArrays(
-        segment_id=segment_id,
-        cook_id=request.window.cook_id or request.window.session_id,
-        through_ordinal=len(scored) - 1,
-        prefix_digest=prefix_digest,
-        fit_partition_digest=request.window.configuration_digest,
-        observation_sequences=tuple(frame.observation_sequence for frame in scored),
-        initial_load=anchor.realized_q,
-        pre_roll_duration_s=(),
-        pre_roll_load=(),
-        pre_roll_temperature_c=(),
-        hold_anchor_c=anchor.temp_c,
-        scored_duration_s=durations,
-        scored_load=tuple(frame.realized_q for frame in scored),
-        scored_ambient_c=tuple(frame.ambient_c for frame in scored),
-        scored_temperature_c=tuple(frame.temp_c for frame in scored),
-        calibration_origin=tuple(
-            bool(calibration or frame.calibration_fit) for frame in scored
-        ),
-    )
-    corpus_slice = FitCorpusSlice(
-        segment_id=segment.segment_id,
-        through_ordinal=segment.through_ordinal,
-        prefix_digest=segment.prefix_digest,
-        pre_roll_count=0,
-        scored_count=len(segment.scored_load),
-    )
-    corpus_payload = {
-        "schema_version": 1,
-        "corpus_revision": request.window.last_observation_sequence,
-        "fit_partition_digest": request.window.configuration_digest,
-        "slices": [
-            {
-                "segment_id": corpus_slice.segment_id,
-                "through_ordinal": corpus_slice.through_ordinal,
-                "prefix_digest": corpus_slice.prefix_digest,
-                "pre_roll_count": corpus_slice.pre_roll_count,
-                "scored_count": corpus_slice.scored_count,
-            }
-        ],
-    }
-    corpus = FitCorpusIdentity(
-        schema_version=1,
-        corpus_revision=request.window.last_observation_sequence,
-        fit_partition_digest=request.window.configuration_digest,
-        slices=(corpus_slice,),
-        corpus_digest=canonical_trajectory_digest(corpus_payload),
-    )
+    arrays: list[GreyFitSegmentArrays] = []
+    for corpus_slice, segment in zip(
+        snapshot.identity.slices,
+        snapshot.segments,
+        strict=True,
+    ):
+        pre_roll = tuple(segment.pre_roll_frames)
+        scored = tuple(segment.scored_hold_frames)
+        if not scored or segment.hold_entry is None:
+            raise ValueError(
+                f"fit corpus segment {segment.segment_id} has no scored Hold anchor"
+            )
+        oldest = pre_roll[0] if pre_roll else scored[0]
+        arrays.append(
+            GreyFitSegmentArrays(
+                segment_id=segment.segment_id,
+                cook_id=segment.cook_id,
+                through_ordinal=corpus_slice.through_ordinal,
+                prefix_digest=corpus_slice.prefix_digest,
+                fit_partition_digest=snapshot.identity.fit_partition_digest,
+                observation_sequences=tuple(frame.sequence for frame in scored),
+                initial_load=oldest.normalized_combustion_load,
+                pre_roll_duration_s=tuple(
+                    (frame.monotonic_end_ms - frame.monotonic_start_ms) / 1_000.0
+                    for frame in pre_roll
+                ),
+                pre_roll_load=tuple(
+                    frame.normalized_combustion_load for frame in pre_roll
+                ),
+                pre_roll_temperature_c=tuple(
+                    frame.chamber_temperature_c for frame in pre_roll
+                ),
+                hold_anchor_c=segment.hold_entry.chamber_temperature_c,
+                scored_duration_s=tuple(
+                    (frame.monotonic_end_ms - frame.monotonic_start_ms) / 1_000.0
+                    for frame in scored
+                ),
+                scored_load=tuple(
+                    frame.normalized_combustion_load for frame in scored
+                ),
+                scored_ambient_c=tuple(
+                    frame.ambient_temperature_c for frame in scored
+                ),
+                scored_temperature_c=tuple(
+                    frame.chamber_temperature_c for frame in scored
+                ),
+                calibration_origin=tuple(
+                    frame.calibration_origin for frame in scored
+                ),
+            )
+        )
     return GreyFitJob(
         request=request,
-        corpus=corpus,
-        segments=(segment,),
+        corpus=snapshot.identity,
+        segments=tuple(arrays),
         config=config,
     )
 
@@ -2256,7 +2051,6 @@ class GreyLearningOrchestrator:
         trigger_config: TriggerConfig | None = None,
         evaluation_config: Any | None = None,
         worker: Any | None = None,
-        max_observations: int = MAX_FIT_OBSERVATIONS,
     ) -> None:
         from controller.acados.contracts import GreyBoxMPCConfig
         from controller.model_learning.evaluation import EvaluationConfig
@@ -2278,11 +2072,6 @@ class GreyLearningOrchestrator:
         if not isinstance(self.evaluation_config, EvaluationConfig):
             raise TypeError("evaluation_config must be an EvaluationConfig")
         self.worker = GreyFitWorker() if worker is None else worker
-        self.passive_history = PassiveGreyHistory(
-            role_generation=identity.role_generation,
-            max_observations=max_observations,
-        )
-        self._operator_history: deque[Any] = deque(maxlen=max_observations)
         self._pending_request: FitRequest | None = None
         self._prepared: CandidatePreparation | None = None
         self._evaluator: Any | None = None
@@ -2292,6 +2081,7 @@ class GreyLearningOrchestrator:
         self._handoff: CandidateHandoff | None = None
         self._started = False
         self._ownership_transferred = False
+        self._forced_stale_request_id: str | None = None
 
     @property
     def pending_request(self) -> FitRequest | None:
@@ -2338,6 +2128,59 @@ class GreyLearningOrchestrator:
         self._prepared = None
         self._ownership_transferred = False
 
+    def _can_supersede_prepared_candidate(
+        self,
+        expected: CandidatePreparation,
+    ) -> bool:
+        return (
+            self._prepared is expected
+            and expected.accepted
+            and not self._ownership_transferred
+        )
+
+    def _reset_prepared_evaluation(self) -> None:
+        self._evaluator = None
+        self._evaluation_cursor = 0
+        self._consecutive_wins = 0
+        self._last_evaluation = None
+        self._handoff = None
+
+    def submit_superseding_corpus_fit(
+        self,
+        job: GreyFitJob,
+        expected: CandidatePreparation,
+        *,
+        persist: Callable[[], None],
+    ) -> tuple[FitSubmission, bool]:
+        """Reserve the worker before releasing an older prepared candidate."""
+        if not isinstance(job, GreyFitJob):
+            raise TypeError("job must be a GreyFitJob")
+        if not callable(persist):
+            raise TypeError("persist must be callable")
+        if (
+            self._pending_request is not None
+            or self._prepared is not expected
+            or not expected.accepted
+        ):
+            return FitSubmission.BUSY, False
+        ownership_transferred = self._ownership_transferred
+        submission = self.worker.submit(job)
+        if submission is not FitSubmission.ACCEPTED:
+            return submission, False
+        self._pending_request = job.request
+        if ownership_transferred:
+            self._release_prepared()
+            self._reset_prepared_evaluation()
+            return submission, False
+        try:
+            persist()
+        except Exception:
+            self._forced_stale_request_id = job.request.request_id
+            return submission, False
+        self._release_prepared()
+        self._reset_prepared_evaluation()
+        return submission, True
+
     def update_identity(
         self,
         identity: LiveLearningIdentity,
@@ -2365,19 +2208,47 @@ class GreyLearningOrchestrator:
         self.identity = identity
         self.config = replacement_config
         self.incumbent_pair = replacement_pair
-        self.passive_history = PassiveGreyHistory(
-            role_generation=identity.role_generation,
-            max_observations=self.passive_history.max_observations,
-        )
-        self._operator_history.clear()
         self._evaluator = None
         self._evaluation_cursor = 0
         self._consecutive_wins = 0
         self._last_evaluation = None
         self._handoff = None
 
+    def rebind_process(
+        self,
+        identity: LiveLearningIdentity,
+        *,
+        config: Any,
+        incumbent_pair: Any,
+        estimator_factory: Callable[..., Any] | None = None,
+        controller_factory: Callable[..., Any] | None = None,
+        timing_probe: Callable[..., Any] | None = None,
+    ) -> None:
+        """Rebind a new cook while retaining a compatible prepared candidate."""
+        compatible = (
+            identity.configuration_digest == self.identity.configuration_digest
+            and identity.incumbent_digest == self.identity.incumbent_digest
+            and identity.role_generation == self.identity.role_generation
+            and identity.candidate_generation == self.identity.candidate_generation
+        )
+        if not compatible:
+            self.update_identity(
+                identity,
+                config=config,
+                incumbent_pair=incumbent_pair,
+            )
+        self.identity = identity
+        self.config = config
+        self.incumbent_pair = incumbent_pair
+        if estimator_factory is not None:
+            self.estimator_factory = estimator_factory
+        if controller_factory is not None:
+            self.controller_factory = controller_factory
+        if timing_probe is not None:
+            self.timing_probe = timing_probe
+
     @staticmethod
-    def _operator_rejection(frame: Any, role_generation: int) -> str | None:
+    def _frame_rejection(frame: Any, role_generation: int) -> str | None:
         if frame.manual_override or frame.output_source == "manual-override":
             return "manual"
         if frame.lid_open:
@@ -2396,19 +2267,9 @@ class GreyLearningOrchestrator:
             return "unknown-actuation"
         if frame.output_source != "controller":
             return "non-controller-output"
-        if not frame.calibration_fit or frame.calibration_stage is None or not frame.probe_valid:
-            return "not-completed-operator-stage"
+        if frame.calibration_fit and not frame.probe_valid:
+            return "invalid-probe"
         return None
-
-    @staticmethod
-    def _append_contiguous(history: deque[Any], frame: Any) -> None:
-        if history:
-            previous = history[-1]
-            if frame.observation_sequence != previous.observation_sequence + 1 or not math.isclose(
-                frame.frame_start_s, previous.frame_end_s, rel_tol=0.0, abs_tol=1e-9
-            ):
-                history.clear()
-        history.append(frame)
 
     def observe_completed_frame(
         self,
@@ -2416,66 +2277,41 @@ class GreyLearningOrchestrator:
         *,
         identifiability: float,
     ) -> GreyLearningObservation:
-        """Collect one frame, complete causal origins, and submit at most one fit."""
-        from controller.model_learning.contracts import CandidateOrigin, FitRequest, FrameObservation
+        """Complete causal origins without retaining a volatile fit corpus."""
+        from controller.model_learning.contracts import FrameObservation
 
         if not isinstance(frame, FrameObservation):
             raise TypeError("frame must be a FrameObservation")
+        del identifiability
         self.start()
-        completed = () if self._evaluator is None else self._evaluator.observe(frame)
-        operator = frame.calibration_fit or frame.calibration_stage is not None or frame.probe_q != 0.0
-        if operator:
-            reason = self._operator_rejection(frame, self.identity.role_generation)
-            if reason is not None:
-                self._operator_history.clear()
-                decision = HistoryDecision(False, (reason,))
-                observations = ()
-            else:
-                self._append_contiguous(self._operator_history, frame)
-                decision = HistoryDecision(True, ())
-                observations = tuple(self._operator_history)
-            origin = CandidateOrigin.OPERATOR_CALIBRATION
-        else:
-            decision = self.passive_history.observe(frame)
-            observations = self.passive_history.observations
-            origin = CandidateOrigin.PASSIVE_ONLINE
-        trigger = fit_trigger(
-            observations,
-            identifiability=identifiability,
-            config=self.trigger_config,
+        completed = (
+            ()
+            if self._evaluator is None or frame.calibration_fit
+            else self._evaluator.observe(frame)
         )
-        if (
-            not observations
-            or not decision.accepted
-            or self._pending_request is not None
-            or (self._prepared is not None and self._prepared.accepted)
+        reason = self._frame_rejection(frame, self.identity.role_generation)
+        decision = HistoryDecision(reason is None, () if reason is None else (reason,))
+        trigger = TriggerDecision(False, ("persistent-corpus",), 0.0, 0)
+        return GreyLearningObservation(
+            decision,
+            trigger,
+            None,
+            None,
+            tuple(completed),
+        )
+
+    def submit_corpus_fit(self, job: GreyFitJob) -> FitSubmission:
+        """Submit the one repository-materialized job to this owner's worker."""
+        if not isinstance(job, GreyFitJob):
+            raise TypeError("job must be a GreyFitJob")
+        if self._pending_request is not None or (
+            self._prepared is not None and self._prepared.accepted
         ):
-            return GreyLearningObservation(decision, trigger, None, None, tuple(completed))
-        if not trigger.ready:
-            return GreyLearningObservation(decision, trigger, None, None, tuple(completed))
-        first = observations[0].observation_sequence
-        last = observations[-1].observation_sequence
-        request_identity = {
-            "origin": origin.value,
-            "first": first,
-            "last": last,
-            "candidate_generation": self.identity.candidate_generation,
-            "incumbent_digest": self.identity.incumbent_digest,
-        }
-        request_id = hashlib.sha256(
-            json.dumps(request_identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        ).hexdigest()
-        request = FitRequest(
-            request_id=request_id,
-            origin=origin,
-            window=self.identity.window(first, last),
-            candidate_generation=self.identity.candidate_generation,
-        )
-        job = volatile_segmented_job(request, observations, self.config)
+            return FitSubmission.BUSY
         submission = self.worker.submit(job)
         if submission is FitSubmission.ACCEPTED:
-            self._pending_request = request
-        return GreyLearningObservation(decision, trigger, submission, request, tuple(completed))
+            self._pending_request = job.request
+        return submission
 
     def poll_fit_off_path(
         self,
@@ -2494,6 +2330,14 @@ class GreyLearningOrchestrator:
             return None
         request = self._pending_request
         self._pending_request = None
+        forced_stale = (
+            ("candidate-supersession-persistence-failed",)
+            if self._forced_stale_request_id == request.request_id
+            else ()
+        )
+        if forced_stale:
+            self._forced_stale_request_id = None
+            return GreyLearningDelivery(message, forced_stale, None)
         if isinstance(message.outcome, GreyFitError):
             return GreyLearningDelivery(message, (), None, ("fit-error",))
         success = message.outcome
@@ -2505,9 +2349,11 @@ class GreyLearningOrchestrator:
             status=FitStatus.SUCCEEDED,
             candidate_digest=grey_config_digest(success.config),
         )
-        current_window = live_identity.window(
-            request.window.first_observation_sequence,
-            request.window.last_observation_sequence,
+        current_window = replace(
+            request.window,
+            configuration_digest=live_identity.configuration_digest,
+            incumbent_digest=live_identity.incumbent_digest,
+            role_generation=live_identity.role_generation,
         )
         stale = stale_result_reasons(
             result,

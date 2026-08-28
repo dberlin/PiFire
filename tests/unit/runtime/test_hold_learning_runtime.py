@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import FrozenInstanceError, replace
 from typing import cast
 
@@ -50,15 +50,8 @@ from controller.runtime.framed_pulse import (
     PulseControllerState,
 )
 from controller.runtime.logic.pulse import PulseResetReason
-from controller.runtime.model_fitting import (
-    TeardownRefitOutcome,
-    TeardownRefitResult,
-)
 from controller.runtime.model_persistence import DurableActivationReceipt, EvidenceSubmission
-from controller.runtime.modes.hold_learning import (
-    HoldLearningRuntime,
-    HoldRefitResult,
-)
+from controller.runtime.modes.hold_learning import HoldLearningRuntime
 from controller.runtime.runner import (
     ObservationOutcomeDrain,
     ObservationOutcomeEnvelope,
@@ -226,15 +219,18 @@ class _Runner:
     def controller_state(self) -> object:
         return {}
 
-    def refit_from_cook(self) -> object:
-        return None
+    def schedule_corpus_fit(self, origin: CandidateOrigin) -> bool:
+        return self._schedule_corpus_fit_after_barrier(origin, None)
+
+    def _schedule_corpus_fit_after_barrier(self, origin, before_schedule) -> bool:
+        del origin
+        if before_schedule is not None:
+            before_schedule()
+        return False
 
     def get_model_snapshot(self) -> object:
         return None
 
-    def finalize_cook_refit(self, outcome: TeardownRefitOutcome) -> bool:
-        del outcome
-        return False
 
     def finish_teardown(self) -> None:
         return None
@@ -263,13 +259,8 @@ class _LifecycleRunner(_Runner):
         self.activation_events: list[ModelEvidenceRecord] = []
         self.status: object = {}
         self.status_error: BaseException | None = None
-        self.refit_result: object = None
-        self.refit_error: BaseException | None = None
-        self.refit_calls = 0
+        self.fit_requests: list[CandidateOrigin] = []
         self.snapshot: object = {"revision": 1}
-        self.finalize_results: list[bool] = [True]
-        self.finalize_errors: list[BaseException | None] = []
-        self.finalized: list[TeardownRefitOutcome] = []
         self.finish_calls = 0
         self.finish_error: BaseException | None = None
 
@@ -310,26 +301,14 @@ class _LifecycleRunner(_Runner):
             raise self.status_error
         return self.status
 
-    def refit_from_cook(self) -> object:
-        self.refit_calls += 1
-        if self.refit_error is not None:
-            raise self.refit_error
-        return self.refit_result
+    def schedule_corpus_fit(self, origin: CandidateOrigin) -> bool:
+        return self._schedule_corpus_fit_after_barrier(origin, None)
 
-    def finalize_cook_refit(self, outcome: TeardownRefitOutcome) -> bool:
-        self.finalized.append(outcome)
-        if self.finalize_errors:
-            error = self.finalize_errors.pop(0)
-            if error is not None:
-                raise error
-        if outcome is TeardownRefitOutcome.CHECKPOINT_FAILURE:
-            self.snapshot = {
-                "revision": len(self.finalized) + 1,
-                "cook_refit": {"latest": outcome.value},
-            }
-        if self.finalize_results:
-            return self.finalize_results.pop(0)
-        return False
+    def _schedule_corpus_fit_after_barrier(self, origin, before_schedule) -> bool:
+        if before_schedule is not None and not before_schedule():
+            return False
+        self.fit_requests.append(origin)
+        return True
 
     def get_model_snapshot(self) -> object:
         return self.snapshot
@@ -2012,258 +1991,6 @@ def test_submit_online_checkpoint_uses_nonblocking_worker_and_availability(
     assert runtime.evidence_available is accepted
 
 
-def _learning_settings(enabled: bool):
-    return {
-        "controller": {
-            "config": {
-                "pid_sp": {
-                    "enable_identification": enabled,
-                }
-            }
-        }
-    }
-
-
-@pytest.mark.parametrize(
-    ("enabled", "verdict", "expected_outcome", "reason"),
-    (
-        (False, None, TeardownRefitOutcome.DISABLED, None),
-        (True, None, TeardownRefitOutcome.INSUFFICIENT, "no reason recorded"),
-        (
-            True,
-            TeardownRefitResult.rejected(
-                "physical-bounds",
-                origin=CandidateOrigin.COOK_REFIT,
-            ),
-            TeardownRefitOutcome.REJECTED,
-            "physical-bounds",
-        ),
-        (
-            True,
-            TeardownRefitResult.ready_for_review(
-                "operator review",
-                candidate_digest="a" * 64,
-            ),
-            TeardownRefitOutcome.READY_FOR_REVIEW,
-            "operator review",
-        ),
-        (
-            True,
-            TeardownRefitResult.accepted_next_cook(
-                "accepted",
-                candidate_digest="b" * 64,
-            ),
-            TeardownRefitOutcome.ACCEPTED_NEXT_COOK,
-            "accepted",
-        ),
-    ),
-    ids=(
-        "disabled",
-        "insufficient",
-        "rejected",
-        "ready-for-review",
-        "accepted-next-cook",
-    ),
-)
-def test_refit_once_returns_immutable_typed_outcome_and_never_repeats(
-    enabled: bool,
-    verdict: TeardownRefitResult | None,
-    expected_outcome: TeardownRefitOutcome,
-    reason: str | None,
-) -> None:
-    runner = _LifecycleRunner()
-    runner.refit_result = verdict
-    runtime, _runner, _store, _trace_session, _recorder, logger = _lifecycle_runtime(runner=runner)
-
-    first = runtime.refit_once(_learning_settings(enabled))
-    second = runtime.refit_once(_learning_settings(not enabled))
-
-    assert first is second
-    assert first.outcome is expected_outcome
-    assert first.verdict is verdict
-    assert runner.refit_calls == int(enabled)
-    with pytest.raises(FrozenInstanceError):
-        first.outcome = TeardownRefitOutcome.FAILED
-    if not enabled:
-        assert logger.infos == ["Model refit skipped at cook end: Learn This Grill is disabled."]
-    else:
-        assert logger.infos == [f"Model refit at cook end: {expected_outcome.value} ({reason})."]
-
-
-@pytest.mark.parametrize(
-    ("runner_result", "runner_error", "expected_error"),
-    (
-        (
-            {"outcome": "accepted-next-cook"},
-            None,
-            "Model refit failed at cook end: invalid refit result",
-        ),
-        (
-            None,
-            RuntimeError("fit exploded"),
-            "Model refit failed at cook end: fit exploded",
-        ),
-    ),
-    ids=("malformed", "exception"),
-)
-def test_refit_once_turns_malformed_and_exception_results_into_typed_failure(
-    runner_result: object,
-    runner_error: BaseException | None,
-    expected_error: str,
-) -> None:
-    runner = _LifecycleRunner()
-    runner.refit_result = runner_result
-    runner.refit_error = runner_error
-    runtime, _runner, _store, _trace_session, _recorder, logger = _lifecycle_runtime(runner=runner)
-
-    result = runtime.refit_once(_learning_settings(True))
-
-    assert result.outcome is TeardownRefitOutcome.FAILED
-    assert result.verdict is None
-    assert runner.refit_calls == 1
-    assert logger.errors == [expected_error]
-
-
-@pytest.mark.parametrize(
-    ("enabled", "verdict", "expected_events"),
-    (
-        (
-            False,
-            None,
-            (ModelEventType.REFIT,),
-        ),
-        (
-            True,
-            TeardownRefitResult.rejected(
-                "physical-bounds",
-                origin=CandidateOrigin.COOK_REFIT,
-            ),
-            (ModelEventType.REFIT, ModelEventType.REJECT),
-        ),
-        (
-            True,
-            TeardownRefitResult.ready_for_review(
-                "operator review",
-                candidate_digest="c" * 64,
-            ),
-            (ModelEventType.REFIT, ModelEventType.ADOPT),
-        ),
-    ),
-    ids=("disabled", "rejected", "adopted"),
-)
-def test_publish_final_checkpoint_records_exact_trace_events_and_authority(
-    enabled: bool,
-    verdict: TeardownRefitResult | None,
-    expected_events: tuple[ModelEventType, ...],
-) -> None:
-    runner = _LifecycleRunner()
-    runner.refit_result = verdict
-    runner.snapshot = {"revision": 11, "params": {"theta": 40.0}}
-    persistence = _Persistence()
-    runtime, _runner, _store, trace, recorder, _logger = _lifecycle_runtime(
-        runner=runner,
-        persistence=persistence,
-    )
-    refit = runtime.refit_once(_learning_settings(enabled))
-
-    assert runtime.publish_final_checkpoint_once(refit, timestamp_ms=6_000)
-
-    payloads = [
-        record.payload
-        for record in _records(recorder, TraceEventKind.MODEL_EVENT)
-        if isinstance(record.payload, ModelEventPayload)
-    ]
-    assert tuple(payload.event for payload in payloads) == expected_events
-    assert all(record.ts_ms == 6_000 for record in _records(recorder, TraceEventKind.MODEL_EVENT))
-    assert trace.model_authority is None
-    assert persistence.checkpoints == [("pid_sp", runner.snapshot)]
-    before = (tuple(runner.finalized), tuple(persistence.checkpoints))
-    assert runtime.publish_final_checkpoint_once(refit, timestamp_ms=7_000)
-    assert (tuple(runner.finalized), tuple(persistence.checkpoints)) == before
-
-
-@pytest.mark.parametrize("failure", ("refusal", "exception"))
-def test_publish_final_checkpoint_never_queues_snapshot_stale_before_finalization_failure(
-    failure: str,
-) -> None:
-    runner = _LifecycleRunner()
-    runner.snapshot = {"revision": 1, "stale": True}
-    if failure == "refusal":
-        runner.finalize_results = [False, True]
-    else:
-        runner.finalize_errors = [RuntimeError("finalize exploded"), None]
-        runner.finalize_results = [True]
-    persistence = _Persistence()
-    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(
-        runner=runner, persistence=persistence
-    )
-    refit = runtime.refit_once(_learning_settings(False))
-
-    assert runtime.publish_final_checkpoint_once(refit, timestamp_ms=8_000)
-
-    assert runner.finalized == [
-        TeardownRefitOutcome.DISABLED,
-        TeardownRefitOutcome.CHECKPOINT_FAILURE,
-    ]
-    assert len(persistence.checkpoints) == 1
-    submitted = persistence.checkpoints[0][1]
-    assert submitted["cook_refit"] == {"latest": "checkpoint-failure"}
-    assert "stale" not in submitted
-
-
-@pytest.mark.parametrize("snapshot", (None, ["malformed"]), ids=("missing", "malformed"))
-def test_publish_final_checkpoint_makes_missing_or_malformed_snapshot_terminal(
-    snapshot: object,
-) -> None:
-    runner = _LifecycleRunner()
-    runner.snapshot = snapshot
-    persistence = _Persistence()
-    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(
-        runner=runner, persistence=persistence
-    )
-    refit = runtime.refit_once(_learning_settings(False))
-
-    first = runtime.publish_final_checkpoint_once(refit, timestamp_ms=9_000)
-    second = runtime.publish_final_checkpoint_once(refit, timestamp_ms=10_000)
-
-    assert not first
-    assert not second
-    assert runner.finalized == [
-        TeardownRefitOutcome.DISABLED,
-        TeardownRefitOutcome.CHECKPOINT_FAILURE,
-    ]
-    assert persistence.checkpoints == []
-    assert not runtime.evidence_available
-
-
-def test_publish_final_checkpoint_bounds_authoritative_retry_and_is_idempotent() -> None:
-    runner = _LifecycleRunner()
-    verdict = TeardownRefitResult.accepted_next_cook(
-        "accepted",
-        candidate_digest="d" * 64,
-    )
-    runner.refit_result = verdict
-    runner.finalize_results = [True, True]
-    runner.snapshot = {"revision": 12, "cook_refit": {"latest": "accepted-next-cook"}}
-    persistence = _Persistence(checkpoint_results=(False, True))
-    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(
-        runner=runner, persistence=persistence
-    )
-    refit = runtime.refit_once(_learning_settings(True))
-
-    assert runtime.publish_final_checkpoint_once(refit, timestamp_ms=11_000)
-    assert runtime.publish_final_checkpoint_once(refit, timestamp_ms=12_000)
-
-    assert runner.finalized == [
-        TeardownRefitOutcome.ACCEPTED_NEXT_COOK,
-        TeardownRefitOutcome.CHECKPOINT_FAILURE,
-    ]
-    assert [
-        cast(Mapping[str, object], snapshot["cook_refit"])["latest"] for _name, snapshot in persistence.checkpoints
-    ] == ["accepted-next-cook", "checkpoint-failure"]
-    assert not runtime.evidence_available
-
-
 def test_finish_teardown_orders_retire_barrier_trace_close_runner_finish_once() -> None:
     events: list[object] = []
     runner = _LifecycleRunner(events=events)
@@ -2310,7 +2037,6 @@ def test_finish_teardown_marks_barrier_failure_and_still_finishes_resources(
     runtime.finish_teardown(generation=5)
     runtime.finish_teardown(generation=5)
 
-    assert runner.finalized == [TeardownRefitOutcome.CHECKPOINT_FAILURE]
     assert persistence.barrier_calls == 1
     assert recorder.close_calls == 1
     assert runner.finish_calls == 1
@@ -2381,7 +2107,7 @@ def test_partial_lifecycle_calls_preserve_noop_and_failure_boundaries() -> None:
     runtime.restore_model(timestamp_ms=1_000, controller_name="mpc")
     runtime.reconcile_activation()
     runtime.drain_activation_events()
-    refit = runtime.refit_once(
+    scheduled = runtime.schedule_stop_fit(
         {
             "controller": {
                 "config": {
@@ -2392,19 +2118,11 @@ def test_partial_lifecycle_calls_preserve_noop_and_failure_boundaries() -> None:
             }
         }
     )
-    published = runtime.publish_final_checkpoint_once(
-        refit,
-        timestamp_ms=2_000,
-    )
     runtime.finish_teardown(generation=0)
 
     assert store.loads == []
     assert runtime.status_fragment() == {}
-    assert refit == HoldRefitResult(
-        TeardownRefitOutcome.INSUFFICIENT,
-        None,
-    )
-    assert not published
+    assert not scheduled
     assert not runtime.evidence_available
     assert logger.warnings == []
 
@@ -2436,138 +2154,6 @@ def test_status_fragment_rejects_invalid_public_runner_status(
     runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(runner=runner)
 
     assert runtime.status_fragment() == {}
-
-
-@pytest.mark.parametrize(
-    "settings",
-    (
-        {"controller": []},
-        {"controller": {"config": []}},
-        {"controller": {"config": {"pid_sp": []}}},
-    ),
-    ids=("controller", "config", "selected"),
-)
-def test_refit_once_rejects_malformed_settings_as_disabled(
-    settings,
-) -> None:
-    runtime, runner, _store, _trace_session, _recorder, logger = _lifecycle_runtime()
-
-    result = runtime.refit_once(settings)
-
-    assert result == HoldRefitResult(TeardownRefitOutcome.DISABLED, None)
-    assert runner.refit_calls == 0
-    assert len(logger.errors) == 1
-    assert logger.errors[0].startswith("Model refit failed at cook end:")
-
-
-def test_controller_switch_does_not_dedupe_an_identical_checkpoint_for_new_owner() -> None:
-    snapshot: dict[str, object] = {"revision": 7}
-    runner = _LifecycleRunner()
-    runner.snapshot = snapshot
-    store = _ModelStore(snapshot)
-    persistence = _Persistence(checkpoint_results=(True, True))
-    runtime = HoldLearningRuntime(
-        runner=runner,
-        model_store=store,
-        persistence=persistence,
-        trace=None,
-        controller_name="pid_sp",
-        logger=_LifecycleLogger(),
-        initial_generation=0,
-    )
-
-    assert runtime.submit_online_checkpoint(snapshot)
-    runtime.restore_model(timestamp_ms=1_000, controller_name="mpc")
-    published = runtime.publish_final_checkpoint_once(
-        HoldRefitResult(TeardownRefitOutcome.DISABLED, None),
-        timestamp_ms=2_000,
-    )
-
-    assert store.loads == ["mpc"]
-    assert runner.restored_models == [snapshot]
-    assert published
-    assert persistence.checkpoints == [
-        ("pid_sp", snapshot),
-        ("mpc", snapshot),
-    ]
-
-
-def test_failed_identical_checkpoint_stops_when_failure_finalization_refuses() -> None:
-    snapshot: dict[str, object] = {"revision": 8}
-    runner = _LifecycleRunner()
-    runner.snapshot = snapshot
-    runner.finalize_results = [True, False]
-    persistence = _Persistence(checkpoint_results=(False,))
-    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(
-        runner=runner, persistence=persistence
-    )
-
-    assert not runtime.submit_online_checkpoint(snapshot)
-    published = runtime.publish_final_checkpoint_once(
-        HoldRefitResult(TeardownRefitOutcome.DISABLED, None),
-        timestamp_ms=3_000,
-    )
-
-    assert not published
-    assert runner.finalized == [
-        TeardownRefitOutcome.DISABLED,
-        TeardownRefitOutcome.CHECKPOINT_FAILURE,
-    ]
-    assert persistence.checkpoints == [("pid_sp", snapshot)]
-
-
-def test_checkpoint_failure_outcome_does_not_retry_a_refused_snapshot() -> None:
-    snapshot: dict[str, object] = {"revision": 9}
-    runner = _LifecycleRunner()
-    runner.snapshot = snapshot
-    persistence = _Persistence(checkpoint_results=(False,))
-    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(
-        runner=runner, persistence=persistence
-    )
-
-    published = runtime.publish_final_checkpoint_once(
-        HoldRefitResult(TeardownRefitOutcome.CHECKPOINT_FAILURE, None),
-        timestamp_ms=4_000,
-    )
-
-    assert not published
-    assert runner.finalized == [TeardownRefitOutcome.CHECKPOINT_FAILURE]
-    assert len(persistence.checkpoints) == 1
-    submitted = persistence.checkpoints[0][1]
-    assert submitted["cook_refit"] == {"latest": "checkpoint-failure"}
-
-
-def test_authoritative_retry_rejects_a_malformed_refinalized_snapshot() -> None:
-    class _MalformedRetryRunner(_LifecycleRunner):
-        def finalize_cook_refit(
-            self,
-            outcome: TeardownRefitOutcome,
-        ) -> bool:
-            accepted = super().finalize_cook_refit(outcome)
-            if outcome is TeardownRefitOutcome.CHECKPOINT_FAILURE:
-                self.snapshot = None
-            return accepted
-
-    snapshot: dict[str, object] = {"revision": 10}
-    runner = _MalformedRetryRunner()
-    runner.snapshot = snapshot
-    runner.finalize_results = [True, True]
-    persistence = _Persistence(checkpoint_results=(False,))
-    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(
-        runner=runner, persistence=persistence
-    )
-
-    published = runtime.publish_final_checkpoint_once(
-        HoldRefitResult(TeardownRefitOutcome.DISABLED, None),
-        timestamp_ms=5_000,
-    )
-
-    assert not published
-    assert runner.finalized == [
-        TeardownRefitOutcome.DISABLED,
-        TeardownRefitOutcome.CHECKPOINT_FAILURE,
-    ]
-    assert persistence.checkpoints == [("pid_sp", snapshot)]
 
 
 def test_finish_teardown_contains_retirement_and_trace_flush_exceptions() -> None:

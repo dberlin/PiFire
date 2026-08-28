@@ -30,7 +30,7 @@ from common.persistence.control_trace import read_control_trace_session
 from controller.applied_output import AppliedOutput, FrameFeedbackDisposition, OutputSource
 from controller.base import MpcFailureState, MpcTraceDiagnostics, PidSpTraceDiagnostics, PidTraceDiagnostics
 from controller.control_trace_replay import ReplayIssueCode, validate_records
-from controller.model_learning.contracts import CandidateOrigin, FrameObservation
+from controller.model_learning.contracts import FrameObservation
 from controller.mpc import Controller
 from controller.mpc_allocator import allocate
 from controller.runtime.control_trace_recorder import ControlTraceRecorder
@@ -40,7 +40,6 @@ from controller.runtime.control_trace_session import (
     TraceUpdateContext,
 )
 from controller.runtime.framed_pulse import FramedPulseRuntime
-from controller.runtime.model_fitting import TeardownRefitResult
 from controller.runtime.model_persistence import EvidenceSubmission
 from controller.runtime.modes.hold import HoldMode
 from controller.runtime.modes.hold_learning import parse_model_lifecycle_payload
@@ -950,40 +949,6 @@ def test_mpc_zero_raw_load_and_zero_requested_auger_duty_remain_zero(hold_cycle,
     allocation = next(record.payload for record in recorder.records if record.event_kind is TraceEventKind.ALLOCATION)
     applied = next(record.payload for record in recorder.records if record.event_kind is TraceEventKind.APPLIED_OUTPUT)
     assert (update.raw_output, allocation.requested_auger_duty, applied.realized_auger_duty) == (0.0, 0.0, 0.0)
-
-
-@pytest.mark.parametrize(
-    ("accepted", "expected_event"),
-    [(False, "reject"), (True, "adopt")],
-    ids=["rejected-refit", "accepted-refit"],
-)
-def test_refit_records_refit_then_its_verdict(hold_cycle, monkeypatch, accepted, expected_event):
-    recorder = _install_recorder(monkeypatch)
-    runner = FakeControllerRunner(period=1.0, commands_fan=True, actuation_mode=ActuationMode.FRAMED_PULSE)
-    runner.snapshot = {"revision": 7}
-    runner.refit_verdict = (
-        TeardownRefitResult.accepted_next_cook(
-            "accepted by trace fixture",
-            candidate_digest="a" * 64,
-        )
-        if accepted
-        else TeardownRefitResult.rejected(
-            "rejected by trace fixture",
-            origin=CandidateOrigin.COOK_REFIT,
-        )
-    )
-    mode = hold_cycle(runner, controller="mpc")
-    mode.setup()
-    mode.settings["controller"]["config"]["mpc"]["enable_identification"] = True
-    mode.control["cook_id"] = f"cook-refit-{accepted}"
-    _open_trace_session(mode, 1.0)
-
-    mode.teardown(220.0)
-
-    model_events = [
-        record.payload.event.value for record in recorder.records if record.event_kind is TraceEventKind.MODEL_EVENT
-    ]
-    assert model_events == ["refit", expected_event]
 
 
 def test_mpc_applied_load_is_measured_and_attributed_to_the_producing_frame(hold_cycle, monkeypatch):

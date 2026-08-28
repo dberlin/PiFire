@@ -23,6 +23,7 @@ from common.model_evidence import (
     ModelEvidenceRecord,
     RollbackEvidence,
 )
+from common.persistence.learning_trajectory import LearningTrajectoryRepository
 from common.persistence.model_evidence import (
     append_model_evidence,
     commit_model_activation_phase,
@@ -46,6 +47,7 @@ from controller.runtime.runner import (
     ThreadedControllerRunner,
 )
 from tests.fakes.runner import FakeControllerRunner
+from tests.unit.common.test_learning_trajectory_store import _finalize_segment, _segment
 from tests.unit.runtime._persistence_helpers import _pair_phase_state
 from tests.unit.runtime.conftest import _off, _output
 
@@ -186,6 +188,43 @@ def test_consecutive_holds_share_exact_process_worker_and_repository(hold_cycle)
     assert first._persistence_worker is second._persistence_worker is worker
     assert first.ctx.trajectory_repository is second.ctx.trajectory_repository is repository
     assert worker.barrier_calls == [2.0, 2.0]
+    assert worker.close_calls == []
+
+
+def test_compatible_corpus_survives_hold_teardown_and_repository_reopen(
+    hold_cycle,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "persistent-grey-corpus.sqlite"
+    worker = _SharedPersistence()
+    first_repository = LearningTrajectoryRepository(str(database_path))
+    first_segment = _segment("first-cook", epoch_ms=0, scored_count=2)
+    _finalize_segment(first_repository, first_segment)
+    first = hold_cycle(FakeControllerRunner(period=0.0), controller="mpc")
+    _inject_process_persistence(first, worker, first_repository)
+    first.setup()
+    first.ctx.clock.advance(400.0)
+    first.teardown(200.0)
+
+    reopened = LearningTrajectoryRepository(str(database_path))
+    second_segment = _segment("second-cook", epoch_ms=200_000, scored_count=2)
+    _finalize_segment(reopened, second_segment)
+    second = hold_cycle(FakeControllerRunner(period=0.0), controller="mpc")
+    _inject_process_persistence(second, worker, reopened)
+    second.setup()
+    second.ctx.clock.advance(400.0)
+    second.teardown(200.0)
+
+    snapshot = reopened.snapshot_fit_corpus(first_segment.fit_partition_digest)
+    assert tuple(item.segment_id for item in snapshot.identity.slices) == (
+        "first-cook",
+        "second-cook",
+    )
+    assert tuple(segment.cook_id for segment in snapshot.segments) == (
+        "cook-first-cook",
+        "cook-second-cook",
+    )
+    assert first._persistence_worker is second._persistence_worker is worker
     assert worker.close_calls == []
 
 

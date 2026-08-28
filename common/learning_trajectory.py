@@ -314,6 +314,7 @@ class LearningTrajectoryFrame:
     continuous: bool
     partial: bool
     boundary_reason: TrajectoryBreakReason | None
+    calibration_origin: bool = False
 
     @model_validator(mode="after")
     def validate_frame(self) -> LearningTrajectoryFrame:
@@ -394,7 +395,7 @@ class HoldEntrySample:
 
 
 def _frame_json(frame: LearningTrajectoryFrame) -> dict[str, JsonValue]:
-    return {
+    payload: dict[str, JsonValue] = {
         "sequence": frame.sequence,
         "monotonic_start_ms": frame.monotonic_start_ms,
         "monotonic_end_ms": frame.monotonic_end_ms,
@@ -426,8 +427,15 @@ def _frame_json(frame: LearningTrajectoryFrame) -> dict[str, JsonValue]:
         "complete": frame.complete,
         "continuous": frame.continuous,
         "partial": frame.partial,
-        "boundary_reason": frame.boundary_reason.value if frame.boundary_reason is not None else None,
+        "boundary_reason": (
+            frame.boundary_reason.value
+            if frame.boundary_reason is not None
+            else None
+        ),
     }
+    if frame.calibration_origin:
+        payload["calibration_origin"] = True
+    return payload
 
 
 def _hold_entry_json(sample: HoldEntrySample) -> dict[str, JsonValue]:

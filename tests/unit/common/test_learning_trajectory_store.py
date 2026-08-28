@@ -524,6 +524,38 @@ def test_begin_append_finalize_updates_cursor_chain_and_corpus_atomically(
     assert repository.status().scored_count == 2
 
 
+def test_per_frame_calibration_origin_round_trips_without_reclassifying_legacy_rows(
+    repository: LearningTrajectoryRepository,
+    database_path: Path,
+) -> None:
+    segment = _segment("calibration-provenance")
+    cursor = repository.begin_segment(segment)
+    frames = (
+        _frame(1),
+        replace(_frame(2), calibration_origin=True),
+    )
+    receipt = _append_scored(repository, cursor, frames)
+    repository.finalize(receipt.cursor, TrajectoryBreakReason.STOP)
+
+    canonical_rows = _rows(
+        database_path,
+        (
+            "SELECT canonical_json FROM learning_trajectory_frame "
+            "WHERE segment_id=? AND kind='scored' ORDER BY ordinal"
+        ),
+        (segment.segment_id,),
+    )
+    stored = repository.read_segment(segment.segment_id)
+
+    assert stored is not None
+    assert tuple(frame.calibration_origin for frame in stored.scored_hold_frames) == (
+        False,
+        True,
+    )
+    assert '"calibration_origin"' not in canonical_rows[0][0]
+    assert '"calibration_origin":true' in canonical_rows[1][0]
+
+
 def test_public_repository_results_are_frozen_and_own_snapshot_tuples(
     repository: LearningTrajectoryRepository,
 ) -> None:
@@ -1481,10 +1513,17 @@ def test_fit_run_queued_running_success_failure_stale_and_conflicting_completion
     repository.record_fit_request(
         snapshot, replace(stale_lineage, result_status="running")
     )
-    stale = repository.record_fit_request(
-        snapshot, replace(stale_lineage, result_status="stale")
-    )
+    stale = repository.mark_fit_stale(stale_lineage.request_id)
     assert stale.status == "stale"
+    assert stale.candidate_digest is None
+    assert stale.error is None
+    assert repository.mark_fit_stale(stale_lineage.request_id) == stale
+    with pytest.raises(LearningTrajectoryConflictError, match="conflict"):
+        repository.complete_fit(
+            stale_lineage.request_id,
+            candidate_digest=_digest("stale-candidate"),
+            error=None,
+        )
 
     with pytest.raises(ValueError, match="candidate|error"):
         repository.complete_fit(

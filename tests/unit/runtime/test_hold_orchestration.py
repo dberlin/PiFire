@@ -8,7 +8,6 @@ import pytest
 from common.control_trace import ResultStaleState, TraceEventKind
 from common.model_evidence import EvidenceKind, FallbackEvidence, ModelEvidenceRecord
 from controller.applied_output import FrameFeedbackDisposition, OutputSource
-from controller.runtime.model_fitting import TeardownRefitOutcome, TeardownRefitResult
 from controller.runtime.model_persistence import EvidenceSubmission
 from controller.runtime.runner import ControllerUpdateResult
 from tests.fakes.runner import FakeControllerRunner
@@ -20,7 +19,6 @@ class _OrderedRunner(FakeControllerRunner):
         self.events = events
         self.failure = failure
         self.snapshot = {"version": 1, "revision": 1, "params": {}}
-        self.refit_verdict = TeardownRefitResult.insufficient("minimum-samples")
         self.result = ControllerUpdateResult(
             cycle_ratio=duty,
             fan=None,
@@ -82,16 +80,14 @@ class _OrderedRunner(FakeControllerRunner):
         if self.failure == "runner-stop":
             raise RuntimeError("runner stop failed")
 
-    def refit_from_cook(self):
-        self.events.append("runner:refit")
-        if self.failure == "refit":
-            raise RuntimeError("refit failed")
-        return super().refit_from_cook()
+    def schedule_corpus_fit(self, origin):
+        return self._schedule_corpus_fit_after_barrier(origin, None)
 
-    def finalize_cook_refit(self, outcome):
-        normalized = outcome if isinstance(outcome, TeardownRefitOutcome) else TeardownRefitOutcome(outcome)
-        self.events.append(("runner:checkpoint-outcome", normalized))
-        return super().finalize_cook_refit(normalized)
+    def _schedule_corpus_fit_after_barrier(self, origin, before_schedule):
+        self.events.append("runner:schedule")
+        if self.failure == "schedule":
+            raise RuntimeError("schedule failed")
+        return super()._schedule_corpus_fit_after_barrier(origin, before_schedule)
 
     def finish_teardown(self):
         self.events.append("runner:finish")
@@ -366,10 +362,10 @@ def test_activation_lifecycle_evidence_keeps_fifo_ahead_of_checkpoint_and_trace_
         ("runner-stop", True),
         ("persistence-barrier", False),
         ("trace-close", False),
-        ("refit", False),
+        ("schedule", False),
         ("checkpoint", False),
     ],
-    ids=["success", "runner-stop", "persistence-barrier", "trace-close", "refit", "checkpoint"],
+    ids=["success", "runner-stop", "persistence-barrier", "trace-close", "schedule", "checkpoint"],
 )
 def test_teardown_orders_cleanup_and_owns_each_resource_at_most_once(hold_cycle, monkeypatch, failure, propagates):
     events = []
@@ -409,13 +405,13 @@ def test_teardown_orders_cleanup_and_owns_each_resource_at_most_once(hold_cycle,
             "runner:stop",
         ],
     )
-    if failure != "runner-stop":
+    if failure not in {"runner-stop", "persistence-barrier", "checkpoint"}:
         _assert_relative_order(
             events,
             [
                 "runner:stop",
-                "runner:refit",
                 "persistence:barrier",
+                "runner:schedule",
                 "trace:close",
                 "runner:finish",
             ],
@@ -427,7 +423,9 @@ def test_teardown_orders_cleanup_and_owns_each_resource_at_most_once(hold_cycle,
         )
 
     assert events.count("runner:stop") == 1
-    assert events.count("runner:refit") <= 1
+    assert events.count("runner:schedule") == int(
+        failure not in {"runner-stop", "persistence-barrier", "checkpoint"}
+    )
     assert events.count("persistence:barrier") == 1
     assert events.count("trace:close") == 1
     assert events.count("runner:finish") == 1

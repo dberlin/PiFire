@@ -675,12 +675,28 @@ def test_sync_reconfigure_installs_complete_core_before_closing_replaced_core(mo
 
     old = CloseCore("old")
     new = CloseCore("new")
-    runner = SyncControllerRunner(old)
-    monkeypatch.setattr(
-        runner_module,
-        "_build_core",
-        lambda settings, control, logger=None: (new, "Active"),
-    )
+    process_owner = object()
+    runner = SyncControllerRunner(old, grey_learning_process=process_owner)
+
+    def build_core(
+        settings,
+        control,
+        *,
+        logger=None,
+        model_persistence=None,
+        trajectory_repository=None,
+        fit_partition_digest=None,
+        grey_learning_process=None,
+    ):
+        del settings, control
+        assert logger is None
+        assert model_persistence is None
+        assert trajectory_repository is None
+        assert fit_partition_digest is None
+        assert grey_learning_process is process_owner
+        return new, "Active"
+
+    monkeypatch.setattr(runner_module, "_build_core", build_core)
 
     assert runner.reconfigure({"controller": {"selected": "mpc"}}, {}) == "Active"
 
