@@ -5,6 +5,7 @@ from uuid import UUID
 import pytest
 
 from common.control_trace import (
+    TRACE_SCHEMA_VERSION,
     CalibrationEventType,
     CalibrationTracePayload,
     ControllerBranch,
@@ -422,7 +423,7 @@ def test_record_update_builds_exact_controller_payloads(result, payload_type) ->
 
     update = next(record for record in recorder.records if record.event_kind is TraceEventKind.CONTROL_UPDATE)
     assert isinstance(update.payload, payload_type)
-    assert (update.schema_version, update.controller, update.ts_ms) == (6, controller, 2_000)
+    assert (update.schema_version, update.controller, update.ts_ms) == (TRACE_SCHEMA_VERSION, controller, 2_000)
     assert (
         update.payload.result_revision,
         update.payload.setpoint,
@@ -473,7 +474,7 @@ def test_record_update_aligns_result_owned_learning_snapshot_with_session_record
     assert session.record_update(_update_context(result, timestamp_ms=2_345))
 
     update = next(record for record in recorder.records if record.event_kind is TraceEventKind.CONTROL_UPDATE)
-    assert (update.schema_version, update.controller, update.ts_ms) == (6, controller, 2_345)
+    assert (update.schema_version, update.controller, update.ts_ms) == (TRACE_SCHEMA_VERSION, controller, 2_345)
     assert update.payload.result_revision == 7
     assert update.payload.learning is not None
     assert (update.payload.learning.schema_version, update.payload.learning.state) == (1, expected_state)

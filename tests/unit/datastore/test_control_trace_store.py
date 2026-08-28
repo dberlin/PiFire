@@ -177,14 +177,14 @@ def test_batch_append_and_typed_reads_preserve_insertion_order(ds):
     assert read_control_trace_session("session-a") == []
 
 
-def test_schema_six_store_round_trip_retains_learning_state(ds):
+def test_current_schema_store_round_trip_retains_learning_state(ds):
     session = _record(1_000, "learning-session", "learning-cook")
     update = _learning_record(3_000, "learning-session", "learning-cook")
 
     append_control_trace([session, update])
 
     restored = read_control_trace_session("learning-session")
-    assert [record.schema_version for record in restored] == [6, 6]
+    assert [record.schema_version for record in restored] == [TRACE_SCHEMA_VERSION, TRACE_SCHEMA_VERSION]
     assert isinstance(restored[1].payload, PidUpdatePayload)
     assert restored[1].payload.learning is not None
     assert restored[1].payload.learning.state == {

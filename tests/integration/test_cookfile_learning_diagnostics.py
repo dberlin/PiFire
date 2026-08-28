@@ -10,6 +10,7 @@ from pydantic import JsonValue
 
 import file_mgmt.cookfile as cookfile_mod
 from common.control_trace import (
+    TRACE_SCHEMA_VERSION,
     ActuationMode,
     AllocationClampReason,
     AllocationPayload,
@@ -392,7 +393,7 @@ def _assert_mixed_controller_envelope(payload: Mapping[str, Any]) -> None:
     assert [record["event_kind"] for record in records] == _EXPECTED_TRACE_EVENTS
     assert [record["session_id"] for record in records] == _EXPECTED_TRACE_SESSIONS
     assert {record["cook_id"] for record in records} == {_COOK_ID}
-    assert trace["record_schema_versions"] == [6]
+    assert trace["record_schema_versions"] == [TRACE_SCHEMA_VERSION]
     assert records[1]["payload"]["learning"] == {
         "schema_version": 1,
         "state": {"status": "collecting", "accepted_samples": 12},
