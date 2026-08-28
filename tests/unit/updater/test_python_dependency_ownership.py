@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import grp
 import json
+import os
 import pathlib
+import pwd
 import re
+import stat
+import sqlite3
+import subprocess
 import tomllib
 
 import pytest
@@ -18,6 +24,146 @@ VENV_CREATORS = FRESH_INSTALLERS
 ALLOWED_SYSTEM_PYTHON_PACKAGES = {"python3", "python3-dev", "python3-devel"}
 RPI_LGPIO_DEPENDENCY = "rpi-lgpio>=0.6; platform_system == 'Linux' and platform_machine == 'aarch64'"
 LINUX_LGPIO_DEPENDENCY = "lgpio>=0.2.2.0; platform_system == 'Linux'"
+
+DATASTORE_PREPARE_CALL = 'pifire_prepare_datastore_dir /usr/local/bin/pifire "$USER"'
+RECURSIVE_INSTALL_CHMOD = re.compile(r"\$SUDO chmod -R (?:775|777) /usr/local/bin(?:/pifire)?")
+
+
+def test_shared_datastore_directory_inherits_group_writable_files(tmp_path) -> None:
+    repo = tmp_path / "pifire"
+    repo.mkdir()
+    existing_artifacts = tuple(repo / name for name in ("pifire.db", "pifire.db-shm", "pifire.db-journal"))
+    for path in existing_artifacts:
+        path.write_text("")
+        path.chmod(0o775)
+    user = pwd.getpwuid(os.getuid()).pw_name
+    group = grp.getgrgid(os.getgid()).gr_name
+    helper = ROOT / "auto-install/pifire-install-common.sh"
+    script = """
+set -e
+SUDO=
+LOG=/dev/null
+source "$1"
+pifire_prepare_datastore_dir "$2" "$3" "$4"
+"""
+
+    subprocess.run(
+        ["bash", "-c", script, "pifire-datastore-test", str(helper), str(repo), user, group],
+        check=True,
+    )
+
+    assert stat.S_IMODE(repo.stat().st_mode) == 0o2775
+    for path in existing_artifacts:
+        assert path.stat().st_gid == os.getgid()
+        assert stat.S_IMODE(path.stat().st_mode) == 0o664
+
+
+def test_datastore_prepare_propagates_artifact_repair_failure(tmp_path) -> None:
+    repo = tmp_path / "pifire"
+    repo.mkdir()
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_find = fake_bin / "find"
+    fake_find.write_text("#!/bin/sh\nexit 19\n")
+    fake_find.chmod(0o755)
+    user = pwd.getpwuid(os.getuid()).pw_name
+    group = grp.getgrgid(os.getgid()).gr_name
+    helper = ROOT / "auto-install/pifire-install-common.sh"
+
+    completed = subprocess.run(
+        [
+            "bash",
+            "-c",
+            'SUDO=; LOG=/dev/null; source "$1"; pifire_prepare_datastore_dir "$2" "$3" "$4"',
+            "pifire-datastore-test",
+            str(helper),
+            str(repo),
+            user,
+            group,
+        ],
+        env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
+        check=False,
+    )
+
+    assert completed.returncode == 1
+
+
+def test_repaired_database_mode_propagates_to_sqlite_sidecars(tmp_path) -> None:
+    repo = tmp_path / "pifire"
+    repo.mkdir()
+    database = repo / "pifire.db"
+    user = pwd.getpwuid(os.getuid()).pw_name
+    group = grp.getgrgid(os.getgid()).gr_name
+    helper = ROOT / "auto-install/pifire-install-common.sh"
+    prepare = [
+        "bash",
+        "-c",
+        'set -e; SUDO=; LOG=/dev/null; source "$1"; pifire_prepare_datastore_dir "$2" "$3" "$4"',
+        "pifire-datastore-test",
+        str(helper),
+        str(repo),
+        user,
+        group,
+    ]
+
+    subprocess.run(prepare, check=True)
+    assert not database.exists()
+    with sqlite3.connect(database) as connection:
+        connection.execute("CREATE TABLE sample (value INTEGER)")
+    subprocess.run(prepare, check=True)
+
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("PRAGMA journal_mode=WAL").fetchone() == ("wal",)
+        connection.execute("INSERT INTO sample VALUES (1)")
+        connection.commit()
+        artifacts = (database, repo / "pifire.db-wal", repo / "pifire.db-shm")
+        for path in artifacts:
+            assert path.stat().st_gid == os.getgid()
+            assert stat.S_IMODE(path.stat().st_mode) == 0o664
+
+
+def test_fresh_installers_prepare_and_repair_datastore_around_initialization() -> None:
+    for installer in FRESH_INSTALLERS:
+        source = installer.read_text()
+        first_prepare = source.index(DATASTORE_PREPARE_CALL)
+        final_prepare = source.rindex(DATASTORE_PREPARE_CALL)
+        initialization = (source.index("python updater.py --piplist"), source.index("python board-config.py -ov"))
+
+        assert source.count(DATASTORE_PREPARE_CALL) == 2, installer
+        recursive_chmod = RECURSIVE_INSTALL_CHMOD.search(source)
+        assert recursive_chmod is not None, installer
+        assert recursive_chmod.start() < first_prepare < min(initialization), installer
+        assert final_prepare > max(initialization), installer
+
+
+def test_fresh_installers_abort_failed_initialization_or_permission_repair() -> None:
+    for installer in FRESH_INSTALLERS:
+        lines = installer.read_text().splitlines()
+        command_indexes = [
+            index
+            for index, line in enumerate(lines)
+            if "python updater.py --piplist" in line or DATASTORE_PREPARE_CALL in line
+        ]
+
+        assert len(command_indexes) == 3, installer
+        file_wide_pipefail = any(line == "set -o pipefail" for line in lines)
+        for index in command_indexes:
+            guard = next(
+                (
+                    candidate
+                    for candidate in range(index, max(index - 5, -1), -1)
+                    if lines[candidate].strip().startswith("if !")
+                ),
+                None,
+            )
+            assert guard is not None, (installer, lines[index])
+            body = lines[guard + 1 : lines.index("fi", guard + 1)]
+            assert any(line.strip() == "exit 1" for line in body), (installer, lines[index])
+            if "|" in lines[index] and not file_wide_pipefail:
+                assert any(line.strip() == "set -o pipefail" for line in lines[guard : index + 1]), (
+                    installer,
+                    lines[index],
+                )
 
 
 def _manifest() -> dict:
@@ -99,9 +245,7 @@ def test_legacy_rpi_gpio_install_paths_are_removed() -> None:
 
 def test_platform_neutral_bootstrap_migration_is_preserved() -> None:
     manifest = _updater_manifest()
-    migration = next(
-        entry for entry in manifest["versions"] if entry["version"] == "1.23.0" and entry["build"] == 119
-    )
+    migration = next(entry for entry in manifest["versions"] if entry["version"] == "1.23.0" and entry["build"] == 119)
     commands = [command for section in migration["dependencies"].values() for command in section["command_list"]]
 
     assert commands == [
@@ -538,7 +682,6 @@ def test_missing_uv_is_bootstrapped_outside_the_virtual_environment(tmp_path) ->
     assert calls[0][1]["input"] == b"install uv"
 
 
-
 def test_old_path_uv_is_replaced_with_repo_owned_toolchain(tmp_path, monkeypatch) -> None:
     import updater
 
@@ -620,6 +763,7 @@ def test_pip_list_uses_the_compatible_uv_resolver(monkeypatch) -> None:
     assert result == 0
     assert commands == [["/repo/.toolchain/uv/uv", "pip", "list", "--format=json"]]
     assert written == [([{"name": "lgpio"}], "pip_list.json")]
+
 
 def test_automatic_refresh_refuses_missing_uv_before_running_any_command(tmp_path, monkeypatch) -> None:
     import updater

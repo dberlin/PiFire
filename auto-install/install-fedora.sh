@@ -276,6 +276,10 @@ $SUDO chown -R "$USER":pifire /usr/local/bin/pifire
 $SUDO chmod -R 775 /usr/local/bin/pifire
 # After the recursive chmod, which would otherwise drop the setgid bit.
 pifire_prepare_log_dir /usr/local/bin/pifire "$USER"
+if ! pifire_prepare_datastore_dir /usr/local/bin/pifire "$USER"; then
+	log " !! Could not prepare shared datastore permissions."
+	exit 1
+fi
 
 # Sudoers drop-in so the pifire group can run the system commands PiFire needs
 # without a password. Fedora paths / package manager (no Raspberry Pi vcgencmd).
@@ -374,8 +378,18 @@ fi
 
 # Record installed packages and board/OS info for the app.
 log " - Getting PIP list and OS info into JSON"
-python updater.py --piplist 2>&1 | tee -a "$LOG"
+if ! python updater.py --piplist 2>&1 | tee -a "$LOG"; then
+	log " !! Datastore initialization and package inventory failed."
+	exit 1
+fi
 python board-config.py -ov 2>&1 | tee -a "$LOG"
+
+# SQLite creates the main database as 0644 regardless of umask. Repair it
+# after initialization so later WAL/SHM sidecars inherit group-write.
+if ! pifire_prepare_datastore_dir /usr/local/bin/pifire "$USER"; then
+	log " !! Could not finalize shared datastore permissions."
+	exit 1
+fi
 
 # --- Web UI ----------------------------------------------------------------
 log "*************************************************************************"

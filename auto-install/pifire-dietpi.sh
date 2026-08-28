@@ -289,6 +289,10 @@ pifire_add_hardware_groups $USER root
 pifire_install_udev_rules /usr/local/bin/pifire
 # After the recursive chmod above, which would otherwise drop the setgid bit.
 pifire_prepare_log_dir /usr/local/bin/pifire "$USER"
+if ! pifire_prepare_datastore_dir /usr/local/bin/pifire "$USER"; then
+	log " !! Could not prepare shared datastore permissions."
+	exit 1
+fi
 
 $SUDO " + Enabling and Starting Bluetooth service"
 $SUDO systemctl enable bluetooth.service
@@ -367,11 +371,24 @@ fi
 
 # Get PIP List into JSON file
 echo " - Getting PIP List into JSON file" | tee -a ~/logs/pifire_install.log
-python updater.py --piplist 2>&1 | tee -a ~/logs/pifire_install.log
+if ! (
+	set -o pipefail
+	python updater.py --piplist 2>&1 | tee -a ~/logs/pifire_install.log
+); then
+	log " !! Datastore initialization and package inventory failed."
+	exit 1
+fi
 
 # Get OS Information into JSON file
 echo " - Getting OS Information into JSON file" | tee -a ~/logs/pifire_install.log
 python board-config.py -ov 2>&1 | tee -a ~/logs/pifire_install.log
+
+# SQLite creates the main database as 0644 regardless of umask. Repair it
+# after initialization so later WAL/SHM sidecars inherit group-write.
+if ! pifire_prepare_datastore_dir /usr/local/bin/pifire "$USER"; then
+	log " !! Could not finalize shared datastore permissions."
+	exit 1
+fi
 
 echo "*************************************************************************" | tee -a ~/logs/pifire_install.log
 echo "**      Building the web UI...                                         **" | tee -a ~/logs/pifire_install.log

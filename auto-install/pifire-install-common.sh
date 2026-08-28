@@ -510,3 +510,29 @@ pifire_prepare_log_dir() {
 	$SUDO find "$logs" -maxdepth 1 -type f -exec chgrp pifire {} + -exec chmod g+w {} + 2>/dev/null
 	return 0
 }
+
+
+# pifire_prepare_datastore_dir <repo> <user> [group]
+#
+# updater.py initializes SQLite before supervisor starts. The installer shell
+# therefore creates pifire.db under the install user's primary group unless the
+# repository directory inherits pifire. SQLite creates a new main database as
+# 0644 and copies that mode to later WAL/SHM sidecars, so umask alone cannot add
+# group-write. Setgid supplies the shared group; repairing the main database to
+# 0664 after initialization makes every later sidecar writable by both root and
+# the install user. Existing database artifacts are repaired at the same time.
+#
+# Call this AFTER recursive chmod, BEFORE the first datastore initialization,
+# and AGAIN after that initialization has completed successfully.
+pifire_prepare_datastore_dir() {
+	local repo="$1" user="$2" group="${3:-pifire}"
+
+	log " + Making the datastore writable by root and $user"
+	$SUDO chown "$user:$group" "$repo" || return 1
+	$SUDO chmod 2775 "$repo" || return 1
+	$SUDO find "$repo" -maxdepth 1 -type f \
+		\( -name "pifire.db" -o -name "pifire.db-wal" -o -name "pifire.db-shm" -o -name "pifire.db-journal" \) \
+		-exec chgrp "$group" {} + -exec chmod 0664 {} + 2>/dev/null || return 1
+	umask 002
+	return 0
+}
