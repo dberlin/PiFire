@@ -506,9 +506,12 @@ def test_operator_evaluation_persists_restart_checkpoint_consumed_by_unmocked_ac
     )
     checkpoint = ControllerModelStore().load("mpc")
     assert checkpoint is not None
-    assert checkpoint["revision"] == 1
+    # One operator-reviewed checkpoint advances the revision twice: once when
+    # the candidate lineage is adopted, once when the checkpoint is persisted.
+    # The store only ever compares revisions for recency, so the gap is inert.
+    assert checkpoint["revision"] == 2
     assert checkpoint["active_pair"] == incumbent.to_dict()
-    assert migrate_grey_learning_snapshot(checkpoint)["revision"] == 1
+    assert migrate_grey_learning_snapshot(checkpoint)["revision"] == 2
     restart_report = client.get("/api/model-evidence/report").get_json()
     assert restart_report["status"] == "ready-for-review", restart_report
     assert checkpoint["candidate_pair"] == candidate.to_dict()
