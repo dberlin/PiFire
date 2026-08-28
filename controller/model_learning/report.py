@@ -134,6 +134,21 @@ def _pair_digest(activation: Mapping[str, object], name: str):
     return None
 
 
+def _candidate_identity(
+    authority: Mapping[str, object],
+) -> tuple[str, int] | None:
+    digest = authority.get("candidate_digest")
+    generation = authority.get("candidate_generation")
+    if (
+        not isinstance(digest, str)
+        or isinstance(generation, bool)
+        or not isinstance(generation, int)
+        or generation < 0
+    ):
+        return None
+    return digest, generation
+
+
 def _validated_checkpoint(checkpoint: dict[str, object]) -> dict[str, object]:
     from controller.mpc_snapshot import migrate_grey_learning_snapshot
 
@@ -249,27 +264,63 @@ def build_learning_report(
 
     identities = checkpoint_map.get("identities")
     identities = identities if isinstance(identities, Mapping) else {}
-    phase = activation.get("phase", live.get("activation_phase", "aborted"))
-    active_pair_digest = (
-        _pair_digest(activation, "candidate_pair") if phase == "active" else _pair_digest(activation, "incumbent_pair")
+    checkpoint_candidate_identity = _candidate_identity(identities)
+    live_candidate_identity = _candidate_identity(live)
+    activation_candidate_identity = _candidate_identity(activation)
+    current_candidate_identities = tuple(
+        identity
+        for identity in (
+            checkpoint_candidate_identity,
+            live_candidate_identity,
+        )
+        if identity is not None
     )
-    incumbent_digest = activation.get("incumbent_digest")
+    activation_matches_candidate = (
+        activation_candidate_identity is not None
+        and all(
+            activation_candidate_identity == identity
+            for identity in current_candidate_identities
+        )
+    )
+    activation_authority = (
+        activation
+        if not current_candidate_identities or activation_matches_candidate
+        else {}
+    )
+    phase = activation_authority.get(
+        "phase",
+        live.get("activation_phase", "aborted"),
+    )
+    active_pair_digest = (
+        _pair_digest(activation_authority, "candidate_pair")
+        if phase == "active"
+        else _pair_digest(activation_authority, "incumbent_pair")
+    )
+    incumbent_digest = activation_authority.get("incumbent_digest")
     if not isinstance(incumbent_digest, str):
-        incumbent_digest = _pair_digest(activation, "incumbent_pair")
+        incumbent_digest = _pair_digest(activation_authority, "incumbent_pair")
     if not isinstance(incumbent_digest, str):
         incumbent_digest = identities.get("active_digest")
-    candidate_digest = activation.get("candidate_digest")
+    candidate_digest = activation_authority.get("candidate_digest")
     if not isinstance(candidate_digest, str):
         candidate_digest = identities.get("candidate_digest")
+    if not isinstance(candidate_digest, str):
+        candidate_digest = live.get("candidate_digest")
     active_digest = (
         active_pair_digest
         if isinstance(active_pair_digest, str)
         else (candidate_digest if phase == "active" else incumbent_digest)
     )
-    role_generation = activation.get("role_generation", identities.get("active_generation"))
-    candidate_generation = activation.get(
+    role_generation = activation_authority.get(
+        "role_generation",
+        identities.get("active_generation", live.get("role_generation")),
+    )
+    candidate_generation = activation_authority.get(
         "candidate_generation",
-        identities.get("candidate_generation"),
+        identities.get(
+            "candidate_generation",
+            live.get("candidate_generation"),
+        ),
     )
 
     live_role = live.get("role_generation")
@@ -290,7 +341,7 @@ def build_learning_report(
         errors.append("live-checkpoint-digest-mismatch")
 
     live_origin = live.get("origin")
-    durable_origin = activation.get("origin", checkpoint_map.get("origin"))
+    durable_origin = activation_authority.get("origin", checkpoint_map.get("origin"))
     try:
         normalized_live_origin = (
             None if live_origin is None else _enum_value(live_origin, CandidateOrigin, "live candidate origin")
@@ -308,6 +359,21 @@ def build_learning_report(
     except ValueError:
         origin = None
         errors.append("candidate-origin-invalid")
+
+    durable_policy = activation_authority.get("policy", checkpoint_map.get("policy"))
+    try:
+        candidate_policy = (
+            None
+            if durable_policy is None
+            else _enum_value(
+                durable_policy,
+                ActivationPolicy,
+                "durable candidate policy",
+            )
+        )
+    except ValueError:
+        candidate_policy = None
+        errors.append("candidate-policy-invalid")
 
     checks_input = live.get("checks", {})
     checks: dict[str, str] = {}
@@ -380,6 +446,7 @@ def build_learning_report(
             errors.append("assessment-candidate-origin-mismatch")
         else:
             assessment_policy = assessment.policy
+            candidate_policy = assessment_policy
     if errors and not schema_invalidated:
         status = LearningStatus.ERROR.value
     if (
@@ -397,7 +464,10 @@ def build_learning_report(
     ):
         status = LearningStatus.READY_FOR_REVIEW.value
     blockers = list(dict.fromkeys([*rejection_reasons, *errors]))
-    decision_id = activation.get("evidence_decision_id", activation.get("decision_id"))
+    decision_id = activation_authority.get(
+        "evidence_decision_id",
+        activation_authority.get("decision_id"),
+    )
     if not isinstance(decision_id, str) and assessment is not None:
         decision_id = assessment.decision_id
     if not isinstance(decision_id, str) and confidence is not None:
@@ -434,7 +504,7 @@ def build_learning_report(
         "candidate": {
             "digest": candidate_digest,
             "origin": origin,
-            "policy": assessment_policy,
+            "policy": candidate_policy,
             "role_generation": role_generation,
             "candidate_generation": candidate_generation,
             "parameters": candidate_checkpoint.get("parameters"),
@@ -444,7 +514,7 @@ def build_learning_report(
             "assessment": None if assessment is None else _json_value(assessment),
         },
         "activation": {
-            **activation,
+            **activation_authority,
             "phase": phase,
             "reason": None if lifecycle is None else lifecycle.reason,
             "pending_persistence": pending_persistence,
@@ -459,7 +529,10 @@ def build_learning_report(
             "active_generation": role_generation,
             "candidate_digest": candidate_digest,
             "candidate_generation": candidate_generation,
-            "rollback_digest": _pair_digest(activation, "rollback_pair") or identities.get("rollback_digest"),
+            "rollback_digest": (
+                _pair_digest(activation_authority, "rollback_pair")
+                or identities.get("rollback_digest")
+            ),
             "rollback_generation": identities.get("rollback_generation"),
         },
         "calibration": {

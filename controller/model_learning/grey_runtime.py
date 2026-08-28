@@ -156,6 +156,8 @@ class GreyLearningRuntime:
         self._teardown_decision_id: str | None = None
         self._checkpoint_challenger: dict[str, JsonValue] | None = None
         self._checkpoint_candidate_identity: tuple[str, int] | None = None
+        self._checkpoint_preparation: CandidatePreparation | None = None
+        self._checkpoint_preparation_key: tuple[FitRequest, str] | None = None
         self._checkpoint_cook_refit: tuple[Literal["idle", "succeeded", "failed"], str | None] = ("idle", None)
         self._checkpoint_activation: tuple[Literal["prepared", "active", "aborted"], bool, bool] = (
             "aborted",
@@ -570,6 +572,54 @@ class GreyLearningRuntime:
             )
         )
 
+    def _adopt_prepared_checkpoint_lineage(
+        self,
+        preparation: CandidatePreparation,
+    ) -> None:
+        """Bind one accepted fit's checkpoint lineage and advance it once."""
+
+        with self._learning_lock:
+            request = preparation.candidate.request
+            descriptor = self._prepared_candidate_descriptor(preparation)
+            identity = (descriptor.model_digest, descriptor.candidate_generation)
+            preparation_key = (request, descriptor.model_digest)
+            candidate_config = preparation.candidate.config
+            candidate_parameters = {
+                key: (
+                    candidate_config.delay_states
+                    if key == "n_delay"
+                    else getattr(candidate_config, key)
+                )
+                for key in self.MODEL_PARAM_KEYS
+            }
+            if preparation_key != self._checkpoint_preparation_key:
+                self._model_revision += 1
+            self._checkpoint_preparation = preparation
+            self._checkpoint_preparation_key = preparation_key
+            self._checkpoint_candidate_identity = identity
+            self._checkpoint_origin = request.origin
+            self._checkpoint_policy = self._policy_for_learning_origin(
+                request.origin
+            )
+            self._checkpoint_challenger = {
+                "parameters": _snapshot.normalize_grey_parameters(
+                    candidate_parameters
+                ),
+                "metadata": {
+                    "rmse": preparation.candidate.rmse_c,
+                    "samples": preparation.candidate.sample_count,
+                    "band_c": list(preparation.candidate.temperature_band_c),
+                    "nfev": preparation.candidate.nfev,
+                },
+            }
+            self._teardown_fit_window = request.window
+            self._teardown_candidate_descriptor = descriptor
+
+    def _clear_prepared_checkpoint_lineage(self) -> None:
+        with self._learning_lock:
+            self._checkpoint_preparation = None
+            self._checkpoint_preparation_key = None
+
     def _persist_reviewed_candidate_checkpoint(self, evaluation, preparation):
         request = getattr(getattr(preparation, "candidate", None), "request", None)
         if (
@@ -580,6 +630,7 @@ class GreyLearningRuntime:
             return
         if not isinstance(preparation, CandidatePreparation):
             raise RuntimeError("reviewed-candidate-preparation-invalid")  # noqa: TRY004  invariant on already-normalized input, not caller type validation
+        self._adopt_prepared_checkpoint_lineage(preparation)
         candidate_descriptor = self._prepared_candidate_descriptor(preparation)
         active_descriptor = self._active_pair().descriptor
         if (
@@ -1007,6 +1058,7 @@ class GreyLearningRuntime:
                 prepared = getattr(delivery, "preparation", getattr(delivery, "prepared", None))
                 if prepared is not None and prepared.accepted:
                     self._learning_candidate_pair = prepared.candidate_pair
+                    self._adopt_prepared_checkpoint_lineage(prepared)
 
         if delivery is not None and getattr(delivery, "message", None) is not None:
             request = delivery.message.request
@@ -1221,21 +1273,24 @@ class GreyLearningRuntime:
             retain_current=True,
         )
         self._sync_configuration()
-        self._checkpoint_origin = origin
-        self._checkpoint_policy = policy
-        self._checkpoint_rollback_identity = (
-            previous.descriptor.model_digest,
-            previous.descriptor.role_generation,
-        )
-        self._checkpoint_challenger = None
-        self._checkpoint_candidate_identity = None
-        self._teardown_candidate = None
-        self._teardown_candidate_descriptor = None
-        self._teardown_fit_window = None
-        self._teardown_decision_id = None
-        self._checkpoint_activation = ("aborted", False, False)
-        self._checkpoint_failure = None
-        self._model_meta = adopted_metadata
+        with self._learning_lock:
+            self._checkpoint_preparation = None
+            self._checkpoint_preparation_key = None
+            self._checkpoint_origin = origin
+            self._checkpoint_policy = policy
+            self._checkpoint_rollback_identity = (
+                previous.descriptor.model_digest,
+                previous.descriptor.role_generation,
+            )
+            self._checkpoint_challenger = None
+            self._checkpoint_candidate_identity = None
+            self._teardown_candidate = None
+            self._teardown_candidate_descriptor = None
+            self._teardown_fit_window = None
+            self._teardown_decision_id = None
+            self._checkpoint_activation = ("aborted", False, False)
+            self._checkpoint_failure = None
+            self._model_meta = adopted_metadata
 
     def get_model_snapshot(self):
         """Return the complete grey-only v4 checkpoint; process jobs stay live-only."""
@@ -1244,9 +1299,12 @@ class GreyLearningRuntime:
             if self._model_meta is None
             else self._model_meta
         )
+        with self._learning_lock:
+            checkpoint_preparation = self._checkpoint_preparation
+            model_revision = self._model_revision
         try:
             snapshot = _snapshot.new_grey_learning_snapshot(
-                revision=int(self._model_revision),
+                revision=int(model_revision),
                 parameters=self._snapshot_parameters(),
                 metadata=metadata,
             )
@@ -1264,9 +1322,12 @@ class GreyLearningRuntime:
             else:
                 rollback_digest = None
                 rollback_generation = None
-            learning = self._learning
-            prepared = None if learning is None else learning.prepared
-            if candidate is None and prepared is not None:
+            prepared = checkpoint_preparation
+            if (
+                candidate is None
+                and prepared is not None
+                and self._teardown_candidate is None
+            ):
                 candidate_config = prepared.candidate.config
                 candidate_parameters = {
                     key: (candidate_config.delay_states if key == "n_delay" else getattr(candidate_config, key))
@@ -1317,15 +1378,28 @@ class GreyLearningRuntime:
                     else active_record.decision_id
                 ),
             }
+            prepared_request = (
+                None
+                if (
+                    candidate is not None
+                    or prepared is None
+                    or self._teardown_candidate is not None
+                )
+                else prepared.candidate.request
+            )
             checkpoint_origin = (
                 CandidateOrigin.OPERATOR_CALIBRATION
                 if self._teardown_candidate is not None
+                else prepared_request.origin
+                if prepared_request is not None
                 else self._checkpoint_origin
             )
             snapshot["origin"] = checkpoint_origin.value if checkpoint_origin is not None else live["origin"]
             snapshot["policy"] = (
                 ActivationPolicy.OPERATOR_REVIEWED.value
                 if self._teardown_candidate is not None
+                else self._policy_for_learning_origin(prepared_request.origin).value
+                if prepared_request is not None
                 else self._checkpoint_policy.value
                 if self._checkpoint_policy is not None
                 else inert_record.policy.value
@@ -1610,6 +1684,7 @@ class GreyLearningRuntime:
             None if rollback_digest is None or rollback_generation is None else (rollback_digest, rollback_generation)
         )
         self._checkpoint_challenger = restored_challenger
+        self._clear_prepared_checkpoint_lineage()
         self._teardown_candidate = None
         self._teardown_candidate_descriptor = restored_candidate_descriptor
         self._teardown_fit_window = restored_window
@@ -1803,12 +1878,15 @@ class GreyLearningRuntime:
             role_generation=identity.role_generation + 1,
         )
         descriptor = self._pair_factory.descriptor(candidate_configuration)
-        self._teardown_fit_window = window
         if origin is CandidateOrigin.OPERATOR_CALIBRATION:
             try:
                 self._persist_operator_teardown_authority(window, descriptor)
-                self._teardown_candidate = success
-                self._teardown_candidate_descriptor = descriptor
+                with self._learning_lock:
+                    self._checkpoint_preparation = None
+                    self._checkpoint_preparation_key = None
+                    self._teardown_fit_window = window
+                    self._teardown_candidate = success
+                    self._teardown_candidate_descriptor = descriptor
                 return TeardownRefitResult.ready_for_review(
                     verdict.reason,
                     candidate_digest=descriptor.model_digest,

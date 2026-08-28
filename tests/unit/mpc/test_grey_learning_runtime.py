@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from types import SimpleNamespace
 
 import pytest
@@ -412,6 +412,23 @@ def _reviewed_candidate(harness: _Harness):
     return preparation, evaluation, components
 
 
+def _stage_passive_checkpoint_preparation(
+    harness: _Harness,
+) -> CandidatePreparation:
+    reviewed, _evaluation, _components = _reviewed_candidate(harness)
+    request = replace(
+        reviewed.candidate.request,
+        origin=CandidateOrigin.PASSIVE_ONLINE,
+    )
+    preparation = replace(
+        reviewed,
+        candidate=replace(reviewed.candidate, request=request),
+    )
+    harness.runtime._adopt_prepared_checkpoint_lineage(preparation)
+    harness.runtime._close_prepared_candidate(preparation)
+    return preparation
+
+
 def _frame(sequence: int = 0) -> FrameObservation:
     return FrameObservation(
         frame_start_s=sequence * 25.0,
@@ -437,6 +454,104 @@ def _frame(sequence: int = 0) -> FrameObservation:
         role_generation=0,
         observation_sequence=sequence,
     )
+
+
+def test_accepted_fit_lineage_advances_once_per_request() -> None:
+    harness = _harness()
+    reviewed, _evaluation, components = _reviewed_candidate(harness)
+    request = replace(
+        reviewed.candidate.request,
+        origin=CandidateOrigin.PASSIVE_ONLINE,
+    )
+    preparation = replace(
+        reviewed,
+        candidate=replace(reviewed.candidate, request=request),
+    )
+
+    def delivery_for(candidate_preparation):
+        return SimpleNamespace(
+            message=SimpleNamespace(
+                request=candidate_preparation.candidate.request,
+                outcome=SimpleNamespace(config=candidate_preparation.candidate.config),
+            ),
+            stale_reasons=(),
+            blockers=(),
+            preparation=candidate_preparation,
+        )
+
+    class _Learning:
+        def __init__(self):
+            self.prepared = preparation
+            self.pending_request = request
+            self.handoff = None
+            self.worker = SimpleNamespace(busy=False)
+            self.delivery = delivery_for(preparation)
+
+        def poll_fit_off_path(self, **_kwargs):
+            return self.delivery
+
+        def evaluate_ready_off_path(self):
+            return None
+
+        def close(self):
+            components.estimator.close()
+            components.controller.close()
+
+    learning = _Learning()
+    harness.runtime._learning = learning
+    before = harness.runtime.get_model_snapshot()
+
+    harness.runtime.poll_learning_off_path(
+        live_origin=CandidateOrigin.PASSIVE_ONLINE,
+    )
+    first = harness.runtime.get_model_snapshot()
+    harness.runtime.poll_learning_off_path(
+        live_origin=CandidateOrigin.PASSIVE_ONLINE,
+    )
+    second = harness.runtime.get_model_snapshot()
+
+    next_request = replace(
+        request,
+        request_id="d" * 64,
+        window=replace(
+            request.window,
+            cook_id="next-cook",
+            first_observation_sequence=1,
+            last_observation_sequence=120,
+        ),
+    )
+    next_preparation = replace(
+        preparation,
+        candidate=replace(preparation.candidate, request=next_request),
+    )
+    learning.prepared = next_preparation
+    learning.pending_request = next_request
+    learning.delivery = delivery_for(next_preparation)
+    harness.runtime.poll_learning_off_path(
+        live_origin=CandidateOrigin.PASSIVE_ONLINE,
+    )
+    third = harness.runtime.get_model_snapshot()
+    harness.runtime.poll_learning_off_path(
+        live_origin=CandidateOrigin.PASSIVE_ONLINE,
+    )
+    fourth = harness.runtime.get_model_snapshot()
+
+    assert first == second
+    assert first["revision"] == before["revision"] + 1
+    assert first["origin"] == CandidateOrigin.PASSIVE_ONLINE.value
+    assert first["policy"] == ActivationPolicy.PASSIVE_AUTO.value
+    assert first["window"] == asdict(request.window)
+    assert first["identities"]["candidate_digest"] == preparation.candidate_digest
+    assert first["identities"]["candidate_generation"] == request.candidate_generation
+    assert third == fourth
+    assert third["revision"] == first["revision"] + 1
+    assert third["window"] == asdict(next_request.window)
+    assert third["identities"]["candidate_digest"] == preparation.candidate_digest
+    assert third["identities"]["candidate_generation"] == request.candidate_generation
+    harness.runtime.close()
+    assert components.estimator.closed
+    assert components.controller.closed
+    harness.activation.close()
 
 
 def test_queued_fit_lifecycle_is_memory_only_until_off_path_poll(monkeypatch) -> None:
@@ -547,6 +662,7 @@ def test_completed_cook_refit_adopts_validated_pair_for_next_cook(
         fit_worker_factory=_SuccessfulWorker,
         estimator_kind=estimator_kind,
     )
+    _stage_passive_checkpoint_preparation(harness)
     incumbent = harness.activation.active_pair
     for sequence in range(120):
         harness.runtime.observe_frame(_frame(sequence))
@@ -559,12 +675,21 @@ def test_completed_cook_refit_adopts_validated_pair_for_next_cook(
     assert harness.activation.rollback_pair is incumbent
     assert not incumbent.closed
     assert _SuccessfulWorker.instances[-1].closed
+    snapshot = harness.runtime.get_model_snapshot()
+    assert harness.runtime._checkpoint_preparation is None
+    assert harness.runtime._checkpoint_preparation_key is None
+    assert snapshot["challenger"] is None
+    assert snapshot["window"] is None
+    assert snapshot["identities"]["candidate_digest"] is None
+    assert snapshot["origin"] == CandidateOrigin.COOK_REFIT.value
+    assert snapshot["policy"] == ActivationPolicy.COOK_REFIT.value
     harness.runtime.close()
     harness.activation.close()
 
 
 def test_operator_probe_refit_persists_authority_without_installing_pair() -> None:
     harness = _harness(fit_worker_factory=_SuccessfulWorker)
+    _stage_passive_checkpoint_preparation(harness)
     harness.runtime.bind_learning_identity("session", "cook", 0)
     incumbent = harness.activation.active_pair
     for sequence in range(120):
@@ -590,6 +715,11 @@ def test_operator_probe_refit_persists_authority_without_installing_pair() -> No
     assert snapshot["challenger"] is not None
     assert snapshot["origin"] == CandidateOrigin.OPERATOR_CALIBRATION.value
     assert snapshot["policy"] == ActivationPolicy.OPERATOR_REVIEWED.value
+    assert harness.runtime._checkpoint_preparation is None
+    assert harness.runtime._checkpoint_preparation_key is None
+    assert snapshot["challenger"]["parameters"]["C_c"] == 420.0
+    assert snapshot["window"]["session_id"] == "session"
+    assert snapshot["window"]["cook_id"] == "cook"
     assert harness.persistence.confidence[0].payload.blocked is False
     assert any(record.payload.policy == "operator-reviewed" for record in harness.persistence.evidence)
     snapshot["identities"]["candidate_digest"] = "f" * 64
@@ -1051,7 +1181,7 @@ def test_reviewed_checkpoint_is_durable_idempotent_and_confidence_ordered(
     assert assessment.kind.value == "candidate_assessment"
     assert assessment.payload.decision_id == evaluation.decision_id
     assert confidence.payload.decision_id == evaluation.decision_id
-    assert harness.runtime.model_authority()[0] == 1
+    assert harness.runtime.model_authority()[0] == 2
     assert store.snapshots[0][1]["evidence"]["confidence_decision_id"] == (evaluation.decision_id)
     assert store.snapshots[0][1]["identities"]["candidate_digest"] == (evaluation.challenger_digest)
     harness.runtime.close()

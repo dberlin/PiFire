@@ -25,6 +25,7 @@ from controller.model_learning.activation import (
     GreyControlPairDescriptor,
 )
 from controller.model_learning.contracts import (
+    ActivationPolicy,
     CandidateOrigin,
     CheckStatus,
     FitRequest,
@@ -246,6 +247,99 @@ def test_report_serializes_locked_fit_and_check_statuses_without_linear_model_fi
     assert "state_alignment" not in candidate
 
 
+def test_report_projects_durable_candidate_policy_before_assessment() -> None:
+    activation = _activation(phase="aborted")
+    activation["origin"] = CandidateOrigin.PASSIVE_ONLINE.value
+    activation["policy"] = ActivationPolicy.PASSIVE_AUTO.value
+    live = _live(status=LearningStatus.EVALUATING)
+    live["origin"] = CandidateOrigin.PASSIVE_ONLINE
+
+    payload = build_learning_report(
+        (),
+        activation_state=activation,
+        live_status=live,
+        calibration_command_high_water=0,
+    ).as_dict()
+
+    candidate = _section(payload, "candidate")
+    assert candidate["origin"] == CandidateOrigin.PASSIVE_ONLINE.value
+    assert candidate["policy"] == ActivationPolicy.PASSIVE_AUTO.value
+
+
+def test_prior_active_activation_does_not_override_new_evaluating_candidate(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        report_module,
+        "_validated_checkpoint",
+        lambda checkpoint: checkpoint,
+    )
+    new_candidate = "c" * 64
+    activation = _activation(phase="active")
+    activation["policy"] = ActivationPolicy.OPERATOR_REVIEWED.value
+    live = _live(status=LearningStatus.EVALUATING)
+    live.update(
+        {
+            "activation_phase": "aborted",
+            "candidate_digest": new_candidate,
+            "candidate_generation": 10,
+            "origin": CandidateOrigin.PASSIVE_ONLINE,
+        }
+    )
+    checkpoint = {
+        "origin": CandidateOrigin.PASSIVE_ONLINE.value,
+        "policy": ActivationPolicy.PASSIVE_AUTO.value,
+        "identities": {
+            "active_digest": _INCUMBENT,
+            "active_generation": 4,
+            "candidate_digest": new_candidate,
+            "candidate_generation": 10,
+            "rollback_digest": None,
+            "rollback_generation": None,
+        },
+        "challenger": {
+            "parameters": {
+                "C_c": 420.0,
+                "K_Q": 400.0,
+                "T_amb": 20.0,
+                "h_amb": 0.6,
+                "n_delay": 8,
+                "sigma": 1.4e-9,
+                "theta": 55.0,
+            },
+            "metadata": {"rmse": 1.0},
+        },
+        "window": {
+            "session_id": "new-session",
+            "cook_id": "new-cook",
+            "first_observation_sequence": 1,
+            "last_observation_sequence": 120,
+            "configuration_digest": "d" * 64,
+            "incumbent_digest": _INCUMBENT,
+            "role_generation": 4,
+        },
+    }
+
+    payload = build_learning_report(
+        (),
+        activation_state=activation,
+        checkpoint=checkpoint,
+        live_status=live,
+        calibration_command_high_water=0,
+    ).as_dict()
+
+    candidate = _section(payload, "candidate")
+    projected_activation = _section(payload, "activation")
+    assert payload["status"] == LearningStatus.EVALUATING.value
+    assert payload["blockers"] == []
+    assert candidate["digest"] == new_candidate
+    assert candidate["candidate_generation"] == 10
+    assert candidate["origin"] == CandidateOrigin.PASSIVE_ONLINE.value
+    assert candidate["policy"] == ActivationPolicy.PASSIVE_AUTO.value
+    assert projected_activation["phase"] == "aborted"
+    assert payload["active_model"]["digest"] == _INCUMBENT
+
+
 def test_prepared_activation_is_reported_as_activating_not_active() -> None:
     payload = build_learning_report(
         (),
@@ -358,20 +452,9 @@ def test_invalid_live_checkpoint_generation_fails_closed_visibly() -> None:
     assert payload["errors"] == ["live-role-generation-mismatch"]
 
 
-@pytest.mark.parametrize(
-    ("field", "value", "error"),
-    (
-        ("candidate_digest", "c" * 64, "live-candidate-digest-mismatch"),
-        ("origin", CandidateOrigin.COOK_REFIT, "live-candidate-origin-mismatch"),
-    ),
-)
-def test_inconsistent_live_candidate_authority_fails_closed_visibly(
-    field: str,
-    value: object,
-    error: str,
-) -> None:
+def test_inconsistent_live_candidate_origin_fails_closed_visibly() -> None:
     live = _live()
-    live[field] = value
+    live["origin"] = CandidateOrigin.COOK_REFIT
 
     payload = build_learning_report(
         (),
@@ -381,7 +464,7 @@ def test_inconsistent_live_candidate_authority_fails_closed_visibly(
     ).as_dict()
 
     assert payload["status"] == "error"
-    assert payload["errors"] == [error]
+    assert payload["errors"] == ["live-candidate-origin-mismatch"]
 
 
 def test_retired_evidence_is_counted_only_as_audit_history() -> None:
@@ -664,7 +747,7 @@ def test_real_operator_evaluation_persists_reviewed_assessment_for_restart_repor
     controller.close()
     checkpoint = ControllerModelStore().load("mpc")
     assert checkpoint is not None
-    assert checkpoint["revision"] == 1
+    assert checkpoint["revision"] == 2
     assert checkpoint["active_pair"] == incumbent.to_dict()
     assert checkpoint["candidate_pair"] == candidate_descriptor.to_dict()
     report, records = backend_learning_report()
