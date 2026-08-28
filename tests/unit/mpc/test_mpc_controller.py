@@ -573,6 +573,11 @@ def test_rejected_real_fit_candidate_is_released_and_a_later_fit_can_prepare(mon
 
         def receive(self, *, timeout_s):
             assert timeout_s == 0.0
+            temperatures = tuple(
+                float(value)
+                for segment in self.job.segments
+                for value in segment.scored_temperature_c
+            )
             return GreyFitMessage(
                 request=self.job.request,
                 outcome=GreyFitSuccess(
@@ -581,11 +586,8 @@ def test_rejected_real_fit_candidate_is_released_and_a_later_fit_can_prepare(mon
                     rmse_c=1.0,
                     max_error_c=2.0,
                     identifiability=1.0,
-                    sample_count=len(self.job.observations),
-                    temperature_band_c=(
-                        self.job.observations[0].temp_c,
-                        self.job.observations[-1].temp_c,
-                    ),
+                    sample_count=len(temperatures),
+                    temperature_band_c=(min(temperatures), max(temperatures)),
                     nfev=4,
                 ),
                 worker_start_method="spawn",

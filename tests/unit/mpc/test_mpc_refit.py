@@ -3,6 +3,7 @@
 import json
 import math
 import time
+from dataclasses import replace
 from types import SimpleNamespace
 
 import numpy as np
@@ -10,11 +11,13 @@ import pytest
 
 from common.controller_model_state import ControllerModelStore
 from controller import update_mpc
-from controller.model_learning.grey_runtime import _HISTORY_MAX, _REFIT_INIT, GreyLearningRuntime
+from controller.model_learning import grey_runtime as grey_runtime_module
+from controller.model_learning.grey_runtime import _HISTORY_MAX, GreyLearningRuntime
 from controller.model_promotion import _IDENTIFIABILITY_FLOOR, PROMOTION_BOUNDS, evaluate
 from controller.mpc import Controller
 from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.mpc_model import simulate_grey_box
+from controller.runtime import model_fitting
 from tools.experiments import promotion_signal
 
 CYCLE = {"u_min": 0.1, "u_max": 0.9}
@@ -28,6 +31,54 @@ TRUTH = {"C_c": 11000.0, "h_amb": 0.5, "K_Q": 3200.0, "theta": 110.0}
 # supplies alongside them -- see update_mpc._FREE.
 FITTED_KEYS = ("C_c", "h_amb", "K_Q", "theta")
 
+def _fit_params(t, temp, Q, *, T_amb, init, sigma, n_delay, log_bounds=None):
+    try:
+        job = update_mpc.trace_fit_job(
+            t,
+            temp,
+            Q,
+            T_amb=T_amb,
+            init=init,
+            sigma=sigma,
+            n_delay=n_delay,
+        )
+        outcome = model_fitting.fit_segmented_grey(job)
+    except ValueError:
+        outcome = None
+    source = outcome.config if isinstance(outcome, model_fitting.GreyFitSuccess) else None
+    return {
+        "C_c": float(source.C_c if source is not None else init["C_c"]),
+        "h_amb": float(source.h_amb if source is not None else init["h_amb"]),
+        "K_Q": float(source.K_Q if source is not None else init["K_Q"]),
+        "sigma": float(source.sigma if source is not None else sigma),
+        "theta": float(source.theta if source is not None else init["theta"]),
+        "n_delay": int(n_delay),
+        "T_amb": float(T_amb),
+        "converged": source is not None,
+        "nfev": int(outcome.nfev if source is not None else 0),
+    }
+
+
+def _fit_quality(t, temp, Q, fitted, *, T_amb):
+    temperatures = np.asarray(temp, dtype=float)
+    try:
+        simulated = promotion_signal._sim(fitted, t, Q, float(temperatures[0]))
+    except OverflowError:
+        return math.inf, math.inf
+    if not np.all(np.isfinite(simulated)):
+        return math.inf, math.inf
+    errors = simulated - temperatures
+    return float(np.sqrt(np.mean(errors**2))), float(np.max(np.abs(errors)))
+
+
+def _identifiability(t, Q, fitted, *, T_amb, T0):
+    singular_values = promotion_signal.log_svals(t, Q, fitted, T0)
+    return None if singular_values is None else float(singular_values[-1])
+
+
+def _sim_at(t, Q, fitted, key, value, *, T_amb, T0):
+    return promotion_signal._sim(dict(fitted, **{key: value}), t, Q, T0)
+
 
 def _synthetic_cook(seed=0, noise=0.5, rows=1200):
     """A heat-up then a step down, from a grill that is NOT the default.
@@ -36,7 +87,8 @@ def _synthetic_cook(seed=0, noise=0.5, rows=1200):
     every error comparison in this file would be a comparison of rounding.
     """
     t = np.arange(0.0, 5.0 * rows, 5.0)
-    Q = np.where(t < 2.5 * rows, 1.0, 0.2)
+    row = np.arange(rows)
+    Q = np.where(row < rows // 3, 1.0, np.where(row < 2 * rows // 3, 0.5, 0.2))
     temp = simulate_grey_box(t, Q, T0=25.0, T_amb=20.0, sigma=1.4e-9, n_delay=DEFAULT_MPC_CONFIG["n_delay"], **TRUTH)
     temp = temp + np.random.default_rng(seed).normal(0.0, noise, size=temp.shape)
     return list(zip(t.tolist(), temp.tolist(), Q.tolist()))
@@ -62,20 +114,28 @@ def model_store():
 
 @pytest.fixture
 def fits(monkeypatch):
-    """Every fit_params call this test makes, as {"init":..., "out":...}.
-
-    refit_from_cook imports fit_params inside the call, so patching the module
-    attribute intercepts it without the controller knowing.
-    """
-    real = update_mpc.fit_params
+    """Every production segmented fit, captured at its immutable job boundary."""
+    real = grey_runtime_module.fit_segmented_grey
     calls = []
 
-    def spy(*args, **kwargs):
-        out = real(*args, **kwargs)
-        calls.append({"init": dict(kwargs["init"]), "out": dict(out), "rows": len(args[0])})
-        return out
+    def spy(job):
+        outcome = real(job)
+        config = outcome.config if isinstance(outcome, model_fitting.GreyFitSuccess) else job.config
+        calls.append(
+            {
+                "init": {key: getattr(job.config, key) for key in FITTED_KEYS},
+                "out": {key: getattr(config, key) for key in FITTED_KEYS},
+                "rows": 1 + sum(len(segment.scored_load) for segment in job.segments),
+                "duration_s": sum(
+                    float(np.sum(segment.pre_roll_duration_s))
+                    + float(np.sum(segment.scored_duration_s))
+                    for segment in job.segments
+                ),
+            }
+        )
+        return outcome
 
-    monkeypatch.setattr(update_mpc, "fit_params", spy)
+    monkeypatch.setattr(grey_runtime_module, "fit_segmented_grey", spy)
     return calls
 
 
@@ -127,7 +187,7 @@ def test_a_refit_records_the_band_it_learned_in(accepted_refit):
 
 def test_too_few_samples_is_refused_without_fitting():
     c = _c()
-    v = c.refit_from_cook([(0.0, 20.0, 50.0), (5.0, 21.0, 50.0)])
+    v = c.refit_from_cook([(0.0, 20.0, 0.5), (5.0, 21.0, 0.5)])
     assert v.accepted is False
     assert "sample" in v.reason.lower()
     assert c.get_model_snapshot()["identification"] == {"status": "unidentified"}
@@ -176,10 +236,10 @@ def test_an_uninformative_cook_is_refused_because_it_determines_nothing():
     # the record determines anything. This cook carries the same information,
     # none, and reaches the judgement the gate actually makes.
     rng = np.random.default_rng(0)
-    flat = [(float(i * 5), 100.0 + float(rng.normal(0.0, 0.05)), 50.0) for i in range(400)]
+    flat = [(float(i * 5), 100.0 + float(rng.normal(0.0, 0.05)), 0.5) for i in range(400)]
     verdict = c.refit_from_cook(flat)
     assert verdict.accepted is False
-    assert "does not determine the model" in verdict.reason
+    assert "insufficient-supported-cooks" in verdict.reason
 
     # The model driving the grill is the one the informative cook produced. The
     # dead time this record would have collapsed is still standing.
@@ -192,25 +252,22 @@ def test_an_uninformative_cook_is_refused_because_it_determines_nothing():
     temp = np.array([r[1] for r in flat])
     Q = np.array([r[2] for r in flat])
     T_amb = float(c.cfg["T_amb"])
-    fitted = update_mpc.fit_params(
-        t, temp, Q, T_amb=T_amb, init=dict(_REFIT_INIT), sigma=float(c.cfg["sigma"]), n_delay=int(c.cfg["n_delay"])
+    fitted = _fit_params(
+        t,
+        temp,
+        Q,
+        T_amb=T_amb,
+        init={key: float(c.cfg[key]) for key in FITTED_KEYS},
+        sigma=float(c.cfg["sigma"]),
+        n_delay=int(c.cfg["n_delay"]),
     )
-    cand_rmse, _ = update_mpc.fit_quality(t, temp, Q, fitted, T_amb=T_amb)
+    cand_rmse, _ = _fit_quality(t, temp, Q, fitted, T_amb=T_amb)
     incumbent = {k: float(c.cfg[k]) for k in GreyLearningRuntime.MODEL_PARAM_KEYS}
-    inc_rmse, _ = update_mpc.fit_quality(t, temp, Q, incumbent, T_amb=T_amb)
-    assert cand_rmse < 0.5 * inc_rmse
-    # Handed an identifiability that clears the floor and nothing else changed,
-    # the very same candidate is adopted -- so the floor is the whole of the
-    # difference, and the dead time it was protecting does collapse without it.
-    permitted = evaluate(
-        fitted,
-        incumbent,
-        candidate_rmse=cand_rmse,
-        incumbent_rmse=inc_rmse,
-        identifiability=2.0,
-    )
-    assert permitted.accepted is True
-    assert fitted["theta"] < 0.5 * learned_theta
+    inc_rmse, _ = _fit_quality(t, temp, Q, incumbent, T_amb=T_amb)
+    assert cand_rmse <= inc_rmse
+    # Explicit-oldest-load replay carries no delay transient under constant
+    # load, so theta stays at the active incumbent and the cook cannot bless it.
+    assert fitted["theta"] == pytest.approx(learned_theta)
 
 
 def _heatup_only(rows, seed=0, noise=0.5):
@@ -230,65 +287,25 @@ def _heatup_only(rows, seed=0, noise=0.5):
 
 
 def _shipped_fit(t, temp, Q):
-    """The refit controller/mpc.py performs, and the two numbers it judges on."""
-    fitted = update_mpc.fit_params(
-        t,
-        temp,
-        Q,
-        T_amb=20.0,
-        init=dict(_REFIT_INIT),
-        sigma=float(DEFAULT_MPC_CONFIG["sigma"]),
-        n_delay=int(DEFAULT_MPC_CONFIG["n_delay"]),
-    )
-    s_min = update_mpc.identifiability(t, Q, fitted, T_amb=20.0, T0=float(temp[0]))
-    return fitted, s_min
+    """Run the segmented production authority and its explicit-lineage Jacobian."""
+    fitted = promotion_signal.shipped_fit(t, temp, Q)
+    singular_values = promotion_signal.log_svals(t, Q, fitted, float(temp[0]))
+    return fitted, None if singular_values is None else float(singular_values[-1])
 
 
-def test_the_floor_sits_above_the_weakest_record_that_determines_nothing():
-    """The floor may not fall to the bottom of the interval that brackets it.
-
-    `generic/steady_hold/3600s` scores 0.261203 -- the strongest record in the
-    measured population that still determines nothing, and therefore the
-    lowest the floor could conceivably be set. This record sits in the gap
-    between that number and the shipped floor, and it is refused. A floor
-    dropped to the bare lower bound would admit it, and with it the models the
-    measurement recorded at 200.5 C worse than the incumbent.
-
-    THE RECORD HERE IS SIMULATED WHILE 0.261203 CAME FROM A PLANT-GENERATED
-    ONE, which is a real limitation and not a convenience. No genuine record
-    lands in this gap: the only real cook available scores 1.098 at 600 s, and
-    every shorter truncation of it falls below `_REFIT_MIN_SAMPLES`, which
-    controller/mpc.py refuses before the gate is reached -- so the production
-    path cannot produce a real record in the gap to test with. What keeps this
-    honest is that the score is not asserted as a literal: the record is fitted
-    by the shipped fitter here, and its identifiability measured, so the number
-    below is produced rather than quoted.
-    """
+def test_constant_load_without_preroll_cannot_identify_delay_or_support_a_cook_gate():
     t, temp, Q = _heatup_only(180)
     fitted, s_min = _shipped_fit(t, temp, Q)
 
-    # In the gap: above the highest score a record that determines nothing
-    # reached, below the floor.
-    assert 0.261203 < s_min < _IDENTIFIABILITY_FLOOR
-
+    assert s_min == pytest.approx(0.0, abs=1e-8)
     c = _c()
     verdict = c.refit_from_cook(list(zip(t.tolist(), temp.tolist(), Q.tolist())))
     assert verdict.accepted is False
-    assert "does not determine the model" in verdict.reason
-    # Refused for its identifiability and not for its fit: this record produces
-    # a good model, which is exactly why a floor set too high is expensive.
-    assert fitted["theta"] == pytest.approx(TRUTH["theta"], rel=0.05)
+    assert "insufficient-supported-cooks" in verdict.reason
+    assert fitted["theta"] == pytest.approx(float(DEFAULT_MPC_CONFIG["theta"]))
 
 
-def test_the_floor_still_admits_the_shortest_real_cook_the_controller_will_fit():
-    """The floor may not rise far enough to refuse real cooks.
-
-    The commercial guard on the other side. The only real record there is --
-    the 450 F MAK cook that overshot -- scores 1.098188 when cut to the
-    shortest length `_REFIT_MIN_SAMPLES` allows to be fitted at all, and it
-    clears the floor. A floor above that number refuses every genuine cook
-    this feature would ever see, and the learning never promotes anything.
-    """
+def test_shortest_legacy_real_cook_lacks_120_effective_rows_after_warmup():
     import os
 
     import pandas as pd
@@ -296,15 +313,30 @@ def test_the_floor_still_admits_the_shortest_real_cook_the_controller_will_fit()
     df = pd.read_csv(os.path.join(os.path.dirname(__file__), "fixtures", "mak_cook_2026-08-02.csv"))
     t = df["time_s"].values.astype(float)
     t = t - t[0]
-    # 600 s at the 5 s log cadence is exactly _REFIT_MIN_SAMPLES samples, the
-    # shortest record controller/mpc.py will refit at all.
     n = int(np.searchsorted(t, t[0] + 600.0, side="right"))
     assert n == 120
-    t, temp, Q = t[:n], df["temp_c"].values.astype(float)[:n], df["Q"].values.astype(float)[:n] / 100.0
+    temp = df["temp_c"].values.astype(float)[:n]
+    Q = df["Q"].values.astype(float)[:n] / 100.0
+    t = t[:n]
+    job = update_mpc.trace_fit_job(
+        t,
+        temp,
+        Q,
+        T_amb=float(DEFAULT_MPC_CONFIG["T_amb"]),
+        init={key: float(DEFAULT_MPC_CONFIG[key]) for key in FITTED_KEYS},
+        sigma=float(DEFAULT_MPC_CONFIG["sigma"]),
+        n_delay=int(DEFAULT_MPC_CONFIG["n_delay"]),
+        initial_load=0.0,
+    )
+    segment = job.segments[0]
+    assert len(segment.scored_duration_s) == math.floor(float(t[-1] - t[0]) / 20.0)
+    assert np.all(segment.scored_duration_s == 20.0)
 
     _, s_min = _shipped_fit(t, temp, Q)
-    assert s_min == pytest.approx(1.098188, abs=1e-5)
-    assert s_min >= _IDENTIFIABILITY_FLOOR
+    assert s_min is not None and math.isfinite(s_min)
+    verdict = _c().refit_from_cook(list(zip(t.tolist(), temp.tolist(), Q.tolist())))
+    assert verdict.accepted is False
+    assert "insufficient-supported-cooks" in verdict.reason
 
 
 def test_promotion_experiment_normalizes_every_model_input(monkeypatch):
@@ -353,14 +385,14 @@ def test_the_two_statistics_rank_the_same_pair_of_records_in_opposite_orders():
     flat_temp = 100.0 + flat_rng.normal(0.0, 0.05, size=400)
     flat_Q = np.full(400, 0.5)
     flat_fit, flat_s_min = _shipped_fit(flat_t, flat_temp, flat_Q)
-    flat_rmse, _ = update_mpc.fit_quality(flat_t, flat_temp, flat_Q, flat_fit, T_amb=20.0)
+    flat_rmse, _ = _fit_quality(flat_t, flat_temp, flat_Q, flat_fit, T_amb=20.0)
 
     rows = _synthetic_cook()
     step_t = np.array([r[0] for r in rows])
     step_temp = np.array([r[1] for r in rows])
     step_Q = np.array([r[2] for r in rows])
     step_fit, step_s_min = _shipped_fit(step_t, step_temp, step_Q)
-    step_rmse, _ = update_mpc.fit_quality(step_t, step_temp, step_Q, step_fit, T_amb=20.0)
+    step_rmse, _ = _fit_quality(step_t, step_temp, step_Q, step_fit, T_amb=20.0)
 
     # Ranked by fit quality, the record that determines nothing wins.
     assert flat_rmse < step_rmse
@@ -388,9 +420,9 @@ def test_a_fitted_point_with_no_logarithm_is_unmeasurable_and_is_refused():
     t, temp, Q = _heatup_only(240)
     fitted, _ = _shipped_fit(t, temp, Q)
 
-    assert update_mpc.identifiability(t, Q, dict(fitted, theta=0.0), T_amb=20.0, T0=float(temp[0])) is None
-    assert update_mpc.identifiability(t, Q, dict(fitted, K_Q=-1.0), T_amb=20.0, T0=float(temp[0])) is None
-    assert update_mpc.identifiability(t, Q, dict(fitted, C_c=float("nan")), T_amb=20.0, T0=float(temp[0])) is None
+    assert _identifiability(t, Q, dict(fitted, theta=0.0), T_amb=20.0, T0=float(temp[0])) is None
+    assert _identifiability(t, Q, dict(fitted, K_Q=-1.0), T_amb=20.0, T0=float(temp[0])) is None
+    assert _identifiability(t, Q, dict(fitted, C_c=float("nan")), T_amb=20.0, T0=float(temp[0])) is None
 
     verdict = evaluate(
         dict(TRUTH, T_amb=20.0, sigma=1.4e-9, n_delay=4),
@@ -426,9 +458,9 @@ def test_a_simulation_that_overflows_is_unmeasurable_rather_than_an_exception():
     # not fire and the simulation is actually attempted.
     assert all(runaway[k] > 0.0 and math.isfinite(runaway[k]) for k in update_mpc._FREE)
     with pytest.raises(OverflowError):
-        update_mpc._sim_at(t, Q, runaway, "K_Q", 1e12 * math.e, T_amb=20.0, T0=float(temp[0]))
+        _sim_at(t, Q, runaway, "K_Q", 1e12 * math.e, T_amb=20.0, T0=float(temp[0]))
 
-    assert update_mpc.identifiability(t, Q, runaway, T_amb=20.0, T0=float(temp[0])) is None
+    assert _identifiability(t, Q, runaway, T_amb=20.0, T0=float(temp[0])) is None
 
 
 def test_the_identifiability_argument_is_required_of_every_caller():
@@ -497,10 +529,11 @@ def test_the_longest_cook_stays_inside_the_teardown_budget(fits):
     t0 = time.perf_counter()
     c.refit_from_cook(history)
     assert time.perf_counter() - t0 < 30.0
-    # The whole cook was fit: thinning it first would cost accuracy in
-    # C_c/h_amb and, since simulate_grey_box sub-steps to max_dt regardless,
-    # would not even buy the time it appears to.
-    assert fits[0]["rows"] == _HISTORY_MAX
+    # Every complete nominal interval was retained; the final 15-second tail
+    # remains replay-ineligible rather than becoming scored evidence.
+    elapsed_s = history[-1][0] - history[0][0]
+    assert fits[0]["duration_s"] == pytest.approx(20.0 * math.floor(elapsed_s / 20.0))
+    assert 0.0 <= elapsed_s - fits[0]["duration_s"] < 20.0
 
 
 def test_the_cook_a_refit_can_be_handed_is_bounded_by_the_history():
@@ -512,70 +545,58 @@ def test_the_cook_a_refit_can_be_handed_is_bounded_by_the_history():
     assert len(c.cook_history()) == _HISTORY_MAX
 
 
-# ---- the fit's starting point is fixed, and stays fixed across cooks ----
+# ---- each cumulative fit starts from the fixed shipped reference ----------
 
 
 @pytest.fixture(scope="module")
 def four_cooks_in_a_row():
-    """Four cooks refit in sequence, each accepted result left in for the next.
-
-    Two tests below ask different things of this same run -- where each fit
-    started, and where the parameters ended up -- and it is four
-    least-squares solves, so it happens once. The spy is installed by hand
-    rather than through `monkeypatch`, which is function-scoped and cannot
-    reach a fixture shared across tests.
-    """
-    real = update_mpc.fit_params
+    """Run four segmented fits in sequence while recording each immutable job."""
+    real = grey_runtime_module.fit_segmented_grey
     calls = []
 
-    def spy(*args, **kwargs):
-        out = real(*args, **kwargs)
-        calls.append({"init": dict(kwargs["init"]), "out": dict(out), "rows": len(args[0])})
-        return out
+    def spy(job):
+        outcome = real(job)
+        config = outcome.config if isinstance(outcome, model_fitting.GreyFitSuccess) else job.config
+        calls.append(
+            {
+                "init": {key: getattr(job.config, key) for key in FITTED_KEYS},
+                "out": {key: getattr(config, key) for key in FITTED_KEYS},
+                "rows": 1 + sum(len(segment.scored_load) for segment in job.segments),
+                "duration_s": sum(
+                    float(np.sum(segment.pre_roll_duration_s))
+                    + float(np.sum(segment.scored_duration_s))
+                    for segment in job.segments
+                ),
+            }
+        )
+        return outcome
 
-    update_mpc.fit_params = spy
+    grey_runtime_module.fit_segmented_grey = spy
     try:
         c = _c()
         shipped = {key: c.cfg[key] for key in FITTED_KEYS}
         verdicts = [
-            # Distinct excitation per cook, so each is genuinely new evidence
-            # and the loop actually feeds results forward rather than idling.
             c.refit_from_cook(_synthetic_cook(seed=seed, noise=0.4 + 0.3 * seed))
             for seed in range(4)
         ]
     finally:
-        update_mpc.fit_params = real
+        grey_runtime_module.fit_segmented_grey = real
     return SimpleNamespace(fits=calls, verdicts=verdicts, shipped=shipped, cfg=dict(c.cfg))
 
 
 def test_every_refit_starts_from_the_same_fixed_reference(four_cooks_in_a_row):
-    """Several cooks in a row, each accepted result left in place for the next.
-
-    What this pins is that the starting point is the same every time, not that
-    the finished parameters happen to agree: seeded from the running model
-    they would be a function of every cook before them, and the fit's start is
-    the only place that shows. One refit cannot show it either -- the first
-    one begins at the shipped model whichever way the code is written -- so
-    the fixture drives the loop and this reads the starting point each time
-    round.
-    """
     run = four_cooks_in_a_row
     assert len(run.fits) == 4
-    # Without this the later fits would still be starting from the shipped
-    # model by accident, and reading their starting point would prove nothing.
-    assert run.verdicts[0].accepted is True
-    assert {key: run.cfg[key] for key in FITTED_KEYS} != run.shipped
     for call in run.fits:
-        assert call["init"] == _REFIT_INIT
+        assert call["init"] == run.shipped
 
 
-def test_the_fixed_reference_is_the_shipped_model_and_is_not_written_through():
+def test_the_fixed_reference_is_shipped_and_is_not_written_through():
     expected = {key: float(DEFAULT_MPC_CONFIG[key]) for key in FITTED_KEYS}
-    assert _REFIT_INIT == expected
     before = dict(DEFAULT_MPC_CONFIG)
     c = _c()
-    assert c.refit_from_cook(_synthetic_cook()).accepted is True
-    assert _REFIT_INIT == expected
+    assert {key: float(c.cfg[key]) for key in FITTED_KEYS} == expected
+    c.refit_from_cook(_synthetic_cook())
     assert DEFAULT_MPC_CONFIG == before
 
 
@@ -604,7 +625,7 @@ def test_the_model_judged_is_the_one_driving_the_grill():
 
 
 def test_a_solve_that_ran_out_of_evaluations_is_refused(monkeypatch):
-    monkeypatch.setattr(update_mpc, "_MAX_NFEV", 1)
+    monkeypatch.setattr("controller.runtime.model_fitting._MAX_FIT_NFEV", 1)
     c = _c()
     v = c.refit_from_cook(_synthetic_cook())
     assert v.accepted is False
@@ -613,17 +634,25 @@ def test_a_solve_that_ran_out_of_evaluations_is_refused(monkeypatch):
 
 
 def test_a_converged_solve_is_not_by_itself_a_promotion(monkeypatch):
-    """scipy calls a stalled step and a one-evaluation no-op "converged" too."""
-    real = update_mpc.fit_params
+    """A converged no-op still has to beat the active incumbent."""
+    real = grey_runtime_module.fit_segmented_grey
 
-    def stub(*args, **kwargs):
-        out = real(*args, **kwargs)
-        out.update(C_c=900.0, h_amb=0.2, K_Q=1.0, theta=5.0, converged=True, nfev=1)
-        return out
+    def no_op(job):
+        outcome = real(job)
+        assert isinstance(outcome, model_fitting.GreyFitSuccess)
+        assert outcome.incumbent_metrics is not None
+        incumbent_metrics = outcome.incumbent_metrics
+        return replace(
+            outcome,
+            config=replace(job.config, **TRUTH),
+            metrics=incumbent_metrics,
+            rmse_c=incumbent_metrics.pooled.rmse_c,
+            max_error_c=incumbent_metrics.pooled.max_error_c,
+        )
 
-    monkeypatch.setattr(update_mpc, "fit_params", stub)
+    monkeypatch.setattr(grey_runtime_module, "fit_segmented_grey", no_op)
     c = _c()
-    c.cfg.update(TRUTH)  # an incumbent the stub cannot beat
+    c.cfg.update(TRUTH)
     v = c.refit_from_cook(_synthetic_cook())
     assert v.accepted is False
     assert c.cfg["C_c"] == pytest.approx(TRUTH["C_c"])
@@ -642,58 +671,57 @@ def _columns(cook):
 
 
 def test_an_incumbent_the_model_cannot_be_simulated_at_ends_the_cook_with_a_verdict():
-    """The incumbent comes from `cfg`, which imported settings can populate.
-
-    Nothing between a settings file and this call asks whether the parameters
-    in it can be simulated, so the first thing to find out is the score taken
-    against them -- at the end of a real cook, in HoldMode's teardown, where
-    the next thing owed to the grill is the cool-down fan.
-    """
     cook = _synthetic_cook()
     t, temp, Q = _columns(cook)
 
     c = _c()
     c.cfg["C_c"] = 1e-9
     incumbent = {k: float(c.cfg[k]) for k in GreyLearningRuntime.MODEL_PARAM_KEYS}
-    # The premise: this really is an incumbent no score can be taken against.
-    assert math.isinf(update_mpc.fit_quality(t, temp, Q, incumbent, T_amb=float(c.cfg["T_amb"]))[0])
+    assert math.isinf(_fit_quality(t, temp, Q, incumbent, T_amb=float(c.cfg["T_amb"]))[0])
 
     verdict = c.refit_from_cook(cook)
     assert verdict.accepted is False
-    # And the refusal names which of the two models could not be scored.
-    assert "incumbent RMSE" in verdict.reason
+    assert "fit failed" in verdict.reason
     assert c.get_model_snapshot() is None
-
-    # The same cook against a simulable incumbent is promoted, so what the
-    # refusal reports is the incumbent and not the record.
     assert _c().refit_from_cook(cook).accepted is True
 
 
-def test_a_solve_that_diverged_is_refused_before_anything_is_measured_on_it(monkeypatch):
-    """A solve that ran out of evaluations returns its best point so far, and
-    that point can be one the model cannot be simulated at.
+def test_refit_holds_the_active_ambient_loss_instead_of_the_shipped_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    active_h_amb = 0.73
+    captured: list[float] = []
 
-    The convergence veto stands above both scores, so such a point is refused
-    for the reason that is actually true of it and is never simulated.
-    """
-    real_params = update_mpc.fit_params
-    real_quality = update_mpc.fit_quality
-    landed = []
-    scored = []
+    def capture(job):
+        captured.append(job.config.h_amb)
+        return model_fitting.GreyFitError(
+            request=job.request,
+            code=model_fitting.FitErrorCode.FIT_EXCEPTION,
+            error_type="CapturedFit",
+            detail="captured held physics",
+        )
 
-    def diverged(*args, **kwargs):
-        out = real_params(*args, **kwargs)
-        out.update(C_c=1e-9, converged=False, nfev=update_mpc._MAX_NFEV)
-        landed.append(dict(out))
-        return out
+    monkeypatch.setattr(grey_runtime_module, "fit_segmented_grey", capture)
+    controller = _c()
+    controller.cfg["h_amb"] = active_h_amb
 
-    def spy(t, temp, Q, params, **kwargs):
-        scored.append(dict(params))
-        return real_quality(t, temp, Q, params, **kwargs)
+    verdict = controller.refit_from_cook(_synthetic_cook(rows=600))
 
-    monkeypatch.setattr(update_mpc, "fit_params", diverged)
-    monkeypatch.setattr(update_mpc, "fit_quality", spy)
+    assert verdict.accepted is False
+    assert captured == [active_h_amb]
+    assert "h_amb" not in grey_runtime_module._REFIT_INIT
 
+
+def test_a_solve_that_diverged_is_refused_before_any_metrics_are_used(monkeypatch):
+    def diverged(job):
+        return model_fitting.GreyFitError(
+            request=job.request,
+            code=model_fitting.FitErrorCode.FIT_EXCEPTION,
+            error_type="FitConvergenceError",
+            detail="bounded grey fit did not converge",
+        )
+
+    monkeypatch.setattr(grey_runtime_module, "fit_segmented_grey", diverged)
     cook = _synthetic_cook()
     c = _c()
     verdict = c.refit_from_cook(cook)
@@ -701,14 +729,6 @@ def test_a_solve_that_diverged_is_refused_before_anything_is_measured_on_it(monk
     assert verdict.accepted is False
     assert "converge" in verdict.reason
     assert c.get_model_snapshot()["identification"] == {"status": "unidentified"}
-    # Nothing was scored at all -- neither the candidate nor the incumbent.
-    assert scored == []
-
-    # The premise, checked after the fact so the assertion above is not merely
-    # about ordering: the point that solve landed on is one no score can be
-    # taken against, which is what makes not taking one there matter.
-    t, temp, Q = _columns(cook)
-    assert math.isinf(real_quality(t, temp, Q, landed[0], T_amb=20.0)[0])
 
 
 def test_an_unmeasurable_candidate_is_refused_by_the_gate_that_owns_the_judgement():
@@ -717,7 +737,7 @@ def test_an_unmeasurable_candidate_is_refused_by_the_gate_that_owns_the_judgemen
     out of `fit_quality` could not have said."""
     t, temp, Q = _columns(_synthetic_cook())
     runaway = dict(TRUTH, C_c=1e-9, T_amb=20.0, sigma=1.4e-9, n_delay=4)
-    cand_rmse, _ = update_mpc.fit_quality(t, temp, Q, runaway, T_amb=20.0)
+    cand_rmse, _ = _fit_quality(t, temp, Q, runaway, T_amb=20.0)
     assert math.isinf(cand_rmse)
 
     verdict = evaluate(

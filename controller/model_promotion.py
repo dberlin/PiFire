@@ -76,8 +76,8 @@ _TAU_DEADBAND = 0.10
 #: How much a cook must determine the model before its fit may drive a grill.
 #:
 #: The unit is degrees C RMS per e-fold of the least-constrained direction in
-#: (log K_Q, log C_c, log theta) -- controller/update_mpc.identifiability, which
-#: is what supplies the value judged against this. A record scoring below this
+#: (log K_Q, log C_c, log theta) -- the stacked independent Jacobian reported
+#: by `controller.runtime.model_fitting.fit_segmented_grey`. A record below this
 #: leaves some combination of the three free to move by a factor of e without
 #: the prediction moving, so what comes out of the solve is the starting point
 #: rather than the grill. Every other test in this file asks whether a model is

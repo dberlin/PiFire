@@ -6,6 +6,7 @@ import json
 import threading
 from dataclasses import asdict, dataclass, replace
 from types import SimpleNamespace
+from typing import ClassVar
 
 import pytest
 
@@ -35,6 +36,8 @@ from controller.runtime.model_fitting import (
     FitErrorCode,
     FitSubmission,
     GreyFitError,
+    GreyFitMetric,
+    GreyFitMetrics,
     GreyFitSuccess,
     GreyFitWorker,
     GreyLearningOrchestrator,
@@ -113,8 +116,69 @@ class _CandidateEstimator(_Estimator):
         self.closed = True
 
 
+def _metric_bundle(job, rmse_c: float) -> GreyFitMetrics:
+    segment = job.segments[0]
+    loads = tuple(float(value) for value in segment.scored_load)
+    temperatures = tuple(float(value) for value in segment.scored_temperature_c)
+    mean_load = sum(loads) / len(loads)
+    excitation = sum((value - mean_load) ** 2 for value in loads) / len(loads)
+    pooled = GreyFitMetric(
+        sample_count=len(loads),
+        rmse_c=rmse_c,
+        bias_c=0.0,
+        error_band_c=(-rmse_c, rmse_c),
+        max_error_c=rmse_c,
+        input_excitation=excitation,
+        input_levels=len(set(loads)),
+        identifiability_row_count=len(loads),
+        temperature_span_c=max(temperatures) - min(temperatures),
+        identifiability=1.0,
+    )
+    return GreyFitMetrics(
+        pooled=pooled,
+        by_segment=(replace(pooled, segment_id=segment.segment_id),),
+        by_cook=(
+            replace(
+                pooled,
+                cook_id=segment.cook_id,
+                supports_regression_gate=True,
+            ),
+        ),
+    )
+
+
+def _fit_success(job, *, rmse_c: float = 0.5) -> GreyFitSuccess:
+    metrics = _metric_bundle(job, rmse_c)
+    incumbent_metrics = _metric_bundle(job, 5.0)
+    temperatures = tuple(
+        float(value)
+        for segment in job.segments
+        for value in segment.scored_temperature_c
+    )
+    return GreyFitSuccess(
+        request=job.request,
+        config=GreyBoxMPCConfig(
+            C_c=420.0,
+            K_Q=400.0,
+            theta=60.0,
+            h_amb=0.7,
+            T_amb=18.0,
+        ),
+        rmse_c=rmse_c,
+        max_error_c=max(rmse_c, 1.0),
+        identifiability=0.9,
+        sample_count=len(temperatures),
+        temperature_band_c=(min(temperatures), max(temperatures)),
+        nfev=4,
+        metrics=metrics,
+        incumbent_metrics=incumbent_metrics,
+        effective_masks=tuple((True,) * len(segment.scored_load) for segment in job.segments),
+        optimizer_residual_count=len(temperatures),
+    )
+
+
 class _SuccessfulWorker:
-    instances = []
+    instances: ClassVar[list[_SuccessfulWorker]] = []
 
     def __init__(self) -> None:
         self.job = None
@@ -131,24 +195,7 @@ class _SuccessfulWorker:
     def receive(self, *, timeout_s: float):
         assert timeout_s == 120.0
         assert self.job is not None
-        return SimpleNamespace(
-            outcome=GreyFitSuccess(
-                request=self.job.request,
-                config=GreyBoxMPCConfig(
-                    C_c=420.0,
-                    K_Q=400.0,
-                    theta=60.0,
-                    h_amb=0.7,
-                    T_amb=18.0,
-                ),
-                rmse_c=0.5,
-                max_error_c=1.0,
-                identifiability=0.9,
-                sample_count=len(self.job.observations),
-                temperature_band_c=(75.0, 160.0),
-                nfev=4,
-            )
-        )
+        return SimpleNamespace(outcome=_fit_success(self.job))
 
     def close(self) -> None:
         self.closed = True
@@ -180,8 +227,8 @@ class _FitErrorWorker(_SuccessfulWorker):
 
 class _RejectedWorker(_SuccessfulWorker):
     def receive(self, *, timeout_s: float):
-        message = super().receive(timeout_s=timeout_s)
-        return SimpleNamespace(outcome=replace(message.outcome, rmse_c=500.0))
+        super().receive(timeout_s=timeout_s)
+        return SimpleNamespace(outcome=_fit_success(self.job, rmse_c=500.0))
 
 
 class _InvalidProbeSolver(_ProbeSolver):
@@ -431,15 +478,15 @@ def _stage_passive_checkpoint_preparation(
 
 def _frame(sequence: int = 0) -> FrameObservation:
     return FrameObservation(
-        frame_start_s=sequence * 25.0,
-        frame_end_s=(sequence + 1) * 25.0,
+        frame_start_s=sequence * 20.0,
+        frame_end_s=(sequence + 1) * 20.0,
         temp_c=75.0 + sequence,
         setpoint_c=120.0,
         ambient_c=20.0,
         requested_q=0.5,
         realized_q=0.5,
         requested_auger_duty=0.5,
-        delivered_on_s=12.5,
+        delivered_on_s=10.0,
         requested_fan_duty=0.5,
         actual_fan_duty=0.5,
         result_revision=sequence + 1,
@@ -1532,24 +1579,7 @@ def test_real_orchestrator_detaches_raw_owner_after_queued_lifecycle_abort() -> 
         def receive(self, *, timeout_s: float):
             assert timeout_s == 0.0
             assert self.job is not None
-            return SimpleNamespace(
-                outcome=GreyFitSuccess(
-                    request=self.job.request,
-                    config=GreyBoxMPCConfig(
-                        C_c=420.0,
-                        K_Q=400.0,
-                        theta=60.0,
-                        h_amb=0.7,
-                        T_amb=18.0,
-                    ),
-                    rmse_c=0.5,
-                    max_error_c=1.0,
-                    identifiability=0.9,
-                    sample_count=len(self.job.observations),
-                    temperature_band_c=(75.0, 160.0),
-                    nfev=4,
-                )
-            )
+            return SimpleNamespace(outcome=_fit_success(self.job))
 
     identity = LiveLearningIdentity(
         session_id="session-handoff",
@@ -1594,7 +1624,7 @@ def test_real_orchestrator_detaches_raw_owner_after_queued_lifecycle_abort() -> 
                 realized_q=q,
                 requested_auger_duty=q,
                 baseline_q=q,
-                delivered_on_s=q * 25.0,
+                delivered_on_s=q * 20.0,
             ),
             identifiability=0.8,
         )

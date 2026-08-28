@@ -13,21 +13,19 @@
  WHAT IS MEASURED. Records come from the two plants in controller/grill_sim.py,
  logged at the shipped control period, over eleven excitation profiles and eight
  truncation lengths, plus the real MAK cook and the flat cook that
- tests/unit/mpc/test_mpc_refit.py pins. Every record is fitted with the SHIPPED
- fitter -- update_mpc.fit_params from GreyLearningRuntime's `_REFIT_INIT` at the
- shipped sigma and n_delay -- and then, against each of two incumbents (the
- shipped defaults, and a model already calibrated to that plant):
+ tests/unit/mpc/test_mpc_refit.py pins. Every record is fitted through the
+ production segmented authority from the shipped model at the shipped sigma
+ and n_delay. Each candidate is then compared against two incumbents: the
+ shipped defaults and a model already calibrated to that plant.
 
    * IN-SAMPLE RMSE, candidate and incumbent, on the record itself. This is the
      signal the gate uses today, computed the way GreyLearningRuntime computes it.
    * HELD-OUT RMSE. The record is split; the fitter is re-run on the prefix
      alone and the resulting model is scored on the suffix it never saw. Two
      scorings, because they differ and the difference matters to whoever builds
-     the gate: `cold` restarts the simulation at the suffix's first sample the
-     way update_mpc.fit_quality does, which leaves the transport-delay chain
-     empty at a point where the real chain is charged; `warm` runs the model
-     through the prefix first so the chain arrives charged, and scores only the
-     suffix.
+     the gate: `cold` starts from the suffix's explicit oldest load and anchor;
+     `warm` runs the model through the prefix first so the chain arrives charged,
+     and scores only the suffix.
    * TRUTH ERROR. For the simulated plants the answer is known, so the fitted
      model is scored against the PLANT's behaviour on two profiles no fit ever
      saw (a full-fire-then-cut probe and a four-level step sequence), plus the
@@ -105,15 +103,23 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 
 from controller import model_promotion as promo  # noqa: E402
 from controller.grill_sim import DT, GrillSim, MAKGrillSim  # noqa: E402
-from controller.model_learning.grey_runtime import (
-    _REFIT_INIT,
+from controller.model_learning.grey_runtime import (  # noqa: E402
     _REFIT_MIN_SAMPLES,
     GreyLearningRuntime,
-)  # noqa: E402
+)
 from controller.mpc import Controller  # noqa: E402
 from controller.mpc_config import DEFAULT_MPC_CONFIG  # noqa: E402
-from controller.mpc_model import simulate_grey_box  # noqa: E402
-from controller.update_mpc import _FREE, _SIM_KEYS, fit_params, fit_quality  # noqa: E402
+from controller.mpc_model import (  # noqa: E402
+    replay_delay_chain_arrays,
+    simulate_grey_box_intervals,
+)
+from controller.runtime.model_fitting import (  # noqa: E402
+    FIT_VALUE_BOUNDS,
+    FITTED_PARAMETERS,
+    GreyFitSuccess,
+    fit_segmented_grey,
+)
+from controller.update_mpc import trace_fit_job  # noqa: E402
 
 T_AMB = 20.0
 SIGMA = float(DEFAULT_MPC_CONFIG["sigma"])
@@ -121,10 +127,11 @@ N_DELAY = int(DEFAULT_MPC_CONFIG["n_delay"])
 #: The cadence a cook is actually logged at, so a synthetic record and the real
 #: one carry the same number of samples per second of grill.
 LOG_PERIOD_S = float(DEFAULT_MPC_CONFIG["control_period"])
-LOG_STRIDE = int(round(LOG_PERIOD_S / DT))
+LOG_STRIDE = round(LOG_PERIOD_S / DT)
 
 MODEL_KEYS = GreyLearningRuntime.MODEL_PARAM_KEYS
 SHIPPED = {k: float(DEFAULT_MPC_CONFIG[k]) for k in MODEL_KEYS}
+_FREE = FITTED_PARAMETERS
 
 #: Where a record is split for the held-out measurement. Two thirds fitted, one
 #: third scored: enough record left to fit from, and a third of a cook is long
@@ -282,9 +289,34 @@ def real_cook():
 
 # ------------------------------------------------------------------- fitting
 def _sim(params, t, Q, T0):
-    p = {k: float(params[k]) for k in _SIM_KEYS}
-    p["n_delay"] = int(round(float(params["n_delay"])))
-    return simulate_grey_box(t, Q, T_amb=T_AMB, T0=float(T0), **p)
+    times = np.asarray(t, dtype=float)
+    loads = np.asarray(Q, dtype=float)
+    if len(times) != len(loads) or not len(times):
+        raise ValueError("simulation times and loads must be equal non-empty arrays")
+    if len(times) == 1:
+        return np.asarray([float(T0)])
+    n_delay = round(float(params["n_delay"]))
+    delay_states = replay_delay_chain_arrays(
+        (),
+        (),
+        theta=float(params["theta"]),
+        n_delay=n_delay,
+        initial_load=float(loads[0]),
+    )
+    predicted = simulate_grey_box_intervals(
+        np.diff(times),
+        loads[:-1],
+        np.full(len(times) - 1, T_AMB, dtype=float),
+        C_c=float(params["C_c"]),
+        h_amb=float(params["h_amb"]),
+        T0=float(T0),
+        K_Q=float(params["K_Q"]),
+        sigma=float(params["sigma"]),
+        theta=float(params["theta"]),
+        n_delay=n_delay,
+        initial_delay_states=delay_states,
+    )
+    return np.concatenate((np.asarray([float(T0)]), predicted))
 
 
 def _safe_rmse(params, t, Q, T0, target, sl=slice(None)):
@@ -299,42 +331,60 @@ def _safe_rmse(params, t, Q, T0, target, sl=slice(None)):
 
 
 def shipped_fit(t, y, Q):
-    """A refit exactly as GreyLearningRuntime performs one."""
-    return fit_params(t, y, Q, T_amb=T_AMB, init=dict(_REFIT_INIT), sigma=SIGMA, n_delay=N_DELAY)
+    """Run the production segmented authority over one explicit-anchor record."""
+    job = trace_fit_job(
+        t,
+        y,
+        Q,
+        T_amb=T_AMB,
+        init={key: SHIPPED[key] for key in ("C_c", "h_amb", "K_Q", "theta")},
+        sigma=SIGMA,
+        n_delay=N_DELAY,
+    )
+    outcome = fit_segmented_grey(job)
+    if not isinstance(outcome, GreyFitSuccess):
+        return dict(SHIPPED, converged=False, nfev=0)
+    fitted = {
+        key: (
+            outcome.config.delay_states
+            if key == "n_delay"
+            else float(getattr(outcome.config, key))
+        )
+        for key in MODEL_KEYS
+    }
+    fitted.update(converged=True, nfev=outcome.nfev)
+    return fitted
 
 
 def log_svals(t, Q, fitted, T0):
-    """Singular values of d(residual)/d(log p) over `_FREE`, per sample.
-
-    The residual is (model - log), so its Jacobian is the model's, and the model
-    does not depend on the measured temperatures at all beyond the T0 it starts
-    from. This is therefore a property of the record's INPUTS and of the fitted
-    point -- not of how well the fit turned out -- which is what makes it usable
-    as an informativeness statistic rather than a restatement of the RMSE.
-
-    Central differences at one part in a thousand of a log, matching the space
-    the shipped solve works in. A singular value is degrees C RMS per e-fold of
-    the corresponding orthonormal direction in (log K_Q, log C_c, log theta), so
-    the smallest one answers: how far can this record's best-fitting parameters
-    be moved, in the direction it constrains least, before the prediction moves
-    at all?
-    """
+    """Singular values of the explicit-lineage model Jacobian in log space."""
     h = 1e-3
+    bases = {key: float(fitted[key]) for key in _FREE}
+    if any(not (value > 0.0 and math.isfinite(value)) for value in bases.values()):
+        return None
     cols = []
-    for key in _FREE:
-        base = float(fitted[key])
-        if not (base > 0.0 and math.isfinite(base)):
-            return None
+    for key, base in bases.items():
+        lower, upper = FIT_VALUE_BOUNDS[key]
         try:
-            y_up = _sim(dict(fitted, **{key: base * math.exp(h)}), t, Q, T0)
-            y_dn = _sim(dict(fitted, **{key: base * math.exp(-h)}), t, Q, T0)
-        except OverflowError:
+            if base <= lower:
+                y_base = _sim(fitted, t, Q, T0)
+                y_moved = _sim(dict(fitted, **{key: base * math.exp(h)}), t, Q, T0)
+                column = (y_moved - y_base) / h
+            elif base >= upper:
+                y_base = _sim(fitted, t, Q, T0)
+                y_moved = _sim(dict(fitted, **{key: base * math.exp(-h)}), t, Q, T0)
+                column = (y_base - y_moved) / h
+            else:
+                y_up = _sim(dict(fitted, **{key: base * math.exp(h)}), t, Q, T0)
+                y_dn = _sim(dict(fitted, **{key: base * math.exp(-h)}), t, Q, T0)
+                column = (y_up - y_dn) / (2.0 * h)
+        except (OverflowError, ValueError):
             return None
-        if not (np.all(np.isfinite(y_up)) and np.all(np.isfinite(y_dn))):
+        if not np.all(np.isfinite(column)):
             return None
-        cols.append((y_up - y_dn) / (2.0 * h))
-    J = np.column_stack(cols) / math.sqrt(len(t))
-    return np.linalg.svd(J, compute_uv=False)
+        cols.append(column)
+    jacobian = np.column_stack(cols) / math.sqrt(len(t))
+    return np.linalg.svd(jacobian, compute_uv=False)
 
 
 def model_disagreement(a, b):
@@ -434,11 +484,11 @@ def measure(rec, incumbents):
     out["converged"] = bool(fitted["converged"])
     out["nfev"] = int(fitted["nfev"])
     out["fit"] = {k: float(fitted[k]) for k in MODEL_KEYS}
-    out["insample"] = {"cand": fit_quality(t, y, Q, fitted, T_amb=T_AMB)[0]}
+    out["insample"] = {"cand": _safe_rmse(fitted, t, Q, float(y[0]), y)}
 
     # --- held out: the fitter re-run on the prefix, scored on the suffix ----
-    k = max(2, int(round(n * SPLIT_FRAC)))
-    pre = fit_params(t[:k], y[:k], Q[:k], T_amb=T_AMB, init=dict(_REFIT_INIT), sigma=SIGMA, n_delay=N_DELAY)
+    k = max(2, round(n * SPLIT_FRAC))
+    pre = shipped_fit(t[:k], y[:k], Q[:k])
     out["pre_converged"] = bool(pre["converged"])
     out["pre_fit"] = {key: float(pre[key]) for key in MODEL_KEYS}
     ts, ys, Qs = t[k:], y[k:], Q[k:]
@@ -447,17 +497,15 @@ def measure(rec, incumbents):
     out["cold"] = {}
     out["warm"] = {}
     if scorable:
-        # cold: restarted at the suffix's first sample, the way fit_quality
-        # scores anything -- so the transport chain starts empty at a point
-        # where the plant's is charged.
-        out["cold"]["cand"] = fit_quality(ts, ys, Qs, pre, T_amb=T_AMB)[0]
+        # cold: restart from the suffix's explicit oldest load and anchor.
+        out["cold"]["cand"] = _safe_rmse(pre, ts, Qs, float(ys[0]), ys)
         # warm: run through the whole record from its true start, scored on the
         # suffix only, so the chain arrives in the state the record put it in.
         out["warm"]["cand"] = _safe_rmse(pre, t, Q, float(y[0]), ys, slice(k, None))
 
     # --- split consistency: the same record fitted twice, on disjoint halves -
     if len(ts) >= 3:
-        suf = fit_params(ts, ys, Qs, T_amb=T_AMB, init=dict(_REFIT_INIT), sigma=SIGMA, n_delay=N_DELAY)
+        suf = shipped_fit(ts, ys, Qs)
         out["suf_converged"] = bool(suf["converged"])
         out["suf_fit"] = {key: float(suf[key]) for key in MODEL_KEYS}
         out["split_disagree"] = model_disagreement(out["pre_fit"], out["suf_fit"])
@@ -470,9 +518,9 @@ def measure(rec, incumbents):
         out["split_disagree"] = out["split_tau_ratio"] = float("inf")
 
     for name, params in incumbents.items():
-        out["insample"][name] = fit_quality(t, y, Q, params, T_amb=T_AMB)[0]
+        out["insample"][name] = _safe_rmse(params, t, Q, float(y[0]), y)
         if scorable:
-            out["cold"][name] = fit_quality(ts, ys, Qs, params, T_amb=T_AMB)[0]
+            out["cold"][name] = _safe_rmse(params, ts, Qs, float(ys[0]), ys)
             out["warm"][name] = _safe_rmse(params, t, Q, float(y[0]), ys, slice(k, None))
         # The same informativeness question asked at the model already believed
         # rather than at the fitted point. A runaway candidate can make the
@@ -521,9 +569,9 @@ def truncations(rec):
         cut["length_s"] = int(L)
         seen.append(int(L))
         yield cut
-    if int(round(dur)) not in seen:
+    if round(dur) not in seen:
         cut = dict(rec)
-        cut["length_s"] = int(round(dur))
+        cut["length_s"] = round(dur)
         yield cut
 
 
@@ -668,7 +716,10 @@ def main():
     say("=" * 104)
     say("PROMOTION SIGNAL -- what separates a fit worth promoting from one that is not")
     say("=" * 104)
-    say(f"shipped fitter : _REFIT_INIT={dict(_REFIT_INIT)} sigma={SIGMA:g} n_delay={N_DELAY} free={list(_FREE)}")
+    say(
+        f"segmented fitter: init={{{', '.join(f'{key!r}: {SHIPPED[key]!r}' for key in ('C_c', 'h_amb', 'K_Q', 'theta'))}}} "
+        f"sigma={SIGMA:g} n_delay={N_DELAY} free={list(_FREE)}"
+    )
     say(
         f"log cadence    : {LOG_PERIOD_S:g}s;  refit floor {_REFIT_MIN_SAMPLES} samples "
         f"(= {_REFIT_MIN_SAMPLES * LOG_PERIOD_S:.0f}s at that cadence)"
@@ -791,7 +842,7 @@ def main():
     say("APPENDIX A -- every record measured")
     say("=" * 104)
     say("RMSEs in C. cand/inc columns are candidate and the SHIPPED incumbent. ho_cold/ho_warm are")
-    say("the PREFIX fit scored on the suffix it never saw (cold = restarted there as fit_quality does,")
+    say("the PREFIX fit scored on the suffix it never saw (cold = explicit suffix lineage,")
     say("warm = run through the prefix first). truth = pooled RMSE on the two unseen validation")
     say("profiles; d_err/c_err = model minus plant dead time and coast on cq_probe, so a NEGATIVE")
     say("c_err is a model that believes the grill stops sooner than it does. s_min = C RMS per e-fold")
@@ -1326,7 +1377,7 @@ def main():
 
     def quantile(vals, q):
         v = sorted(x for x in vals if math.isfinite(x))
-        return v[min(len(v) - 1, max(0, int(round(q * (len(v) - 1)))))] if v else float("nan")
+        return v[min(len(v) - 1, max(0, round(q * (len(v) - 1))))] if v else float("nan")
 
     all_smin = [r["s_min"] for r in sim_rows]
     smin_grid = [(q, quantile(all_smin, q)) for q in (0.0, 0.25, 0.5, 0.6, 0.75, 0.9)]

@@ -46,15 +46,15 @@ _CONFIG = "3" * 64
 def _frame(sequence: int, **changes) -> FrameObservation:
     q = (0.15, 0.50, 0.85)[sequence % 3]
     values: Any = {
-        "frame_start_s": sequence * 25.0,
-        "frame_end_s": (sequence + 1) * 25.0,
+        "frame_start_s": sequence * 20.0,
+        "frame_end_s": (sequence + 1) * 20.0,
         "temp_c": 75.0 + sequence,
         "setpoint_c": 120.0,
         "ambient_c": 20.0,
         "requested_q": q,
         "realized_q": q,
         "requested_auger_duty": q,
-        "delivered_on_s": q * 25.0,
+        "delivered_on_s": q * 20.0,
         "requested_fan_duty": 0.5,
         "actual_fan_duty": 0.5,
         "result_revision": sequence + 1,
@@ -289,6 +289,11 @@ class _ImmediateFitWorker:
 
     def receive(self, *, timeout_s):
         assert timeout_s == 0.0
+        temperatures = tuple(
+            float(value)
+            for segment in self.job.segments
+            for value in segment.scored_temperature_c
+        )
         return SimpleNamespace(
             outcome=GreyFitSuccess(
                 request=self.job.request,
@@ -296,11 +301,8 @@ class _ImmediateFitWorker:
                 rmse_c=1.0,
                 max_error_c=2.0,
                 identifiability=self.identifiability,
-                sample_count=len(self.job.observations),
-                temperature_band_c=(
-                    self.job.observations[0].temp_c,
-                    self.job.observations[-1].temp_c,
-                ),
+                sample_count=len(temperatures),
+                temperature_band_c=(min(temperatures), max(temperatures)),
                 nfev=4,
             )
         )

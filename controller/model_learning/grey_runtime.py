@@ -10,7 +10,7 @@ import math
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from typing import Literal
 
 import numpy as np
@@ -62,26 +62,34 @@ from controller.mpc_factory import MpcPairFactory, OwnedMpcPair
 from controller.mpc_model import MODEL_SCHEMA
 from controller.runtime.context import EVENT_LOG_NAME
 from controller.runtime.model_fitting import (
+    FIT_VALUE_BOUNDS,
     CandidateOwnershipTransferredError,
     CandidatePair,
     CandidatePreparation,
     FitSubmission,
     GreyFitError,
-    GreyFitJob,
+    GreyFitSuccess,
     GreyFitWorker,
     GreyLearningOrchestrator,
     LiveLearningIdentity,
     TeardownGreyHistory,
     TeardownRefitOutcome,
     TeardownRefitResult,
+    compare_segmented_grey,
+    fit_segmented_grey,
     grey_config_digest,
     prepare_candidate_off_path,
+    supported_segmented_cooks,
+    volatile_segmented_job,
 )
 from controller.runtime.model_persistence import DurableActivationReceipt
 
 _HISTORY_MAX = 8640
 _REFIT_MIN_SAMPLES = 120
-_REFIT_INIT = {key: float(DEFAULT_MPC_CONFIG[key]) for key in ("C_c", "h_amb", "K_Q", "theta")}
+_REFIT_INIT = {
+    key: float(DEFAULT_MPC_CONFIG[key])
+    for key in ("C_c", "K_Q", "theta")
+}
 
 
 class GreyLearningRuntime:
@@ -1781,7 +1789,6 @@ class GreyLearningRuntime:
 
     def _refit_completed_frames(self) -> TeardownRefitResult:
         from controller.model_promotion import evaluate
-        from controller.update_mpc import fit_quality
 
         frames = self._teardown_history.observations
         origin = self._teardown_history.origin
@@ -1817,7 +1824,13 @@ class GreyLearningRuntime:
         try:
             worker.start()
             if (
-                worker.submit(GreyFitJob(request, frames, self._active_components().controller.config))
+                worker.submit(
+                    volatile_segmented_job(
+                        request,
+                        frames,
+                        self._active_components().controller.config,
+                    )
+                )
                 is not FitSubmission.ACCEPTED
             ):
                 return TeardownRefitResult.failed("fitting worker was busy", origin=origin)
@@ -1832,31 +1845,21 @@ class GreyLearningRuntime:
                 origin=origin,
             )
         success = message.outcome
+        if not isinstance(success, GreyFitSuccess) or success.metrics is None or success.incumbent_metrics is None:
+            return TeardownRefitResult.failed("fit returned incomplete segmented metrics", origin=origin)
+        if success.rejection_reasons:
+            return TeardownRefitResult.rejected(",".join(success.rejection_reasons), origin=origin)
         candidate_parameters = {
             key: (success.config.delay_states if key == "n_delay" else getattr(success.config, key))
             for key in self.MODEL_PARAM_KEYS
         }
         incumbent = {key: float(self._configuration()[key]) for key in self.MODEL_PARAM_KEYS}
-        times = np.array(
-            [frame.frame_end_s - frames[0].frame_end_s for frame in frames],
-            dtype=float,
-        )
-        temperatures = np.array([frame.temp_c for frame in frames], dtype=float)
-        realized = np.array(
-            [frame.realized_q for frame in frames[1:]] + [frames[-1].realized_q],
-            dtype=float,
-        )
-        incumbent_rmse, _ = fit_quality(
-            times,
-            temperatures,
-            realized,
-            incumbent,
-            T_amb=float(self._configuration()["T_amb"]),
-        )
+        cand_rmse = success.metrics.pooled.rmse_c
+        incumbent_rmse = success.incumbent_metrics.pooled.rmse_c
         verdict = evaluate(
             candidate_parameters,
             incumbent,
-            candidate_rmse=success.rmse_c,
+            candidate_rmse=cand_rmse,
             incumbent_rmse=incumbent_rmse,
             identifiability=success.identifiability,
         )
@@ -1961,7 +1964,7 @@ class GreyLearningRuntime:
         mid-cook numerical relabel—authorizes it for the next cook.
         """
         from controller.model_promotion import evaluate
-        from controller.update_mpc import fit_params, fit_quality, identifiability
+        from controller.update_mpc import trace_fit_job
 
         if history is None:
             return self._refit_completed_frames()
@@ -1976,49 +1979,58 @@ class GreyLearningRuntime:
         Q = np.array([r[2] for r in rows], dtype=float)
         t = t - t[0]
 
-        T_amb = float(self._configuration()["T_amb"])
+        active = self._configuration()
+        T_amb = float(active["T_amb"])
         try:
-            fitted = fit_params(
+            job = trace_fit_job(
                 t,
                 temp,
                 Q,
                 T_amb=T_amb,
-                init=dict(_REFIT_INIT),
-                sigma=float(self._configuration()["sigma"]),
-                n_delay=int(self._configuration()["n_delay"]),
+                init={**_REFIT_INIT, "h_amb": float(active["h_amb"])},
+                sigma=float(active["sigma"]),
+                n_delay=int(active["n_delay"]),
+                initial_load=0.0,
             )
-            # A solve that ran out of evaluations reports its best point so
-            # far, and that point has not been shown to be a minimum -- so it
-            # is refused. The converse is not available: scipy calls a stalled
-            # step and a stalled cost "converged" too, and a one-evaluation
-            # solve that moved nowhere reports the same flag as a hard-won
-            # fit. Convergence can only veto here; what earns a promotion is
-            # the error comparison and the bounds below.
-            #
-            # It vetoes before anything is measured, so no statistic is ever
-            # taken at a point that is already refused -- including at one the
-            # model cannot be simulated at, which a diverging solve's best
-            # point can be.
-            if not fitted["converged"]:
-                self._logger.info(
-                    f"[mpc] refit: abandoned after {fitted['nfev']} evaluations over "
-                    f"{len(rows)} samples in {time.perf_counter() - started:.1f} s"
+            if not supported_segmented_cooks(
+                job,
+                theta=FIT_VALUE_BOUNDS["theta"][0],
+            ):
+                return _Verdict(False, "insufficient-supported-cooks")
+            active_config = replace(
+                job.config,
+                C_c=float(active["C_c"]),
+                h_amb=float(active["h_amb"]),
+                T_amb=T_amb,
+                theta=float(active["theta"]),
+                K_Q=float(active["K_Q"]),
+                sigma=float(active["sigma"]),
+            )
+            outcome = fit_segmented_grey(job)
+            if isinstance(outcome, GreyFitError):
+                return _Verdict(False, f"fit failed: {outcome.detail}")
+            if not isinstance(outcome, GreyFitSuccess):
+                return _Verdict(False, "fit failed: incomplete segmented result")
+            comparison = compare_segmented_grey(
+                job,
+                candidate=outcome.config,
+                incumbent=active_config,
+            )
+            if comparison.rejection_reasons:
+                return _Verdict(False, ",".join(comparison.rejection_reasons))
+            fitted = {
+                key: (
+                    outcome.config.delay_states
+                    if key == "n_delay"
+                    else float(getattr(outcome.config, key))
                 )
-                return _Verdict(
-                    False,
-                    f"the solve did not converge within {fitted['nfev']} evaluations",
-                )
-            # The candidate starts from a fixed reference, but it is judged
-            # against the model actually driving the grill: the question this
-            # answers is whether to replace THAT, on this cook's own data.
-            incumbent = {k: float(self._configuration()[k]) for k in self.MODEL_PARAM_KEYS}
-            cand_rmse, _ = fit_quality(t, temp, Q, fitted, T_amb=T_amb)
-            inc_rmse, _ = fit_quality(t, temp, Q, incumbent, T_amb=T_amb)
-            # How much this cook actually determined, measured at the point the
-            # solve landed on. Six more simulations against the solve's own
-            # hundreds, and the only thing asked here that the fit residual
-            # cannot say -- a flat cook fits itself perfectly and pins nothing.
-            ident = identifiability(t, Q, fitted, T_amb=T_amb, T0=float(temp[0]))
+                for key in self.MODEL_PARAM_KEYS
+            }
+            fitted.update(converged=True, nfev=outcome.nfev)
+            incumbent = {key: float(active[key]) for key in self.MODEL_PARAM_KEYS}
+            cand_rmse = comparison.metrics.pooled.rmse_c
+            inc_rmse = comparison.incumbent_metrics.pooled.rmse_c
+            ident = comparison.identifiability
         except (ValueError, FloatingPointError) as e:
             return _Verdict(False, f"fit failed: {e}")
         except Exception:
