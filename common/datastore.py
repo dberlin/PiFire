@@ -323,7 +323,7 @@ CREATE TABLE IF NOT EXISTS learning_trajectory_frame (
     segment_id                 TEXT NOT NULL,
     ordinal                    INTEGER NOT NULL,
     kind                       TEXT NOT NULL CHECK(kind IN ('pre-roll','scored')),
-    payload_schema_version     INTEGER NOT NULL,
+    payload_schema_version     INTEGER NOT NULL CHECK(payload_schema_version = 2),
     interval_identity          TEXT NOT NULL,
     canonical_json             TEXT NOT NULL CHECK(json_valid(canonical_json)),
     frame_digest               TEXT NOT NULL,

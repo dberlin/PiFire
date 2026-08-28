@@ -172,6 +172,13 @@ def _trajectory_frame(
         wall_start_ms=1_700_000_000_000 + start_ms,
         wall_end_ms=1_700_000_020_000 + start_ms,
         chamber_temperature_c=225.0 + sequence,
+        temperature_sample_monotonic_ms=start_ms + 20_000,
+        temperature_sample_wall_ms=1_700_000_020_000 + start_ms,
+        temperature_sample_age_ms=0,
+        temperature_sample_wall_age_ms=0,
+        temperature_sample_clock_skew_ms=0,
+        source_temperature_units="C",
+        settings_revision=7,
         probe_valid=True,
         probe_source="primary",
         ambient_temperature_c=20.0,
@@ -225,7 +232,7 @@ def _stored_segment(
     frame = _stored_frame(0, epoch_ms=epoch_ms, effective_mode="Smoke")
     return LearningTrajectorySegment(
         schema_version=1,
-        observation_schema_version=1,
+        observation_schema_version=2,
         segment_id=segment_id,
         cook_id=f"cook-{segment_id}",
         trajectory_session_id=f"trajectory-{segment_id}",

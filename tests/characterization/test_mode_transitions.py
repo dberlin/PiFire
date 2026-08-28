@@ -20,9 +20,18 @@ touch controller.py's Shutdown->Stop halt path (the only shutdown_system() call
 in the controller lives in controller.py, not in any mode file exercised here).
 """
 
+import importlib
+import importlib.abc
+import sys
+
+import controller.runtime.runner as runtime_runner
+from common.modes import Mode
+from controller.runtime.modes.smoke import SmokeMode
 from controller.runtime.runner import ControllerUpdateResult
+from controller.runtime.state import WorkCycleState
+from probes.thermocouple_health import ThermocoupleFault, ThermocoupleHealthReport
 from tests.characterization.fixtures import base_control, base_pellet_db, base_settings
-from tests.characterization.harness import run_mode
+from tests.characterization.harness import make_ctx, run_mode
 from tests.fakes.grill import FakeGrillPlatform
 from tests.fakes.probes import FakeProbes
 from tests.fakes.runner import FakeControllerRunner
@@ -343,3 +352,221 @@ def test_pre_act_priority_maxtemp_beats_check_safety_on_same_tick():
     assert "Grill_Error_02" not in result.notifications
     assert "Grill_Error_03" not in result.notifications
     assert out["safety"]["reigniteretries"] == 1  # flameout reignite never fired
+
+
+class _LearningTrajectoryHookSpy:
+    def __init__(self):
+        self.events = []
+        self.samples = []
+
+    def mode_entered(self, event):
+        self.events.append(("entered", event))
+
+    def mode_exited(self, event):
+        self.events.append(("exited", event))
+
+    def observe_temperature(self, sample):
+        self.samples.append(sample)
+        self.events.append(("sample", sample))
+
+    def observe_hold_frame(self, observation):
+        self.events.append(("hold-frame", observation))
+
+    def intervention(self, boundary):
+        self.events.append(("intervention", boundary))
+
+    def configuration_changed(self, boundary):
+        self.events.append(("configuration", boundary))
+
+    def status(self):
+        return {}
+
+    def barrier(self, timeout=2.0):
+        self.events.append(("barrier", timeout))
+        return True
+
+    def close(self):
+        self.events.append(("close", None))
+
+
+def test_shared_smoke_skeleton_emits_one_canonical_sample_per_post_entry_probe_read():
+    recorder = _LearningTrajectoryHookSpy()
+    probes = FakeProbes().script([200])
+    settings = base_settings()
+    settings["cycle_data"]["SmokeOnCycleTime"] = 0.1
+    settings["cycle_data"]["SmokeOffCycleTime"] = 0.1
+    settings["cycle_data"]["PMode"] = 0
+
+    run_mode(
+        "Smoke",
+        settings=settings,
+        control_data=base_control(mode="Smoke"),
+        pellet_db=base_pellet_db(),
+        probes=probes,
+        probe_cap=8,
+        learning_trajectory=recorder,
+    )
+
+    assert recorder.events[0][0] == "entered"
+    assert recorder.events[0][1].effective_mode == "Smoke"
+    assert recorder.events[0][1].persisted_mode == "Smoke"
+    exits = [
+        (index, event)
+        for index, (kind, event) in enumerate(recorder.events)
+        if kind == "exited"
+    ]
+    assert len(exits) == 1
+    exit_index, exit_event = exits[0]
+    assert exit_event.effective_mode == "Smoke"
+    assert all(
+        index < exit_index
+        for index, (kind, _event) in enumerate(recorder.events)
+        if kind == "sample"
+    )
+    assert len(recorder.samples) == len(probes.read_calls)
+    assert all(sample.chamber_temperature == 200 for sample in recorder.samples)
+    assert all(
+        left.monotonic_ms <= right.monotonic_ms
+        for left, right in zip(recorder.samples, recorder.samples[1:])
+    )
+
+
+
+def test_recipe_exit_emits_actual_next_effective_handler() -> None:
+    recorder = _LearningTrajectoryHookSpy()
+    settings = base_settings()
+    control = base_control(mode="Recipe")
+    control["recipe"]["step"] = 0
+    ctx, _grill, _notifier = make_ctx(
+        settings,
+        control,
+        base_pellet_db(),
+        FakeProbes().script([200]),
+    )
+    ctx.learning_trajectory = recorder
+    ctx.trajectory_next_effective_mode = Mode.HOLD
+    handler = SmokeMode(ctx, WorkCycleState())
+    handler.settings = settings
+    handler.control = control
+
+    handler._emit_trajectory_mode_exited(control, 100, 1_000_100)
+
+    exit_event = recorder.events[-1][1]
+    assert exit_event.effective_mode == "Smoke"
+    assert exit_event.next_effective_mode == "Hold"
+    assert exit_event.reason is None
+
+
+def test_preflight_probe_sample_and_fault_exit_are_emitted_without_hardware_reorder() -> None:
+    recorder = _LearningTrajectoryHookSpy()
+    fault = ThermocoupleHealthReport.confirmed_hardware(
+        (ThermocoupleFault.OPEN,),
+        now=0.0,
+        status=0x10,
+    )
+    probes = FakeProbes().script([200]).script_health([{"Grill": fault}])
+
+    result = run_mode(
+        "Smoke",
+        settings=base_settings(),
+        control_data=base_control(mode="Smoke"),
+        pellet_db=base_pellet_db(),
+        probes=probes,
+        learning_trajectory=recorder,
+    )
+
+    assert [kind for kind, _event in recorder.events] == [
+        "entered",
+        "sample",
+        "intervention",
+        "exited",
+    ]
+    assert result.grill_calls[:4] == [
+        ("igniter_off", ()),
+        ("auger_off", ()),
+        ("fan_off", ()),
+        ("power_off", ()),
+    ]
+
+class _ForbiddenMpcFinder(importlib.abc.MetaPathFinder):
+    def __init__(self) -> None:
+        self.attempts: list[str] = []
+
+    def find_spec(self, fullname, path=None, target=None):
+        del path, target
+        if fullname == "controller.mpc" or fullname.startswith(
+            ("controller.mpc.", "controller.mpc_")
+        ):
+            self.attempts.append(fullname)
+            raise AssertionError(f"Smoke imported forbidden MPC dependency {fullname}")
+
+
+def test_smoke_has_no_mpc_import_build_or_call_and_mode_hardware_order_is_unchanged(monkeypatch):
+    finder = _ForbiddenMpcFinder()
+    with monkeypatch.context() as scoped:
+        for loaded_name in tuple(sys.modules):
+            if (
+                loaded_name in {
+                    "controller.runtime.modes.smoke",
+                    "controller.mpc",
+                }
+                or loaded_name.startswith(
+                    ("controller.mpc.", "controller.mpc_")
+                )
+            ):
+                scoped.delitem(sys.modules, loaded_name, raising=False)
+        scoped.setattr(sys, "meta_path", [finder, *sys.meta_path])
+        loaded = importlib.import_module("controller.runtime.modes.smoke")
+    assert loaded.SmokeMode is not None
+    assert finder.attempts == []
+
+    def forbidden_build(*_args, **_kwargs):
+        raise AssertionError("Smoke attempted to construct or call an MPC/controller runner")
+
+    settings = base_settings()
+    settings["cycle_data"]["SmokeOnCycleTime"] = 0.1
+    settings["cycle_data"]["SmokeOffCycleTime"] = 0.1
+    settings["cycle_data"]["PMode"] = 0
+    with monkeypatch.context() as scoped:
+        scoped.setattr(runtime_runner, "build_runner", forbidden_build)
+        smoke = run_mode(
+            "Smoke",
+            settings=settings,
+            control_data=base_control(mode="Smoke"),
+            pellet_db=base_pellet_db(),
+            probes=FakeProbes().script([200]),
+            probe_cap=8,
+        )
+
+    hold_control = base_control(mode="Hold")
+    hold_control["primary_setpoint"] = 225
+    hold_control["safety"]["startuptemp"] = 150
+    hold_control["safety"]["afterstarttemp"] = 200
+    hold_runner = FakeControllerRunner(period=0.0).script(
+        [ControllerUpdateResult(cycle_ratio=0.25, fan=None, input_temperature=200.0)] * 12
+    )
+    hold = run_mode(
+        "Hold",
+        settings=base_settings(),
+        control_data=hold_control,
+        pellet_db=base_pellet_db(),
+        probes=FakeProbes().script([200]),
+        runner=hold_runner,
+        probe_cap=8,
+    )
+
+    expected_setup = [
+        ("igniter_off", ()),
+        ("auger_off", ()),
+        ("fan_on", (None,)),
+        ("power_on", ()),
+    ]
+    assert smoke.grill_calls[:4] == expected_setup
+    assert hold.grill_calls[:4] == expected_setup
+    assert smoke.grill_calls[-2:] == [("auger_off", ()), ("igniter_off", ())]
+    assert hold.grill_calls[-4:] == [
+        ("auger_off", ()),
+        ("fan_off", ()),
+        ("igniter_off", ()),
+        ("power_off", ()),
+    ]

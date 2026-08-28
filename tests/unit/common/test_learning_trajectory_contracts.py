@@ -51,6 +51,13 @@ def _frame(
         "wall_start_ms": 1_000_000 + start_ms,
         "wall_end_ms": 1_000_000 + end_ms,
         "chamber_temperature_c": 110.0 + sequence,
+        "temperature_sample_monotonic_ms": end_ms,
+        "temperature_sample_wall_ms": 1_000_000 + end_ms,
+        "temperature_sample_age_ms": 0,
+        "temperature_sample_wall_age_ms": 0,
+        "temperature_sample_clock_skew_ms": 0,
+        "source_temperature_units": "C",
+        "settings_revision": 7,
         "probe_valid": True,
         "probe_source": "grill-probe-1",
         "ambient_temperature_c": 24.0,
@@ -105,7 +112,7 @@ def _segment(**overrides: Any) -> LearningTrajectorySegment:
     )
     values: dict[str, Any] = {
         "schema_version": 1,
-        "observation_schema_version": 1,
+        "observation_schema_version": 2,
         "segment_id": "segment-1",
         "cook_id": "cook-1",
         "trajectory_session_id": "trajectory-session-1",
@@ -304,6 +311,77 @@ def test_frame_requires_twenty_seconds_unless_it_is_a_short_partial_boundary() -
         _frame(0, end_ms=10_000, partial=True, boundary_reason=None)
 
 
+def test_frame_retains_actual_temperature_timestamp_age_units_and_settings_revision() -> None:
+    frame = _frame(
+        0,
+        temperature_sample_monotonic_ms=19_949,
+        temperature_sample_wall_ms=1_019_951,
+        temperature_sample_age_ms=51,
+        temperature_sample_wall_age_ms=49,
+        temperature_sample_clock_skew_ms=-2,
+        source_temperature_units="F",
+        settings_revision=12,
+    )
+
+    assert frame.temperature_sample_monotonic_ms == 19_949
+    assert frame.temperature_sample_wall_ms == 1_019_951
+    assert frame.temperature_sample_age_ms == 51
+    assert frame.temperature_sample_wall_age_ms == 49
+    assert frame.temperature_sample_clock_skew_ms == -2
+    assert frame.source_temperature_units == "F"
+    assert frame.settings_revision == 12
+
+    with pytest.raises(ValidationError, match="sample.*age|age.*sample"):
+        _frame(
+            0,
+            temperature_sample_monotonic_ms=19_949,
+            temperature_sample_wall_ms=1_019_949,
+            temperature_sample_age_ms=50,
+        )
+    with pytest.raises(ValidationError, match="sample.*frame|frame.*sample"):
+        _frame(
+            0,
+            temperature_sample_monotonic_ms=20_001,
+            temperature_sample_wall_ms=1_020_001,
+            temperature_sample_age_ms=0,
+        )
+    with pytest.raises(ValidationError, match="wall.*age|age.*wall"):
+        _frame(
+            0,
+            temperature_sample_wall_ms=1_019_949,
+            temperature_sample_wall_age_ms=50,
+        )
+    with pytest.raises(ValidationError, match="skew"):
+        _frame(
+            0,
+            temperature_sample_monotonic_ms=19_949,
+            temperature_sample_wall_ms=1_019_949,
+            temperature_sample_age_ms=51,
+            temperature_sample_wall_age_ms=51,
+            temperature_sample_clock_skew_ms=1,
+        )
+
+
+def test_hold_entry_retains_first_valid_measurement_inside_first_scored_interval() -> None:
+    anchor = HoldEntrySample(
+        monotonic_ms=40_025,
+        wall_ms=1_040_025,
+        chamber_temperature_c=106.5,
+        probe_valid=True,
+        probe_source="grill-probe-1",
+    )
+
+    segment = _segment(hold_entry=anchor)
+
+    assert segment.hold_entry == anchor
+    assert segment.hold_entry.monotonic_ms != segment.scored_hold_frames[0].monotonic_start_ms
+
+    with pytest.raises(ValidationError, match="Hold-entry.*interval|interval.*Hold-entry"):
+        _segment(hold_entry=replace(anchor, monotonic_ms=39_999, wall_ms=1_039_999))
+    with pytest.raises(ValidationError, match="Hold-entry.*sample|sample.*Hold-entry"):
+        _segment(hold_entry=replace(anchor, monotonic_ms=60_001, wall_ms=1_060_001))
+
+
 def test_partial_frame_is_forbidden_in_scored_hold_observations() -> None:
     partial = _frame(
         3,
@@ -371,8 +449,8 @@ def test_pre_roll_requires_continuity_and_exact_scalar_delay_input() -> None:
         _frame(0),
         fan_delivery_certainty=FrameDeliveryCertainty.UNKNOWN,
     )
-    segment = _segment(pre_roll_frames=(uncertain_fan, _frame(1)))
-    assert segment.pre_roll_frames[0].fan_delivery_certainty is FrameDeliveryCertainty.UNKNOWN
+    with pytest.raises(ValidationError, match="pre-roll.*fan|fan.*pre-roll"):
+        _segment(pre_roll_frames=(uncertain_fan, _frame(1)))
 
 
 def test_scored_observations_require_effective_hold_mode() -> None:
@@ -387,6 +465,7 @@ def test_trajectory_break_and_delivery_certainty_enums_have_exact_typed_members(
         "MANUAL": "manual",
         "LID_OPEN": "lid-open",
         "SAFETY": "safety",
+        "RESET": "reset",
         "STOP": "stop",
         "ERROR": "error",
         "PROCESS_RESTART": "process-restart",
@@ -398,7 +477,10 @@ def test_trajectory_break_and_delivery_certainty_enums_have_exact_typed_members(
         "CLOCK_DISCONTINUITY": "clock-discontinuity",
         "UNITS_CHANGED": "units-changed",
         "STRUCTURE_CHANGED": "structure-changed",
+        "ACTUATION_MAPPING_CHANGED": "actuation-mapping-changed",
         "FAN_MAPPING_CHANGED": "fan-mapping-changed",
+        "AMBIENT_SEMANTICS_CHANGED": "ambient-semantics-changed",
+        "MODE_TRANSITION": "mode-transition",
         "LEFT_HOLD": "left-hold",
         "UNCLEAN_RESTART": "unclean-restart",
         "RETENTION_ROLLOVER": "retention-rollover",
@@ -452,7 +534,6 @@ def test_generation_and_learned_free_parameter_changes_do_not_change_fit_partiti
     ("field", "changed_value"),
     [
         ("schema_version", 2),
-        ("observation_schema_version", 2),
         ("held_physics_digest", _digest("held-grey-physics-v2")),
         ("model_structure_digest", _digest("grey-two-zone-v2")),
         ("cadence_digest", _digest("different-cadence-semantics")),
@@ -469,6 +550,31 @@ def test_fit_partition_changes_with_schema_physics_structure_cadence_and_input_s
     changed = _segment(**{field: changed_value})
 
     assert changed.fit_partition_digest != original.fit_partition_digest
+
+
+@pytest.mark.parametrize("noncurrent_schema", [1, 3], ids=["older", "future"])
+def test_noncurrent_observation_schema_is_non_scoreable_for_pre_roll_only_segment(
+    noncurrent_schema: int,
+) -> None:
+    smoke_pre_roll = (
+        replace(_frame(0), effective_mode="Smoke"),
+        replace(_frame(1), effective_mode="Smoke"),
+    )
+    current = _segment(
+        observation_schema_version=2,
+        pre_roll_frames=smoke_pre_roll,
+        scored_hold_frames=(),
+        hold_entry=None,
+    )
+
+    assert current.observation_schema_version == 2
+    with pytest.raises(ValidationError, match="observation schema.*non-scoreable"):
+        _segment(
+            observation_schema_version=noncurrent_schema,
+            pre_roll_frames=smoke_pre_roll,
+            scored_hold_frames=(),
+            hold_entry=None,
+        )
 
 
 def test_corpus_slices_are_ordered_immutable_and_validate_counts_ordinals_and_digests() -> None:

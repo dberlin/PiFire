@@ -16,6 +16,7 @@ from pydantic import ConfigDict, Field, StringConstraints, field_validator, mode
 from pydantic.dataclasses import dataclass
 
 _FRAME_MILLISECONDS = 20_000
+TRAJECTORY_OBSERVATION_SCHEMA_VERSION = 2
 _MAX_METADATA_BYTES = 65_536
 _MAX_CORPUS_SLICES = 256
 _DATACLASS_CONFIG = ConfigDict(
@@ -29,6 +30,7 @@ type FiniteFloat = Annotated[float, Field(allow_inf_nan=False, strict=True)]
 type NonNegativeFloat = Annotated[FiniteFloat, Field(ge=0)]
 type BoundedLoad = Annotated[FiniteFloat, Field(ge=0, le=1)]
 type NonNegativeInt = Annotated[int, Field(ge=0, strict=True)]
+type StrictInt = Annotated[int, Field(strict=True)]
 type PositiveInt = Annotated[int, Field(gt=0, strict=True)]
 type NonBlankString = Annotated[
     str,
@@ -137,6 +139,7 @@ class TrajectoryBreakReason(StrEnum):
     MANUAL = "manual"
     LID_OPEN = "lid-open"
     SAFETY = "safety"
+    RESET = "reset"
     STOP = "stop"
     ERROR = "error"
     PROCESS_RESTART = "process-restart"
@@ -148,7 +151,10 @@ class TrajectoryBreakReason(StrEnum):
     CLOCK_DISCONTINUITY = "clock-discontinuity"
     UNITS_CHANGED = "units-changed"
     STRUCTURE_CHANGED = "structure-changed"
+    ACTUATION_MAPPING_CHANGED = "actuation-mapping-changed"
     FAN_MAPPING_CHANGED = "fan-mapping-changed"
+    AMBIENT_SEMANTICS_CHANGED = "ambient-semantics-changed"
+    MODE_TRANSITION = "mode-transition"
     LEFT_HOLD = "left-hold"
     UNCLEAN_RESTART = "unclean-restart"
     RETENTION_ROLLOVER = "retention-rollover"
@@ -282,6 +288,13 @@ class LearningTrajectoryFrame:
     wall_start_ms: NonNegativeInt
     wall_end_ms: NonNegativeInt
     chamber_temperature_c: FiniteFloat
+    temperature_sample_monotonic_ms: NonNegativeInt
+    temperature_sample_wall_ms: NonNegativeInt
+    temperature_sample_age_ms: NonNegativeInt
+    temperature_sample_wall_age_ms: StrictInt
+    temperature_sample_clock_skew_ms: StrictInt
+    source_temperature_units: Literal["C", "F"]
+    settings_revision: NonNegativeInt
     probe_valid: bool
     probe_source: NonBlankString | None
     ambient_temperature_c: FiniteFloat
@@ -310,6 +323,27 @@ class LearningTrajectoryFrame:
             raise ValueError("trajectory frame interval must be positive")
         if wall_duration_ms != monotonic_duration_ms:
             raise ValueError("wall and monotonic frame durations must agree")
+        if self.temperature_sample_monotonic_ms > self.monotonic_end_ms:
+            raise ValueError("temperature sample must not follow its frame end")
+        monotonic_sample_age_ms = (
+            self.monotonic_end_ms - self.temperature_sample_monotonic_ms
+        )
+        wall_sample_age_ms = self.wall_end_ms - self.temperature_sample_wall_ms
+        if self.temperature_sample_age_ms != monotonic_sample_age_ms:
+            raise ValueError(
+                "temperature sample monotonic age must match the monotonic frame-end difference"
+            )
+        if self.temperature_sample_wall_age_ms != wall_sample_age_ms:
+            raise ValueError(
+                "temperature sample wall age must match the wall frame-end difference"
+            )
+        if (
+            self.temperature_sample_clock_skew_ms
+            != wall_sample_age_ms - monotonic_sample_age_ms
+        ):
+            raise ValueError(
+                "temperature sample clock skew must equal wall age minus monotonic age"
+            )
         if self.partial:
             if monotonic_duration_ms >= _FRAME_MILLISECONDS:
                 raise ValueError("partial trajectory frame must be shorter than twenty seconds")
@@ -367,6 +401,13 @@ def _frame_json(frame: LearningTrajectoryFrame) -> dict[str, JsonValue]:
         "wall_start_ms": frame.wall_start_ms,
         "wall_end_ms": frame.wall_end_ms,
         "chamber_temperature_c": frame.chamber_temperature_c,
+        "temperature_sample_monotonic_ms": frame.temperature_sample_monotonic_ms,
+        "temperature_sample_wall_ms": frame.temperature_sample_wall_ms,
+        "temperature_sample_age_ms": frame.temperature_sample_age_ms,
+        "temperature_sample_wall_age_ms": frame.temperature_sample_wall_age_ms,
+        "temperature_sample_clock_skew_ms": frame.temperature_sample_clock_skew_ms,
+        "source_temperature_units": frame.source_temperature_units,
+        "settings_revision": frame.settings_revision,
         "probe_valid": frame.probe_valid,
         "probe_source": frame.probe_source,
         "ambient_temperature_c": frame.ambient_temperature_c,
@@ -472,6 +513,13 @@ class LearningTrajectorySegment:
 
     @model_validator(mode="after")
     def validate_segment(self) -> LearningTrajectorySegment:
+        if (
+            self.observation_schema_version
+            != TRAJECTORY_OBSERVATION_SCHEMA_VERSION
+        ):
+            raise ValueError(
+                "older trajectory observation schema is non-scoreable"
+            )
         if not self.pre_roll_frames and not self.scored_hold_frames:
             raise ValueError("trajectory segment requires at least one frame")
         if not self.trace_session_ids or len(set(self.trace_session_ids)) != len(self.trace_session_ids):
@@ -491,6 +539,8 @@ class LearningTrajectorySegment:
                 raise ValueError("pre-roll frames must be continuous")
             if frame.auger_delivery_certainty is not FrameDeliveryCertainty.EXACT:
                 raise ValueError("pre-roll frames require exact auger delivery")
+            if frame.fan_delivery_certainty is not FrameDeliveryCertainty.EXACT:
+                raise ValueError("pre-roll frames require exact fan delivery")
         for frame in self.scored_hold_frames:
             if frame.partial:
                 raise ValueError("partial frames are forbidden in scored observations")
@@ -500,6 +550,8 @@ class LearningTrajectorySegment:
                 raise ValueError("scored observations require effective Hold mode")
             if frame.auger_delivery_certainty is not FrameDeliveryCertainty.EXACT:
                 raise ValueError("scored observations require exact auger delivery")
+            if frame.fan_delivery_certainty is not FrameDeliveryCertainty.EXACT:
+                raise ValueError("scored observations require exact fan delivery")
         if self.pre_roll_frames and self.scored_hold_frames:
             previous = self.pre_roll_frames[-1]
             current = self.scored_hold_frames[0]
@@ -533,10 +585,26 @@ class LearningTrajectorySegment:
             if self.hold_entry is None:
                 raise ValueError("scored observations require a Hold-entry anchor")
             first_scored = self.scored_hold_frames[0]
-            if self.hold_entry.monotonic_ms != first_scored.monotonic_start_ms:
-                raise ValueError("Hold-entry monotonic boundary must match scored Hold entry")
-            if self.hold_entry.wall_ms != first_scored.wall_start_ms:
-                raise ValueError("Hold-entry wall boundary must match scored Hold entry")
+            if (
+                self.hold_entry.monotonic_ms < first_scored.monotonic_start_ms
+                or self.hold_entry.wall_ms < first_scored.wall_start_ms
+            ):
+                raise ValueError("Hold-entry anchor must fall inside the first scored interval")
+            if (
+                self.hold_entry.monotonic_ms - first_scored.monotonic_start_ms
+                != self.hold_entry.wall_ms - first_scored.wall_start_ms
+            ):
+                raise ValueError(
+                    "Hold-entry wall and monotonic offsets must agree inside the first scored interval"
+                )
+            if (
+                self.hold_entry.monotonic_ms
+                > first_scored.temperature_sample_monotonic_ms
+                or self.hold_entry.wall_ms > first_scored.temperature_sample_wall_ms
+            ):
+                raise ValueError(
+                    "Hold-entry sample must not follow the first scored temperature sample"
+                )
             if not self.hold_entry.probe_valid:
                 raise ValueError("Hold-entry anchor must be probe-valid")
         elif self.hold_entry is not None:

@@ -17,6 +17,7 @@ from common.control_trace import (
     TraceEventKind,
 )
 from common.controller_model_state import ControllerModelStore
+from common.learning_trajectory import TrajectoryBreakReason
 from common.modes import Mode
 from common.persistence.learning_trajectory import LearningTrajectoryRepository
 from common.persistence.protocols import JsonValue
@@ -766,6 +767,7 @@ class HoldMode(ControlMode):
             controller_name=self._controller_name,
             logger=self.ctx.event_log,
             initial_generation=self._runner_configuration_revision,
+            learning_trajectory=getattr(self.ctx, "learning_trajectory", None),
         )
         if not learning_evidence_available:
             self._hold_learning.mark_evidence_unavailable()
@@ -831,6 +833,11 @@ class HoldMode(ControlMode):
 
     def _adopt_runner_configuration(self, now, current_output_status):
         """Adopt one actually installed runner generation exactly once."""
+        self._emit_trajectory_boundary(
+            TrajectoryBreakReason.RESET,
+            now,
+            "controller-update-reset",
+        )
         runner = cast(_runner_mod.ControllerRunner, self._runner)
 
         retiring_generation = self._runner_configuration_revision
@@ -1222,6 +1229,12 @@ class HoldMode(ControlMode):
             or action not in {"pause", "stop", "reset-progress"}
         ):
             return False
+        if action == "reset-progress":
+            self._emit_trajectory_boundary(
+                TrajectoryBreakReason.RESET,
+                now,
+                "operator-reset-progress",
+            )
         return self._cancel_active_framed_calibration(
             f"operator_{action}",
             now=now,
@@ -1748,6 +1761,11 @@ class HoldMode(ControlMode):
             self.state.target_temp_achieved = True
 
         if lid_will_open:
+            self._emit_trajectory_boundary(
+                TrajectoryBreakReason.LID_OPEN,
+                now,
+                "lid-open-detected",
+            )
             self.state.lid.open_detected = True
             if trace is not None:
                 trace.record_applied_interval(

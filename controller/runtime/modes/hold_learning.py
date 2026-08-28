@@ -153,6 +153,10 @@ def parse_model_lifecycle_payload(
         return None
 
 
+class _LearningTrajectoryObserver(Protocol):
+    def observe_hold_frame(self, observation: FrameObservation) -> None: ...
+
+
 class _HoldLearningRunner(ModelLifecycleRunner, Protocol):
     """Typed runner surface owned by Hold's complete learning lifecycle."""
 
@@ -274,11 +278,13 @@ class HoldLearningRuntime:
         controller_name: str,
         logger: _LifecycleLogger,
         initial_generation: int,
+        learning_trajectory: _LearningTrajectoryObserver | None = None,
     ) -> None:
         self._runner = runner
         self._model_store = model_store
         self._persistence = persistence
         self._trajectory_repository = trajectory_repository
+        self._learning_trajectory = learning_trajectory
         self._trace = trace
         self._controller_name = controller_name
         self._logger = logger
@@ -933,6 +939,14 @@ class HoldLearningRuntime:
                 )
                 continue
 
+            trajectory = self._learning_trajectory
+            if trajectory is not None:
+                try:
+                    trajectory.observe_hold_frame(delivered)
+                except Exception as error:
+                    self._logger.warning(
+                        f"Learning trajectory observation failed: {error}"
+                    )
             records: list[_TraceRecord] = [(TraceEventKind.MODEL_OBSERVATION, observation_payload)]
             if evaluation is not None:
                 records.append((TraceEventKind.MODEL_EVALUATION, evaluation))

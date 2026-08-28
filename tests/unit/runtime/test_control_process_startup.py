@@ -34,8 +34,19 @@ class _ProcessPersistence:
         return True
 
 
-def test_process_shutdown_closes_shared_persistence_exactly_once() -> None:
+class _ProcessTrajectoryRuntime:
+    def __init__(self, persistence: _ProcessPersistence) -> None:
+        self.persistence = persistence
+        self.close_calls = 0
+
+    def close(self) -> None:
+        self.close_calls += 1
+        self.persistence.close(timeout=2.0)
+
+
+def test_process_shutdown_closes_shared_trajectory_and_persistence_exactly_once() -> None:
     persistence = _ProcessPersistence()
+    trajectory = _ProcessTrajectoryRuntime(persistence)
     repository = object()
     grill = SimpleNamespace(cleanup_calls=0)
 
@@ -56,6 +67,7 @@ def test_process_shutdown_closes_shared_persistence_exactly_once() -> None:
         control_log=SimpleNamespace(info=lambda _message: None),
         trajectory_repository=repository,
         model_persistence=persistence,
+        learning_trajectory=trajectory,
     )
     controller = Controller(ctx)
 
@@ -63,6 +75,8 @@ def test_process_shutdown_closes_shared_persistence_exactly_once() -> None:
     controller.cleanup()
 
     assert controller.ctx.trajectory_repository is repository
+    assert controller.ctx.learning_trajectory is trajectory
+    assert trajectory.close_calls == 1
     assert persistence.close_calls == [2.0]
     assert grill.cleanup_calls == 1
 

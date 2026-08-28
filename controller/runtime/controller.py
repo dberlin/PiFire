@@ -166,7 +166,16 @@ class Controller:
             control["updated"] = False  # Clear Updated Flag if Set
             ctx.store.write_control_snapshot(control, origin="control")
             # 4b. Start the recipe step work cycle
-            self.work_cycle(recipe["steps"][step_num]["mode"])
+            next_effective_mode = (
+                recipe["steps"][step_num + 1]["mode"]
+                if step_num + 1 < num_steps
+                else Mode.STOP
+            )
+            self.ctx.trajectory_next_effective_mode = next_effective_mode
+            try:
+                self.work_cycle(recipe["steps"][step_num]["mode"])
+            finally:
+                self.ctx.trajectory_next_effective_mode = None
 
             # 4c. If reignite is required, run a reignite cycle and retry current step
             ctx.store.execute_control_writes()
@@ -221,20 +230,26 @@ class Controller:
                 logger.info("Control Script Exiting.")
             except Exception:  # noqa: S110 -- exit logging cannot preempt owner cleanup
                 pass
+        trajectory = getattr(self.ctx, "learning_trajectory", None)
         persistence = getattr(self.ctx, "model_persistence", None)
-        if persistence is not None:
+        owner = trajectory if trajectory is not None else persistence
+        if owner is not None:
             try:
-                closed = persistence.close(timeout=2.0)
+                closed = (
+                    owner.close()
+                    if trajectory is not None
+                    else owner.close(timeout=2.0)
+                )
                 if closed is False:
                     error_log = getattr(self.eventLogger, "error", None)
                     if callable(error_log):
-                        error_log("Model persistence process shutdown timed out")
+                        error_log("Learning persistence process shutdown timed out")
             except Exception as error:
                 error_log = getattr(self.eventLogger, "error", None)
                 if callable(error_log):
                     try:
                         error_log(
-                            f"Model persistence process shutdown failed: {error}"
+                            f"Learning persistence process shutdown failed: {error}"
                         )
                     except Exception:  # noqa: S110 -- cleanup must continue after logging failure
                         pass

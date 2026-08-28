@@ -33,6 +33,7 @@ from controller.runtime.clock import RealClock
 from controller.runtime.context import ControllerContext
 from controller.runtime.controller import Controller
 from controller.runtime.devices import build_devices
+from controller.runtime.learning_trajectory import LearningTrajectoryRuntime
 from controller.runtime.model_persistence import ModelPersistenceWorker
 from controller.runtime.notifier import LiveNotifier
 from controller.runtime.store import SqliteStore
@@ -113,6 +114,11 @@ if __name__ == "__main__":
         eventLogger,
         trajectory_repository=trajectory_repository,
     )
+    trajectory_repository.recover_open_segments(int(RealClock().now() * 1_000))
+    learning_trajectory = LearningTrajectoryRuntime(
+        journal=devices.grill_platform.journal,
+        persistence=model_persistence,
+    )
 
     # Build the injected context used by the controller / mode functions instead of bare globals
     ctx = ControllerContext(
@@ -124,6 +130,7 @@ if __name__ == "__main__":
         control_log=controlLogger,
         trajectory_repository=trajectory_repository,
         model_persistence=model_persistence,
+        learning_trajectory=learning_trajectory,
     )
 
     # Hand off to the orchestrator: setup() + the control loop.

@@ -68,6 +68,13 @@ def _frame(
         wall_start_ms=_WALL_EPOCH_MS + start_ms,
         wall_end_ms=_WALL_EPOCH_MS + end_ms,
         chamber_temperature_c=110.0 + temperature_offset + sequence / 100.0,
+        temperature_sample_monotonic_ms=end_ms,
+        temperature_sample_wall_ms=_WALL_EPOCH_MS + end_ms,
+        temperature_sample_age_ms=0,
+        temperature_sample_wall_age_ms=0,
+        temperature_sample_clock_skew_ms=0,
+        source_temperature_units="C",
+        settings_revision=7,
         probe_valid=True,
         probe_source="grill-probe-1",
         ambient_temperature_c=24.0,
@@ -124,7 +131,7 @@ def _segment(
     hold_entry = _hold_entry(scored[0]) if scored else None
     return LearningTrajectorySegment(
         schema_version=1,
-        observation_schema_version=1,
+        observation_schema_version=2,
         segment_id=segment_id,
         cook_id=f"cook-{segment_id}",
         trajectory_session_id=f"trajectory-{segment_id}",
@@ -371,6 +378,12 @@ def test_schema_v9_migration_is_additive_and_declares_corpus_tables(database_pat
             "canonical_json",
             "frame_digest",
         } <= _columns(database_path, "learning_trajectory_frame")
+        frame_ddl = str(
+            connection.execute(
+                "SELECT sql FROM sqlite_master WHERE name='learning_trajectory_frame'"
+            ).fetchone()[0]
+        )
+        assert "payload_schema_version = 2" in frame_ddl
         assert {
             "request_id",
             "status",
@@ -1608,3 +1621,26 @@ def test_terminal_fit_manifests_use_repository_visible_deterministic_bound(
         f"terminal-fit-{index:04d}" for index in range(3, limit + 3)
     )
     assert repository.replay_fit(f"terminal-fit-{limit + 2:04d}").identity == snapshot.identity
+
+
+def test_older_frame_payload_schema_is_explicitly_non_scoreable(
+    database_path: Path,
+) -> None:
+    repository = LearningTrajectoryRepository(str(database_path))
+    segment = _segment("old-frame-schema", scored_count=1)
+    repository.begin_segment(segment)
+    _executescript(
+        database_path,
+        """
+        PRAGMA ignore_check_constraints=ON;
+        UPDATE learning_trajectory_frame
+        SET payload_schema_version=1
+        WHERE segment_id='old-frame-schema';
+        PRAGMA ignore_check_constraints=OFF;
+        """,
+    )
+
+    reopened = LearningTrajectoryRepository(str(database_path))
+
+    assert reopened.read_segment("old-frame-schema") is None
+    assert reopened.status().quarantined_segment_count == 1

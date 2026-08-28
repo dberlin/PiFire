@@ -130,7 +130,19 @@ def make_ctx(settings, control_data, pellet_db, probes, grill=None, runner=None,
     return ctx, grill, notifier
 
 
-def run_mode(mode, *, settings, control_data, pellet_db, probes, grill=None, probe_cap=None, runner=None, store=None):
+def run_mode(
+    mode,
+    *,
+    settings,
+    control_data,
+    pellet_db,
+    probes,
+    grill=None,
+    probe_cap=None,
+    runner=None,
+    store=None,
+    learning_trajectory=None,
+):
     """Run one `control._work_cycle` invocation hermetically and capture its
     observable effects.
 
@@ -145,6 +157,9 @@ def run_mode(mode, *, settings, control_data, pellet_db, probes, grill=None, pro
     Hold-mode scenarios pin the runner's `.latest()` output deterministically
     without depending on real controller math.
 
+    `learning_trajectory`: optional process-owned recorder spy used to
+    characterize the shared mode hooks without replacing Smoke/Hold handlers.
+
     NOTE: HoldMode (controller/runtime/modes/hold.py) calls
     `controller.runtime.runner.build_runner(...)` directly (a patchable
     module-level reference). The legacy inline Hold code in `control.py` that
@@ -153,6 +168,8 @@ def run_mode(mode, *, settings, control_data, pellet_db, probes, grill=None, pro
     patching now.
     """
     ctx, grill, notifier = make_ctx(settings, control_data, pellet_db, probes, grill, store=store)
+    if learning_trajectory is not None:
+        ctx.learning_trajectory = learning_trajectory
 
     if probe_cap is not None:
         probes = _CappedProbes(probes, ctx.store, probe_cap)

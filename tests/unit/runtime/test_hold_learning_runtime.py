@@ -103,20 +103,20 @@ class _Persistence:
         accepted: bool = True,
         blocked: bool = False,
         checkpoint_results: Sequence[bool] = (True,),
-        flush_result: bool = True,
-        flush_error: BaseException | None = None,
+        barrier_result: bool = True,
+        barrier_error: BaseException | None = None,
         failed: bool = False,
         events=None,
     ) -> None:
         self.accepted = accepted
         self.evidence_blocked = blocked
         self.checkpoint_results = list(checkpoint_results)
-        self.flush_result = flush_result
-        self.flush_error = flush_error
+        self.barrier_result = barrier_result
+        self.barrier_error = barrier_error
         self.failed = failed
         self.batches: list[tuple[ModelEvidenceRecord, ...]] = []
         self.checkpoints: list[tuple[str, dict[str, object]]] = []
-        self.flush_calls = 0
+        self.barrier_calls = 0
         self.events = [] if events is None else events
 
     def submit_evidence_batch(self, records: Sequence[ModelEvidenceRecord]) -> EvidenceSubmission:
@@ -132,12 +132,13 @@ class _Persistence:
             return self.checkpoint_results.pop(0)
         return False
 
-    def flush_and_stop(self) -> bool:
-        self.flush_calls += 1
-        self.events.append("persistence:flush")
-        if self.flush_error is not None:
-            raise self.flush_error
-        return self.flush_result
+    def barrier(self, timeout: float = 2.0) -> bool:
+        del timeout
+        self.barrier_calls += 1
+        self.events.append("persistence:barrier")
+        if self.barrier_error is not None:
+            raise self.barrier_error
+        return self.barrier_result
 
 
 class _Runner:
@@ -734,6 +735,45 @@ def test_sub_millisecond_frame_leaves_the_control_loop_running() -> None:
         "Rejected model observation failed",
         "Recorder gap trace failed",
     ]
+
+
+class _TrajectoryObserver:
+    def __init__(self) -> None:
+        self.observations: list[FrameObservation] = []
+
+    def observe_hold_frame(self, observation: FrameObservation) -> None:
+        self.observations.append(observation)
+
+
+def test_eligible_reconciled_hold_observation_enters_trajectory_exactly_once() -> None:
+    trace, _recorder = _trace()
+    runner = _Runner()
+    trajectory = _TrajectoryObserver()
+    runtime = HoldLearningRuntime(
+        runner=runner,
+        model_store=None,
+        persistence=_Persistence(),
+        trace=trace,
+        controller_name="mpc",
+        logger=_LifecycleLogger(),
+        initial_generation=runner.generation,
+        learning_trajectory=trajectory,
+    )
+    observation = _observation()
+    eligible = {
+        **_outcome(),
+        "eligible": True,
+        "rejection_reasons": (),
+    }
+
+    runtime.submit_completed_observation((0, 20_000), observation)
+    runner.drains.append(
+        _drain(ObservationOutcomeEnvelope(1, 0, observation, eligible))
+    )
+    runtime.reconcile_outcomes(22.0)
+    runtime.reconcile_outcomes(23.0)
+
+    assert trajectory.observations == [observation]
 
 
 def test_accepted_outcome_keeps_exact_frame_feedback_identity_and_reconciles_once() -> None:
@@ -2224,7 +2264,7 @@ def test_publish_final_checkpoint_bounds_authoritative_retry_and_is_idempotent()
     assert not runtime.evidence_available
 
 
-def test_finish_teardown_orders_retire_flush_trace_close_and_runner_finish_once() -> None:
+def test_finish_teardown_orders_retire_runner_finish_barrier_trace_close_once() -> None:
     events: list[object] = []
     runner = _LifecycleRunner(events=events)
     persistence = _Persistence(events=events)
@@ -2242,24 +2282,26 @@ def test_finish_teardown_orders_retire_flush_trace_close_and_runner_finish_once(
 
     assert events == [
         ("runner:retire", 4),
-        "persistence:flush",
-        "trace:close",
         "runner:finish",
+        "persistence:barrier",
+        "trace:close",
     ]
     assert runner.retirements == [4]
-    assert persistence.flush_calls == 1
+    assert persistence.barrier_calls == 1
     assert recorder.close_calls == 1
     assert runner.finish_calls == 1
 
 
 @pytest.mark.parametrize("failure", ("refusal", "timeout"))
-def test_finish_teardown_marks_flush_failure_and_still_finishes_resources(
+def test_finish_teardown_marks_barrier_failure_and_still_finishes_resources(
     failure: str,
 ) -> None:
     runner = _LifecycleRunner()
     persistence = _Persistence(
-        flush_result=failure != "refusal",
-        flush_error=TimeoutError("flush timed out") if failure == "timeout" else None,
+        barrier_result=failure != "refusal",
+        barrier_error=(
+            TimeoutError("barrier timed out") if failure == "timeout" else None
+        ),
     )
     runtime, _runner, _store, _trace_session, recorder, _logger = _lifecycle_runtime(
         runner=runner, persistence=persistence
@@ -2269,7 +2311,7 @@ def test_finish_teardown_marks_flush_failure_and_still_finishes_resources(
     runtime.finish_teardown(generation=5)
 
     assert runner.finalized == [TeardownRefitOutcome.CHECKPOINT_FAILURE]
-    assert persistence.flush_calls == 1
+    assert persistence.barrier_calls == 1
     assert recorder.close_calls == 1
     assert runner.finish_calls == 1
     assert not runtime.evidence_available

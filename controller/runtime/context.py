@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from common.persistence.learning_trajectory import LearningTrajectoryRepository
 from common.persistence.protocols import ControllerStore
 from controller.runtime.actuation_delivery import DeliveredGrillPlatform
+from controller.runtime.learning_trajectory import LearningTrajectoryRuntime
 from controller.runtime.model_persistence import ModelPersistenceWorker
 
 #: The two operator-visible logger names. `create_logger` configures their
@@ -38,3 +39,5 @@ class ControllerContext:
     control_log: object = field(default_factory=lambda: logging.getLogger(CONTROL_LOG_NAME))
     trajectory_repository: LearningTrajectoryRepository | None = None
     model_persistence: ModelPersistenceWorker | None = None
+    learning_trajectory: LearningTrajectoryRuntime | None = None
+    trajectory_next_effective_mode: str | None = None

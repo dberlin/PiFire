@@ -15,6 +15,7 @@ from typing import Literal, Protocol, cast
 
 from common import datastore
 from common.learning_trajectory import (
+    TRAJECTORY_OBSERVATION_SCHEMA_VERSION,
     FitCorpusIdentity,
     FitCorpusSlice,
     FrameDeliveryCertainty,
@@ -149,6 +150,13 @@ def _frame_payload(frame: LearningTrajectoryFrame) -> dict[str, object]:
         "wall_start_ms": frame.wall_start_ms,
         "wall_end_ms": frame.wall_end_ms,
         "chamber_temperature_c": frame.chamber_temperature_c,
+        "temperature_sample_monotonic_ms": frame.temperature_sample_monotonic_ms,
+        "temperature_sample_wall_ms": frame.temperature_sample_wall_ms,
+        "temperature_sample_age_ms": frame.temperature_sample_age_ms,
+        "temperature_sample_wall_age_ms": frame.temperature_sample_wall_age_ms,
+        "temperature_sample_clock_skew_ms": frame.temperature_sample_clock_skew_ms,
+        "source_temperature_units": frame.source_temperature_units,
+        "settings_revision": frame.settings_revision,
         "probe_valid": frame.probe_valid,
         "probe_source": frame.probe_source,
         "ambient_temperature_c": frame.ambient_temperature_c,
@@ -276,6 +284,11 @@ def _with_frames(
         end_wall_ms=all_frames[-1].wall_end_ms,
         start_sequence=all_frames[0].sequence,
         end_sequence=all_frames[-1].sequence,
+        pre_roll_end_reason=(
+            pre_roll[-1].boundary_reason
+            if pre_roll and pre_roll[-1].partial
+            else segment.pre_roll_end_reason
+        ),
         state=segment.state if state is None else state,
         terminal_break_reason=terminal_reason,
     )
@@ -680,6 +693,13 @@ class LearningTrajectoryRepository:
         for expected_ordinal, row in enumerate(rows):
             if row["ordinal"] != expected_ordinal:
                 raise ValueError("trajectory frame ordinals are not contiguous")
+            if (
+                row["payload_schema_version"]
+                != TRAJECTORY_OBSERVATION_SCHEMA_VERSION
+            ):
+                raise ValueError(
+                    "older trajectory frame payload schema is non-scoreable"
+                )
             canonical_json = row["canonical_json"]
             payload = json.loads(canonical_json)
             if _canonical_json(payload) != canonical_json:
