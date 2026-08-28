@@ -12,7 +12,7 @@ from common.model_evidence import ForecastOriginEvidence
 from controller.acados import SolverDiagnostics, SolverError
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.base import ControllerLearningDiagnostics, MpcFailureState
-from controller.model_learning.contracts import FrameObservation
+from controller.model_learning.contracts import CandidateOrigin, FitRequest, FrameObservation
 from controller.model_learning.evaluation import (
     CompletedForecastOrigin,
     EvaluationDecision,
@@ -21,6 +21,7 @@ from controller.model_learning.evaluation import (
 )
 from controller.runtime.model_fitting import (
     CandidatePair,
+    CandidatePreparation,
     FitSubmission,
     GreyFitMessage,
     GreyFitSuccess,
@@ -461,6 +462,7 @@ def test_slow_candidate_preparation_does_not_block_live_observation(monkeypatch)
 
 def test_identity_rebind_fences_and_discards_an_inflight_old_generation_candidate(monkeypatch):
     controller, _estimator, _solver = _make(monkeypatch)
+    runtime = controller._grey_learning_runtime
     preparing = threading.Event()
     release = threading.Event()
     rebound = threading.Event()
@@ -481,13 +483,32 @@ def test_identity_rebind_fences_and_discards_an_inflight_old_generation_candidat
             self.prepared = None
             self.identities = []
 
-        def poll_fit_off_path(self, **_kwargs):
+        def poll_fit_off_path(self, *, live_identity=None, **_kwargs):
             self.calls += 1
             pair = old_pair if self.calls == 1 else new_pair
             if self.calls == 1:
                 preparing.set()
                 assert release.wait(2.0)
-            preparation = SimpleNamespace(accepted=True, candidate_pair=pair)
+            preparation = CandidatePreparation.accepted_for_test(
+                candidate=GreyFitSuccess(
+                    request=FitRequest(
+                        request_id=f"{self.calls:064d}",
+                        origin=CandidateOrigin.PASSIVE_ONLINE,
+                        window=live_identity.window(0, 119),
+                        candidate_generation=live_identity.candidate_generation,
+                    ),
+                    config=runtime._active_components().controller.config,
+                    rmse_c=1.0,
+                    max_error_c=2.0,
+                    identifiability=1.0,
+                    sample_count=120,
+                    temperature_band_c=(80.0, 120.0),
+                    nfev=4,
+                ),
+                candidate_pair=pair,
+                incumbent_pair=CandidatePair(Closable(), Closable()),
+                timing=TargetTimingEvidence("candidate-dry-solve", 3, 1.0, 25.0),
+            )
             self.prepared = preparation
             return SimpleNamespace(preparation=preparation)
 
