@@ -1268,6 +1268,75 @@ def test_reviewed_checkpoint_failures_preserve_active_owner_and_close_candidate(
     harness.activation.close()
 
 
+@pytest.mark.parametrize(
+    ("failure", "message"),
+    (
+        ("identity", "reviewed-candidate-identity-changed"),
+        ("snapshot", "reviewed-candidate-checkpoint-invalid"),
+        ("checkpoint", "reviewed-candidate-checkpoint-not-durable"),
+    ),
+)
+def test_reviewed_checkpoint_failure_leaves_the_checkpoint_lineage_untouched(
+    monkeypatch,
+    failure,
+    message,
+) -> None:
+    instances = []
+
+    class _Learning:
+        def __init__(self, **_kwargs) -> None:
+            self.prepared = None
+            self.pending_request = None
+            self.handoff = None
+            self.evaluation = None
+            instances.append(self)
+
+        def start(self) -> None:
+            return None
+
+        def poll_fit_off_path(self, **_kwargs):
+            return None
+
+        def evaluate_ready_off_path(self):
+            return self.evaluation
+
+        def close(self) -> None:
+            if self.prepared is not None:
+                self.prepared.candidate_pair.estimator.close()
+                self.prepared.candidate_pair.controller.close()
+
+    monkeypatch.setattr(
+        "controller.model_learning.grey_runtime.GreyLearningOrchestrator",
+        _Learning,
+    )
+    store = _CheckpointStore(CheckpointSaveOutcome.FAILED if failure == "checkpoint" else CheckpointSaveOutcome.SAVED)
+    snapshot_parameters = (
+        (lambda: (_ for _ in ()).throw(ValueError("not serializable"))) if failure == "snapshot" else None
+    )
+    harness = _harness(
+        learning_enabled=True,
+        checkpoint_store=store,
+        snapshot_parameters=snapshot_parameters,
+    )
+    preparation, evaluation, components = _reviewed_candidate(harness)
+    if failure == "identity":
+        evaluation = replace(evaluation, challenger_digest="f" * 64)
+    instances[0].prepared = preparation
+    instances[0].evaluation = evaluation
+    revision_before = harness.runtime.model_authority()[0]
+    snapshot_before = harness.runtime.get_model_snapshot()
+
+    with pytest.raises(RuntimeError, match=message):
+        harness.runtime.poll_learning_off_path()
+
+    assert harness.runtime.model_authority()[0] == revision_before
+    assert harness.runtime.get_model_snapshot() == snapshot_before
+    harness.runtime.close()
+    harness.activation.close()
+    assert components.estimator.closed
+    assert components.controller.closed
+
+
 def test_learning_status_projects_queued_running_preparing_and_handoff_states(
     monkeypatch,
 ) -> None:

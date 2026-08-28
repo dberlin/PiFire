@@ -585,11 +585,7 @@ class GreyLearningRuntime:
             preparation_key = (request, descriptor.model_digest)
             candidate_config = preparation.candidate.config
             candidate_parameters = {
-                key: (
-                    candidate_config.delay_states
-                    if key == "n_delay"
-                    else getattr(candidate_config, key)
-                )
+                key: (candidate_config.delay_states if key == "n_delay" else getattr(candidate_config, key))
                 for key in self.MODEL_PARAM_KEYS
             }
             if preparation_key != self._checkpoint_preparation_key:
@@ -598,13 +594,9 @@ class GreyLearningRuntime:
             self._checkpoint_preparation_key = preparation_key
             self._checkpoint_candidate_identity = identity
             self._checkpoint_origin = request.origin
-            self._checkpoint_policy = self._policy_for_learning_origin(
-                request.origin
-            )
+            self._checkpoint_policy = self._policy_for_learning_origin(request.origin)
             self._checkpoint_challenger = {
-                "parameters": _snapshot.normalize_grey_parameters(
-                    candidate_parameters
-                ),
+                "parameters": _snapshot.normalize_grey_parameters(candidate_parameters),
                 "metadata": {
                     "rmse": preparation.candidate.rmse_c,
                     "samples": preparation.candidate.sample_count,
@@ -620,6 +612,29 @@ class GreyLearningRuntime:
             self._checkpoint_preparation = None
             self._checkpoint_preparation_key = None
 
+    _CHECKPOINT_LINEAGE_FIELDS = (
+        "_model_revision",
+        "_checkpoint_preparation",
+        "_checkpoint_preparation_key",
+        "_checkpoint_candidate_identity",
+        "_checkpoint_origin",
+        "_checkpoint_policy",
+        "_checkpoint_challenger",
+        "_teardown_fit_window",
+        "_teardown_candidate_descriptor",
+    )
+
+    def _capture_checkpoint_lineage(self) -> dict[str, object]:
+        """Every field an adoption replaces, so a failed persist can undo it."""
+
+        with self._learning_lock:
+            return {name: getattr(self, name) for name in self._CHECKPOINT_LINEAGE_FIELDS}
+
+    def _restore_checkpoint_lineage(self, lineage: dict[str, object]) -> None:
+        with self._learning_lock:
+            for name, value in lineage.items():
+                setattr(self, name, value)
+
     def _persist_reviewed_candidate_checkpoint(self, evaluation, preparation):
         request = getattr(getattr(preparation, "candidate", None), "request", None)
         if (
@@ -630,43 +645,45 @@ class GreyLearningRuntime:
             return
         if not isinstance(preparation, CandidatePreparation):
             raise RuntimeError("reviewed-candidate-preparation-invalid")  # noqa: TRY004  invariant on already-normalized input, not caller type validation
+        lineage_before_adoption = self._capture_checkpoint_lineage()
         self._adopt_prepared_checkpoint_lineage(preparation)
-        candidate_descriptor = self._prepared_candidate_descriptor(preparation)
-        active_descriptor = self._active_pair().descriptor
-        if (
-            evaluation.incumbent_digest != active_descriptor.model_digest
-            or evaluation.challenger_digest != candidate_descriptor.model_digest
-            or evaluation.candidate_generation != candidate_descriptor.candidate_generation
-        ):
-            raise RuntimeError("reviewed-candidate-identity-changed")
-        persisted = getattr(self, "_reviewed_checkpoint_decision_ids", None)
-        if persisted is None:
-            persisted = set()
-            self._reviewed_checkpoint_decision_ids = persisted
-        if evaluation.decision_id in persisted:
-            return
+        try:
+            candidate_descriptor = self._prepared_candidate_descriptor(preparation)
+            active_descriptor = self._active_pair().descriptor
+            if (
+                evaluation.incumbent_digest != active_descriptor.model_digest
+                or evaluation.challenger_digest != candidate_descriptor.model_digest
+                or evaluation.candidate_generation != candidate_descriptor.candidate_generation
+            ):
+                raise RuntimeError("reviewed-candidate-identity-changed")
+            persisted = getattr(self, "_reviewed_checkpoint_decision_ids", None)
+            if persisted is None:
+                persisted = set()
+                self._reviewed_checkpoint_decision_ids = persisted
+            if evaluation.decision_id in persisted:
+                return
 
-        from common.controller_model_state import (
-            CheckpointSaveOutcome,
-            ControllerModelStore,
-        )
+            from common.controller_model_state import (
+                CheckpointSaveOutcome,
+                ControllerModelStore,
+            )
 
-        previous_revision = self._model_revision
-        self._model_revision = max(
-            previous_revision + 1,
-            candidate_descriptor.role_generation,
-        )
-        checkpoint = self.get_model_snapshot()
-        if checkpoint is None:
-            self._model_revision = previous_revision
-            raise RuntimeError("reviewed-candidate-checkpoint-invalid")
-        checkpoint["evidence"]["confidence_decision_id"] = evaluation.decision_id
-        checkpoint["origin"] = CandidateOrigin.OPERATOR_CALIBRATION.value
-        checkpoint["policy"] = ActivationPolicy.OPERATOR_REVIEWED.value
-        outcome = self._checkpoint_store.save_outcome("mpc", checkpoint)
-        if outcome is not CheckpointSaveOutcome.SAVED:
-            self._model_revision = previous_revision
-            raise RuntimeError("reviewed-candidate-checkpoint-not-durable")
+            self._model_revision = max(
+                self._model_revision + 1,
+                candidate_descriptor.role_generation,
+            )
+            checkpoint = self.get_model_snapshot()
+            if checkpoint is None:
+                raise RuntimeError("reviewed-candidate-checkpoint-invalid")
+            checkpoint["evidence"]["confidence_decision_id"] = evaluation.decision_id
+            checkpoint["origin"] = CandidateOrigin.OPERATOR_CALIBRATION.value
+            checkpoint["policy"] = ActivationPolicy.OPERATOR_REVIEWED.value
+            outcome = self._checkpoint_store.save_outcome("mpc", checkpoint)
+            if outcome is not CheckpointSaveOutcome.SAVED:
+                raise RuntimeError("reviewed-candidate-checkpoint-not-durable")
+        except Exception:
+            self._restore_checkpoint_lineage(lineage_before_adoption)
+            raise
         persisted.add(evaluation.decision_id)
 
     def _persist_candidate_evaluation(self, evaluation, preparation):
@@ -1323,11 +1340,7 @@ class GreyLearningRuntime:
                 rollback_digest = None
                 rollback_generation = None
             prepared = checkpoint_preparation
-            if (
-                candidate is None
-                and prepared is not None
-                and self._teardown_candidate is None
-            ):
+            if candidate is None and prepared is not None and self._teardown_candidate is None:
                 candidate_config = prepared.candidate.config
                 candidate_parameters = {
                     key: (candidate_config.delay_states if key == "n_delay" else getattr(candidate_config, key))
@@ -1380,11 +1393,7 @@ class GreyLearningRuntime:
             }
             prepared_request = (
                 None
-                if (
-                    candidate is not None
-                    or prepared is None
-                    or self._teardown_candidate is not None
-                )
+                if (candidate is not None or prepared is None or self._teardown_candidate is not None)
                 else prepared.candidate.request
             )
             checkpoint_origin = (
