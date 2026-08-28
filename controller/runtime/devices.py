@@ -22,7 +22,11 @@ from common.persistence.runtime import (
     write_generic_key,
     write_pellet_db,
 )
+from controller.runtime.actuation_delivery import DeliveredGrillPlatform
 from controller.runtime.context import Devices
+
+_AUTHORITATIVE_ACTUATION_READBACK_MODULES = frozenset({"grillplat.prototype"})
+
 
 
 def build_display(settings, *, errors, event_log, control_log):
@@ -192,6 +196,12 @@ def build_devices(settings, *, errors, event_log, control_log):
         write_errors(ErrorKind.CONTROL, errors)
         event_log.error(error_event)
         control_log.error(error_event)
+    raw_grill_platform = grill_platform
+    grill_platform = DeliveredGrillPlatform(
+        raw_grill_platform,
+        readback_authoritative=type(raw_grill_platform).__module__ in _AUTHORITATIVE_ACTUATION_READBACK_MODULES,
+    )
+
 
     """
 	Set up Probes Input Module

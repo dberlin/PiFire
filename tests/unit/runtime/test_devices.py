@@ -107,6 +107,12 @@ def _selective_import(overrides):
 
     return _fake
 
+def _assert_delivered_platform(platform):
+    from controller.runtime.actuation_delivery import DeliveredGrillPlatform
+
+    assert isinstance(platform, DeliveredGrillPlatform)
+    assert platform.auger_timing() is not None
+
 
 # ---------------------------------------------------------------------------
 # build_devices(): happy path
@@ -120,7 +126,7 @@ def test_build_devices_prototype_success_random_hopper_and_probe_info_written(ds
     devices, errors = build_devices(settings, errors=[], event_log=_RecordingLogger(), control_log=_RecordingLogger())
 
     assert errors == []
-    assert type(devices.grill_platform).__module__ == "grillplat.prototype"
+    _assert_delivered_platform(devices.grill_platform)
     assert devices.probe_complex.disable is False
     # Both modules == "prototype" selects the random-reading branch (lines
     # 241-249): distance.prototype.HopperLevel records the `random` flag and
@@ -190,7 +196,7 @@ def test_build_devices_grillplat_import_failure_falls_back_to_prototype(ds, monk
     assert "nonexistent_grillplat_xyz" in errors[0]
     assert control_log.exceptions and control_log.errors
     assert read_control()["critical_error"] is True
-    assert type(devices.grill_platform).__module__ == "grillplat.prototype"
+    _assert_delivered_platform(devices.grill_platform)
 
 
 def test_build_devices_grillplat_import_failure_falls_back_to_prototype_in_debug_mode(ds, monkeypatch):
@@ -212,7 +218,7 @@ def test_build_devices_grillplat_import_failure_falls_back_to_prototype_in_debug
 
     assert len(errors) == 1
     assert "nonexistent_grillplat_xyz" in errors[0]
-    assert type(devices.grill_platform).__module__ == "grillplat.prototype"
+    _assert_delivered_platform(devices.grill_platform)
     assert read_control()["critical_error"] is True
 
 
@@ -230,7 +236,7 @@ def test_build_devices_grillplat_configure_failure_falls_back_to_prototype(ds, m
 
     assert len(errors) == 1
     assert read_control()["critical_error"] is True
-    assert type(devices.grill_platform).__module__ == "grillplat.prototype"
+    _assert_delivered_platform(devices.grill_platform)
 
 
 def test_build_devices_grillplat_configure_failure_falls_back_to_prototype_in_debug_mode(ds, monkeypatch):
@@ -250,7 +256,7 @@ def test_build_devices_grillplat_configure_failure_falls_back_to_prototype_in_de
     devices, errors = build_devices(settings, errors=[], event_log=_RecordingLogger(), control_log=_RecordingLogger())
 
     assert len(errors) == 1
-    assert type(devices.grill_platform).__module__ == "grillplat.prototype"
+    _assert_delivered_platform(devices.grill_platform)
     assert read_control()["critical_error"] is True
 
 

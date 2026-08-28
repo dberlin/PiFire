@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from common.persistence.learning_trajectory import LearningTrajectoryRepository
 from common.persistence.protocols import ControllerStore
+from controller.runtime.actuation_delivery import DeliveredGrillPlatform
 from controller.runtime.model_persistence import ModelPersistenceWorker
 
 #: The two operator-visible logger names. `create_logger` configures their
@@ -18,7 +19,7 @@ CONTROL_LOG_NAME = "control"
 
 @dataclass
 class Devices:
-    grill_platform: object
+    grill_platform: DeliveredGrillPlatform
     probe_complex: object
     dist_device: object
 
