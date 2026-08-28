@@ -8,6 +8,13 @@ exception of the 240x240 re-baseline).
 CAPTURE_GOLDEN=1 must NEVER be used again after this file's initial commit,
 except for that documented re-baseline.
 
+Second documented re-baseline: the five `text:network_error` cases moved
+when `_display_text` gained margin-aware font fitting. Their layout is
+guarded behaviorally by
+tests/ui/test_fixed_base_harness_smoke.py::test_long_text_fits_inside_every_fixed_viewport;
+these hashes only detect unintended change. The five `current:shutdown`
+cases do not route through `_display_text` and must never move with it.
+
 Determinism note on time-based branches: `_display_current` computes
 countdown/lid-pause text from `time.time() - status_data["start_time"]`
 (or `status_data["lid_open_endtime"] - time.time()`) with no mock available
