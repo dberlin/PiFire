@@ -366,7 +366,10 @@ $SUDO chown -R $USER:pifire pifire
 # Change ability for pifire group to read/write/execute
 $SUDO chmod -R 777 /usr/local/bin
 # After the recursive chmod, which would otherwise drop the setgid bit.
-pifire_prepare_log_dir /usr/local/bin/pifire "$USER"
+if ! pifire_prepare_log_dir /usr/local/bin/pifire "$USER"; then
+	log " !! Could not prepare shared log permissions."
+	exit 1
+fi
 if ! pifire_prepare_datastore_dir /usr/local/bin/pifire "$USER"; then
 	log " !! Could not prepare shared datastore permissions."
 	exit 1

@@ -303,7 +303,10 @@ pifire_install_udev_rules /usr/local/bin/pifire
 $SUDO chown -R "$USER":pifire /usr/local/bin/pifire
 $SUDO chmod -R 775 /usr/local/bin/pifire
 # After the recursive chmod, which would otherwise drop the setgid bit.
-pifire_prepare_log_dir /usr/local/bin/pifire "$USER"
+if ! pifire_prepare_log_dir /usr/local/bin/pifire "$USER"; then
+	log " !! Could not prepare shared log permissions."
+	exit 1
+fi
 if ! pifire_prepare_datastore_dir /usr/local/bin/pifire "$USER"; then
 	log " !! Could not prepare shared datastore permissions."
 	exit 1

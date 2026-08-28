@@ -155,7 +155,20 @@ restore_snapshot() {
 	else
 		tmp_link="${current_link}.rollback.$$"
 		rm -f "$tmp_link"
-		ln -s "$runtime_target" "$tmp_link" && mv -Tf "$tmp_link" "$current_link" || result=1
+		if ln -s "$runtime_target" "$tmp_link"; then
+			if ! python3 - "$tmp_link" "$current_link" <<'PY'
+import os
+import sys
+
+os.replace(sys.argv[1], sys.argv[2])
+PY
+			then
+				rm -f "$tmp_link"
+				result=1
+			fi
+		else
+			result=1
+		fi
 	fi
 	return "$result"
 }

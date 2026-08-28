@@ -288,7 +288,10 @@ $SUDO systemctl enable --now seatd 2>&1 | tee -a ~/logs/pifire_install.log
 pifire_add_hardware_groups $USER root
 pifire_install_udev_rules /usr/local/bin/pifire
 # After the recursive chmod above, which would otherwise drop the setgid bit.
-pifire_prepare_log_dir /usr/local/bin/pifire "$USER"
+if ! pifire_prepare_log_dir /usr/local/bin/pifire "$USER"; then
+	log " !! Could not prepare shared log permissions."
+	exit 1
+fi
 if ! pifire_prepare_datastore_dir /usr/local/bin/pifire "$USER"; then
 	log " !! Could not prepare shared datastore permissions."
 	exit 1

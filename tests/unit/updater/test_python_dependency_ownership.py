@@ -26,6 +26,7 @@ RPI_LGPIO_DEPENDENCY = "rpi-lgpio>=0.6; platform_system == 'Linux' and platform_
 LINUX_LGPIO_DEPENDENCY = "lgpio>=0.2.2.0; platform_system == 'Linux'"
 
 DATASTORE_PREPARE_CALL = 'pifire_prepare_datastore_dir /usr/local/bin/pifire "$USER"'
+LOG_PREPARE_CALL = 'pifire_prepare_log_dir /usr/local/bin/pifire "$USER"'
 RECURSIVE_INSTALL_CHMOD = re.compile(r"\$SUDO chmod -R (?:775|777) /usr/local/bin(?:/pifire)?")
 
 
@@ -61,11 +62,12 @@ pifire_prepare_datastore_dir "$2" "$3" "$4"
 def test_datastore_prepare_propagates_artifact_repair_failure(tmp_path) -> None:
     repo = tmp_path / "pifire"
     repo.mkdir()
+    (repo / "pifire.db").write_text("")
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
-    fake_find = fake_bin / "find"
-    fake_find.write_text("#!/bin/sh\nexit 19\n")
-    fake_find.chmod(0o755)
+    fake_chgrp = fake_bin / "chgrp"
+    fake_chgrp.write_text("#!/bin/sh\nexit 19\n")
+    fake_chgrp.chmod(0o755)
     user = pwd.getpwuid(os.getuid()).pw_name
     group = grp.getgrgid(os.getgid()).gr_name
     helper = ROOT / "auto-install/pifire-install-common.sh"
@@ -80,6 +82,40 @@ def test_datastore_prepare_propagates_artifact_repair_failure(tmp_path) -> None:
             str(repo),
             user,
             group,
+        ],
+        env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
+        check=False,
+    )
+
+    assert completed.returncode == 1
+
+
+def test_log_prepare_propagates_artifact_repair_failure(tmp_path) -> None:
+    repo = tmp_path / "pifire"
+    repo.mkdir()
+    logs = repo / "logs"
+    logs.mkdir()
+    (logs / "control.log").write_text("")
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_chgrp = fake_bin / "chgrp"
+    fake_chgrp.write_text("#!/bin/sh\nexit 19\n")
+    fake_chgrp.chmod(0o755)
+    fake_chown = fake_bin / "chown"
+    fake_chown.write_text("#!/bin/sh\nexit 0\n")
+    fake_chown.chmod(0o755)
+    user = pwd.getpwuid(os.getuid()).pw_name
+    helper = ROOT / "auto-install/pifire-install-common.sh"
+
+    completed = subprocess.run(
+        [
+            "bash",
+            "-c",
+            'SUDO=; LOG=/dev/null; source "$1"; pifire_prepare_log_dir "$2" "$3"',
+            "pifire-log-test",
+            str(helper),
+            str(repo),
+            user,
         ],
         env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
         check=False,
@@ -133,6 +169,8 @@ def test_fresh_installers_prepare_and_repair_datastore_around_initialization() -
         recursive_chmod = RECURSIVE_INSTALL_CHMOD.search(source)
         assert recursive_chmod is not None, installer
         assert recursive_chmod.start() < first_prepare < min(initialization), installer
+        log_prepare = source.index(LOG_PREPARE_CALL)
+        assert recursive_chmod.start() < log_prepare < first_prepare, installer
         assert final_prepare > max(initialization), installer
 
 
@@ -142,10 +180,10 @@ def test_fresh_installers_abort_failed_initialization_or_permission_repair() -> 
         command_indexes = [
             index
             for index, line in enumerate(lines)
-            if "python updater.py --piplist" in line or DATASTORE_PREPARE_CALL in line
+            if ("python updater.py --piplist" in line or DATASTORE_PREPARE_CALL in line or LOG_PREPARE_CALL in line)
         ]
 
-        assert len(command_indexes) == 3, installer
+        assert len(command_indexes) == 4, installer
         file_wide_pipefail = any(line == "set -o pipefail" for line in lines)
         for index in command_indexes:
             guard = next(

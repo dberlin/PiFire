@@ -507,7 +507,7 @@ pifire_prepare_log_dir() {
 	$SUDO chmod 2775 "$logs" || return 1
 	# Repair logs an earlier install left owned by root alone. Ownership is
 	# left as it is -- group access is what the other process needs.
-	$SUDO find "$logs" -maxdepth 1 -type f -exec chgrp pifire {} + -exec chmod g+w {} + 2>/dev/null
+	$SUDO find "$logs" -maxdepth 1 -type f -exec chgrp pifire {} + -exec chmod g+w {} + 2>/dev/null || return 1
 	return 0
 }
 
