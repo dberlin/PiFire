@@ -11,6 +11,7 @@ from pathlib import Path
 _HERE = os.path.dirname(os.path.abspath(__file__))
 DB_PATH: str = os.environ.get("PIFIRE_DB_PATH", os.path.join(_HERE, "..", "pifire.db"))
 _ORIGINAL_DB_PATH: str = DB_PATH
+DB_SCHEMA_VERSION = 9
 
 _local = threading.local()
 
@@ -264,6 +265,135 @@ CREATE INDEX IF NOT EXISTS ix_errors_kind_id ON errors(kind, id);
 """
 )
 
+
+# Durable bounded cumulative-learning corpus (schema v9). Kept out of SCHEMA so
+# every table, index, singleton row, and the user_version bump are one
+# transactional migration. executescript() would commit before executing and
+# would make a crash leave v9 objects behind while the database still reports
+# v8.
+_LEARNING_TRAJECTORY_V9_DDL = (
+    """
+CREATE TABLE IF NOT EXISTS learning_trajectory_corpus (
+    singleton                  INTEGER PRIMARY KEY CHECK(singleton = 1),
+    schema_version             INTEGER NOT NULL,
+    corpus_revision            INTEGER NOT NULL,
+    segment_count              INTEGER NOT NULL,
+    pre_roll_count             INTEGER NOT NULL,
+    scored_count               INTEGER NOT NULL,
+    evicted_segment_count      INTEGER NOT NULL,
+    evicted_pre_roll_count     INTEGER NOT NULL,
+    evicted_scored_count       INTEGER NOT NULL,
+    quarantined_segment_count  INTEGER NOT NULL
+)
+""",
+    """
+CREATE TABLE IF NOT EXISTS learning_trajectory_segment (
+    segment_id                 TEXT PRIMARY KEY,
+    state                      TEXT NOT NULL CHECK(state IN ('open','finalized','quarantined')),
+    fit_partition_digest       TEXT NOT NULL,
+    header_json                TEXT NOT NULL CHECK(json_valid(header_json)),
+    start_monotonic_ms         INTEGER NOT NULL,
+    end_monotonic_ms           INTEGER NOT NULL,
+    start_wall_ms              INTEGER NOT NULL,
+    end_wall_ms                INTEGER NOT NULL,
+    start_sequence             INTEGER NOT NULL,
+    end_sequence               INTEGER NOT NULL,
+    hold_entry_json            TEXT CHECK(hold_entry_json IS NULL OR json_valid(hold_entry_json)),
+    hold_entry_revision        INTEGER,
+    pre_roll_count             INTEGER NOT NULL,
+    scored_count               INTEGER NOT NULL,
+    next_ordinal               INTEGER NOT NULL,
+    rolling_digest             TEXT NOT NULL,
+    final_digest               TEXT,
+    content_digest             TEXT NOT NULL,
+    begin_content_digest        TEXT NOT NULL,
+    roll_successor_segment_id   TEXT,
+    created_corpus_revision    INTEGER NOT NULL,
+    updated_corpus_revision    INTEGER NOT NULL,
+    finalized_corpus_revision  INTEGER,
+    pre_roll_end_reason        TEXT,
+    terminal_break_reason      TEXT,
+    source_trace_digest        TEXT,
+    source_schema_version      INTEGER NOT NULL,
+    source_row_digest          TEXT
+)
+""",
+    """
+CREATE TABLE IF NOT EXISTS learning_trajectory_frame (
+    segment_id                 TEXT NOT NULL,
+    ordinal                    INTEGER NOT NULL,
+    kind                       TEXT NOT NULL CHECK(kind IN ('pre-roll','scored')),
+    payload_schema_version     INTEGER NOT NULL,
+    interval_identity          TEXT NOT NULL,
+    canonical_json             TEXT NOT NULL CHECK(json_valid(canonical_json)),
+    frame_digest               TEXT NOT NULL,
+    created_corpus_revision    INTEGER NOT NULL,
+    PRIMARY KEY(segment_id, ordinal),
+    FOREIGN KEY(segment_id) REFERENCES learning_trajectory_segment(segment_id) ON DELETE CASCADE
+)
+""",
+    """
+CREATE TABLE IF NOT EXISTS learning_trajectory_operation_receipt (
+    operation_key             TEXT PRIMARY KEY,
+    operation_kind            TEXT NOT NULL CHECK(operation_kind IN ('append','break-and-begin')),
+    source_segment_id         TEXT NOT NULL,
+    request_digest            TEXT NOT NULL,
+    result_segment_id         TEXT NOT NULL,
+    inserted_pre_roll_count   INTEGER NOT NULL,
+    inserted_scored_count     INTEGER NOT NULL,
+    created_corpus_revision   INTEGER NOT NULL,
+    FOREIGN KEY(source_segment_id) REFERENCES learning_trajectory_segment(segment_id) ON DELETE CASCADE
+)
+""",
+    """
+CREATE TABLE IF NOT EXISTS learning_fit_run (
+    request_id                    TEXT PRIMARY KEY,
+    status                        TEXT NOT NULL CHECK(status IN ('queued','running','succeeded','failed','interrupted','stale')),
+    fit_partition_digest          TEXT NOT NULL,
+    corpus_revision               INTEGER NOT NULL,
+    corpus_digest                 TEXT NOT NULL,
+    manifest_json                 TEXT CHECK(manifest_json IS NULL OR json_valid(manifest_json)),
+    parent_incumbent_digest       TEXT NOT NULL,
+    parent_incumbent_generation   INTEGER NOT NULL,
+    candidate_generation          INTEGER NOT NULL,
+    trigger_origin                TEXT NOT NULL,
+    candidate_digest              TEXT,
+    result_error                  TEXT,
+    created_ms                    INTEGER NOT NULL,
+    started_ms                    INTEGER,
+    completed_ms                  INTEGER
+)
+""",
+    (
+        "CREATE INDEX IF NOT EXISTS ix_learning_segment_retention "
+        "ON learning_trajectory_segment(state, end_wall_ms, segment_id)"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS ix_learning_segment_partition "
+        "ON learning_trajectory_segment(fit_partition_digest, start_wall_ms, segment_id)"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS ix_learning_frame_revision "
+        "ON learning_trajectory_frame(segment_id, created_corpus_revision, ordinal)"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS ix_learning_operation_source "
+        "ON learning_trajectory_operation_receipt(source_segment_id, created_corpus_revision, operation_key)"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS ix_learning_fit_terminal "
+        "ON learning_fit_run(status, completed_ms, request_id)"
+    ),
+    """
+INSERT OR IGNORE INTO learning_trajectory_corpus(
+    singleton, schema_version, corpus_revision, segment_count,
+    pre_roll_count, scored_count, evicted_segment_count,
+    evicted_pre_roll_count, evicted_scored_count,
+    quarantined_segment_count
+) VALUES(1, 1, 0, 0, 0, 0, 0, 0, 0, 0)
+""",
+)
+
 # one table per queue; JSON queues carry a json_valid CHECK, raw lists do not
 _JSON_QUEUE_TABLES = ["queue_control_write", "queue_systemq", "queue_systemo", "queue_displayq", "queue_autotune"]
 _RAW_LIST_TABLES = ["list_warnings", "list_users_connected"]
@@ -389,6 +519,14 @@ def _ensure_schema(conn):
                 if name not in columns:
                     conn.execute(f"ALTER TABLE history ADD COLUMN {name} {declaration}")
             conn.execute("PRAGMA user_version=8")
+    if version < 9:
+        # Schema v9 is an additive cumulative-learning corpus. All DDL and the
+        # version bump stay inside the same explicit transaction so a failed
+        # migration leaves both the v8 data and user_version untouched.
+        with transaction(conn):
+            for statement in _LEARNING_TRAJECTORY_V9_DDL:
+                conn.execute(statement)
+            conn.execute("PRAGMA user_version=9")
 
 
 def connection():
