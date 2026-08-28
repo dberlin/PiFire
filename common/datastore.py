@@ -6,12 +6,19 @@ import os
 import sqlite3
 import threading
 import time
+from pathlib import Path
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.environ.get("PIFIRE_DB_PATH", os.path.join(_HERE, "..", "pifire.db"))
-_ORIGINAL_DB_PATH = DB_PATH
+DB_PATH: str = os.environ.get("PIFIRE_DB_PATH", os.path.join(_HERE, "..", "pifire.db"))
+_ORIGINAL_DB_PATH: str = DB_PATH
 
 _local = threading.local()
+
+_database_creation_allowed = True
+
+
+class DatabaseNotFoundError(sqlite3.OperationalError):
+    """Raised when existing-only initialization cannot find the datastore."""
 
 # history table DDL (schema v8). `{name}` is templated so the pre-v4
 # migration below can rebuild it under a temporary name (history_new) with an
@@ -387,7 +394,18 @@ def _ensure_schema(conn):
 def connection():
     conn = getattr(_local, "conn", None)
     if conn is None:
-        conn = sqlite3.connect(DB_PATH, timeout=30)
+        if _database_creation_allowed:
+            conn = sqlite3.connect(DB_PATH, timeout=30)
+        else:
+            uri = Path(DB_PATH).resolve().as_uri() + "?mode=rw"
+            try:
+                conn = sqlite3.connect(uri, timeout=30, uri=True)
+            except sqlite3.OperationalError as exc:
+                try:
+                    os.stat(DB_PATH)
+                except FileNotFoundError:
+                    raise DatabaseNotFoundError(f"Datastore does not exist: {DB_PATH}") from exc
+                raise
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.execute("PRAGMA busy_timeout=5000")
@@ -469,6 +487,13 @@ def init():
     _upgrade_settings_in_store()
     _upgrade_pellets_in_store()
     _validate_settings_in_store()
+
+
+def init_existing():
+    """Initialize an existing datastore and prohibit creation in this process."""
+    global _database_creation_allowed
+    _database_creation_allowed = False
+    init()
 
 
 def _drop_legacy_error_blobs():
@@ -661,14 +686,14 @@ def _validate_settings_in_store():
 
 
 def _reset_for_tests(path):
-    """Test hook: repoint DB_PATH and drop the cached thread-local connection so
-    the next connection()/init() in a test opens the fresh (test) database."""
-    global DB_PATH
+    """Reset the test path, cached connection, and creation policy."""
+    global DB_PATH, _database_creation_allowed
     conn = getattr(_local, "conn", None)
     if conn is not None:
         conn.close()
         _local.conn = None
     DB_PATH = path if path is not None else _ORIGINAL_DB_PATH
+    _database_creation_allowed = True
 
 
 def get_blob(key):

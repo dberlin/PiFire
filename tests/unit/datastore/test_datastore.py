@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import sqlite3
+import threading
 
 import pytest
 
@@ -37,6 +38,70 @@ def test_schema_tables_exist(ds):
 def test_init_idempotent(ds):
     ds.init()  # second call must not raise
     assert ds.connection().execute("PRAGMA user_version").fetchone()[0] >= 1
+
+
+def test_init_existing_refuses_to_create_missing_database(tmp_path):
+    original_db_path = datastore.DB_PATH
+    database_path = tmp_path / "missing.db"
+    try:
+        datastore._reset_for_tests(str(database_path))
+        with pytest.raises(datastore.DatabaseNotFoundError):
+            datastore.init_existing()
+        assert not database_path.exists()
+    finally:
+        datastore._reset_for_tests(original_db_path)
+
+
+def test_init_existing_surfaces_permission_error(monkeypatch, tmp_path):
+    original_db_path = datastore.DB_PATH
+    database_path = tmp_path / "pifire.db"
+
+    def deny_connection(*_args, **_kwargs):
+        raise sqlite3.OperationalError("unable to open database file")
+
+    def deny_stat(_path):
+        raise PermissionError("permission denied")
+
+    try:
+        datastore._reset_for_tests(str(database_path))
+        monkeypatch.setattr(datastore.sqlite3, "connect", deny_connection)
+        monkeypatch.setattr(datastore.os, "stat", deny_stat)
+        with pytest.raises(PermissionError, match="permission denied"):
+            datastore.init_existing()
+    finally:
+        datastore._reset_for_tests(original_db_path)
+
+
+def test_init_existing_applies_to_later_thread_connections(tmp_path):
+    original_db_path = datastore.DB_PATH
+    database_path = tmp_path / "existing.db"
+    errors = []
+    try:
+        datastore._reset_for_tests(str(database_path))
+        datastore.init()
+        datastore._reset_for_tests(str(database_path))
+        datastore.init_existing()
+        datastore.connection().close()
+        datastore._local.conn = None
+        database_path.unlink()
+
+        thread = threading.Thread(target=lambda: _capture_connection_error(errors))
+        thread.start()
+        thread.join(timeout=2)
+
+        assert not thread.is_alive()
+        assert len(errors) == 1
+        assert isinstance(errors[0], datastore.DatabaseNotFoundError)
+        assert not database_path.exists()
+    finally:
+        datastore._reset_for_tests(original_db_path)
+
+
+def _capture_connection_error(errors):
+    try:
+        datastore.connection()
+    except Exception as exc:
+        errors.append(exc)
 
 
 def test_kv_check_rejects_non_json(ds):

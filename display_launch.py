@@ -19,6 +19,7 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 from collections.abc import Iterable
 from typing import TextIO
 
@@ -37,6 +38,24 @@ _SWAY_IGNORED_STDERR_PATTERNS = (
     ),
     re.compile(r"\[sway/desktop/output\.c:\d+\] Page-flip failed on output \S+$"),
 )
+
+_DATABASE_POLL_INTERVAL_SECONDS = 0.5
+
+
+def _wait_for_settings(*, sleep=time.sleep):
+    waiting = False
+    while True:
+        try:
+            datastore.init_existing()
+            return read_settings()
+        except datastore.DatabaseNotFoundError:
+            if not waiting:
+                logging.getLogger("display_launch").warning(
+                    "Waiting for the datastore to be created: %s",
+                    datastore.DB_PATH,
+                )
+                waiting = True
+            sleep(_DATABASE_POLL_INTERVAL_SECONDS)
 
 
 def build_launch_argv(settings, env):
@@ -100,15 +119,10 @@ def _run_sway(argv: list[str]) -> int:
 
 
 def main():
-    # display_launch.py runs as its own standalone process (supervisor's exec
-    # shim), so it gets no benefit from app.py's or control.py's init() call.
-    # Must run before the first read_settings() call below -- see app.py:39
-    # and control.py:70, which do the same.
-    datastore.init()
-    settings = read_settings()
+    logging.basicConfig()
+    settings = _wait_for_settings()
     argv, env_updates = build_launch_argv(settings, os.environ)
     log = logging.getLogger("display_launch")
-    logging.basicConfig()
     runtime_dir = env_updates.get("XDG_RUNTIME_DIR")
     if runtime_dir:
         try:

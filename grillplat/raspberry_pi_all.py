@@ -240,7 +240,8 @@ class GrillPlatform(SystemCommandsMixin):
         self.igniter.close()
         self.auger.close()
         self.fan.close()
-        self.pwm.stop()
+        if self.dc_fan:
+            self.pwm.stop()
         if self.selector is not None:
             self.selector.close()
 

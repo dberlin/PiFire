@@ -344,6 +344,15 @@ def test_cleanup_closes_all_devices_and_stops_pwm(hw):
     p.pwm.stop.assert_called_once()
 
 
+def test_cleanup_without_dc_fan_closes_relay_devices(hw):
+    p = rpi.GrillPlatform(_config(dc_fan=False, standalone=True))
+    p.cleanup()
+    p.power.close.assert_called_once()
+    p.igniter.close.assert_called_once()
+    p.auger.close.assert_called_once()
+    p.fan.close.assert_called_once()
+
+
 def test_cleanup_closes_selector_when_not_standalone(hw):
     p = rpi.GrillPlatform(_config(dc_fan=True, standalone=False))
     p.cleanup()

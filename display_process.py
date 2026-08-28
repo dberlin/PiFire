@@ -41,12 +41,8 @@ class DisplayFeeder:
             self.clock.sleep(0.1)
 
 
-if __name__ == "__main__":
-    # display_process.py runs as its own standalone process (supervisor
-    # launches it independently of app.py/control.py), so it gets no benefit
-    # from their init() calls. Must run before the first read_settings() call
-    # below -- see app.py:39 and control.py:70, which do the same.
-    datastore.init()
+def main():
+    datastore.init_existing()
     store = SqliteStore()
     settings = store.read_settings()
 
@@ -76,3 +72,7 @@ if __name__ == "__main__":
     eventLogger.info("PiFire Display Process started.")
 
     DisplayFeeder(display_device, store, RealClock()).run()
+
+
+if __name__ == "__main__":
+    main()

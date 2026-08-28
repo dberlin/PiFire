@@ -1,6 +1,21 @@
+import pytest
+
+import display_process
 from controller.runtime.clock import ManualClock
 from controller.runtime.store import InMemoryStore
 from display_process import DisplayFeeder
+
+
+def test_main_refuses_to_create_missing_database(tmp_path):
+    original_db_path = display_process.datastore.DB_PATH
+    database_path = tmp_path / "pifire.db"
+    try:
+        display_process.datastore._reset_for_tests(str(database_path))
+        with pytest.raises(display_process.datastore.DatabaseNotFoundError):
+            display_process.main()
+        assert not database_path.exists()
+    finally:
+        display_process.datastore._reset_for_tests(original_db_path)
 
 
 class _FakeDisplay:

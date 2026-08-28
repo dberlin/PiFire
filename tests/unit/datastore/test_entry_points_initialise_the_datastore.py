@@ -1,5 +1,4 @@
-"""Every top-level entry point calls datastore.init() before touching settings.
-
+"""Every top-level entry point initializes the datastore before settings access.
 A settings migration only some callers reach is a real defect: updater.py and
 wizard.py run as their own standalone processes (the upgrade script and the
 installer launch them directly, never through app.py/control.py), so they
@@ -10,10 +9,10 @@ common/datastore.py -- a write hidden inside a read, gated by process-global
 mutable state in a library module.
 
 The fix is to make the migration explicit everywhere instead: every entry
-point calls datastore.init() itself (see common/datastore.py's init(), which
-calls _upgrade_settings_in_store() directly), and this test is what keeps a
-future entry point from silently skipping it -- a missing call fails CI here
-rather than shipping a process that serves an unmigrated settings tree.
+point calls datastore.init() or datastore.init_existing() itself (see
+common/datastore.py), and this test is what keeps a future entry point from
+silently skipping it -- a missing call fails CI here rather than shipping a
+process that serves an unmigrated settings tree.
 
 Presence alone isn't the invariant: a call that runs AFTER the first settings
 read is exactly the bug above, just spelled differently. What's checked here
@@ -95,11 +94,11 @@ def _entry_point_scripts():
 
 
 def _is_datastore_init_call(call):
-    """True for a `datastore.init()` call node."""
+    """True for a datastore initialization call node."""
     func = call.func
     return (
         isinstance(func, ast.Attribute)
-        and func.attr == "init"
+        and func.attr in {"init", "init_existing"}
         and isinstance(func.value, ast.Name)
         and func.value.id == "datastore"
     )
@@ -203,8 +202,7 @@ def _calls_in_statement(stmt):
 
 
 def _entry_sequence_calls(tree):
-    """Yield datastore.init() and settings-accessor Call nodes in the order
-    they execute when the module is run as `python entrypoint.py`.
+    """Yield datastore initialization and settings-accessor calls in execution order.
 
     Walks the module body top to bottom, descending into every nested
     statement block along the way -- `if`/`elif`/`else`, `for`/`while` (and
@@ -254,7 +252,7 @@ def _entry_sequence_calls(tree):
 
 
 def _init_precedes_first_settings_access(path):
-    """True if datastore.init() executes before the first settings
+    """True if datastore initialization executes before the first settings
     read/write reachable from this module's run-as-a-script execution order.
 
     Vacuously true when no settings access is reachable at all -- there is
@@ -271,8 +269,8 @@ def _init_precedes_first_settings_access(path):
 
 
 def test_every_entry_point_initialises_the_datastore_before_reading_settings():
-    """datastore.init() must precede the first settings access reachable from
-    each entry point's run-as-a-script path, per `_init_precedes_first_settings_access`.
+    """Datastore initialization must precede the first settings access reachable
+    from each entry point's run-as-a-script path, per `_init_precedes_first_settings_access`.
     A call that exists somewhere in the file -- after the first settings read,
     in a function nobody calls, or behind indirection the scan doesn't follow
     (a class method, a lambda, a stored callback) -- does not satisfy this.
@@ -286,10 +284,11 @@ def test_every_entry_point_initialises_the_datastore_before_reading_settings():
         if path.name not in EXCLUDED_ENTRY_POINTS and not _init_precedes_first_settings_access(path)
     ]
     assert not violations, (
-        f"{violations} read or write settings before calling datastore.init() (or never reach "
-        "the call at all) -- call datastore.init() before the first settings access reachable "
-        "from the module's __main__ guard (see app.py, control.py, updater.py or wizard.py for "
-        "the pattern), or add a justified entry to EXCLUDED_ENTRY_POINTS."
+        f"{violations} read or write settings before initializing the datastore (or never reach "
+        "the call at all) -- call datastore.init() or datastore.init_existing() before the first "
+        "settings access reachable from the module's __main__ guard (see app.py, control.py, "
+        "display_launch.py, updater.py or wizard.py for the pattern), or add a justified entry "
+        "to EXCLUDED_ENTRY_POINTS."
     )
 
 

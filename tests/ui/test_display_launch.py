@@ -1,10 +1,44 @@
 import io
 import shlex
+import sqlite3
 import sys
 
 import pytest
 
 import display_launch
+
+
+def test_wait_for_settings_sleeps_without_creating_database(tmp_path):
+    original_db_path = display_launch.datastore.DB_PATH
+    database_path = tmp_path / "pifire.db"
+    sleep_delays = []
+
+    def install_database(delay):
+        sleep_delays.append(delay)
+        assert not database_path.exists()
+        display_launch.datastore._reset_for_tests(str(database_path))
+        display_launch.datastore.init()
+
+    try:
+        display_launch.datastore._reset_for_tests(str(database_path))
+        settings = display_launch._wait_for_settings(sleep=install_database)
+        assert sleep_delays == [0.5]
+        assert "display" in settings["modules"]
+    finally:
+        display_launch.datastore._reset_for_tests(original_db_path)
+
+
+def test_wait_for_settings_surfaces_corrupt_database(tmp_path):
+    original_db_path = display_launch.datastore.DB_PATH
+    database_path = tmp_path / "pifire.db"
+    database_path.write_text("not a sqlite database")
+
+    try:
+        display_launch.datastore._reset_for_tests(str(database_path))
+        with pytest.raises(sqlite3.DatabaseError):
+            display_launch._wait_for_settings(sleep=lambda _delay: pytest.fail("must not wait for a corrupt database"))
+    finally:
+        display_launch.datastore._reset_for_tests(original_db_path)
 
 
 @pytest.mark.parametrize(
