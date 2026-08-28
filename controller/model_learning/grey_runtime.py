@@ -404,14 +404,13 @@ class GreyLearningRuntime:
             ) and self._activation_runtime.consume_confidence_persisted(evaluation_decision_id)
         forecasts = tuple(self._completed_forecast_evidence(value) for value in result.completed_forecasts)
         reasons = tuple(result.history.reasons)
+        trigger = result.trigger
         return {
             "role_generation": observation.role_generation,
             "eligible": bool(result.history.accepted),
             "rejection_reasons": reasons,
-            "input_variance": 0.0,
-            "input_levels": 0,
-            "incumbent_innovation_c": None,
-            "challenger_innovation_c": None,
+            "input_variance": trigger.input_variance,
+            "input_levels": trigger.input_levels,
             "effective_updates": len(learning.passive_history.observations)
             if hasattr(learning, "passive_history")
             else 0,
@@ -433,8 +432,6 @@ class GreyLearningRuntime:
             "rejection_reasons": ("learner-exception",),
             "input_variance": 0.0,
             "input_levels": 0,
-            "incumbent_innovation_c": None,
-            "challenger_innovation_c": None,
             "effective_updates": 0,
             "model_digest": grey_config_digest(self._active_components().controller.config),
             "learner_error": f"{type(error).__name__}: {error}",

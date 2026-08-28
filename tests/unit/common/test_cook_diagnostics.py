@@ -26,7 +26,7 @@ from common.cook_diagnostics import (
 )
 from common.model_evidence import ConfidenceDecisionEvidence, EvidenceKind, ModelEvidenceRecord
 
-type _TraceSchemaVersion = Literal[2, 3, 4, 5, 6]
+type _TraceSchemaVersion = Literal[2, 3, 4, 5, 6, 7]
 type _EvidenceSchemaVersion = Literal[1, 2, 3]
 
 
@@ -218,8 +218,8 @@ def test_collects_complete_mixed_controller_cook_in_order() -> None:
     warnings: list[str] = []
     pid_session = _session(ControllerType.PID_SP, schema_version=5, session_id="session-pid-sp")
     pid_update = _pid_sp_update(schema_version=5, session_id="session-pid-sp")
-    mpc_session = _session(ControllerType.MPC, schema_version=6, session_id="session-mpc")
-    mpc_update = _mpc_update(schema_version=6, session_id="session-mpc")
+    mpc_session = _session(ControllerType.MPC, schema_version=7, session_id="session-mpc")
+    mpc_update = _mpc_update(schema_version=7, session_id="session-mpc")
     evidence_v2 = _evidence("evidence-v2", 2)
     evidence_v3 = _evidence("evidence-v3", 3)
 
@@ -236,8 +236,8 @@ def test_collects_complete_mixed_controller_cook_in_order() -> None:
     assert bundle.captured_at_ms == _CAPTURED_AT_MS
     assert bundle.controllers == ("pid_sp", "mpc")
     assert [item.controller for item in bundle.reports] == ["pid_sp", "mpc"]
-    assert [item.schema_version for item in bundle.control_trace.records] == [5, 5, 6, 6]
-    assert bundle.control_trace.record_schema_versions == (5, 6)
+    assert [item.schema_version for item in bundle.control_trace.records] == [5, 5, 7, 7]
+    assert bundle.control_trace.record_schema_versions == (5, 7)
     assert bundle.model_evidence.record_schema_versions == (2, 3)
     assert bundle.capture_errors == ()
     assert warnings == []
@@ -254,7 +254,7 @@ def test_collects_complete_mixed_controller_cook_in_order() -> None:
     )
     assert dumped["schema_version"] == 1
     assert dumped["controllers"] == ["pid_sp", "mpc"]
-    assert dumped["control_trace"]["record_schema_versions"] == [5, 6]
+    assert dumped["control_trace"]["record_schema_versions"] == [5, 7]
     assert dumped["model_evidence"]["record_schema_versions"] == [2, 3]
     assert dumped["capture_errors"] == []
 

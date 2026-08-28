@@ -330,41 +330,7 @@ def _payload_cases():
         (
             ControllerType.MPC,
             TraceEventKind.MODEL_OBSERVATION,
-            ModelObservationPayload(
-                frame_start_ms=1_000,
-                frame_end_ms=21_000,
-                temp_c=110.0,
-                setpoint_c=120.0,
-                ambient_c=20.0,
-                observation_sequence=1,
-                probe_valid=True,
-                probe_source="chamber-probe-1",
-                ambient_source=AmbientSource.CONFIGURED,
-                ambient_uncertainty=AmbientUncertainty.UNMEASURED,
-                baseline_combustion_load=0.4,
-                calibration_probe_load=0.0,
-                requested_combustion_load=0.4,
-                allocated_combustion_load=0.4,
-                realized_combustion_load=0.35,
-                requested_auger_duty=0.4,
-                scheduled_on_seconds=8.0,
-                delivered_on_seconds=7.0,
-                realized_auger_duty=0.35,
-                allocator_revision=1,
-                allocation_clamp_reasons=(),
-                calibration_stage=None,
-                calibration_fit=False,
-                result_revision=2,
-                eligible=True,
-                rejection_reasons=(),
-                input_variance=0.01,
-                input_levels=3,
-                incumbent_innovation_c=1.0,
-                challenger_innovation_c=0.5,
-                effective_updates=21,
-                role_generation=0,
-                model_digest="a" * 64,
-            ),
+            lambda: _canonical_observation_payload(calibration=False),
         ),
         (
             ControllerType.MPC,
@@ -524,6 +490,7 @@ def _mpc_update_payload() -> MpcUpdatePayload:
 
 @pytest.mark.parametrize(("controller", "event_kind", "payload"), _payload_cases())
 def test_every_payload_round_trips_through_pydantic_json(controller, event_kind, payload):
+    payload = payload() if callable(payload) else payload
     record = ControlTraceRecord(
         ts_ms=1_000,
         session_id="session-1",
@@ -566,7 +533,7 @@ def test_pid_sp_update_round_trips_owned_learning_snapshot() -> None:
 
     restored = ControlTraceRecord.model_validate_json(record.model_dump_json())
 
-    assert restored.schema_version == 6
+    assert restored.schema_version == TRACE_SCHEMA_VERSION
     assert isinstance(restored.payload, PidSpUpdatePayload)
     assert restored.payload.learning is not None
     assert restored.payload.learning.state == {
@@ -1166,7 +1133,7 @@ def test_strict_db_json_path_still_decodes_valid_enum_values():
 
 
 def test_schema_four_has_one_canonical_model_evidence_contract():
-    assert TRACE_SCHEMA_VERSION == 6
+    assert TRACE_SCHEMA_VERSION == 7
     assert {"u_min", "u_max", "hold_cycle_seconds"}.isdisjoint(SessionPayload.__annotations__)
     assert {"pulse_slot_seconds", "pulse_frame_seconds"} <= SessionPayload.__annotations__.keys()
     assert "FAN_ASSIST" not in OutputSource.__members__
@@ -1280,7 +1247,7 @@ def test_envelope_accepts_framed_payload_for_every_controller(controller):
     ],
 )
 def test_model_observation_rejects_invalid_learning_evidence(replacement):
-    payload = next(item[2] for item in _payload_cases() if isinstance(item[2], ModelObservationPayload))
+    payload = _canonical_observation_payload(calibration=False)
     with pytest.raises(ValidationError):
         replace(payload, **replacement)
 
@@ -1344,7 +1311,7 @@ def test_v2_envelopes_accept_unchanged_payloads_but_reject_v3_learning_payloads(
         payload=lifecycle,
     )
     assert ControlTraceRecord.from_db_row(legacy.to_db_row()) == legacy
-    observation = next(item[2] for item in _payload_cases() if isinstance(item[2], ModelObservationPayload))
+    observation = _canonical_observation_payload(calibration=False)
     with pytest.raises(ValidationError, match="schema version 2"):
         ControlTraceRecord(
             ts_ms=1,
@@ -1385,8 +1352,6 @@ def _canonical_observation_payload(*, calibration: bool) -> ModelObservationPayl
         rejection_reasons=(),
         input_variance=0.01,
         input_levels=3,
-        incumbent_innovation_c=1.0,
-        challenger_innovation_c=0.5,
         effective_updates=21,
         role_generation=0,
         model_digest="a" * 64,
@@ -1400,6 +1365,59 @@ def _canonical_observation_payload(*, calibration: bool) -> ModelObservationPayl
         reset=False,
         continuous=True,
     )
+
+
+def test_v7_model_observation_round_trip_omits_legacy_v6_score_keys() -> None:
+    obsolete_keys = {"incumbent_innovation_c", "challenger_innovation_c"}
+    payload = _canonical_observation_payload(calibration=False)
+    record = ControlTraceRecord(
+        ts_ms=20_000,
+        session_id="session-v7",
+        controller=ControllerType.MPC,
+        event_kind=TraceEventKind.MODEL_OBSERVATION,
+        schema_version=7,
+        payload=payload,
+    )
+
+    encoded = record.model_dump_json()
+    restored = ControlTraceRecord.model_validate_json(encoded)
+
+    assert restored.payload == payload
+    assert obsolete_keys.isdisjoint(json.loads(encoded)["payload"])
+
+
+def test_v6_model_observation_migration_drops_only_obsolete_score_keys() -> None:
+    obsolete_scores = {
+        "incumbent_innovation_c": 1.0,
+        "challenger_innovation_c": 0.5,
+    }
+    payload = _canonical_observation_payload(calibration=False)
+    current = ControlTraceRecord(
+        ts_ms=20_000,
+        session_id="session-v6",
+        controller=ControllerType.MPC,
+        event_kind=TraceEventKind.MODEL_OBSERVATION,
+        schema_version=7,
+        payload=payload,
+    )
+    legacy_payload = json.loads(current.to_db_row().payload)
+    legacy_payload.update(obsolete_scores)
+    legacy_row = replace(
+        current.to_db_row(),
+        schema_version=6,
+        payload=json.dumps(legacy_payload),
+    )
+
+    restored = ControlTraceRecord.from_db_row(legacy_row)
+
+    assert restored.payload == payload
+    assert obsolete_scores.keys().isdisjoint(json.loads(restored.to_db_row().payload))
+
+    unrelated_extra = dict(legacy_payload, unexpected_legacy_key=True)
+    with pytest.raises(ValidationError):
+        ControlTraceRecord.from_db_row(
+            replace(legacy_row, payload=json.dumps(unrelated_extra)),
+        )
 
 
 def test_schema_four_round_trips_distinct_canonical_observation_evidence() -> None:

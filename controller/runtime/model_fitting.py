@@ -528,6 +528,7 @@ class TeardownGreyHistory:
         if self.max_observations > MAX_FIT_OBSERVATIONS:
             raise ValueError(f"max_observations must be bounded to {MAX_FIT_OBSERVATIONS}")
         self._observations: deque[Any] = deque(maxlen=self.max_observations)
+        self._continuity_broken = False
 
     @property
     def observations(self) -> tuple[Any, ...]:
@@ -575,9 +576,12 @@ class TeardownGreyHistory:
         elif frame.calibration_fit and not frame.probe_valid:
             reason = "invalid-probe"
         if reason is not None:
-            self._observations.clear()
+            self._continuity_broken = True
             return HistoryDecision(False, (reason,))
-        if self._observations:
+        if self._continuity_broken:
+            self._observations.clear()
+            self._continuity_broken = False
+        elif self._observations:
             previous = self._observations[-1]
             adjacent = frame.observation_sequence == previous.observation_sequence + 1 and math.isclose(
                 frame.frame_start_s, previous.frame_end_s, rel_tol=0.0, abs_tol=1e-9
@@ -664,6 +668,8 @@ class TriggerConfig:
 class TriggerDecision:
     ready: bool
     blockers: tuple[str, ...]
+    input_variance: float
+    input_levels: int
 
 
 def fit_trigger(
@@ -677,14 +683,18 @@ def fit_trigger(
     frames = tuple(observations)
     if not all(isinstance(frame, FrameObservation) for frame in frames):
         raise ValueError("observations must contain FrameObservation values")
-    if len(frames) < resolved.min_samples:
-        return TriggerDecision(False, ("minimum-samples",))
-    blockers: list[str] = []
     loads = tuple(frame.realized_q for frame in frames)
-    mean = sum(loads) / len(loads)
-    variance = sum((value - mean) ** 2 for value in loads) / len(loads)
-    levels = len({round(value, 9) for value in loads})
-    if variance < resolved.min_input_variance or levels < resolved.min_input_levels:
+    if loads:
+        mean = sum(loads) / len(loads)
+        input_variance = sum((value - mean) ** 2 for value in loads) / len(loads)
+        input_levels = len({round(value, 9) for value in loads})
+    else:
+        input_variance = 0.0
+        input_levels = 0
+    if len(frames) < resolved.min_samples:
+        return TriggerDecision(False, ("minimum-samples",), input_variance, input_levels)
+    blockers: list[str] = []
+    if input_variance < resolved.min_input_variance or input_levels < resolved.min_input_levels:
         blockers.append("insufficient-excitation")
     temperatures = tuple(frame.temp_c for frame in frames)
     if max(temperatures) - min(temperatures) < resolved.min_temperature_span_c:
@@ -698,7 +708,7 @@ def fit_trigger(
     score = _finite(identifiability, "identifiability")
     if score < resolved.min_identifiability:
         blockers.append("identifiability")
-    return TriggerDecision(not blockers, tuple(blockers))
+    return TriggerDecision(not blockers, tuple(blockers), input_variance, input_levels)
 
 
 def stale_result_reasons(
@@ -1129,6 +1139,7 @@ class LiveLearningIdentity:
 @dataclass(frozen=True, slots=True)
 class GreyLearningObservation:
     history: HistoryDecision
+    trigger: TriggerDecision
     submission: FitSubmission | None
     request: Any | None
     completed_forecasts: tuple[Any, ...]
@@ -1345,15 +1356,20 @@ class GreyLearningOrchestrator:
             decision = self.passive_history.observe(frame)
             observations = self.passive_history.observations
             origin = CandidateOrigin.PASSIVE_ONLINE
+        trigger = fit_trigger(
+            observations,
+            identifiability=identifiability,
+            config=self.trigger_config,
+        )
         if (
-            not decision.accepted
+            not observations
+            or not decision.accepted
             or self._pending_request is not None
             or (self._prepared is not None and self._prepared.accepted)
         ):
-            return GreyLearningObservation(decision, None, None, tuple(completed))
-        trigger = fit_trigger(observations, identifiability=identifiability, config=self.trigger_config)
+            return GreyLearningObservation(decision, trigger, None, None, tuple(completed))
         if not trigger.ready:
-            return GreyLearningObservation(decision, None, None, tuple(completed))
+            return GreyLearningObservation(decision, trigger, None, None, tuple(completed))
         first = observations[0].observation_sequence
         last = observations[-1].observation_sequence
         request_identity = {
@@ -1376,7 +1392,7 @@ class GreyLearningOrchestrator:
         submission = self.worker.submit(job)
         if submission is FitSubmission.ACCEPTED:
             self._pending_request = request
-        return GreyLearningObservation(decision, submission, request, tuple(completed))
+        return GreyLearningObservation(decision, trigger, submission, request, tuple(completed))
 
     def poll_fit_off_path(
         self,

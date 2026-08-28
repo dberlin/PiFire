@@ -110,8 +110,6 @@ class _ParsedOutcome:
     rejection_reasons: tuple[str, ...]
     input_variance: float
     input_levels: int
-    incumbent_innovation_c: float | None
-    challenger_innovation_c: float | None
     effective_updates: int
     role_generation: int
     model_digest: str | None
@@ -1261,8 +1259,6 @@ class HoldLearningRuntime:
                 rejection_reasons=(reason,),
                 input_variance=0.0,
                 input_levels=0,
-                incumbent_innovation_c=None,
-                challenger_innovation_c=None,
                 effective_updates=0,
                 role_generation=observation.role_generation,
                 model_digest=None,
@@ -1352,8 +1348,6 @@ class HoldLearningRuntime:
             rejection_reasons=outcome.rejection_reasons,
             input_variance=outcome.input_variance,
             input_levels=outcome.input_levels,
-            incumbent_innovation_c=outcome.incumbent_innovation_c,
-            challenger_innovation_c=outcome.challenger_innovation_c,
             effective_updates=outcome.effective_updates,
             role_generation=outcome.role_generation,
             model_digest=outcome.model_digest,
@@ -1376,14 +1370,6 @@ class HoldLearningRuntime:
             rejection_reasons=tuple(cast(Sequence[str], outcome["rejection_reasons"])),
             input_variance=cast(float, outcome["input_variance"]),
             input_levels=cast(int, outcome["input_levels"]),
-            incumbent_innovation_c=cast(
-                float | None,
-                outcome["incumbent_innovation_c"],
-            ),
-            challenger_innovation_c=cast(
-                float | None,
-                outcome["challenger_innovation_c"],
-            ),
             effective_updates=cast(int, outcome["effective_updates"]),
             role_generation=cast(int, outcome["role_generation"]),
             model_digest=cast(str | None, outcome["model_digest"]),

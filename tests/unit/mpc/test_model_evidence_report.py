@@ -709,6 +709,7 @@ def test_real_fit_submission_persists_queued_lifecycle_for_restart_report(ds) ->
                 request=request,
                 history=SimpleNamespace(accepted=True, reasons=()),
                 completed_forecasts=(),
+                trigger=SimpleNamespace(input_variance=0.03, input_levels=3),
             )
 
         def poll_fit_off_path(self, **_kwargs):

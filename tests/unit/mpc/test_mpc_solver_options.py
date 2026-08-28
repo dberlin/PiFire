@@ -88,7 +88,6 @@ forbidden = (
     "do_mpc",
     "casadi",
     "controller.mpc_net",
-    "controller.linear_mpc.arx",
     "controller.linear_mpc.state_space",
     "controller.linear_mpc.policy",
 )

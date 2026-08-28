@@ -84,7 +84,7 @@ class CookControlTrace(BaseModel):
     model_config: ClassVar[ConfigDict] = _MODEL_CONFIG
 
     records: tuple[ControlTraceRecord, ...]
-    record_schema_versions: tuple[Literal[2, 3, 4, 5, 6], ...]
+    record_schema_versions: tuple[Literal[2, 3, 4, 5, 6, 7], ...]
 
 
 class CookModelEvidence(BaseModel):

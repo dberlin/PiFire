@@ -281,6 +281,7 @@ def test_passive_and_operator_observations_dispatch_to_task7_orchestrator(monkey
             or SimpleNamespace(
                 history=SimpleNamespace(accepted=True, reasons=()),
                 completed_forecasts=(),
+                trigger=SimpleNamespace(input_variance=0.03, input_levels=3),
             )
         ),
         poll_fit_off_path=lambda **kwargs: ("polled", kwargs),
@@ -299,6 +300,8 @@ def test_passive_and_operator_observations_dispatch_to_task7_orchestrator(monkey
     assert all(item[1] >= 0.0 for item in seen)
     assert passive_outcome["eligible"] is True
     assert operator_outcome["eligible"] is True
+    assert passive_outcome["input_variance"] == 0.03
+    assert passive_outcome["input_levels"] == 3
     assert off_path[0][0] == "polled"
     assert off_path[1] is None
 
@@ -329,6 +332,7 @@ def test_completed_task7_forecasts_are_translated_to_compact_runner_evidence(mon
             history=SimpleNamespace(accepted=True, reasons=()),
             completed_forecasts=(completed,),
             request=None,
+            trigger=SimpleNamespace(input_variance=0.03, input_levels=3),
         ),
         passive_history=SimpleNamespace(observations=()),
         register_causal_forecasts=lambda *_args, **_kwargs: (),
@@ -398,6 +402,7 @@ def test_task7_evaluation_is_published_through_the_established_runner_payload(mo
             history=SimpleNamespace(accepted=True, reasons=()),
             completed_forecasts=(),
             request=None,
+            trigger=SimpleNamespace(input_variance=0.03, input_levels=3),
         ),
         passive_history=SimpleNamespace(observations=()),
         register_causal_forecasts=lambda *_args, **_kwargs: (),
@@ -433,6 +438,7 @@ def test_slow_candidate_preparation_does_not_block_live_observation(monkeypatch)
                 history=SimpleNamespace(accepted=True, reasons=()),
                 completed_forecasts=(),
                 request=None,
+                trigger=SimpleNamespace(input_variance=0.03, input_levels=3),
             ),
         )[1],
         passive_history=SimpleNamespace(observations=()),

@@ -178,8 +178,6 @@ def _observation(*, temp_c: float = 100.0, ambient_c: float = 20.0) -> ControlTr
             rejection_reasons=(),
             input_variance=0.01,
             input_levels=3,
-            incumbent_innovation_c=1.0,
-            challenger_innovation_c=0.5,
             effective_updates=21,
             role_generation=0,
             model_digest="a" * 64,

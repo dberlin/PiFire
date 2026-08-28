@@ -458,6 +458,27 @@ def test_complete_teardown_window_keeps_probe_frames_and_uses_most_restrictive_o
     assert history.origin is CandidateOrigin.OPERATOR_CALIBRATION
 
 
+def test_terminal_rejection_preserves_teardown_segment_until_a_valid_successor():
+    history = TeardownGreyHistory(role_generation=0, max_observations=4)
+    accepted = (_completed_frame(1), _completed_frame(2))
+    for frame in accepted:
+        assert history.observe(frame).accepted
+
+    terminal = replace(
+        _completed_frame(3),
+        output_source="unknown",
+        safety_inhibited=True,
+        reset=True,
+        continuous=False,
+    )
+    assert history.observe(terminal).reasons == ("safety",)
+    assert history.observations == accepted
+
+    successor = _completed_frame(4)
+    assert history.observe(successor).accepted
+    assert history.observations == (successor,)
+
+
 def test_probe_frame_is_excluded_from_passive_online_validation_without_being_lost_from_teardown():
     probe = _completed_frame(1, probe=True)
     passive = PassiveGreyHistory(role_generation=0)

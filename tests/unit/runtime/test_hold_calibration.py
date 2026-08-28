@@ -1283,8 +1283,6 @@ def test_cancelled_frame_persists_matching_raw_and_compact_evidence_once(hold_cy
         "rejection_reasons": ("reset",),
         "input_variance": 0.0,
         "input_levels": 0,
-        "incumbent_innovation_c": None,
-        "challenger_innovation_c": None,
         "effective_updates": 0,
         "model_digest": None,
     }
@@ -1383,8 +1381,6 @@ def test_current_stale_probe_result_does_not_claim_prior_interval_evidence(
         "rejection_reasons": ("stale_result",),
         "input_variance": 0.0,
         "input_levels": 0,
-        "incumbent_innovation_c": None,
-        "challenger_innovation_c": None,
         "effective_updates": 0,
         "model_digest": None,
     }
@@ -1486,8 +1482,6 @@ def test_hold_persists_measured_completed_stages_on_coast_evidence(hold_cycle, m
         "rejection_reasons": ("insufficient-history",),
         "input_variance": 0.0,
         "input_levels": 0,
-        "incumbent_innovation_c": None,
-        "challenger_innovation_c": None,
         "effective_updates": 0,
         "model_digest": None,
     }

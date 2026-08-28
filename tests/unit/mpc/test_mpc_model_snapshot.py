@@ -491,7 +491,7 @@ def test_v4_round_trip_is_exact_for_identified_and_default_snapshots():
         ("challenger", {"parameters": PARAMS, "metadata": {"samples": -1}}),
         ("window", {"session_id": "missing-the-rest"}),
         ("evidence", {"eligible": -1, "rejected": 0, "confidence_decision_id": None}),
-        ("origin", "scheduled-arx"),
+        ("origin", "invalid-origin"),
         ("policy", "unreviewed"),
         ("identification", {"status": "maybe"}),
         ("cook_refit", {"status": "idle", "latest": 7}),

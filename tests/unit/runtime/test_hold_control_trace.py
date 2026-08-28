@@ -1382,8 +1382,6 @@ def _model_observation_outcome(*, frame_end_ms, role_generation=0, eligible=Fals
         "rejection_reasons": () if eligible else ("insufficient_excitation",),
         "input_variance": 0.2,
         "input_levels": 2,
-        "incumbent_innovation_c": 1.0 if eligible else None,
-        "challenger_innovation_c": 0.5 if eligible else None,
         "effective_updates": 4,
         "model_digest": "a" * 64,
     }

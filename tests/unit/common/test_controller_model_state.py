@@ -52,14 +52,14 @@ def test_round_trips_any_json_safe_shape(snapshot):
 def test_round_trips_a_composite_mpc_snapshot_without_interpreting_the_nested_model():
     snapshot = {
         "revision": 7,
-        "version": 3,
-        "params": {"C_c": 2520.0, "h_amb": 0.224},
-        "online_adaptation": {
-            "schema": "online-adaptation/v1",
-            "active_model_kind": "scheduled-arx",
-            "role_generation": 2,
-            "challenger": {"schema": "scheduled-arx/v2", "regions": []},
+        "version": 4,
+        "structure": {"kind": "grey-box", "n_delay": 8, "state_count": 10},
+        "active": {
+            "parameters": {"C_c": 2520.0, "h_amb": 0.224, "n_delay": 8},
+            "metadata": {"samples": 42},
         },
+        "candidate": None,
+        "generic_metadata": {"labels": ["primary", "restored"]},
     }
     store, _ = _store()
 

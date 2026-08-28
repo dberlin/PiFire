@@ -807,8 +807,6 @@ def test_ineligible_completed_frames_are_delivered_with_explicit_provenance(
         "rejection_reasons": ("ineligible_frame",),
         "input_variance": 0.0,
         "input_levels": 0,
-        "incumbent_innovation_c": None,
-        "challenger_innovation_c": None,
         "effective_updates": 0,
         "model_digest": "a" * 64,
     }

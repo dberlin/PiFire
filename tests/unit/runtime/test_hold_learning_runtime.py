@@ -422,8 +422,6 @@ def _outcome(*, role_generation: int = 0, evaluation: ModelEvaluationPayload | N
         "rejection_reasons": ("insufficient-excitation",),
         "input_variance": 0.2,
         "input_levels": 2,
-        "incumbent_innovation_c": None,
-        "challenger_innovation_c": None,
         "effective_updates": 0,
         "model_digest": "a" * 64,
         "evaluation_payload": evaluation,
@@ -757,6 +755,35 @@ def test_accepted_outcome_keeps_exact_frame_feedback_identity_and_reconciles_onc
         20_000,
         1,
     )
+
+
+def test_complete_grey_outcome_without_obsolete_scores_stays_eligible() -> None:
+    runtime, runner, _persistence, _trace_session, recorder = _runtime()
+    observation = _observation()
+    outcome = {
+        "role_generation": 0,
+        "eligible": True,
+        "rejection_reasons": (),
+        "input_variance": 0.0,
+        "input_levels": 0,
+        "effective_updates": 21,
+        "model_digest": "a" * 64,
+        "forecast_origin_evidence": (),
+        "learning_evaluation": None,
+        "evaluation_payload": None,
+        "confidence_accepted": None,
+        "confidence_already_persisted": False,
+    }
+
+    runtime.submit_completed_observation((0, 20_000), observation)
+    runner.drains.append(_drain(ObservationOutcomeEnvelope(1, 0, observation, outcome)))
+    runtime.reconcile_outcomes(22.0)
+
+    payloads = _observation_payloads(recorder)
+    assert len(payloads) == 1
+    assert payloads[0].eligible is True
+    assert payloads[0].rejection_reasons == ()
+    assert _gap_payloads(recorder) == []
 
 
 def test_submission_eviction_terminal_drop_and_dropped_sequence_are_consumed_once() -> None:

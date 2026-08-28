@@ -42,6 +42,7 @@ from controller.runtime.model_fitting import (
     TargetTimingEvidence,
     TeardownRefitOutcome,
     TriggerConfig,
+    TriggerDecision,
 )
 from controller.runtime.model_persistence import DurableActivationReceipt, ModelPersistenceWorker
 from tests.unit.mpc._solver_fixtures import CYCLE, _config, _Estimator, _Solver, inactive_calibration
@@ -457,6 +458,7 @@ def test_queued_fit_lifecycle_is_memory_only_until_off_path_poll(monkeypatch) ->
                 request=self.request,
                 completed_forecasts=(),
                 history=SimpleNamespace(accepted=True, reasons=()),
+                trigger=TriggerDecision(False, ("minimum-samples",), 0.0, 1),
             )
 
         def register_causal_forecasts(self, *_args, **_kwargs):
@@ -800,6 +802,7 @@ def test_rejected_evaluation_persists_failure_checks_and_projects_once(monkeypat
                 history=SimpleNamespace(accepted=True, reasons=()),
                 completed_forecasts=(),
                 request=None,
+                trigger=TriggerDecision(False, ("minimum-samples",), 0.125, 3),
             )
 
         def register_causal_forecasts(self, *_args, **_kwargs):
@@ -824,6 +827,8 @@ def test_rejected_evaluation_persists_failure_checks_and_projects_once(monkeypat
     assert projected is not None
     assert outcome["evaluation_payload"] == projected
     assert outcome["confidence_accepted"] is False
+    assert outcome["input_variance"] == 0.125
+    assert outcome["input_levels"] == 3
     assessment = harness.persistence.confidence_preceding[-1][0].payload
     assert assessment.rejection_reasons == (
         "candidate-confidence-low",

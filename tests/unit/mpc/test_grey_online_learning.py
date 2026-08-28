@@ -158,13 +158,26 @@ def test_trigger_retains_minimum_sample_excitation_coverage_continuity_and_ident
         min_samples=9, min_input_variance=0.02, min_input_levels=3, min_temperature_span_c=8.0, min_identifiability=0.5
     )
     informative = tuple(_frame(index) for index in range(12))
-    assert fit_trigger(informative, identifiability=0.8, config=config).ready is True
-    assert fit_trigger(informative[:8], identifiability=0.8, config=config).blockers == ("minimum-samples",)
+    accepted = fit_trigger(informative, identifiability=0.8, config=config)
+    assert accepted.ready is True
+    assert accepted.input_variance == pytest.approx(0.08166666666666667)
+    assert accepted.input_levels == 3
+    below_minimum = fit_trigger(informative[:8], identifiability=0.8, config=config)
+    assert below_minimum.blockers == ("minimum-samples",)
+    assert below_minimum.input_variance == pytest.approx(0.0746484375)
+    assert below_minimum.input_levels == 3
+    empty = fit_trigger((), identifiability=0.8, config=config)
+    assert empty.blockers == ("minimum-samples",)
+    assert empty.input_variance == 0.0
+    assert empty.input_levels == 0
     constant = tuple(
         _frame(index, requested_q=0.5, realized_q=0.5, requested_auger_duty=0.5, delivered_on_s=12.5)
         for index in range(12)
     )
-    assert fit_trigger(constant, identifiability=0.8, config=config).blockers == ("insufficient-excitation",)
+    constant_decision = fit_trigger(constant, identifiability=0.8, config=config)
+    assert constant_decision.blockers == ("insufficient-excitation",)
+    assert constant_decision.input_variance == 0.0
+    assert constant_decision.input_levels == 1
     narrow = tuple(_frame(index, temp_c=90.0 + index * 0.1) for index in range(12))
     assert fit_trigger(narrow, identifiability=0.8, config=config).blockers == ("insufficient-coverage",)
     broken = informative[:6] + (replace(informative[6], continuous=False),) + informative[7:]
@@ -341,11 +354,27 @@ def test_orchestrator_connects_completed_history_to_fit_and_off_path_preparation
             identifiability=0.8,
         )
     assert submitted.submission is FitSubmission.ACCEPTED
+    assert submitted.trigger.input_variance == pytest.approx(0.08166666666666667)
+    assert submitted.trigger.input_levels == 3
+    while_pending = orchestrator.observe_completed_frame(
+        _frame(9, **changes),
+        identifiability=0.8,
+    )
+    assert while_pending.submission is None
+    assert while_pending.trigger.input_variance == pytest.approx(0.084525)
+    assert while_pending.trigger.input_levels == 3
     assert worker.job.request.origin is origin
     delivery = orchestrator.poll_fit_off_path(live_identity=identity, live_origin=origin)
     assert delivery.stale_reasons == ()
     assert delivery.preparation.accepted is True
     assert delivery.preparation.incumbent_pair is incumbent
+    while_prepared = orchestrator.observe_completed_frame(
+        _frame(10, **changes),
+        identifiability=0.8,
+    )
+    assert while_prepared.submission is None
+    assert while_prepared.trigger.input_variance > 0.02
+    assert while_prepared.trigger.input_levels == 3
     assert orchestrator.incumbent_pair is incumbent
     orchestrator.close()
     assert worker.closed is True

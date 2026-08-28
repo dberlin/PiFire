@@ -30,8 +30,8 @@ from pydantic.dataclasses import dataclass
 
 from controller.applied_output import OutputSource
 
-COMPATIBLE_TRACE_SCHEMA_VERSIONS = (2, 3, 4, 5, 6)
-TRACE_SCHEMA_VERSION = 6
+COMPATIBLE_TRACE_SCHEMA_VERSIONS = (2, 3, 4, 5, 6, 7)
+TRACE_SCHEMA_VERSION = 7
 
 FiniteFloat: TypeAlias = Annotated[float, Field(allow_inf_nan=False, strict=True)]
 NonNegativeFloat: TypeAlias = Annotated[FiniteFloat, Field(ge=0)]
@@ -563,8 +563,6 @@ class ModelObservationPayload:
     rejection_reasons: Annotated[tuple[NonBlankString, ...], Field(max_length=32)]
     input_variance: NonNegativeFloat
     input_levels: NonNegativeInt
-    incumbent_innovation_c: FiniteFloat | None
-    challenger_innovation_c: FiniteFloat | None
     effective_updates: NonNegativeInt
     role_generation: NonNegativeInt
     model_digest: Digest | None
@@ -645,8 +643,6 @@ class ModelObservationPayload:
                 raise ValueError("combined allocation must match requested combustion load")
         if self.eligible and self.model_digest is None:
             raise ValueError("eligible model observation requires a model digest")
-        if self.eligible and (self.incumbent_innovation_c is None or self.challenger_innovation_c is None):
-            raise ValueError("eligible model observation requires innovation scores")
         return self
 
 
@@ -933,7 +929,7 @@ class ControlTraceRecord(BaseModel):
     cook_id: NonBlankString | None = None
     controller: ControllerType
     event_kind: TraceEventKind
-    schema_version: Literal[2, 3, 4, 5, 6] = TRACE_SCHEMA_VERSION
+    schema_version: Literal[2, 3, 4, 5, 6, 7] = TRACE_SCHEMA_VERSION
     payload: ControlTracePayload
 
     @model_validator(mode="after")
@@ -1062,6 +1058,14 @@ class ControlTraceRecord(BaseModel):
             decoded_payload: object = _JSON_VALUE_ADAPTER.validate_json(payload_json)
         except ValidationError as exc:
             raise ValueError("control trace payload column is invalid JSON") from exc
+        if (
+            schema_version == 6
+            and event_kind == TraceEventKind.MODEL_OBSERVATION.value
+            and isinstance(decoded_payload, dict)
+        ):
+            decoded_payload = dict(decoded_payload)
+            decoded_payload.pop("incumbent_innovation_c", None)
+            decoded_payload.pop("challenger_innovation_c", None)
         envelope_json = json.dumps(
             {
                 "ts_ms": ts_ms,
