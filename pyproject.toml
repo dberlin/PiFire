@@ -40,6 +40,7 @@ dependencies = [
     # Runtime imports in controller/{grey_box,mpc_model,update_mpc}.py require
     # SciPy in every production venv, not only development/codegen environments.
     "scipy>=1.18.0",
+    "sqlite-utils>=4.2.1,<5",
     "thermoworks-cloud>=0.1.13",
     "uuid>=1.30",
     "zeroconf>=0.149.17",

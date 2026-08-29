@@ -3,6 +3,7 @@ import logging
 import os
 import sqlite3
 import threading
+from unittest.mock import patch
 
 import pytest
 
@@ -14,6 +15,27 @@ def test_pragmas_applied(ds):
     assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
     assert conn.execute("PRAGMA synchronous").fetchone()[0] == 1  # NORMAL
     assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+
+
+def test_schema_wraps_existing_connection_without_ownership(tmp_path):
+    from sqlite_utils import Database
+
+    from common import schema_migrations
+
+    connection = sqlite3.connect(tmp_path / "wrapped.db")
+    connection.isolation_level = None
+    try:
+        with patch.object(schema_migrations, "Database", wraps=Database) as database:
+            datastore._ensure_schema(connection)
+
+        database.assert_called_once_with(
+            connection,
+            recursive_triggers=False,
+            execute_plugins=False,
+        )
+        assert connection.execute("SELECT 1").fetchone() == (1,)
+    finally:
+        connection.close()
 
 
 def test_schema_tables_exist(ds):
@@ -412,13 +434,13 @@ def test_history_migration_crash_mid_rebuild_rolls_back(tmp_path, monkeypatch):
     (after history_new is created and populated, but before the swap finishes)
     must roll back cleanly -- the original `history` table (and its row) must
     survive untouched, `user_version` must NOT be bumped to 4, and no leftover
-    `history_new` shadow table must remain. This is only true because
-    `_migrate_history_to_numeric_psp` runs inside `transaction(conn)` using
-    plain `execute()` calls; if a future edit switched it to `executescript()`
-    (which implicitly commits before each statement) the rollback guarantee
-    would break and this test would catch it -- either by the injected fault
-    no longer firing (executescript doesn't go through Connection.execute) or
-    by leftover state surviving the crash."""
+    `history_new` shadow table must remain. This is guaranteed by
+    `_ensure_schema()`'s one outer transaction and the adapter's plain
+    `execute()` calls. If a future edit bypassed that transaction or used
+    sqlite3's implicitly committing `Connection.executescript()`, the rollback
+    guarantee would break and this test would catch it through leftover state
+    surviving the crash.
+    """
     db_path = str(tmp_path / "crash_history.db")
     conn = sqlite3.connect(db_path)
     try:

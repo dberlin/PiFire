@@ -285,7 +285,7 @@ def test_schema_v10_migration_from_v8_is_additive_and_declares_learning_tables(d
         datastore._reset_for_tests(None)
 
 
-def test_schema_v10_migration_rolls_back_only_challenger_stage_before_version_bump(
+def test_schema_v10_migration_failure_rolls_back_entire_v8_batch_and_retries(
     database_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _seed_v8_database(database_path)
@@ -303,6 +303,24 @@ def test_schema_v10_migration_rolls_back_only_challenger_stage_before_version_bu
         kwargs["factory"] = _CrashingConnection
         return original_connect(*args, **kwargs)
 
+    v9_v10_objects = {
+        "learning_trajectory_corpus",
+        "learning_trajectory_segment",
+        "learning_trajectory_frame",
+        "learning_trajectory_operation_receipt",
+        "learning_fit_run",
+        "ix_learning_segment_retention",
+        "ix_learning_segment_partition",
+        "ix_learning_frame_revision",
+        "ix_learning_operation_source",
+        "ix_learning_fit_terminal",
+        "model_challenger_state",
+        "ix_model_challenger_identity",
+    }
+
+    def schema_object_names(connection: sqlite3.Connection) -> set[str]:
+        return {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type IN ('table', 'index')")}
+
     try:
         with (
             monkeypatch.context() as patch,
@@ -313,21 +331,33 @@ def test_schema_v10_migration_rolls_back_only_challenger_stage_before_version_bu
 
         check = sqlite3.connect(database_path)
         try:
-            # The v9 corpus migration committed before the isolated v10 transaction began.
-            assert check.execute("PRAGMA user_version").fetchone()[0] == 9
-            assert _CORPUS_TABLES <= _table_names(database_path)
-            assert "model_challenger_state" not in _table_names(database_path)
-            assert check.execute("SELECT value FROM kv WHERE key='preserved-v8'").fetchone()[0] == '{"value":8}'
-            assert (
-                check.execute("SELECT payload FROM legacy_v8_data WHERE identity='legacy-row'").fetchone()[0]
-                == "untouched"
+            assert check.execute("PRAGMA user_version").fetchone() == (8,)
+            assert schema_object_names(check).isdisjoint(v9_v10_objects)
+            assert check.execute("SELECT value FROM kv WHERE key='preserved-v8'").fetchone() == ('{"value":8}',)
+            assert check.execute("SELECT payload FROM legacy_v8_data WHERE identity='legacy-row'").fetchone() == (
+                "untouched",
             )
         finally:
             check.close()
 
         datastore._reset_for_tests(str(database_path))
-        assert datastore.connection().execute("PRAGMA user_version").fetchone()[0] == 10
-        assert _SCHEMA_V10_TABLES <= _table_names(database_path)
+        connection = datastore.connection()
+        assert connection.execute("PRAGMA user_version").fetchone() == (10,)
+        assert v9_v10_objects <= schema_object_names(connection)
+        assert connection.execute(
+            """
+            SELECT singleton, schema_version, corpus_revision, segment_count,
+                   pre_roll_count, scored_count, evicted_segment_count,
+                   evicted_pre_roll_count, evicted_scored_count,
+                   quarantined_segment_count
+              FROM learning_trajectory_corpus
+            """
+        ).fetchone() == (1, 1, 0, 0, 0, 0, 0, 0, 0, 0)
+        assert connection.execute("SELECT COUNT(*) FROM model_challenger_state").fetchone() == (0,)
+        assert connection.execute("SELECT value FROM kv WHERE key='preserved-v8'").fetchone() == ('{"value":8}',)
+        assert connection.execute("SELECT payload FROM legacy_v8_data WHERE identity='legacy-row'").fetchone() == (
+            "untouched",
+        )
     finally:
         datastore._reset_for_tests(None)
 
