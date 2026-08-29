@@ -97,26 +97,27 @@ def hold_cycle(monkeypatch):
         ctx, _grill, _notifier = make_ctx(settings, control_data, base_pellet_db(), FakeProbes().script([225] * 200))
         if controller == "mpc":
             ctx.learning_trajectory = _ExactSeedSource()
-        if not hasattr(runner, "estimator_seed_requirements"):
-            monkeypatch.setattr(
-                runner,
-                "estimator_seed_requirements",
-                ControllerRunner.estimator_seed_requirements.__get__(
+        if runner is not None:
+            if not hasattr(runner, "estimator_seed_requirements"):
+                monkeypatch.setattr(
                     runner,
-                    type(runner),
-                ),
-                raising=False,
-            )
-        if not hasattr(runner, "bind_estimator_seed_source"):
-            monkeypatch.setattr(
-                runner,
-                "bind_estimator_seed_source",
-                ControllerRunner.bind_estimator_seed_source.__get__(
+                    "estimator_seed_requirements",
+                    ControllerRunner.estimator_seed_requirements.__get__(
+                        runner,
+                        type(runner),
+                    ),
+                    raising=False,
+                )
+            if not hasattr(runner, "bind_estimator_seed_source"):
+                monkeypatch.setattr(
                     runner,
-                    type(runner),
-                ),
-                raising=False,
-            )
+                    "bind_estimator_seed_source",
+                    ControllerRunner.bind_estimator_seed_source.__get__(
+                        runner,
+                        type(runner),
+                    ),
+                    raising=False,
+                )
         monkeypatch.setattr(controller_runtime_runner, "build_runner", lambda *a, **k: (runner, "Active"))
         mode = HoldMode(ctx, WorkCycleState())
         mode.settings = settings
