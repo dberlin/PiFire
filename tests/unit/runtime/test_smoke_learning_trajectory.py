@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import FrozenInstanceError, dataclass, replace
 from hashlib import sha256
 from math import inf, nan
+from threading import Event, Thread
 from typing import Any
 
 import pytest
@@ -11,6 +12,7 @@ from common.control_trace import AmbientSource, AmbientUncertainty
 from common.learning_trajectory import (
     FrameDeliveryCertainty,
     LearningTrajectoryFrame,
+    LearningTrajectorySegment,
     TrajectoryBreakReason,
 )
 from common.persistence.learning_trajectory import SegmentCursor
@@ -122,6 +124,8 @@ class _Receipt:
     cursor: SegmentCursor | None
     error: str | None = None
     gap: TrajectoryPersistenceGap | None = None
+    segments: tuple[LearningTrajectorySegment, ...] = ()
+
     def complete(
         self,
         *,
@@ -149,10 +153,16 @@ class _Persistence:
         self.close_calls: list[float] = []
         self.delay_next = False
         self.pending_receipts: list[_Receipt] = []
+        self.delay_quarantine = False
+        self.pending_quarantine_receipts: list[_Receipt] = []
+        self.quarantine_rejections: list[str] = []
+        self.quarantine_barrier_completion: tuple[bool, str | None] | None = None
         self.barrier_completion: tuple[bool, str | None] | None = None
         self.close_result = True
         self.close_error: BaseException | None = None
         self.revision = 0
+        self.readback_segments = False
+        self.quarantined_segment_ids: list[str] = []
 
     def submit_trajectory_batch(self, batch: TrajectoryAppendBatch) -> _Receipt:
         assert isinstance(batch, TrajectoryAppendBatch)
@@ -169,6 +179,7 @@ class _Persistence:
             )
 
         self.revision += 1
+        segments: tuple[LearningTrajectorySegment, ...] = ()
         cursor = batch.cursor
         if batch.begin_segment is not None:
             segment = batch.begin_segment
@@ -178,6 +189,7 @@ class _Persistence:
                 chain_digest=_digest(f"{segment.segment_id}:{self.revision}"),
                 corpus_revision=self.revision,
             )
+            segments = (segment,)
         elif batch.next_segment is not None:
             segment = batch.next_segment
             cursor = SegmentCursor(
@@ -186,6 +198,7 @@ class _Persistence:
                 chain_digest=_digest(f"{segment.segment_id}:{self.revision}"),
                 corpus_revision=self.revision,
             )
+            segments = (segment,)
         elif cursor is not None and (batch.pre_roll or batch.scored):
             cursor = SegmentCursor(
                 segment_id=cursor.segment_id,
@@ -198,10 +211,31 @@ class _Persistence:
             durable=not self.delay_next,
             cursor=cursor,
             completed=not self.delay_next,
+            segments=segments if self.readback_segments else (),
         )
         if self.delay_next:
             self.delay_next = False
             self.pending_receipts.append(receipt)
+        return receipt
+
+    def submit_trajectory_quarantine(self, segment_id: str) -> _Receipt:
+        self.quarantined_segment_ids.append(segment_id)
+        if self.quarantine_rejections:
+            return _Receipt(
+                accepted=False,
+                durable=False,
+                cursor=None,
+                error=self.quarantine_rejections.pop(0),
+            )
+        receipt = _Receipt(
+            accepted=True,
+            durable=not self.delay_quarantine,
+            cursor=None,
+            completed=not self.delay_quarantine,
+        )
+        if self.delay_quarantine:
+            self.delay_quarantine = False
+            self.pending_quarantine_receipts.append(receipt)
         return receipt
 
     def barrier(self, timeout: float = 2.0) -> bool:
@@ -210,6 +244,15 @@ class _Persistence:
             durable, error = self.barrier_completion
             self.barrier_completion = None
             self.complete_next(durable=durable, error=error)
+        for receipt in self.pending_quarantine_receipts:
+            completion = self.quarantine_barrier_completion
+            if completion is None:
+                receipt.complete(durable=True)
+            else:
+                durable, error = completion
+                receipt.complete(durable=durable, error=error)
+                self.quarantine_barrier_completion = None
+        self.pending_quarantine_receipts.clear()
         return True
 
     def close(self, timeout: float = 2.0) -> bool:
@@ -217,6 +260,7 @@ class _Persistence:
         if self.close_error is not None:
             raise self.close_error
         return self.close_result
+
     def complete_next(
         self,
         *,
@@ -224,7 +268,6 @@ class _Persistence:
         error: str | None = None,
     ) -> None:
         self.pending_receipts.pop(0).complete(durable=durable, error=error)
-
 
 
 def _entered(
@@ -360,15 +403,30 @@ def _hold_frame(
     )
 
 
+class _BoundLearningTrajectoryRuntime(LearningTrajectoryRuntime):
+    """Exercise persistence with the real UUID trace-binding prerequisite."""
+
+    def mode_entered(self, event: ModeEntered) -> None:
+        super().mode_entered(event)
+        if event.effective_mode == "Smoke":
+            assert self.bind_trace_session(
+                "00000000-0000-4000-8000-000000000001",
+                event.cook_id,
+                lambda _segment: True,
+            )
+
+
 def _runtime(
     *,
     journal: _Journal | None = None,
     persistence: _Persistence | None = None,
     ids: _SegmentIds | None = None,
+    bind_trace: bool = True,
 ) -> tuple[LearningTrajectoryRuntime, _Journal, _Persistence]:
     owned_journal = journal or _Journal()
     owned_persistence = persistence or _Persistence()
-    runtime = LearningTrajectoryRuntime(
+    runtime_class = _BoundLearningTrajectoryRuntime if bind_trace else LearningTrajectoryRuntime
+    runtime = runtime_class(
         journal=owned_journal,
         persistence=owned_persistence,
         segment_id_factory=ids or _SegmentIds(),
@@ -406,6 +464,215 @@ def _scored_frames(persistence: _Persistence) -> list[LearningTrajectoryFrame]:
             frames.extend(batch.next_segment.scored_hold_frames)
         frames.extend(batch.scored)
     return frames
+
+
+def test_segment_trace_publication_waits_for_durable_readback_and_real_session() -> None:
+    runtime, journal, persistence = _runtime(bind_trace=False)
+    runtime.mode_entered(_entered("Smoke"))
+    journal.set_exact(0, _FRAME_MS, auger_on_s=6.0)
+    runtime.observe_temperature(_sample(_FRAME_MS, 110.0))
+    runtime.mode_exited(
+        ModeExited(
+            effective_mode="Smoke",
+            next_effective_mode="Hold",
+            monotonic_ms=_FRAME_MS,
+            wall_ms=_WALL_OFFSET_MS + _FRAME_MS,
+        )
+    )
+    runtime.mode_entered(_entered("Hold", at_ms=_FRAME_MS))
+    persistence.readback_segments = True
+    persistence.delay_next = True
+    published: list[LearningTrajectorySegment] = []
+    session_id = "00000000-0000-4000-8000-000000000001"
+
+    assert runtime.bind_trace_session(
+        session_id,
+        "cook-1",
+        lambda segment: not published.append(segment),
+    )
+    assert published == []
+    assert len(persistence.pending_receipts) == 1
+    pending_segment = persistence.pending_receipts[0].segments[0]
+    assert pending_segment.trace_session_ids == (session_id,)
+
+    persistence.complete_next()
+    runtime.status()
+
+    assert published == [pending_segment]
+    assert published[0].content_digest == pending_segment.content_digest
+
+
+def test_trace_session_rotation_keeps_each_durable_segment_with_its_original_publisher() -> None:
+    runtime, journal, persistence = _runtime(bind_trace=False)
+    runtime.mode_entered(_entered("Smoke"))
+    persistence.readback_segments = True
+    old_session_id = "00000000-0000-4000-8000-000000000001"
+    new_session_id = "00000000-0000-4000-8000-000000000002"
+    old_published: list[LearningTrajectorySegment] = []
+    new_published: list[LearningTrajectorySegment] = []
+    assert runtime.bind_trace_session(
+        old_session_id,
+        "cook-1",
+        lambda segment: not old_published.append(segment),
+    )
+    persistence.delay_next = True
+    journal.set_exact(0, _FRAME_MS, auger_on_s=6.0)
+    runtime.observe_temperature(_sample(_FRAME_MS, 110.0))
+    old_segment = persistence.pending_receipts[0].segments[0]
+
+    runtime.intervention(
+        _boundary(
+            TrajectoryBreakReason.COOK_ROTATED,
+            _FRAME_MS,
+            replacement_mode=_entered(
+                "Smoke",
+                at_ms=_FRAME_MS,
+                cook_id="cook-2",
+            ),
+        )
+    )
+    assert runtime.bind_trace_session(
+        new_session_id,
+        "cook-2",
+        lambda segment: not new_published.append(segment),
+    )
+    persistence.complete_next()
+    runtime.status()
+
+    assert old_published == [old_segment]
+    assert old_published[0].trace_session_ids == (old_session_id,)
+    assert new_published == []
+
+    journal.set_exact(_FRAME_MS, 2 * _FRAME_MS, auger_on_s=7.0)
+    runtime.observe_temperature(_sample(2 * _FRAME_MS, 111.0))
+
+    assert new_published
+    assert all(segment.trace_session_ids == (new_session_id,) for segment in new_published)
+
+
+def test_trace_publication_failure_blocks_learning_and_quarantines_durable_segment() -> None:
+    runtime, journal, persistence = _runtime(bind_trace=False)
+    runtime.mode_entered(_entered("Smoke"))
+    persistence.readback_segments = True
+    failures: list[str] = []
+    assert runtime.bind_trace_session(
+        "00000000-0000-4000-8000-000000000001",
+        "cook-1",
+        lambda _segment: False,
+        failure_handler=failures.append,
+    )
+    journal.set_exact(0, _FRAME_MS, auger_on_s=6.0)
+
+    runtime.observe_temperature(_sample(_FRAME_MS, 110.0))
+
+    status = runtime.status()
+    assert status.enabled is False
+    assert status.last_break_reason is TrajectoryBreakReason.RECORDER_GAP
+    assert failures == ["trajectory-trace-publication-failed"]
+    assert persistence.quarantined_segment_ids == ["segment-1"]
+
+
+def test_barrier_fences_quarantine_submitted_after_delayed_publication_failure() -> None:
+    runtime, journal, persistence = _runtime(bind_trace=False)
+    runtime.mode_entered(_entered("Smoke"))
+    persistence.readback_segments = True
+    persistence.delay_next = True
+    persistence.barrier_completion = (True, None)
+    persistence.delay_quarantine = True
+    assert runtime.bind_trace_session(
+        "00000000-0000-4000-8000-000000000001",
+        "cook-1",
+        lambda _segment: False,
+    )
+    journal.set_exact(0, _FRAME_MS, auger_on_s=6.0)
+    runtime.observe_temperature(_sample(_FRAME_MS, 110.0))
+
+    assert runtime.barrier() is False
+
+    assert persistence.quarantined_segment_ids == ["segment-1"]
+    assert persistence.pending_quarantine_receipts == []
+    assert persistence.barrier_calls == [2.0, 2.0]
+
+
+def test_rejected_quarantine_is_retried_and_fenced() -> None:
+    runtime, journal, persistence = _runtime(bind_trace=False)
+    runtime.mode_entered(_entered("Smoke"))
+    persistence.readback_segments = True
+    persistence.quarantine_rejections.append("quarantine-queue-rejected")
+    assert runtime.bind_trace_session(
+        "00000000-0000-4000-8000-000000000001",
+        "cook-1",
+        lambda _segment: False,
+    )
+    journal.set_exact(0, _FRAME_MS, auger_on_s=6.0)
+
+    runtime.observe_temperature(_sample(_FRAME_MS, 110.0))
+
+    assert runtime.barrier() is False
+    assert persistence.quarantined_segment_ids == ["segment-1", "segment-1"]
+    assert persistence.pending_quarantine_receipts == []
+
+
+def test_nondurable_quarantine_is_retried_and_fenced() -> None:
+    runtime, journal, persistence = _runtime(bind_trace=False)
+    runtime.mode_entered(_entered("Smoke"))
+    persistence.readback_segments = True
+    persistence.delay_quarantine = True
+    persistence.quarantine_barrier_completion = (
+        False,
+        "quarantine-write-failed",
+    )
+    assert runtime.bind_trace_session(
+        "00000000-0000-4000-8000-000000000001",
+        "cook-1",
+        lambda _segment: False,
+    )
+    journal.set_exact(0, _FRAME_MS, auger_on_s=6.0)
+
+    runtime.observe_temperature(_sample(_FRAME_MS, 110.0))
+
+    assert runtime.barrier() is False
+    assert persistence.quarantined_segment_ids == ["segment-1", "segment-1"]
+    assert persistence.pending_quarantine_receipts == []
+
+
+def test_barrier_serializes_with_frame_submission() -> None:
+    barrier_entered = Event()
+    barrier_release = Event()
+
+    class _BlockingPersistence(_Persistence):
+        def barrier(self, timeout: float = 2.0) -> bool:
+            barrier_entered.set()
+            assert barrier_release.wait(timeout)
+            return super().barrier(timeout)
+
+    persistence = _BlockingPersistence()
+    runtime, _journal, _persistence = _runtime(persistence=persistence)
+    runtime.mode_entered(_entered("Smoke"))
+    barrier_result: list[bool] = []
+    mutation_finished = Event()
+
+    barrier_thread = Thread(target=lambda: barrier_result.append(runtime.barrier()))
+    mutation_thread = Thread(
+        target=lambda: (
+            runtime.observe_temperature(_sample(_FRAME_MS, 110.0)),
+            mutation_finished.set(),
+        )
+    )
+    barrier_thread.start()
+    assert barrier_entered.wait(1.0)
+    mutation_thread.start()
+    try:
+        assert not mutation_finished.wait(0.05)
+    finally:
+        barrier_release.set()
+        barrier_thread.join(timeout=1.0)
+        mutation_thread.join(timeout=1.0)
+
+    assert not barrier_thread.is_alive()
+    assert not mutation_thread.is_alive()
+    assert barrier_result == [True]
+    assert mutation_finished.is_set()
 
 
 def _finalize_reasons(persistence: _Persistence) -> list[TrajectoryBreakReason]:
@@ -650,9 +917,7 @@ def test_every_explicit_boundary_reason_appends_only_exact_tail_before_split(
     old_appends = [
         batch
         for batch in persistence.batches[before:]
-        if batch.cursor is not None
-        and batch.cursor.segment_id == old_segment_id
-        and (batch.pre_roll or batch.scored)
+        if batch.cursor is not None and batch.cursor.segment_id == old_segment_id and (batch.pre_roll or batch.scored)
     ]
     assert len(old_appends) == 1
     boundary_batch = old_appends[0]
@@ -663,16 +928,8 @@ def test_every_explicit_boundary_reason_appends_only_exact_tail_before_split(
     assert boundary_tail.complete is False
     assert boundary_tail.boundary_reason is reason
     assert boundary_tail.monotonic_end_ms == 25_000
-    assert all(
-        not batch.scored
-        and not any(not frame.partial for frame in batch.pre_roll)
-        for batch in old_appends
-    )
-    next_segments = [
-        batch.next_segment
-        for batch in persistence.batches[before:]
-        if batch.next_segment is not None
-    ]
+    assert all(not batch.scored and not any(not frame.partial for frame in batch.pre_roll) for batch in old_appends)
+    next_segments = [batch.next_segment for batch in persistence.batches[before:] if batch.next_segment is not None]
     assert len(next_segments) == 1
     assert next_segments[0].segment_id == runtime.status().segment_id
     assert next_segments[0].segment_id != old_segment_id
@@ -723,9 +980,7 @@ def test_recipe_uses_effective_smoke_hold_modes_and_hold_to_smoke_breaks_left_ho
     runtime, journal, persistence = _runtime()
     journal.set_exact(0, _FRAME_MS, auger_on_s=4.0)
     journal.set_exact(_FRAME_MS, 30_000, auger_on_s=2.0)
-    runtime.mode_entered(
-        _entered("Smoke", persisted_mode="Recipe", recipe_step_id="step-smoke")
-    )
+    runtime.mode_entered(_entered("Smoke", persisted_mode="Recipe", recipe_step_id="step-smoke"))
     runtime.observe_temperature(_sample(_FRAME_MS, 100.0, recipe_step_id="step-smoke"))
     runtime.observe_temperature(_sample(29_975, 101.0, recipe_step_id="step-smoke"))
     runtime.mode_exited(_exited("Smoke", "Hold", 30_000))
@@ -814,9 +1069,7 @@ def test_persistence_rejection_disables_learning_records_gap_and_never_commands_
     assert journal.calls == calls_after_rejection
     assert len(persistence.batches) == 1
 
-    runtime.mode_exited(
-        _exited("Smoke", "Stop", 40_000, reason=TrajectoryBreakReason.STOP)
-    )
+    runtime.mode_exited(_exited("Smoke", "Stop", 40_000, reason=TrajectoryBreakReason.STOP))
     runtime.mode_entered(_entered("Smoke", at_ms=40_000, cook_id="cook-2"))
     runtime.observe_temperature(_sample(60_000, 102.0))
 
@@ -963,9 +1216,7 @@ def test_short_first_partial_can_begin_and_finalize_smoke_segment() -> None:
     runtime.mode_entered(_entered("Smoke"))
     runtime.observe_temperature(_sample(4_975, 100.0))
 
-    runtime.mode_exited(
-        _exited("Smoke", "Stop", 5_000, reason=TrajectoryBreakReason.STOP)
-    )
+    runtime.mode_exited(_exited("Smoke", "Stop", 5_000, reason=TrajectoryBreakReason.STOP))
 
     (segment,) = _segments(persistence)
     assert segment.pre_roll_frames[0].monotonic_start_ms == 0
@@ -1001,9 +1252,7 @@ def test_close_returns_worker_result_and_records_timeout_or_error() -> None:
 
     failed_persistence = _Persistence()
     failed_persistence.close_error = RuntimeError("worker-close-failed")
-    failed_runtime, _journal, _persistence = _runtime(
-        persistence=failed_persistence
-    )
+    failed_runtime, _journal, _persistence = _runtime(persistence=failed_persistence)
     assert failed_runtime.close() is False
     assert failed_runtime.status().last_error == "worker-close-failed"
 

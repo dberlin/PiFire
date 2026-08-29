@@ -18,6 +18,7 @@ from typing import Literal, Protocol
 import numpy as np
 
 from common.control_trace import (
+    ChallengerProgressTracePayload,
     CompletedOriginPayload,
     ControllerType,
     ControlTraceRecord,
@@ -29,7 +30,12 @@ from common.control_trace import (
     TraceEventKind,
 )
 from common.controller_model_state import MAX_SNAPSHOT_BYTES, ControllerModelStore
-from common.learning_trajectory import FitCorpusIdentity, ModelFitLineage, trajectory_json_value
+from common.learning_trajectory import (
+    FitCorpusIdentity,
+    ModelFitLineage,
+    canonical_model_fit_lineage_digest,
+    trajectory_json_value,
+)
 from common.model_evidence import (
     ActivationLifecycleEvidence,
     CalibrationSummaryEvidence,
@@ -76,7 +82,7 @@ from controller.model_learning.contracts import (
     LearningStatus,
     activation_policy_for_origin,
 )
-from controller.model_learning.evaluation import EvaluationDecision
+from controller.model_learning.evaluation import EvaluationConfig, EvaluationDecision
 from controller.mpc_config import (
     DEFAULT_MPC_CONFIG,
     JsonValue,
@@ -1236,6 +1242,7 @@ class GreyLearningRuntime:
                 "request_id": request.request_id,
                 "accepted": True,
                 "candidate_digest": candidate.model_digest,
+                "required_horizons": list(learning.evaluation_config.required_horizons),
                 "native_build": "passed",
                 "dry_solve": "passed" if preparation.dry_solve_finite else "failed",
                 "target_timing": (None if timing is None else trajectory_json_value(asdict(timing))),
@@ -1267,15 +1274,17 @@ class GreyLearningRuntime:
             retired_ms=now_ms if manifest_blocked else None,
         )
         if current is not None and current.phase != "retired":
-            retire_model_challenger(
+            retired_current = retire_model_challenger(
                 expected_revision=current.revision,
                 reason="superseded-by-new-cumulative-fit",
                 retired_ms=now_ms,
             )
+            self._trace_durable_challenger(retired_current)
         durable = create_model_challenger(state)
         with self._learning_lock:
             self._challenger_state = durable
             self._fit_corpus_identities.pop(request.request_id, None)
+        self._trace_durable_challenger(durable)
         if not manifest_blocked:
             self._adopt_prepared_checkpoint_lineage(preparation)
         return durable
@@ -1300,6 +1309,7 @@ class GreyLearningRuntime:
         with self._learning_lock:
             self._challenger_state = retired
             self._model_revision += 1
+        self._trace_durable_challenger(retired)
 
     def _abort_durable_challenger_activation(
         self,
@@ -1321,6 +1331,7 @@ class GreyLearningRuntime:
         with self._learning_lock:
             self._challenger_state = retired
             self._model_revision += 1
+        self._trace_durable_challenger(retired)
 
     def _record_terminal_fit_intent(self, intent: _CorpusFitIntent) -> None:
         self._record_terminal_fit_identity(intent.ticket, intent.origin)
@@ -1373,6 +1384,100 @@ class GreyLearningRuntime:
                 ),
             )
             return (None, None) if result is None else result
+
+    def _durable_challenger_horizons(
+        self,
+        state: ModelChallengerState,
+    ) -> tuple[tuple[int, ...], tuple[int, ...]]:
+        fit_preparation = trajectory_json_value(state.fit_preparation)
+        stored_required_horizons = (
+            fit_preparation.get("required_horizons") if isinstance(fit_preparation, dict) else None
+        )
+        if stored_required_horizons is None:
+            required_horizons = EvaluationConfig().required_horizons
+        elif (
+            not isinstance(stored_required_horizons, list)
+            or not stored_required_horizons
+            or any(type(horizon) is not int or horizon <= 0 for horizon in stored_required_horizons)
+        ):
+            raise RuntimeError("durable challenger required horizons are invalid")
+        else:
+            required_horizons = tuple(stored_required_horizons)
+        if state.last_evidence_id is None:
+            return (), required_horizons
+
+        repository = self._trajectory_repository
+        records = read_model_evidence(
+            kind=EvidenceKind.CHALLENGER_ROUND,
+            database_path=getattr(repository, "_database_path", None),
+        )
+        evidence = next(
+            (record for record in reversed(records) if record.evidence_id == state.last_evidence_id),
+            None,
+        )
+        if evidence is None or not isinstance(evidence.payload, ChallengerRoundEvidence):
+            raise RuntimeError("durable challenger round evidence is absent")
+        payload = evidence.payload
+        if (
+            payload.challenger_id != state.challenger_id
+            or payload.incumbent_digest != state.incumbent.model_digest
+            or payload.candidate_digest != state.candidate.model_digest
+            or evidence.role_generation != state.incumbent.role_generation
+            or payload.required_horizons != required_horizons
+        ):
+            raise RuntimeError("durable challenger round lineage changed")
+        current_round = (
+            payload.evaluation_epoch == state.evaluation_epoch and payload.evaluation_round == state.evaluation_round
+        )
+        resumed_round = state.evaluation_round == 0 and state.evaluation_epoch == payload.evaluation_epoch + 1
+        if not current_round and not resumed_round:
+            raise RuntimeError("durable challenger round progress changed")
+        return payload.completed_horizons, payload.required_horizons
+
+    def _trace_durable_challenger(self, state: ModelChallengerState) -> None:
+        try:
+            completed_horizons, required_horizons = self._durable_challenger_horizons(state)
+            fit_preparation = trajectory_json_value(state.fit_preparation)
+            fit_result = fit_preparation.get("fit_result") if isinstance(fit_preparation, dict) else None
+            result_digest = fit_result.get("result_digest") if isinstance(fit_result, dict) else None
+            if not isinstance(result_digest, str):
+                raise TypeError("durable challenger fit result digest is absent")
+            payload = ChallengerProgressTracePayload(
+                challenger_id=state.challenger_id,
+                challenger_revision=state.revision,
+                phase=state.phase,
+                origin=state.origin.value,
+                policy=state.policy.value,
+                incumbent_digest=state.incumbent.model_digest,
+                incumbent_generation=state.incumbent.role_generation,
+                candidate_digest=state.candidate.model_digest,
+                candidate_generation=state.candidate.candidate_generation,
+                corpus_digest=state.fit_corpus.corpus_digest,
+                lineage_digest=canonical_model_fit_lineage_digest(state.fit_lineage),
+                result_digest=result_digest,
+                evaluation_epoch=state.evaluation_epoch,
+                evaluation_round=state.evaluation_round,
+                consecutive_wins=state.consecutive_wins,
+                required_wins=state.required_wins,
+                completed_horizons=completed_horizons,
+                required_horizons=required_horizons,
+                resumed_from_previous_cook=state.evaluation_epoch > 0,
+                reset_reason=state.retirement_reason,
+            )
+            self._append_trace(
+                (
+                    ControlTraceRecord(
+                        ts_ms=state.updated_ms,
+                        session_id=(getattr(self, "_learning_session_id", None) or "mpc-learning"),
+                        cook_id=getattr(self, "_learning_cook_id", None),
+                        controller=ControllerType.MPC,
+                        event_kind=TraceEventKind.CHALLENGER_PROGRESS,
+                        payload=payload,
+                    ),
+                )
+            )
+        except Exception as error:
+            self._activation_runtime.terminate(f"durable challenger trace failed: {error}")
 
     def _grey_lifecycle_record(
         self,
@@ -1524,6 +1629,7 @@ class GreyLearningRuntime:
             with self._learning_lock:
                 self._challenger_state = retired
                 self._model_revision += 1
+            self._trace_durable_challenger(retired)
             return retired
         if state.last_decision_id == evaluation.decision_id:
             if (
@@ -1542,6 +1648,7 @@ class GreyLearningRuntime:
                 with self._learning_lock:
                     self._challenger_state = state
                     self._model_revision += 1
+                self._trace_durable_challenger(state)
             return state
         round_number = state.evaluation_round + 1
         evidence = ModelEvidenceRecord(
@@ -1572,12 +1679,14 @@ class GreyLearningRuntime:
             expected_revision=state.revision,
             evidence=evidence,
         )
+        self._trace_durable_challenger(progressed)
         gates = qualification_gates(progressed)
         if progressed.phase == "evaluating" and gates.accepted:
             progressed = qualify_model_challenger(
                 expected_revision=progressed.revision,
                 qualified_ms=timestamp_ms,
             )
+            self._trace_durable_challenger(progressed)
         with self._learning_lock:
             self._challenger_state = progressed
             self._model_revision += 1
@@ -1852,6 +1961,7 @@ class GreyLearningRuntime:
                 )
                 with self._learning_lock:
                     self._challenger_state = activating
+                self._trace_durable_challenger(activating)
             except BaseException as error:
                 receipt._complete(durable=False, error=error)
             else:
@@ -2823,6 +2933,14 @@ class GreyLearningRuntime:
                     recovered_ms=self._clock_ms(),
                 )
                 if recovered is None:
+                    latest = read_model_challenger()
+                    if (
+                        latest is not None
+                        and latest.challenger_id == durable.challenger_id
+                        and latest.revision > durable.revision
+                        and latest.phase == "retired"
+                    ):
+                        self._trace_durable_challenger(latest)
                     for component in (
                         preparation.candidate_pair.controller,
                         preparation.candidate_pair.estimator,
@@ -2831,6 +2949,7 @@ class GreyLearningRuntime:
                         if callable(close):
                             close()
                 else:
+                    self._trace_durable_challenger(recovered)
                     self._learning.restore_persisted_challenger(
                         preparation,
                         evaluation_epoch=recovered.evaluation_epoch,

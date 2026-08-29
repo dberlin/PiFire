@@ -158,6 +158,7 @@ def _activation(evidence_id: str) -> ModelEvidenceRecord:
         ),
     )
 
+
 def _trajectory_frame(
     sequence: int,
     *,
@@ -354,9 +355,7 @@ def test_close_is_idempotent_joins_once_and_rejects_post_close_work(monkeypatch)
         expected_phase=None,
     ).accepted
 
-    rejected: PersistenceReceipt = worker.submit_trajectory_batch(
-        _trajectory_batch("after-close")
-    )
+    rejected: PersistenceReceipt = worker.submit_trajectory_batch(_trajectory_batch("after-close"))
     assert not rejected.accepted
     assert rejected.completed
     assert not rejected.durable
@@ -385,9 +384,7 @@ def test_priority_fifo_and_timed_out_barrier_fence_prevent_overtake() -> None:
 
     def resulting_cursor(batch):
         if batch.begin_segment is not None:
-            next_ordinal = len(batch.begin_segment.pre_roll_frames) + len(
-                batch.begin_segment.scored_hold_frames
-            )
+            next_ordinal = len(batch.begin_segment.pre_roll_frames) + len(batch.begin_segment.scored_hold_frames)
             return SegmentCursor(
                 segment_id=batch.begin_segment.segment_id,
                 next_ordinal=next_ordinal,
@@ -397,9 +394,7 @@ def test_priority_fifo_and_timed_out_barrier_fence_prevent_overtake() -> None:
         assert batch.cursor is not None
         if batch.break_reason is not None:
             assert batch.next_segment is not None
-            next_ordinal = len(batch.next_segment.pre_roll_frames) + len(
-                batch.next_segment.scored_hold_frames
-            )
+            next_ordinal = len(batch.next_segment.pre_roll_frames) + len(batch.next_segment.scored_hold_frames)
             return SegmentCursor(
                 segment_id=batch.next_segment.segment_id,
                 next_ordinal=next_ordinal,
@@ -413,9 +408,7 @@ def test_priority_fifo_and_timed_out_barrier_fence_prevent_overtake() -> None:
                 chain_digest=batch.cursor.chain_digest,
                 corpus_revision=batch.cursor.corpus_revision + 1,
             )
-        next_ordinal = (
-            batch.cursor.next_ordinal + len(batch.pre_roll) + len(batch.scored)
-        )
+        next_ordinal = batch.cursor.next_ordinal + len(batch.pre_roll) + len(batch.scored)
         return SegmentCursor(
             segment_id=batch.cursor.segment_id,
             next_ordinal=next_ordinal,
@@ -428,9 +421,7 @@ def test_priority_fifo_and_timed_out_barrier_fence_prevent_overtake() -> None:
     def persist_batch(batch):
         nonlocal durable_revision
         assert batch.cursor is not None
-        order.append(
-            f"trajectory:{batch.cursor.segment_id}:{batch.cursor.next_ordinal}"
-        )
+        order.append(f"trajectory:{batch.cursor.segment_id}:{batch.cursor.next_ordinal}")
         durable_revision += 1
         result = resulting_cursor(batch)
         return SegmentCursor(
@@ -455,9 +446,7 @@ def test_priority_fifo_and_timed_out_barrier_fence_prevent_overtake() -> None:
     assert started.wait(timeout=1.0)
     assert worker.submit_checkpoint("ordinary", {"revision": 1})
     assert worker.submit_evidence(_refresh("ordinary-evidence")).accepted
-    pre_roll = worker.submit_trajectory_batch(
-        _trajectory_batch("pre-roll", kind="pre-roll")
-    )
+    pre_roll = worker.submit_trajectory_batch(_trajectory_batch("pre-roll", kind="pre-roll"))
     compound_a_batch = _trajectory_batch("compound")
     compound_a = worker.submit_trajectory_batch(compound_a_batch)
     compound_b_source = _trajectory_batch("compound", sequence=1)
@@ -469,9 +458,7 @@ def test_priority_fifo_and_timed_out_barrier_fence_prevent_overtake() -> None:
             evidence=compound_b_source.evidence,
         )
     )
-    boundary = worker.submit_trajectory_batch(
-        _trajectory_batch("segment-finalize", kind="finalize")
-    )
+    boundary = worker.submit_trajectory_batch(_trajectory_batch("segment-finalize", kind="finalize"))
     activation_before = worker.submit_activation_phase(
         prepared,
         expected_phase=None,
@@ -481,7 +468,6 @@ def test_priority_fifo_and_timed_out_barrier_fence_prevent_overtake() -> None:
         prepared,
         expected_phase=None,
     )
-
 
     release.set()
     try:
@@ -525,9 +511,7 @@ def test_compound_scored_frame_and_evidence_commit_or_roll_back_atomically(
         _Logger(),
         trajectory_repository=repository,
     )
-    begin = worker.submit_trajectory_batch(
-        TrajectoryAppendBatch(begin_segment=_stored_segment("atomic"))
-    )
+    begin = worker.submit_trajectory_batch(TrajectoryAppendBatch(begin_segment=_stored_segment("atomic")))
     assert begin.wait(timeout=1.0)
     assert begin.cursor is not None
 
@@ -571,6 +555,56 @@ def test_compound_scored_frame_and_evidence_commit_or_roll_back_atomically(
         worker.close(timeout=1.0)
 
 
+def test_trace_gap_quarantine_runs_on_persistence_worker_and_blocks_evidence(ds) -> None:
+    repository = LearningTrajectoryRepository()
+    worker = ModelPersistenceWorker(
+        _Store(),
+        _Logger(),
+        trajectory_repository=repository,
+    )
+    begin = worker.submit_trajectory_batch(TrajectoryAppendBatch(begin_segment=_stored_segment("trace-gap")))
+    assert begin.wait(timeout=1.0)
+
+    quarantine = worker.submit_trajectory_quarantine("trace-gap")
+    try:
+        assert quarantine.accepted
+        assert worker.evidence_blocked
+        assert quarantine.wait(timeout=1.0)
+        assert repository.read_segment("trace-gap") is None
+        assert repository.status().quarantined_segment_count == 1
+    finally:
+        worker.close(timeout=1.0)
+
+
+def test_worker_failure_completes_pending_quarantine_receipt() -> None:
+    started = threading.Event()
+    release = threading.Event()
+
+    class _FailingStore:
+        def save_outcome(self, _name, _snapshot):
+            started.set()
+            assert release.wait(timeout=1.0)
+            raise RuntimeError("checkpoint-write-failed")
+
+    worker = ModelPersistenceWorker(_FailingStore(), _Logger())
+    try:
+        assert worker.submit_checkpoint("mpc", {"revision": 1})
+        assert started.wait(timeout=1.0)
+        quarantine = worker.submit_trajectory_quarantine("trace-gap")
+        assert quarantine.accepted
+        assert not quarantine.completed
+
+        release.set()
+
+        assert not quarantine.wait(timeout=1.0)
+        assert quarantine.completed
+        assert not quarantine.durable
+        assert quarantine.error == "RuntimeError: checkpoint-write-failed"
+    finally:
+        release.set()
+        worker.close(timeout=1.0)
+
+
 def test_injected_trajectory_callback_must_return_resulting_cursor() -> None:
     def missing_cursor(_batch):
         return None
@@ -592,7 +626,6 @@ def test_injected_trajectory_callback_must_return_resulting_cursor() -> None:
         worker.close(timeout=1.0)
 
 
-
 def test_real_repository_cursor_progresses_across_stale_queued_batches(ds) -> None:
     repository = LearningTrajectoryRepository()
     worker = ModelPersistenceWorker(
@@ -600,9 +633,7 @@ def test_real_repository_cursor_progresses_across_stale_queued_batches(ds) -> No
         _Logger(),
         trajectory_repository=repository,
     )
-    begin = worker.submit_trajectory_batch(
-        TrajectoryAppendBatch(begin_segment=_stored_segment("cursor"))
-    )
+    begin = worker.submit_trajectory_batch(TrajectoryAppendBatch(begin_segment=_stored_segment("cursor")))
     assert begin.wait(timeout=1.0)
     assert begin.cursor is not None
     stale = begin.cursor
@@ -658,16 +689,12 @@ def test_interleaved_segments_rebase_cached_global_corpus_revision(ds) -> None:
         _Logger(),
         trajectory_repository=repository,
     )
-    begin_a = worker.submit_trajectory_batch(
-        TrajectoryAppendBatch(begin_segment=_stored_segment("interleaved-a"))
-    )
+    begin_a = worker.submit_trajectory_batch(TrajectoryAppendBatch(begin_segment=_stored_segment("interleaved-a")))
     assert begin_a.wait(timeout=1.0)
     assert begin_a.cursor is not None
     stale_a = begin_a.cursor
     begin_b = worker.submit_trajectory_batch(
-        TrajectoryAppendBatch(
-            begin_segment=_stored_segment("interleaved-b", epoch_ms=100_000)
-        )
+        TrajectoryAppendBatch(begin_segment=_stored_segment("interleaved-b", epoch_ms=100_000))
     )
     assert begin_b.wait(timeout=1.0)
     assert begin_b.cursor is not None
@@ -708,9 +735,7 @@ def test_trajectory_queue_rejection_returns_explicit_gap_and_failure() -> None:
     first = worker.submit_trajectory_batch(_trajectory_batch("running"))
     assert started.wait(timeout=1.0)
     queued = worker.submit_trajectory_batch(_trajectory_batch("queued", sequence=1))
-    rejected = worker.submit_trajectory_batch(
-        _trajectory_batch("rejected", sequence=2)
-    )
+    rejected = worker.submit_trajectory_batch(_trajectory_batch("rejected", sequence=2))
     try:
         assert first.accepted
         assert queued.accepted
@@ -738,9 +763,7 @@ def test_rejected_lineage_stays_blocked_until_durable_break_and_begin(ds) -> Non
         trajectory_capacity=1,
         trajectory_repository=repository,
     )
-    begin = worker.submit_trajectory_batch(
-        TrajectoryAppendBatch(begin_segment=_stored_segment("gap-lineage"))
-    )
+    begin = worker.submit_trajectory_batch(TrajectoryAppendBatch(begin_segment=_stored_segment("gap-lineage")))
     assert begin.wait(timeout=1.0)
     assert begin.cursor is not None
     stale = begin.cursor
@@ -855,9 +878,7 @@ def test_global_capacity_reserves_boundary_and_activation_slots() -> None:
     assert started.wait(timeout=1.0)
     assert worker.submit_checkpoint("ordinary-a", {"revision": 1})
     assert not worker.submit_checkpoint("ordinary-b", {"revision": 1})
-    boundary = worker.submit_trajectory_batch(
-        _trajectory_batch("capacity-boundary", kind="finalize")
-    )
+    boundary = worker.submit_trajectory_batch(_trajectory_batch("capacity-boundary", kind="finalize"))
     first_activation = worker.submit_activation_phase(
         _prepared_activation(),
         expected_phase=None,
@@ -929,9 +950,7 @@ def test_activation_and_checkpoint_receipts_survive_trajectory_priority() -> Non
         append_evidence=lambda records: persisted_evidence.extend(records),
         persist_trajectory_batch=persist_batch,
     )
-    trajectory_receipt = worker.submit_trajectory_batch(
-        _trajectory_batch("receipt-preservation")
-    )
+    trajectory_receipt = worker.submit_trajectory_batch(_trajectory_batch("receipt-preservation"))
     assert started.wait(timeout=1.0)
     confidence = _confidence_for(_prepared_activation())
     confidence_receipt = worker.submit_activation_confidence(confidence)

@@ -21,6 +21,7 @@ from common.control_trace import (
     AllocationClampReason,
     AmbientSource,
     AmbientUncertainty,
+    ChallengerProgressTracePayload,
     ControllerType,
     ModelEvaluationPayload,
     ModelObservationPayload,
@@ -34,10 +35,14 @@ from common.learning_trajectory import (
     LearningTrajectoryFrame,
     LearningTrajectorySegment,
     TrajectoryBreakReason,
+    canonical_model_fit_lineage_digest,
+    canonical_trajectory_digest,
+    trajectory_json_value,
 )
 from common.model_evidence import (
     ActivationLifecycleEvidence,
     CandidateAssessmentEvidence,
+    ChallengerRoundEvidence,
     ConfidenceDecisionEvidence,
     EvidenceKind,
     FitLifecycleEvidence,
@@ -53,16 +58,23 @@ from common.persistence.model_challenger import (
 from common.persistence.model_evidence import read_model_activation, read_model_evidence
 from controller.applied_output import AppliedOutput, FrameFeedbackDisposition, OutputSource
 from controller.grill_sim import MAKGrillSim
-from controller.model_learning.activation import ActivationPhase, PreparedActivationRecord
+from controller.model_learning.activation import (
+    ActivationPhase,
+    PreparedActivationRecord,
+    canonical_snapshot_digest,
+)
 from controller.model_learning.contracts import (
     ActivationPolicy,
     CandidateOrigin,
+    FitRequest,
+    FitWindowIdentity,
     FrameObservation,
 )
 from controller.model_learning.migration import migrate_mpc_learning_authority
 from controller.model_learning.report import current_learning_report
 from controller.mpc import Controller
 from controller.mpc_config import DEFAULT_MPC_CONFIG
+from controller.mpc_factory import MpcPairFactory
 from controller.mpc_model import EstimatorSeed, replay_delay_chain_arrays, simulate_grey_box_intervals
 from controller.mpc_snapshot import migrate_grey_learning_snapshot
 from controller.runtime.control_trace_recorder import RETENTION_PERIOD_MS, ControlTraceRecorder
@@ -70,6 +82,11 @@ from controller.runtime.control_trace_session import (
     ControlTraceSession,
     TraceModelAuthority,
     TraceSessionContext,
+)
+from controller.runtime.model_fitting import (
+    GreyFitSuccess,
+    fit_segmented_grey,
+    segmented_corpus_fit_job,
 )
 from controller.runtime.model_persistence import ModelPersistenceWorker
 from controller.runtime.modes.hold_learning import HoldLearningRuntime
@@ -92,7 +109,6 @@ _EXACT_V6_ROWS_SHA256 = "f9bf8eaa632a68e73586abfd93ef42c07d4bac91a824f4660fcc1af
 _EXACT_FOLLOWING_ROWS_SHA256 = "27bb8ed230195e426a88da623a46f05f406188e4dc5ad7fbf6a042c351eff60a"
 _EXACT_V6_ACTIVE_DIGEST = "8749cde88b2906c4b8ea59a3ea6247aedef2cef67fcff1a3d4c91dc3e302d0ba"
 _EXACT_V6_CANDIDATE_DIGEST = "597586b395cf0678201a19c9b8b10e4bf56b5c2985b5c8cdd4470cf7611cbb57"
-_EXACT_PASSIVE_CANDIDATE_DIGEST = "bb406912f78ecdb6a8c40412d5bc07123549e7c4ce9ef004e2cf0b2a4ee78acd"
 _EXACT_PASSIVE_CONFIGURATION_DIGEST = "093cd524af707b4dd5c0ed15e30fdaf3156d0a35d41deaa6459579a47f164c71"
 _SUPPORT_MODEL_PARAMETERS = {
     "C_c": 1767.5013593870272,
@@ -111,15 +127,6 @@ _MAK_SUPPORT_PARAMETERS = {
     "n_delay": 8,
     "sigma": 1.4e-09,
     "theta": float(MAKGrillSim.DEADTIME),
-}
-_EXACT_PASSIVE_PARAMETERS = {
-    "C_c": 1631.50421658499,
-    "K_Q": 276.76250487291765,
-    "T_amb": 20.0,
-    "h_amb": 0.5,
-    "n_delay": 8,
-    "sigma": 1.4e-09,
-    "theta": 49.86315357290799,
 }
 _EXACT_REPLAY_COOK_ID = "mpc-restored-v6-passive-21-140"
 _LOGGER = logging.getLogger(__name__)
@@ -445,6 +452,7 @@ def _seed_passive_corpus(
     source_trace_digest: str = _EXACT_V6_ROWS_SHA256,
     source_kind: str = "restored-v6-replay",
     support_parameters: Mapping[str, float | int] = _SUPPORT_MODEL_PARAMETERS,
+    persist_source_segment: bool = True,
 ) -> str:
     scored_frames = tuple(_exact_corpus_frame(row) for row in rows)
     first_scored = scored_frames[0]
@@ -662,7 +670,8 @@ def _seed_passive_corpus(
         },
     )
     assert support_segment.fit_partition_digest == segment.fit_partition_digest
-    for value in (support_segment, segment):
+    retained_segments = (support_segment, segment) if persist_source_segment else (support_segment,)
+    for value in retained_segments:
         cursor = repository.begin_segment(value)
         finalized = repository.finalize(cursor, TrajectoryBreakReason.STOP)
         assert finalized.segment_id == value.segment_id
@@ -761,6 +770,83 @@ def _report_candidate_lineage(
     }
     assert projected == _durable_candidate_lineage(challenger)
     return projected
+
+
+def _replay_exact_fit(
+    repository: LearningTrajectoryRepository,
+    challenger: ModelChallengerState,
+) -> GreyFitSuccess:
+    preparation = trajectory_json_value(challenger.fit_preparation)
+    assert isinstance(preparation, dict)
+    window_value = preparation["window"]
+    fit_result_value = preparation["fit_result"]
+    assert isinstance(window_value, dict)
+    assert isinstance(fit_result_value, dict)
+    request = FitRequest(
+        request_id=challenger.fit_lineage.request_id,
+        origin=challenger.origin,
+        window=FitWindowIdentity(
+            session_id=cast(str, window_value["session_id"]),
+            cook_id=cast(str | None, window_value["cook_id"]),
+            first_observation_sequence=cast(int, window_value["first_observation_sequence"]),
+            last_observation_sequence=cast(int, window_value["last_observation_sequence"]),
+            configuration_digest=cast(str, window_value["configuration_digest"]),
+            incumbent_digest=cast(str, window_value["incumbent_digest"]),
+            role_generation=cast(int, window_value["role_generation"]),
+        ),
+        candidate_generation=challenger.candidate.candidate_generation,
+    )
+
+    replayed = repository.replay_fit(request.request_id)
+    assert replayed.identity == challenger.fit_corpus
+    assert replayed.identity.corpus_digest == challenger.fit_lineage.fit_corpus_digest
+    assert tuple((segment.segment_id, segment.content_digest) for segment in replayed.segments) == tuple(
+        (segment.segment_id, segment.content_digest) for segment in repository.replay_fit(request.request_id).segments
+    )
+
+    job = segmented_corpus_fit_job(
+        replayed,
+        request,
+        MpcPairFactory._native_from_descriptor(challenger.incumbent),
+    )
+    assert job.request == request
+    assert job.corpus == replayed.identity
+    assert tuple(
+        (
+            segment.segment_id,
+            segment.through_ordinal,
+            segment.prefix_digest,
+            len(segment.pre_roll_load),
+            len(segment.scored_load),
+        )
+        for segment in job.segments
+    ) == tuple(
+        (
+            segment.segment_id,
+            segment.through_ordinal,
+            segment.prefix_digest,
+            segment.pre_roll_count,
+            segment.scored_count,
+        )
+        for segment in replayed.identity.slices
+    )
+
+    replayed_result = fit_segmented_grey(job)
+    assert isinstance(replayed_result, GreyFitSuccess)
+    assert {
+        "rmse_c": replayed_result.rmse_c,
+        "max_error_c": replayed_result.max_error_c,
+        "identifiability": replayed_result.identifiability,
+        "sample_count": replayed_result.sample_count,
+        "temperature_band_c": list(replayed_result.temperature_band_c),
+        "nfev": replayed_result.nfev,
+        "result_digest": replayed_result.result_digest,
+    } == fit_result_value
+    assert (
+        canonical_snapshot_digest(MpcPairFactory._native_mapping(replayed_result.config))
+        == challenger.candidate.model_digest
+    )
+    return replayed_result
 
 
 def _legacy_observation(active_digest: str) -> None:
@@ -1046,6 +1132,9 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
     initial_snapshot: dict[str, Any] | None = None
     before_active_boundary: dict[str, Any] | None = None
     durable_active = None
+    estimator_seeds: list[EstimatorSeed] = []
+    challenger_snapshots: dict[int, ModelChallengerState] = {}
+    fit_challenger: ModelChallengerState | None = None
     try:
         learning.restore_model(timestamp_ms=0)
         learning.reconcile_activation()
@@ -1086,7 +1175,7 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
                 "n_delay": n_delay,
                 "loads": selected,
             }
-            return EstimatorSeed(
+            seed = EstimatorSeed(
                 delay_states=tuple(float(value) for value in delay_states),
                 chamber_temperature_c=plant.measured(),
                 disturbance=0.0,
@@ -1102,6 +1191,8 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
                 required_frame_count=required,
                 status="exact",
             )
+            estimator_seeds.append(seed)
+            return seed
 
         runner.bind_estimator_seed_source(candidate_seed)
         gate.advance()
@@ -1124,6 +1215,22 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
             timeout_s=90.0,
             description="the real grey fit and candidate preparation",
         )
+        created_challenger = cast(
+            ModelChallengerState,
+            _wait_until(
+                lambda: (
+                    challenger
+                    if (challenger := read_model_challenger()) is not None
+                    and challenger.phase == "evaluating"
+                    and challenger.evaluation_round == 0
+                    else None
+                ),
+                timeout_s=30.0,
+                description="the initial durable challenger",
+            ),
+        )
+        fit_challenger = created_challenger
+        challenger_snapshots[created_challenger.revision] = created_challenger
 
         for sequence in range(_FIT_SAMPLES, _FIRST_EVALUATION_END + 1):
             _drive_frame(
@@ -1148,6 +1255,21 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
             timeout_s=30.0,
             description="the first winning causal confidence window",
         )
+        first_round_challenger = cast(
+            ModelChallengerState,
+            _wait_until(
+                lambda: (
+                    challenger
+                    if (challenger := read_model_challenger()) is not None
+                    and challenger.evaluation_round == 1
+                    and challenger.consecutive_wins == 1
+                    else None
+                ),
+                timeout_s=30.0,
+                description="the first durable challenger round",
+            ),
+        )
+        challenger_snapshots[first_round_challenger.revision] = first_round_challenger
 
         _drive_frame(
             plant=plant,
@@ -1182,6 +1304,22 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
             description="durable passive activation preparation",
         )
         assert prepared_state.evidence_decision_id == second_confidence.payload.decision_id
+        activating_challenger = cast(
+            ModelChallengerState,
+            _wait_until(
+                lambda: (
+                    challenger
+                    if (challenger := read_model_challenger()) is not None
+                    and challenger.phase == "activating"
+                    and challenger.evaluation_round == 2
+                    and challenger.consecutive_wins == challenger.required_wins
+                    else None
+                ),
+                timeout_s=30.0,
+                description="the durable activating challenger",
+            ),
+        )
+        challenger_snapshots[activating_challenger.revision] = activating_challenger
 
         learning.reconcile_activation()
         _drive_frame(
@@ -1237,6 +1375,8 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
     assert before_active_boundary is not None
     assert learned_snapshot is not None
     assert durable_active is not None
+    assert fit_challenger is not None
+    assert estimator_seeds
     initial_parameters = cast(
         dict[str, Any],
         cast(dict[str, Any], initial_snapshot["active"])["parameters"],
@@ -1258,7 +1398,7 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
         if record.event_kind is TraceEventKind.MODEL_OBSERVATION and isinstance(record.payload, ModelObservationPayload)
     ]
     assert len(observation_records) == _EVALUATION_PUBLICATION_SEQUENCE + 1
-    assert all(record.schema_version == 7 for record in observation_records)
+    assert all(record.schema_version == 8 for record in observation_records)
     for record in observation_records:
         payload = cast(ModelObservationPayload, record.payload)
         assert payload.eligible
@@ -1300,6 +1440,77 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
     assert [record.status for record in fit_records] == ["queued", "succeeded"]
     assert len({record.request_id for record in fit_records}) == 1
     assert all(record.origin == CandidateOrigin.PASSIVE_ONLINE.value for record in fit_records)
+    _replay_exact_fit(repository, fit_challenger)
+
+    progress_records = [
+        record
+        for record in cook_trace
+        if record.event_kind is TraceEventKind.CHALLENGER_PROGRESS
+        and isinstance(record.payload, ChallengerProgressTracePayload)
+    ]
+    assert progress_records
+    progress_payloads = [cast(ChallengerProgressTracePayload, record.payload) for record in progress_records]
+    revisions = [payload.challenger_revision for payload in progress_payloads]
+    assert revisions == sorted(set(revisions))
+    assert progress_payloads[0].phase == "evaluating"
+    assert {
+        (payload.phase, payload.evaluation_round, payload.consecutive_wins) for payload in progress_payloads
+    }.issuperset(
+        {
+            ("evaluating", 0, 0),
+            ("evaluating", 1, 1),
+            ("qualified", 2, 2),
+            ("activating", 2, 2),
+        }
+    )
+    fit_result_value = trajectory_json_value(fit_challenger.fit_preparation)["fit_result"]
+    assert isinstance(fit_result_value, dict)
+    expected_lineage_digest = canonical_model_fit_lineage_digest(fit_challenger.fit_lineage)
+    for record, payload in zip(progress_records, progress_payloads, strict=True):
+        assert record.schema_version == 8
+        assert record.session_id == identity.session_id
+        assert record.cook_id == cook_id
+        assert payload.challenger_id == fit_challenger.challenger_id
+        assert payload.origin == fit_challenger.origin.value
+        assert payload.policy == fit_challenger.policy.value
+        assert payload.incumbent_digest == fit_challenger.incumbent.model_digest
+        assert payload.incumbent_generation == fit_challenger.incumbent.role_generation
+        assert payload.candidate_digest == fit_challenger.candidate.model_digest
+        assert payload.candidate_generation == fit_challenger.candidate.candidate_generation
+        assert payload.corpus_digest == fit_challenger.fit_corpus.corpus_digest
+        assert payload.lineage_digest == expected_lineage_digest
+        assert payload.result_digest == fit_result_value["result_digest"]
+        assert payload.required_horizons == tuple(sorted(_REQUIRED_HORIZONS))
+        assert payload.resumed_from_previous_cook is False
+
+    challenger_rounds = {
+        record.evidence_id: cast(ChallengerRoundEvidence, record.payload)
+        for record in read_model_evidence(kind=EvidenceKind.CHALLENGER_ROUND)
+        if isinstance(record.payload, ChallengerRoundEvidence)
+        and record.payload.challenger_id == fit_challenger.challenger_id
+    }
+    for revision, state in challenger_snapshots.items():
+        payload = next(item for item in progress_payloads if item.challenger_revision == revision)
+        completed_horizons = (
+            () if state.last_evidence_id is None else challenger_rounds[state.last_evidence_id].completed_horizons
+        )
+        assert (
+            payload.phase,
+            payload.evaluation_epoch,
+            payload.evaluation_round,
+            payload.consecutive_wins,
+            payload.required_wins,
+            payload.completed_horizons,
+            payload.reset_reason,
+        ) == (
+            state.phase,
+            state.evaluation_epoch,
+            state.evaluation_round,
+            state.consecutive_wins,
+            state.required_wins,
+            completed_horizons,
+            state.retirement_reason,
+        )
     assessments = [
         record.payload for record in cook_evidence if isinstance(record.payload, CandidateAssessmentEvidence)
     ]
@@ -1525,7 +1736,15 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
         repository,
         rows,
         trace_session_id=provenance["source_session_id"],
+        persist_source_segment=False,
     )
+    assert repository.read_cook_segments(provenance["source_cook_id"]) == ()
+    assert repository.read_cook_segments(_EXACT_REPLAY_COOK_ID) == ()
+    support_segments = repository.read_cook_segments("deterministic-grey-support-cook")
+    assert len(support_segments) == 1
+    assert support_segments[0].source_schema_version == TRAJECTORY_OBSERVATION_SCHEMA_VERSION
+    assert support_segments[0].source_trace_digest != _EXACT_V6_ROWS_SHA256
+    assert support_segments[0].trace_session_ids == ("trace-deterministic-grey-support-cook",)
     model_store = ControllerModelStore()
     persistence = ModelPersistenceWorker(
         model_store,
@@ -1635,7 +1854,7 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
                     state
                     if (state := dict(core.get_learning_diagnostics().state)).get("status") == "evaluating"
                     and state.get("fit_status") == "succeeded"
-                    and state.get("candidate_digest") == _EXACT_PASSIVE_CANDIDATE_DIGEST
+                    and isinstance(state.get("candidate_digest"), str)
                     else None
                 ),
                 timeout_s=90.0,
@@ -1675,7 +1894,7 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
                     if (
                         (challenger := read_model_challenger()) is not None
                         and challenger.phase == "evaluating"
-                        and challenger.candidate.model_digest == _EXACT_PASSIVE_CANDIDATE_DIGEST
+                        and challenger.candidate.model_digest == fit_state["candidate_digest"]
                     )
                     else None
                 ),
@@ -1689,10 +1908,15 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
         assert durable_challenger.evaluation_round == 0
         assert durable_challenger.consecutive_wins == 0
         candidate_configuration = durable_challenger.candidate.configuration
-        assert {
-            name: (candidate_configuration["delay_states"] if name == "n_delay" else candidate_configuration[name])
-            for name in _EXACT_PASSIVE_PARAMETERS
-        } == _EXACT_PASSIVE_PARAMETERS
+        candidate_parameters = {
+            name: candidate_configuration[name] for name in ("C_c", "K_Q", "T_amb", "h_amb", "sigma", "theta")
+        }
+        candidate_parameters["n_delay"] = candidate_configuration.get(
+            "n_delay",
+            candidate_configuration.get("delay_states"),
+        )
+        assert durable_challenger.candidate.model_digest != _EXACT_V6_ACTIVE_DIGEST
+        assert candidate_parameters == pytest.approx(_SUPPORT_MODEL_PARAMETERS)
         raw_live_checkpoint = runner.get_model_snapshot()
         assert isinstance(raw_live_checkpoint, dict)
         live_checkpoint = raw_live_checkpoint
@@ -1721,13 +1945,23 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
     assert persisted_checkpoint is not None
     assert normalized_report is not None
     assert durable_challenger is not None
+    retained_segments = repository.read_cook_segments(
+        "deterministic-grey-support-cook"
+    ) + repository.read_cook_segments(_EXACT_REPLAY_COOK_ID)
+    assert retained_segments
+    assert all(
+        segment.source_schema_version != provenance["source_trace_schema_version"]
+        and provenance["source_session_id"] not in segment.trace_session_ids
+        and segment.source_trace_digest != _EXACT_V6_ROWS_SHA256
+        for segment in retained_segments
+    )
     observation_records = [
         record
         for record in read_control_trace_cook(_EXACT_REPLAY_COOK_ID)
         if record.event_kind is TraceEventKind.MODEL_OBSERVATION and isinstance(record.payload, ModelObservationPayload)
     ]
     assert len(observation_records) == _FIT_SAMPLES + 1
-    assert all(record.schema_version == 7 for record in observation_records)
+    assert all(record.schema_version == 8 for record in observation_records)
     replay_rows = []
     for record in observation_records:
         payload = cast(ModelObservationPayload, record.payload)
@@ -1773,7 +2007,7 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
         for payload in fit_payloads
     )
     assert fit_evidence_records[0].model_digest == _EXACT_V6_ACTIVE_DIGEST
-    assert fit_evidence_records[1].model_digest == _EXACT_PASSIVE_CANDIDATE_DIGEST
+    assert fit_evidence_records[1].model_digest == durable_challenger.candidate.model_digest
     assert not any(
         isinstance(
             record.payload,
@@ -1843,7 +2077,7 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
     expected_lineage = {
         "origin": CandidateOrigin.PASSIVE_ONLINE.value,
         "policy": ActivationPolicy.CAUSAL_AUTO.value,
-        "candidate_digest": _EXACT_PASSIVE_CANDIDATE_DIGEST,
+        "candidate_digest": durable_challenger.candidate.model_digest,
         "candidate_generation": 1,
     }
     lineage_by_surface = {

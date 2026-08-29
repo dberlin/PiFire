@@ -100,14 +100,46 @@ class CorpusStatus:
 
 
 @dataclass(frozen=True, slots=True)
+class TrajectoryBreakReasonCount:
+    """One typed terminal-break total in a corpus report."""
+
+    reason: TrajectoryBreakReason
+    count: int
+
+
+@dataclass(frozen=True, slots=True)
+class TrajectoryCorpusReport:
+    """Storage-owned global trajectory corpus diagnostics."""
+
+    schema_version: int
+    corpus_revision: int
+    segment_count: int
+    pre_roll_count: int
+    pre_roll_capacity: int
+    scored_count: int
+    scored_capacity: int
+    evicted_segment_count: int
+    evicted_pre_roll_count: int
+    evicted_scored_count: int
+    open_segment_count: int
+    finalized_segment_count: int
+    quarantined_segment_count: int
+    distinct_cook_count: int
+    distinct_session_count: int
+    earliest_wall_ms: int | None
+    latest_wall_ms: int | None
+    break_reason_counts: tuple[TrajectoryBreakReasonCount, ...]
+    last_persistence_error: str | None
+    last_recovery_error: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class FitCorpusSnapshot:
     identity: FitCorpusIdentity
     segments: tuple[LearningTrajectorySegment, ...]
 
 
-FitRunStatus = Literal[
-    "queued", "running", "succeeded", "failed", "interrupted", "stale"
-]
+FitRunStatus = Literal["queued", "running", "succeeded", "failed", "interrupted", "stale"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,11 +207,7 @@ def _frame_payload(frame: LearningTrajectoryFrame) -> dict[str, object]:
         "complete": frame.complete,
         "continuous": frame.continuous,
         "partial": frame.partial,
-        "boundary_reason": (
-            frame.boundary_reason.value
-            if frame.boundary_reason is not None
-            else None
-        ),
+        "boundary_reason": (frame.boundary_reason.value if frame.boundary_reason is not None else None),
     }
     if frame.calibration_origin:
         payload["calibration_origin"] = True
@@ -189,12 +217,8 @@ def _frame_payload(frame: LearningTrajectoryFrame) -> dict[str, object]:
 def _frame_from_json(canonical_json: str) -> LearningTrajectoryFrame:
     payload = json.loads(canonical_json)
     payload.setdefault("calibration_origin", False)
-    payload["auger_delivery_certainty"] = FrameDeliveryCertainty(
-        payload["auger_delivery_certainty"]
-    )
-    payload["fan_delivery_certainty"] = FrameDeliveryCertainty(
-        payload["fan_delivery_certainty"]
-    )
+    payload["auger_delivery_certainty"] = FrameDeliveryCertainty(payload["auger_delivery_certainty"])
+    payload["fan_delivery_certainty"] = FrameDeliveryCertainty(payload["fan_delivery_certainty"])
     if payload["boundary_reason"] is not None:
         payload["boundary_reason"] = TrajectoryBreakReason(payload["boundary_reason"])
     return LearningTrajectoryFrame(**payload)
@@ -224,9 +248,7 @@ def _segment_header(segment: LearningTrajectorySegment) -> dict[str, object]:
         "trajectory_session_id": segment.trajectory_session_id,
         "trace_session_ids": list(segment.trace_session_ids),
         "collection_provenance": trajectory_json_value(segment.collection_provenance),
-        "configuration_provenance": trajectory_json_value(
-            segment.configuration_provenance
-        ),
+        "configuration_provenance": trajectory_json_value(segment.configuration_provenance),
         "cadence_digest": segment.cadence_digest,
         "model_structure_digest": segment.model_structure_digest,
         "held_physics_digest": segment.held_physics_digest,
@@ -234,9 +256,7 @@ def _segment_header(segment: LearningTrajectorySegment) -> dict[str, object]:
         "actuation_mapping_digest": segment.actuation_mapping_digest,
         "scored_fan_regime_digest": segment.scored_fan_regime_digest,
         "ambient_semantics_digest": segment.ambient_semantics_digest,
-        "generation_audit_ranges": [
-            trajectory_json_value(item) for item in segment.generation_audit_ranges
-        ],
+        "generation_audit_ranges": [trajectory_json_value(item) for item in segment.generation_audit_ranges],
         "source_schema_version": segment.source_schema_version,
         "build_provenance": trajectory_json_value(segment.build_provenance),
     }
@@ -255,9 +275,7 @@ def _interval_identity(frame: LearningTrajectoryFrame) -> str:
 
 
 def _next_chain_digest(previous: str, canonical_frame: str) -> str:
-    return sha256(
-        bytes.fromhex(previous) + canonical_frame.encode()
-    ).hexdigest()
+    return sha256(bytes.fromhex(previous) + canonical_frame.encode()).hexdigest()
 
 
 def _frames_chain(frames: tuple[LearningTrajectoryFrame, ...]) -> str:
@@ -291,9 +309,7 @@ def _with_frames(
         start_sequence=all_frames[0].sequence,
         end_sequence=all_frames[-1].sequence,
         pre_roll_end_reason=(
-            pre_roll[-1].boundary_reason
-            if pre_roll and pre_roll[-1].partial
-            else segment.pre_roll_end_reason
+            pre_roll[-1].boundary_reason if pre_roll and pre_roll[-1].partial else segment.pre_roll_end_reason
         ),
         state=segment.state if state is None else state,
         terminal_break_reason=terminal_reason,
@@ -330,12 +346,8 @@ def _rolled_segment(
         pre_roll_end_reason=TrajectoryBreakReason.RETENTION_ROLLOVER,
         terminal_break_reason=None,
         state="open",
-        source_trace_digest=sha256(
-            f"{source.source_trace_digest}:{segment_id}".encode()
-        ).hexdigest(),
-        source_row_digest=sha256(
-            f"{source.source_row_digest}:{segment_id}".encode()
-        ).hexdigest(),
+        source_trace_digest=sha256(f"{source.source_trace_digest}:{segment_id}".encode()).hexdigest(),
+        source_row_digest=sha256(f"{source.source_row_digest}:{segment_id}".encode()).hexdigest(),
     )
 
 
@@ -453,11 +465,10 @@ class LearningTrajectoryRepository:
     operation_receipt_limit_per_segment = 512
 
     def __init__(self, database_path: str | None = None):
-        self._database_path = Path(
-            datastore.DB_PATH if database_path is None else database_path
-        )
+        self._database_path = Path(datastore.DB_PATH if database_path is None else database_path)
         self._write_state = local()
         self._reopen_quarantined_segment_ids: tuple[str, ...] = ()
+        self._last_recovery_error: str | None = None
         with self._connection(ensure_schema=True):
             pass
         with self._write() as connection:
@@ -478,12 +489,13 @@ class LearningTrajectoryRepository:
                 self._set_revision(connection, before.corpus_revision + 1)
             corrupt_rows: list[sqlite3.Row] = []
             for row in connection.execute(
-                "SELECT * FROM learning_trajectory_segment "
-                "WHERE state!='quarantined' ORDER BY start_wall_ms,segment_id"
+                "SELECT * FROM learning_trajectory_segment WHERE state!='quarantined' ORDER BY start_wall_ms,segment_id"
             ).fetchall():
                 try:
                     self._materialize_segment(connection, row)
-                except Exception:
+                except Exception as exc:
+                    detail = str(exc).strip()
+                    self._last_recovery_error = detail or type(exc).__name__
                     corrupt_rows.append(row)
             if corrupt_rows:
                 revision = self._corpus_revision(connection) + 1
@@ -491,14 +503,10 @@ class LearningTrajectoryRepository:
                     self._quarantine(connection, row, revision=revision)
                 self._apply_retention(connection)
                 self._set_revision(connection, revision)
-                self._reopen_quarantined_segment_ids = tuple(
-                    row["segment_id"] for row in corrupt_rows
-                )
+                self._reopen_quarantined_segment_ids = tuple(row["segment_id"] for row in corrupt_rows)
 
     @contextmanager
-    def _connection(
-        self, *, ensure_schema: bool = False
-    ) -> Iterator[sqlite3.Connection]:
+    def _connection(self, *, ensure_schema: bool = False) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self._database_path, timeout=30)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA journal_mode=WAL")
@@ -538,9 +546,7 @@ class LearningTrajectoryRepository:
 
     @staticmethod
     def _corpus_row(connection: sqlite3.Connection) -> sqlite3.Row:
-        row = connection.execute(
-            "SELECT * FROM learning_trajectory_corpus WHERE singleton=1"
-        ).fetchone()
+        row = connection.execute("SELECT * FROM learning_trajectory_corpus WHERE singleton=1").fetchone()
         if row is None:
             raise RuntimeError("learning trajectory corpus singleton is missing")
         return row
@@ -564,18 +570,14 @@ class LearningTrajectoryRepository:
         )
 
     @staticmethod
-    def _segment_row(
-        connection: sqlite3.Connection, segment_id: str
-    ) -> sqlite3.Row | None:
+    def _segment_row(connection: sqlite3.Connection, segment_id: str) -> sqlite3.Row | None:
         return connection.execute(
             "SELECT * FROM learning_trajectory_segment WHERE segment_id=?",
             (segment_id,),
         ).fetchone()
 
     @classmethod
-    def _cursor(
-        cls, connection: sqlite3.Connection, row: sqlite3.Row
-    ) -> SegmentCursor:
+    def _cursor(cls, connection: sqlite3.Connection, row: sqlite3.Row) -> SegmentCursor:
         return SegmentCursor(
             segment_id=row["segment_id"],
             next_ordinal=row["next_ordinal"],
@@ -584,9 +586,7 @@ class LearningTrajectoryRepository:
         )
 
     @classmethod
-    def _resolve_current_row(
-        cls, connection: sqlite3.Connection, segment_id: str
-    ) -> sqlite3.Row | None:
+    def _resolve_current_row(cls, connection: sqlite3.Connection, segment_id: str) -> sqlite3.Row | None:
         seen: set[str] = set()
         row = cls._segment_row(connection, segment_id)
         while row is not None and row["roll_successor_segment_id"] is not None:
@@ -599,22 +599,16 @@ class LearningTrajectoryRepository:
         return row
 
     @staticmethod
-    def _set_roll_successor(
-        connection: sqlite3.Connection, source_segment_id: str, successor_id: str
-    ) -> None:
+    def _set_roll_successor(connection: sqlite3.Connection, source_segment_id: str, successor_id: str) -> None:
         connection.execute(
-            "UPDATE learning_trajectory_segment SET roll_successor_segment_id=? "
-            "WHERE segment_id=?",
+            "UPDATE learning_trajectory_segment SET roll_successor_segment_id=? WHERE segment_id=?",
             (successor_id, source_segment_id),
         )
 
     @staticmethod
-    def _operation_receipt(
-        connection: sqlite3.Connection, operation_key: str
-    ) -> sqlite3.Row | None:
+    def _operation_receipt(connection: sqlite3.Connection, operation_key: str) -> sqlite3.Row | None:
         return connection.execute(
-            "SELECT * FROM learning_trajectory_operation_receipt "
-            "WHERE operation_key=?",
+            "SELECT * FROM learning_trajectory_operation_receipt WHERE operation_key=?",
             (operation_key,),
         ).fetchone()
 
@@ -657,8 +651,7 @@ class LearningTrajectoryRepository:
         ).fetchall()
         if stale:
             connection.executemany(
-                "DELETE FROM learning_trajectory_operation_receipt "
-                "WHERE operation_key=?",
+                "DELETE FROM learning_trajectory_operation_receipt WHERE operation_key=?",
                 ((row["operation_key"],) for row in stale),
             )
 
@@ -679,9 +672,7 @@ class LearningTrajectoryRepository:
             clauses.append("created_corpus_revision<=?")
             parameters.append(through_revision)
         return connection.execute(
-            "SELECT * FROM learning_trajectory_frame WHERE "
-            + " AND ".join(clauses)
-            + " ORDER BY ordinal",
+            "SELECT * FROM learning_trajectory_frame WHERE " + " AND ".join(clauses) + " ORDER BY ordinal",
             tuple(parameters),
         ).fetchall()
 
@@ -699,13 +690,8 @@ class LearningTrajectoryRepository:
         for expected_ordinal, row in enumerate(rows):
             if row["ordinal"] != expected_ordinal:
                 raise ValueError("trajectory frame ordinals are not contiguous")
-            if (
-                row["payload_schema_version"]
-                != TRAJECTORY_OBSERVATION_SCHEMA_VERSION
-            ):
-                raise ValueError(
-                    "older trajectory frame payload schema is non-scoreable"
-                )
+            if row["payload_schema_version"] != TRAJECTORY_OBSERVATION_SCHEMA_VERSION:
+                raise ValueError("older trajectory frame payload schema is non-scoreable")
             canonical_json = row["canonical_json"]
             payload = json.loads(canonical_json)
             if _canonical_json(payload) != canonical_json:
@@ -754,12 +740,8 @@ class LearningTrajectoryRepository:
         ):
             hold_entry = None
 
-        historical_open = (
-            through_revision is not None
-            and (
-                row["finalized_corpus_revision"] is None
-                or row["finalized_corpus_revision"] > through_revision
-            )
+        historical_open = through_revision is not None and (
+            row["finalized_corpus_revision"] is None or row["finalized_corpus_revision"] > through_revision
         )
         state = "open" if historical_open else row["state"]
         terminal_reason = (
@@ -796,9 +778,7 @@ class LearningTrajectoryRepository:
             start_sequence=first.sequence,
             end_sequence=last.sequence,
             pre_roll_end_reason=(
-                TrajectoryBreakReason(row["pre_roll_end_reason"])
-                if row["pre_roll_end_reason"] is not None
-                else None
+                TrajectoryBreakReason(row["pre_roll_end_reason"]) if row["pre_roll_end_reason"] is not None else None
             ),
             terminal_break_reason=terminal_reason,
             state=state,
@@ -807,9 +787,11 @@ class LearningTrajectoryRepository:
             source_row_digest=row["source_row_digest"],
             build_provenance=header["build_provenance"],
         )
-        if not (
-            verify_header and through_revision is None and through_ordinal is None
-        ):
+        if _canonical_json(_segment_header(segment)) != row["header_json"]:
+            raise ValueError("trajectory segment header is corrupt")
+        if segment.fit_partition_digest != row["fit_partition_digest"]:
+            raise ValueError("trajectory partition digest is corrupt")
+        if not (verify_header and through_revision is None and through_ordinal is None):
             return segment
         if len(pre_roll) != row["pre_roll_count"]:
             raise ValueError("trajectory pre-roll count is corrupt")
@@ -903,9 +885,7 @@ class LearningTrajectoryRepository:
             [("pre-roll", frame) for frame in segment.pre_roll_frames]
             + [("scored", frame) for frame in segment.scored_hold_frames]
         )
-        rolling_digest = _frames_chain(
-            (*segment.pre_roll_frames, *segment.scored_hold_frames)
-        )
+        rolling_digest = _frames_chain((*segment.pre_roll_frames, *segment.scored_hold_frames))
         connection.execute(
             """
             INSERT INTO learning_trajectory_segment(
@@ -930,11 +910,7 @@ class LearningTrajectoryRepository:
                 segment.end_wall_ms,
                 segment.start_sequence,
                 segment.end_sequence,
-                (
-                    _canonical_json(_hold_payload(segment.hold_entry))
-                    if segment.hold_entry is not None
-                    else None
-                ),
+                (_canonical_json(_hold_payload(segment.hold_entry)) if segment.hold_entry is not None else None),
                 revision if segment.hold_entry is not None else None,
                 len(segment.pre_roll_frames),
                 len(segment.scored_hold_frames),
@@ -947,20 +923,14 @@ class LearningTrajectoryRepository:
                 revision,
                 revision,
                 None,
-                (
-                    segment.pre_roll_end_reason.value
-                    if segment.pre_roll_end_reason is not None
-                    else None
-                ),
+                (segment.pre_roll_end_reason.value if segment.pre_roll_end_reason is not None else None),
                 None,
                 segment.source_trace_digest,
                 segment.source_schema_version,
                 segment.source_row_digest,
             ),
         )
-        cls._insert_frames(
-            connection, segment, frames, start_ordinal=0, revision=revision
-        )
+        cls._insert_frames(connection, segment, frames, start_ordinal=0, revision=revision)
 
     @staticmethod
     def _update_segment(
@@ -996,11 +966,7 @@ class LearningTrajectoryRepository:
                 segment.end_wall_ms,
                 segment.start_sequence,
                 segment.end_sequence,
-                (
-                    _canonical_json(_hold_payload(segment.hold_entry))
-                    if segment.hold_entry is not None
-                    else None
-                ),
+                (_canonical_json(_hold_payload(segment.hold_entry)) if segment.hold_entry is not None else None),
                 hold_entry_revision,
                 len(segment.pre_roll_frames),
                 len(segment.scored_hold_frames),
@@ -1010,16 +976,8 @@ class LearningTrajectoryRepository:
                 segment.content_digest,
                 revision,
                 finalized_revision,
-                (
-                    segment.pre_roll_end_reason.value
-                    if segment.pre_roll_end_reason is not None
-                    else None
-                ),
-                (
-                    segment.terminal_break_reason.value
-                    if segment.terminal_break_reason is not None
-                    else None
-                ),
+                (segment.pre_roll_end_reason.value if segment.pre_roll_end_reason is not None else None),
+                (segment.terminal_break_reason.value if segment.terminal_break_reason is not None else None),
                 segment.source_trace_digest,
                 segment.source_schema_version,
                 segment.source_row_digest,
@@ -1090,8 +1048,7 @@ class LearningTrajectoryRepository:
             "ON f.segment_id=s.segment_id"
         ).fetchone()
         connection.execute(
-            "UPDATE learning_trajectory_corpus SET segment_count=?, "
-            "pre_roll_count=?, scored_count=? WHERE singleton=1",
+            "UPDATE learning_trajectory_corpus SET segment_count=?, pre_roll_count=?, scored_count=? WHERE singleton=1",
             tuple(row),
         )
 
@@ -1118,9 +1075,7 @@ class LearningTrajectoryRepository:
                 "ORDER BY s.end_wall_ms,s.segment_id LIMIT 1"
             ).fetchone()
             if victim is None:
-                raise ValueError(
-                    "retention caps cannot be met without evicting an open segment"
-                )
+                raise ValueError("retention caps cannot be met without evicting an open segment")
             connection.execute(
                 "DELETE FROM learning_trajectory_segment WHERE segment_id=?",
                 (victim["segment_id"],),
@@ -1139,7 +1094,12 @@ class LearningTrajectoryRepository:
 
     @classmethod
     def _quarantine(
-        cls, connection: sqlite3.Connection, row: sqlite3.Row, *, revision: int
+        cls,
+        connection: sqlite3.Connection,
+        row: sqlite3.Row,
+        *,
+        revision: int,
+        reason: TrajectoryBreakReason = TrajectoryBreakReason.ERROR,
     ) -> None:
         if row["state"] == "quarantined":
             return
@@ -1150,15 +1110,14 @@ class LearningTrajectoryRepository:
             "updated_corpus_revision=?, finalized_corpus_revision=? "
             "WHERE segment_id=?",
             (
-                TrajectoryBreakReason.ERROR.value,
+                reason.value,
                 revision,
                 revision,
                 row["segment_id"],
             ),
         )
         connection.execute(
-            "DELETE FROM learning_trajectory_operation_receipt "
-            "WHERE source_segment_id=?",
+            "DELETE FROM learning_trajectory_operation_receipt WHERE source_segment_id=?",
             (row["segment_id"],),
         )
         connection.execute(
@@ -1175,10 +1134,7 @@ class LearningTrajectoryRepository:
         hold_entry: HoldEntrySample | None,
         scored: tuple[LearningTrajectoryFrame, ...],
     ) -> bool:
-        expected = tuple(
-            [("pre-roll", frame) for frame in pre_roll]
-            + [("scored", frame) for frame in scored]
-        )
+        expected = tuple([("pre-roll", frame) for frame in pre_roll] + [("scored", frame) for frame in scored])
         if not expected:
             return False
         rows = connection.execute(
@@ -1189,8 +1145,7 @@ class LearningTrajectoryRepository:
         if len(rows) != len(expected):
             return False
         if any(
-            row["kind"] != kind
-            or row["canonical_json"] != _canonical_json(_frame_payload(frame))
+            row["kind"] != kind or row["canonical_json"] != _canonical_json(_frame_payload(frame))
             for row, (kind, frame) in zip(rows, expected, strict=True)
         ):
             return False
@@ -1199,11 +1154,69 @@ class LearningTrajectoryRepository:
                 "SELECT hold_entry_json FROM learning_trajectory_segment WHERE segment_id=?",
                 (cursor.segment_id,),
             ).fetchone()
-            if segment_row is None or segment_row["hold_entry_json"] != _canonical_json(
-                _hold_payload(hold_entry)
-            ):
+            if segment_row is None or segment_row["hold_entry_json"] != _canonical_json(_hold_payload(hold_entry)):
                 return False
         return True
+
+    def import_finalized_segments(
+        self,
+        segments: tuple[LearningTrajectorySegment, ...],
+    ) -> int:
+        """Atomically import exact finalized segments, returning the inserted count."""
+
+        if type(segments) is not tuple or not segments:
+            raise ValueError("finalized trajectory import requires a non-empty tuple")
+        if len({segment.segment_id for segment in segments}) != len(segments):
+            raise ValueError("finalized trajectory import segment identities must be unique")
+        if any(segment.state != "finalized" or segment.terminal_break_reason is None for segment in segments):
+            raise ValueError("trajectory import accepts finalized segments only")
+
+        with self._write() as connection:
+            missing: list[LearningTrajectorySegment] = []
+            for segment in segments:
+                row = self._segment_row(connection, segment.segment_id)
+                if row is None:
+                    missing.append(segment)
+                    continue
+                try:
+                    existing = self._materialize_segment(connection, row)
+                except Exception as exc:
+                    raise LearningTrajectoryConflictError(
+                        f"retained trajectory import identity is corrupt: {segment.segment_id}"
+                    ) from exc
+                if existing != segment:
+                    raise LearningTrajectoryConflictError(
+                        f"retained trajectory import identity conflicts: {segment.segment_id}"
+                    )
+            if not missing:
+                return 0
+
+            revision = self._corpus_revision(connection) + 1
+            for segment in missing:
+                opened = replace(
+                    segment,
+                    state="open",
+                    terminal_break_reason=None,
+                )
+                self._insert_segment(connection, opened, revision=revision)
+                row = self._segment_row(connection, segment.segment_id)
+                if row is None:
+                    raise RuntimeError("imported trajectory segment was not inserted")
+                self._update_segment(
+                    connection,
+                    segment,
+                    revision=revision,
+                    rolling_digest=row["rolling_digest"],
+                    hold_entry_revision=row["hold_entry_revision"],
+                    finalized_revision=revision,
+                )
+            self._apply_retention(connection)
+            self._set_revision(connection, revision)
+            for segment in missing:
+                row = self._segment_row(connection, segment.segment_id)
+                if row is None or self._materialize_segment(connection, row) != segment:
+                    raise RuntimeError("imported trajectory segment was evicted or changed")
+            return len(missing)
 
     def begin_segment(self, segment: LearningTrajectorySegment) -> SegmentCursor:
         conflict = False
@@ -1211,28 +1224,19 @@ class LearningTrajectoryRepository:
         with self._write() as connection:
             existing = self._segment_row(connection, segment.segment_id)
             if existing is not None:
-                exact_prefix = (
-                    existing["begin_content_digest"] == segment.content_digest
-                )
+                exact_prefix = existing["begin_content_digest"] == segment.content_digest
                 if not exact_prefix and existing["state"] != "quarantined":
                     try:
-                        current_segment = self._materialize_segment(
-                            connection, existing
-                        )
+                        current_segment = self._materialize_segment(connection, existing)
                     except Exception:
                         current_segment = None
                     exact_prefix = (
-                        current_segment is not None
-                        and current_segment.content_digest == segment.content_digest
+                        current_segment is not None and current_segment.content_digest == segment.content_digest
                     )
                 if exact_prefix:
-                    current = self._resolve_current_row(
-                        connection, existing["segment_id"]
-                    )
+                    current = self._resolve_current_row(connection, existing["segment_id"])
                     if current is None:
-                        raise StaleSegmentCursorError(
-                            "delayed begin receipt source was evicted"
-                        )
+                        raise StaleSegmentCursorError("delayed begin receipt source was evicted")
                     return self._cursor(connection, current)
                 revision = self._corpus_revision(connection) + 1
                 self._quarantine(connection, existing, revision=revision)
@@ -1242,9 +1246,7 @@ class LearningTrajectoryRepository:
             else:
                 revision = self._corpus_revision(connection) + 1
                 self._insert_segment(connection, segment, revision=revision)
-                inserted = self._normalize_full_open_segment(
-                    connection, segment, revision=revision
-                )
+                inserted = self._normalize_full_open_segment(connection, segment, revision=revision)
                 self._apply_retention(connection)
                 self._set_revision(connection, revision)
                 retained = self._segment_row(connection, inserted["segment_id"])
@@ -1283,18 +1285,12 @@ class LearningTrajectoryRepository:
         with self._write() as connection:
             operation = self._operation_receipt(connection, operation_key)
             if operation is not None and operation["request_digest"] == request_digest:
-                current = self._resolve_current_row(
-                    connection, operation["result_segment_id"]
-                )
+                current = self._resolve_current_row(connection, operation["result_segment_id"])
                 if current is None:
-                    raise StaleSegmentCursorError(
-                        "delayed append receipt source was evicted"
-                    )
+                    raise StaleSegmentCursorError("delayed append receipt source was evicted")
                 return AppendReceipt(
                     cursor=self._cursor(connection, current),
-                    inserted_pre_roll_count=operation[
-                        "inserted_pre_roll_count"
-                    ],
+                    inserted_pre_roll_count=operation["inserted_pre_roll_count"],
                     inserted_scored_count=operation["inserted_scored_count"],
                 )
             row = self._segment_row(connection, cursor.segment_id)
@@ -1316,8 +1312,7 @@ class LearningTrajectoryRepository:
                 )
             else:
                 occupied = connection.execute(
-                    "SELECT 1 FROM learning_trajectory_frame "
-                    "WHERE segment_id=? AND ordinal>=? LIMIT 1",
+                    "SELECT 1 FROM learning_trajectory_frame WHERE segment_id=? AND ordinal>=? LIMIT 1",
                     (cursor.segment_id, cursor.next_ordinal),
                 ).fetchone()
                 if occupied is not None and cursor.next_ordinal < row["next_ordinal"]:
@@ -1338,19 +1333,11 @@ class LearningTrajectoryRepository:
                     combined_pre_roll = (*segment.pre_roll_frames, *pre_roll)
                     if len(combined_pre_roll) > _MAX_PRE_ROLL_PER_SEGMENT:
                         raise ValueError("pre-roll frames per segment must not exceed 180")
-                    if (
-                        hold_entry is not None
-                        and segment.hold_entry is not None
-                        and hold_entry != segment.hold_entry
-                    ):
-                        raise LearningTrajectoryConflictError(
-                            "Hold-entry anchor conflict"
-                        )
+                    if hold_entry is not None and segment.hold_entry is not None and hold_entry != segment.hold_entry:
+                        raise LearningTrajectoryConflictError("Hold-entry anchor conflict")
                     combined_hold = segment.hold_entry or hold_entry
                     revision = current_revision + 1
-                    first_capacity = _MAX_SCORED_PER_SEGMENT - len(
-                        segment.scored_hold_frames
-                    )
+                    first_capacity = _MAX_SCORED_PER_SEGMENT - len(segment.scored_hold_frames)
                     first_scored = scored[:first_capacity]
                     remaining = scored[first_capacity:]
                     first_combined = _with_frames(
@@ -1361,8 +1348,7 @@ class LearningTrajectoryRepository:
                         terminal_reason=None,
                     )
                     appended_frames = tuple(
-                        [("pre-roll", frame) for frame in pre_roll]
-                        + [("scored", frame) for frame in first_scored]
+                        [("pre-roll", frame) for frame in pre_roll] + [("scored", frame) for frame in first_scored]
                     )
                     rolling = self._insert_frames(
                         connection,
@@ -1400,14 +1386,10 @@ class LearningTrajectoryRepository:
                         )
                         carried = finalized.scored_hold_frames[-180:]
                         roll_index += 1
-                        rolled_id = (
-                            f"{cursor.segment_id}:roll:{revision}:{roll_index}"
-                        )
+                        rolled_id = f"{cursor.segment_id}:roll:{revision}:{roll_index}"
                         active = _rolled_segment(finalized, rolled_id, carried)
                         self._insert_segment(connection, active, revision=revision)
-                        self._set_roll_successor(
-                            connection, finalized.segment_id, rolled_id
-                        )
+                        self._set_roll_successor(connection, finalized.segment_id, rolled_id)
                         active_row = self._segment_row(connection, active.segment_id)
                         if active_row is None:
                             raise RuntimeError("failed to create rolled trajectory segment")
@@ -1466,9 +1448,7 @@ class LearningTrajectoryRepository:
                         inserted_scored_count=len(scored),
                     )
         if conflict:
-            raise LearningTrajectoryConflictError(
-                f"learning trajectory frame conflict: {cursor.segment_id}"
-            )
+            raise LearningTrajectoryConflictError(f"learning trajectory frame conflict: {cursor.segment_id}")
         if result is None:
             raise RuntimeError("append produced no receipt")
         return result
@@ -1483,21 +1463,12 @@ class LearningTrajectoryRepository:
         request_digest = _break_request_digest(cursor, reason, next_segment)
         with self._write() as connection:
             operation = self._operation_receipt(connection, operation_key)
-            if (
-                operation is not None
-                and operation["request_digest"] != request_digest
-            ):
-                raise LearningTrajectoryConflictError(
-                    f"break-and-begin receipt conflict: {cursor.segment_id}"
-                )
+            if operation is not None and operation["request_digest"] != request_digest:
+                raise LearningTrajectoryConflictError(f"break-and-begin receipt conflict: {cursor.segment_id}")
             if operation is not None:
-                current = self._resolve_current_row(
-                    connection, operation["result_segment_id"]
-                )
+                current = self._resolve_current_row(connection, operation["result_segment_id"])
                 if current is None:
-                    raise StaleSegmentCursorError(
-                        "delayed break-and-begin receipt source was evicted"
-                    )
+                    raise StaleSegmentCursorError("delayed break-and-begin receipt source was evicted")
                 return self._cursor(connection, current)
             current_row = self._segment_row(connection, cursor.segment_id)
             next_row = self._segment_row(connection, next_segment.segment_id)
@@ -1510,9 +1481,7 @@ class LearningTrajectoryRepository:
                 and next_row is not None
                 and next_row["begin_content_digest"] == next_segment.content_digest
             ):
-                legacy_current = self._resolve_current_row(
-                    connection, next_row["segment_id"]
-                )
+                legacy_current = self._resolve_current_row(connection, next_row["segment_id"])
             if legacy_current is not None:
                 return self._cursor(connection, legacy_current)
             current_revision = self._corpus_revision(connection)
@@ -1529,9 +1498,7 @@ class LearningTrajectoryRepository:
                 )
             revision = current_revision + 1
             current = self._materialize_segment(connection, current_row)
-            finalized = replace(
-                current, state="finalized", terminal_break_reason=reason
-            )
+            finalized = replace(current, state="finalized", terminal_break_reason=reason)
             self._update_segment(
                 connection,
                 finalized,
@@ -1541,9 +1508,7 @@ class LearningTrajectoryRepository:
                 finalized_revision=revision,
             )
             self._insert_segment(connection, next_segment, revision=revision)
-            inserted = self._normalize_full_open_segment(
-                connection, next_segment, revision=revision
-            )
+            inserted = self._normalize_full_open_segment(connection, next_segment, revision=revision)
             self._store_operation_receipt(
                 connection,
                 operation_key=operation_key,
@@ -1562,9 +1527,7 @@ class LearningTrajectoryRepository:
                 raise RuntimeError("new open trajectory segment was evicted")
             return self._cursor(connection, retained)
 
-    def finalize(
-        self, cursor: SegmentCursor, reason: TrajectoryBreakReason
-    ) -> FinalizeReceipt:
+    def finalize(self, cursor: SegmentCursor, reason: TrajectoryBreakReason) -> FinalizeReceipt:
         with self._write() as connection:
             row = self._segment_row(connection, cursor.segment_id)
             if row is None:
@@ -1591,9 +1554,7 @@ class LearningTrajectoryRepository:
                 raise StaleSegmentCursorError("stale segment cursor CAS")
             revision = current_revision + 1
             segment = self._materialize_segment(connection, row)
-            finalized = replace(
-                segment, state="finalized", terminal_break_reason=reason
-            )
+            finalized = replace(segment, state="finalized", terminal_break_reason=reason)
             self._update_segment(
                 connection,
                 finalized,
@@ -1620,14 +1581,12 @@ class LearningTrajectoryRepository:
         interrupted_ids: list[str] = []
         with self._write() as connection:
             candidate_rows = connection.execute(
-                "SELECT * FROM learning_trajectory_segment "
-                "WHERE state!='quarantined' ORDER BY start_wall_ms,segment_id"
+                "SELECT * FROM learning_trajectory_segment WHERE state!='quarantined' ORDER BY start_wall_ms,segment_id"
             ).fetchall()
             interrupted_ids = [
                 row["request_id"]
                 for row in connection.execute(
-                    "SELECT request_id FROM learning_fit_run "
-                    "WHERE status IN ('queued','running') ORDER BY request_id"
+                    "SELECT request_id FROM learning_fit_run WHERE status IN ('queued','running') ORDER BY request_id"
                 ).fetchall()
             ]
             current_revision = self._corpus_revision(connection)
@@ -1635,7 +1594,9 @@ class LearningTrajectoryRepository:
             for row in candidate_rows:
                 try:
                     segment = self._materialize_segment(connection, row)
-                except Exception:
+                except Exception as exc:
+                    detail = str(exc).strip()
+                    self._last_recovery_error = detail or type(exc).__name__
                     self._quarantine(connection, row, revision=revision)
                     quarantined_ids.append(row["segment_id"])
                     new_quarantine_count += 1
@@ -1666,10 +1627,19 @@ class LearningTrajectoryRepository:
             if interrupted_ids:
                 placeholders = ",".join("?" for _ in interrupted_ids)
                 connection.execute(
-                    "UPDATE learning_fit_run SET status='interrupted',completed_ms=? "
+                    "UPDATE learning_fit_run SET status='interrupted',"
+                    "candidate_digest=NULL,result_error=NULL,completed_ms=? "
                     f"WHERE request_id IN ({placeholders})",
                     (now_ms, *interrupted_ids),
                 )
+                for request_id in interrupted_ids:
+                    self._update_manifest_result(
+                        connection,
+                        request_id,
+                        status="interrupted",
+                        candidate_digest=None,
+                        error=None,
+                    )
             self._apply_retention(connection)
             self._set_revision(connection, revision)
             self._prune_fit_manifests(connection)
@@ -1696,6 +1666,106 @@ class LearningTrajectoryRepository:
                     return None
                 raise
 
+    def quarantine_segment(
+        self,
+        segment_id: str,
+        reason: TrajectoryBreakReason = TrajectoryBreakReason.ERROR,
+    ) -> bool:
+        if not isinstance(segment_id, str) or not segment_id or segment_id != segment_id.strip():
+            raise ValueError("segment_id must be a non-blank string")
+        if not isinstance(reason, TrajectoryBreakReason):
+            raise TypeError("reason must be a TrajectoryBreakReason")
+        with self._write() as connection:
+            row = self._segment_row(connection, segment_id)
+            if row is None:
+                raise KeyError(segment_id)
+            if row["state"] == "quarantined":
+                return False
+            revision = self._corpus_revision(connection) + 1
+            self._quarantine(
+                connection,
+                row,
+                revision=revision,
+                reason=reason,
+            )
+            self._set_revision(connection, revision)
+            self._apply_retention(connection)
+            return True
+
+    def read_cook_segments(self, cook_id: str) -> tuple[LearningTrajectorySegment, ...]:
+        """Read one cook's retained segments in stable chronological order."""
+        if not isinstance(cook_id, str) or not cook_id or cook_id != cook_id.strip():
+            raise ValueError("cook_id must be a non-blank, whitespace-trimmed string")
+        with self._connection() as connection:
+            rows = connection.execute(
+                "SELECT * FROM learning_trajectory_segment "
+                "WHERE state!='quarantined' "
+                "AND json_extract(header_json,'$.cook_id')=? "
+                "ORDER BY start_wall_ms,segment_id LIMIT ?",
+                (cook_id, _MAX_SEGMENTS),
+            ).fetchall()
+            return tuple(self._materialize_segment(connection, row) for row in rows)
+
+    def corpus_report(self) -> TrajectoryCorpusReport:
+        """Read one bounded, storage-owned global corpus report."""
+        with self._connection() as connection:
+            corpus = self._corpus_row(connection)
+            aggregate = connection.execute(
+                "SELECT "
+                "COALESCE(SUM(state='open'),0) AS open_segment_count,"
+                "COALESCE(SUM(state='finalized'),0) AS finalized_segment_count,"
+                "COALESCE(SUM(state='quarantined'),0) AS quarantined_segment_count,"
+                "COUNT(DISTINCT json_extract(header_json,'$.cook_id')) "
+                "AS distinct_cook_count,"
+                "COUNT(DISTINCT json_extract(header_json,'$.trajectory_session_id')) "
+                "AS distinct_session_count,"
+                "MIN(start_wall_ms) AS earliest_wall_ms,"
+                "MAX(end_wall_ms) AS latest_wall_ms "
+                "FROM learning_trajectory_segment"
+            ).fetchone()
+            if aggregate is None:
+                raise RuntimeError("learning trajectory corpus aggregate is missing")
+            break_reason_counts = tuple(
+                TrajectoryBreakReasonCount(
+                    reason=TrajectoryBreakReason(row["terminal_break_reason"]),
+                    count=row["reason_count"],
+                )
+                for row in connection.execute(
+                    "SELECT terminal_break_reason,COUNT(*) AS reason_count "
+                    "FROM learning_trajectory_segment "
+                    "WHERE terminal_break_reason IS NOT NULL "
+                    "GROUP BY terminal_break_reason "
+                    "ORDER BY terminal_break_reason"
+                ).fetchall()
+            )
+            persistence_error = connection.execute(
+                "SELECT result_error FROM learning_fit_run "
+                "WHERE status='failed' AND result_error IS NOT NULL "
+                "ORDER BY completed_ms DESC,request_id DESC LIMIT 1"
+            ).fetchone()
+            return TrajectoryCorpusReport(
+                schema_version=corpus["schema_version"],
+                corpus_revision=corpus["corpus_revision"],
+                segment_count=corpus["segment_count"],
+                pre_roll_count=corpus["pre_roll_count"],
+                pre_roll_capacity=_MAX_PRE_ROLL_ROWS,
+                scored_count=corpus["scored_count"],
+                scored_capacity=_MAX_SCORED_ROWS,
+                evicted_segment_count=corpus["evicted_segment_count"],
+                evicted_pre_roll_count=corpus["evicted_pre_roll_count"],
+                evicted_scored_count=corpus["evicted_scored_count"],
+                open_segment_count=aggregate["open_segment_count"],
+                finalized_segment_count=aggregate["finalized_segment_count"],
+                quarantined_segment_count=aggregate["quarantined_segment_count"],
+                distinct_cook_count=aggregate["distinct_cook_count"],
+                distinct_session_count=aggregate["distinct_session_count"],
+                earliest_wall_ms=aggregate["earliest_wall_ms"],
+                latest_wall_ms=aggregate["latest_wall_ms"],
+                break_reason_counts=break_reason_counts,
+                last_persistence_error=(None if persistence_error is None else persistence_error["result_error"]),
+                last_recovery_error=self._last_recovery_error,
+            )
+
     def snapshot_fit_corpus(
         self,
         fit_partition_digest: str,
@@ -1705,11 +1775,7 @@ class LearningTrajectoryRepository:
         with self._connection() as connection:
             current_revision = self._corpus_revision(connection)
             revision = current_revision if through_revision is None else through_revision
-            if (
-                isinstance(revision, bool)
-                or not isinstance(revision, int)
-                or not 0 <= revision <= current_revision
-            ):
+            if isinstance(revision, bool) or not isinstance(revision, int) or not 0 <= revision <= current_revision:
                 raise ValueError("through_revision is outside the retained corpus history")
             rows = connection.execute(
                 "SELECT * FROM learning_trajectory_segment "
@@ -1779,24 +1845,81 @@ class LearningTrajectoryRepository:
         )
 
     @staticmethod
-    def _manifest_json(identity: FitCorpusIdentity) -> str:
+    def _manifest_json(
+        snapshot: FitCorpusSnapshot,
+        lineage: ModelFitLineage,
+        *,
+        status: FitRunStatus,
+        candidate_digest: str | None,
+        error: str | None,
+    ) -> str:
+        slices: list[dict[str, object]] = []
+        for item, segment in zip(
+            snapshot.identity.slices,
+            snapshot.segments,
+            strict=True,
+        ):
+            if item.segment_id != segment.segment_id:
+                raise ValueError("fit snapshot segment order is inconsistent")
+            slices.append(
+                {
+                    "segment_id": item.segment_id,
+                    "through_ordinal": item.through_ordinal,
+                    "prefix_digest": item.prefix_digest,
+                    "pre_roll_count": item.pre_roll_count,
+                    "scored_count": item.scored_count,
+                    "content_digest": segment.content_digest,
+                }
+            )
         return _canonical_json(
             {
-                "schema_version": identity.schema_version,
-                "corpus_revision": identity.corpus_revision,
-                "fit_partition_digest": identity.fit_partition_digest,
-                "corpus_digest": identity.corpus_digest,
-                "slices": [
-                    {
-                        "segment_id": item.segment_id,
-                        "through_ordinal": item.through_ordinal,
-                        "prefix_digest": item.prefix_digest,
-                        "pre_roll_count": item.pre_roll_count,
-                        "scored_count": item.scored_count,
-                    }
-                    for item in identity.slices
-                ],
+                "schema_version": snapshot.identity.schema_version,
+                "corpus_revision": snapshot.identity.corpus_revision,
+                "fit_partition_digest": snapshot.identity.fit_partition_digest,
+                "corpus_digest": snapshot.identity.corpus_digest,
+                "request": {
+                    "request_id": lineage.request_id,
+                    "parent_incumbent_digest": lineage.parent_incumbent_digest,
+                    "parent_incumbent_generation": lineage.parent_incumbent_generation,
+                    "candidate_generation": lineage.candidate_generation,
+                    "trigger_origin": lineage.trigger_origin,
+                },
+                "result": {
+                    "status": status,
+                    "candidate_digest": candidate_digest,
+                    "error": error,
+                },
+                "slices": slices,
             }
+        )
+
+    @staticmethod
+    def _update_manifest_result(
+        connection: sqlite3.Connection,
+        request_id: str,
+        *,
+        status: FitRunStatus,
+        candidate_digest: str | None,
+        error: str | None,
+    ) -> None:
+        row = connection.execute(
+            "SELECT manifest_json FROM learning_fit_run WHERE request_id=?",
+            (request_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(request_id)
+        manifest_json = row["manifest_json"]
+        if manifest_json is None:
+            return
+        manifest = json.loads(manifest_json)
+        manifest["result"] = {
+            "status": status,
+            "candidate_digest": candidate_digest,
+            "error": error,
+        }
+        connection.execute(
+            "UPDATE learning_fit_run SET manifest_json=? WHERE request_id=?",
+            (_canonical_json(manifest), request_id),
         )
 
     @staticmethod
@@ -1825,9 +1948,7 @@ class LearningTrajectoryRepository:
                 (row["request_id"],),
             )
 
-    def record_fit_request(
-        self, snapshot: FitCorpusSnapshot, lineage: ModelFitLineage
-    ) -> FitRun:
+    def record_fit_request(self, snapshot: FitCorpusSnapshot, lineage: ModelFitLineage) -> FitRun:
         if lineage.fit_corpus != snapshot.identity:
             raise ValueError("fit lineage corpus does not match the supplied snapshot")
         with self._write() as connection:
@@ -1838,9 +1959,7 @@ class LearningTrajectoryRepository:
             ).fetchone()
             status = cast(FitRunStatus, lineage.result_status)
             if existing is None and status not in ("queued", "running"):
-                raise ValueError(
-                    "new fit requests must start queued or running, not terminal"
-                )
+                raise ValueError("new fit requests must start queued or running, not terminal")
             if existing is None:
                 started_ms = now_ms if status == "running" else None
                 completed_ms = now_ms if status == "stale" else None
@@ -1860,7 +1979,13 @@ class LearningTrajectoryRepository:
                         snapshot.identity.fit_partition_digest,
                         snapshot.identity.corpus_revision,
                         snapshot.identity.corpus_digest,
-                        self._manifest_json(snapshot.identity),
+                        self._manifest_json(
+                            snapshot,
+                            lineage,
+                            status=status,
+                            candidate_digest=lineage.candidate_digest,
+                            error=None,
+                        ),
                         lineage.parent_incumbent_digest,
                         lineage.parent_incumbent_generation,
                         lineage.candidate_generation,
@@ -1892,9 +2017,7 @@ class LearningTrajectoryRepository:
                     lineage.trigger_origin,
                 )
                 if immutable_values != requested_values:
-                    raise LearningTrajectoryConflictError(
-                        f"fit request identity conflict: {lineage.request_id}"
-                    )
+                    raise LearningTrajectoryConflictError(f"fit request identity conflict: {lineage.request_id}")
                 current_status = existing["status"]
                 if current_status == status:
                     return self._fit_run(existing)
@@ -1913,6 +2036,13 @@ class LearningTrajectoryRepository:
                     "completed_ms=CASE WHEN ?='stale' THEN ? ELSE completed_ms END "
                     "WHERE request_id=?",
                     (status, status, now_ms, status, now_ms, lineage.request_id),
+                )
+                self._update_manifest_result(
+                    connection,
+                    lineage.request_id,
+                    status=status,
+                    candidate_digest=existing["candidate_digest"],
+                    error=existing["result_error"],
                 )
             self._prune_fit_manifests(connection)
             row = connection.execute(
@@ -1944,6 +2074,13 @@ class LearningTrajectoryRepository:
                 "result_error=NULL,completed_ms=? WHERE request_id=?",
                 (now_ms, request_id),
             )
+            self._update_manifest_result(
+                connection,
+                request_id,
+                status="stale",
+                candidate_digest=None,
+                error=None,
+            )
             self._prune_fit_manifests(connection)
             completed = connection.execute(
                 "SELECT * FROM learning_fit_run WHERE request_id=?",
@@ -1965,36 +2102,33 @@ class LearningTrajectoryRepository:
         elif candidate_digest is None and isinstance(error, str) and error.strip():
             status = "failed"
         else:
-            raise ValueError(
-                "complete_fit requires a candidate for success or an error for failure"
-            )
+            raise ValueError("complete_fit requires a candidate for success or an error for failure")
         with self._write() as connection:
             now_ms = self._next_fit_timestamp(connection)
-            row = connection.execute(
-                "SELECT * FROM learning_fit_run WHERE request_id=?", (request_id,)
-            ).fetchone()
+            row = connection.execute("SELECT * FROM learning_fit_run WHERE request_id=?", (request_id,)).fetchone()
             if row is None:
                 raise KeyError(request_id)
             terminal = row["status"] in ("succeeded", "failed")
             exact_completion = (
-                row["status"] == status
-                and row["candidate_digest"] == candidate_digest
-                and row["result_error"] == error
+                row["status"] == status and row["candidate_digest"] == candidate_digest and row["result_error"] == error
             )
             if terminal and exact_completion:
                 return self._fit_run(row)
             if terminal:
-                raise LearningTrajectoryConflictError(
-                    f"fit completion conflict: {request_id}"
-                )
+                raise LearningTrajectoryConflictError(f"fit completion conflict: {request_id}")
             if row["status"] not in ("queued", "running"):
-                raise LearningTrajectoryConflictError(
-                    f"fit completion conflict from {row['status']}: {request_id}"
-                )
+                raise LearningTrajectoryConflictError(f"fit completion conflict from {row['status']}: {request_id}")
             connection.execute(
                 "UPDATE learning_fit_run SET status=?,candidate_digest=?,"
                 "result_error=?,completed_ms=? WHERE request_id=?",
                 (status, candidate_digest, error, now_ms, request_id),
+            )
+            self._update_manifest_result(
+                connection,
+                request_id,
+                status=status,
+                candidate_digest=candidate_digest,
+                error=error,
             )
             self._prune_fit_manifests(connection)
             completed = connection.execute(
@@ -2006,33 +2140,85 @@ class LearningTrajectoryRepository:
 
     def replay_fit(self, request_id: str) -> FitCorpusSnapshot:
         with self._connection() as connection:
-            row = connection.execute(
-                "SELECT * FROM learning_fit_run WHERE request_id=?", (request_id,)
-            ).fetchone()
+            row = connection.execute("SELECT * FROM learning_fit_run WHERE request_id=?", (request_id,)).fetchone()
             if row is None:
                 raise KeyError(request_id)
             if row["manifest_json"] is None:
                 raise FitCorpusEvictedError(request_id)
-            manifest = json.loads(row["manifest_json"])
-            slices = tuple(
-                FitCorpusSlice(
-                    segment_id=item["segment_id"],
-                    through_ordinal=item["through_ordinal"],
-                    prefix_digest=item["prefix_digest"],
-                    pre_roll_count=item["pre_roll_count"],
-                    scored_count=item["scored_count"],
+            try:
+                manifest = json.loads(row["manifest_json"])
+                if _canonical_json(manifest) != row["manifest_json"]:
+                    raise ValueError("fit manifest is not canonical")
+                manifest_slices = manifest["slices"]
+                slices = tuple(
+                    FitCorpusSlice(
+                        segment_id=item["segment_id"],
+                        through_ordinal=item["through_ordinal"],
+                        prefix_digest=item["prefix_digest"],
+                        pre_roll_count=item["pre_roll_count"],
+                        scored_count=item["scored_count"],
+                    )
+                    for item in manifest_slices
                 )
-                for item in manifest["slices"]
-            )
-            identity = FitCorpusIdentity(
-                schema_version=manifest["schema_version"],
-                corpus_revision=manifest["corpus_revision"],
-                fit_partition_digest=manifest["fit_partition_digest"],
-                slices=slices,
-                corpus_digest=manifest["corpus_digest"],
-            )
+                content_digests = tuple(item["content_digest"] for item in manifest_slices)
+                identity = FitCorpusIdentity(
+                    schema_version=manifest["schema_version"],
+                    corpus_revision=manifest["corpus_revision"],
+                    fit_partition_digest=manifest["fit_partition_digest"],
+                    slices=slices,
+                    corpus_digest=manifest["corpus_digest"],
+                )
+                if identity != _corpus_identity(
+                    corpus_revision=identity.corpus_revision,
+                    fit_partition_digest=identity.fit_partition_digest,
+                    slices=identity.slices,
+                ):
+                    raise ValueError("fit manifest corpus digest is corrupt")
+                if (
+                    row["fit_partition_digest"],
+                    row["corpus_revision"],
+                    row["corpus_digest"],
+                ) != (
+                    identity.fit_partition_digest,
+                    identity.corpus_revision,
+                    identity.corpus_digest,
+                ):
+                    raise ValueError("fit manifest row identity is corrupt")
+                request = manifest["request"]
+                result = manifest["result"]
+                if (
+                    request["request_id"],
+                    request["parent_incumbent_digest"],
+                    request["parent_incumbent_generation"],
+                    request["candidate_generation"],
+                    request["trigger_origin"],
+                ) != (
+                    row["request_id"],
+                    row["parent_incumbent_digest"],
+                    row["parent_incumbent_generation"],
+                    row["candidate_generation"],
+                    row["trigger_origin"],
+                ):
+                    raise ValueError("fit manifest request lineage is corrupt")
+                if (
+                    result["status"],
+                    result["candidate_digest"],
+                    result["error"],
+                ) != (
+                    row["status"],
+                    row["candidate_digest"],
+                    row["result_error"],
+                ):
+                    raise ValueError("fit manifest result is corrupt")
+            except Exception as exc:
+                raise FitCorpusEvictedError(request_id) from exc
+
             segments: list[LearningTrajectorySegment] = []
-            for item in slices:
+            for item, content_digest in zip(
+                slices,
+                content_digests,
+                strict=True,
+            ):
                 segment_row = self._segment_row(connection, item.segment_id)
                 if segment_row is None:
                     raise FitCorpusEvictedError(request_id)
@@ -2060,10 +2246,15 @@ class LearningTrajectoryRepository:
                     prefix_digest != item.prefix_digest
                     or pre_roll_count != item.pre_roll_count
                     or scored_count != item.scored_count
+                    or segment.content_digest != content_digest
+                    or segment.fit_partition_digest != identity.fit_partition_digest
                 ):
                     raise FitCorpusEvictedError(request_id)
                 segments.append(segment)
-            return FitCorpusSnapshot(identity=identity, segments=tuple(segments))
+            return FitCorpusSnapshot(
+                identity=identity,
+                segments=tuple(segments),
+            )
 
 
 def _hold_entry_from_frame(frame: LearningTrajectoryFrame) -> HoldEntrySample:

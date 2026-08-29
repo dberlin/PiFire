@@ -9,11 +9,27 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal, Protocol, TypeGuard, cast
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, StringConstraints
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    StringConstraints,
+    model_validator,
+)
 
 from common.control_trace import ControlTraceRecord, TraceEventKind
+from common.learning_trajectory import (
+    Digest,
+    LearningTrajectorySegment,
+    TrajectoryBreakReason,
+)
 from common.model_evidence import ModelEvidenceRecord
 from common.persistence.control_trace import read_control_trace_cook
+from common.persistence.learning_trajectory import (
+    LearningTrajectoryRepository,
+    TrajectoryCorpusReport,
+)
 from common.persistence.model_evidence import read_model_evidence
 
 
@@ -61,9 +77,10 @@ class ControllerLearningReport:
         )
 
 
-_DIAGNOSTIC_SCHEMA_VERSION = 1
+_DIAGNOSTIC_SCHEMA_VERSION = 2
 _NonBlankString = Annotated[str, StringConstraints(strict=True, strip_whitespace=True, min_length=1)]
 _NonNegativeInt = Annotated[int, Field(ge=0, strict=True)]
+_PositiveInt = Annotated[int, Field(gt=0, strict=True)]
 _MODEL_CONFIG: ConfigDict = ConfigDict(extra="forbid", frozen=True, strict=True)
 logger = logging.getLogger(__name__)
 
@@ -84,7 +101,7 @@ class CookControlTrace(BaseModel):
     model_config: ClassVar[ConfigDict] = _MODEL_CONFIG
 
     records: tuple[ControlTraceRecord, ...]
-    record_schema_versions: tuple[Literal[2, 3, 4, 5, 6, 7], ...]
+    record_schema_versions: tuple[Literal[2, 3, 4, 5, 6, 7, 8], ...]
 
 
 class CookModelEvidence(BaseModel):
@@ -93,21 +110,94 @@ class CookModelEvidence(BaseModel):
     model_config: ClassVar[ConfigDict] = _MODEL_CONFIG
 
     records: tuple[ModelEvidenceRecord, ...]
-    record_schema_versions: tuple[Literal[1, 2, 3], ...]
+    record_schema_versions: tuple[Literal[1, 2, 3, 4], ...]
 
 
-class CookLearningDiagnostics(BaseModel):
-    """Validated schema-one cook learning diagnostics envelope."""
+class CookTrajectorySegmentReference(BaseModel):
+    """Lightweight current-cook reference to one validated trajectory segment."""
 
     model_config: ClassVar[ConfigDict] = _MODEL_CONFIG
 
-    schema_version: Literal[1] = _DIAGNOSTIC_SCHEMA_VERSION
+    cook_id: _NonBlankString
+    segment_schema_version: _PositiveInt
+    observation_schema_version: _PositiveInt
+    segment_id: _NonBlankString
+    trajectory_session_id: _NonBlankString
+    trace_session_ids: tuple[_NonBlankString, ...]
+    state: Literal["open", "finalized", "quarantined"]
+    source_trace_digest: Digest
+    content_digest: Digest
+    fit_partition_digest: Digest
+    source_row_digest: Digest
+    source_schema_version: _PositiveInt
+    pre_roll_frame_count: _NonNegativeInt
+    scored_hold_frame_count: _NonNegativeInt
+    terminal_break_reason: TrajectoryBreakReason | None
+
+
+class CookTrajectoryBreakReasonCount(BaseModel):
+    """One typed terminal trajectory break total."""
+
+    model_config: ClassVar[ConfigDict] = _MODEL_CONFIG
+
+    reason: TrajectoryBreakReason
+    count: _NonNegativeInt
+
+
+class CookTrajectoryCorpusReport(BaseModel):
+    """Normalized global trajectory corpus diagnostics."""
+
+    model_config: ClassVar[ConfigDict] = _MODEL_CONFIG
+
+    schema_version: Literal[1]
+    corpus_revision: _NonNegativeInt
+    segment_count: _NonNegativeInt
+    pre_roll_count: _NonNegativeInt
+    pre_roll_capacity: _NonNegativeInt
+    scored_count: _NonNegativeInt
+    scored_capacity: _NonNegativeInt
+    evicted_segment_count: _NonNegativeInt
+    evicted_pre_roll_count: _NonNegativeInt
+    evicted_scored_count: _NonNegativeInt
+    open_segment_count: _NonNegativeInt
+    finalized_segment_count: _NonNegativeInt
+    quarantined_segment_count: _NonNegativeInt
+    distinct_cook_count: _NonNegativeInt
+    distinct_session_count: _NonNegativeInt
+    earliest_wall_ms: _NonNegativeInt | None
+    latest_wall_ms: _NonNegativeInt | None
+    break_reason_counts: tuple[CookTrajectoryBreakReasonCount, ...]
+    last_persistence_error: _NonBlankString | None
+    last_recovery_error: _NonBlankString | None
+
+    @model_validator(mode="after")
+    def normalize_break_reason_counts(self) -> CookTrajectoryCorpusReport:
+        reasons = tuple(item.reason for item in self.break_reason_counts)
+        if len(reasons) != len(set(reasons)):
+            raise ValueError("break reason counts must be unique")
+        object.__setattr__(
+            self,
+            "break_reason_counts",
+            tuple(sorted(self.break_reason_counts, key=lambda item: item.reason.value)),
+        )
+        return self
+
+
+class CookLearningDiagnostics(BaseModel):
+    """Validated schema-two cook learning diagnostics envelope."""
+
+    model_config: ClassVar[ConfigDict] = _MODEL_CONFIG
+
+    schema_version: Literal[2] = _DIAGNOSTIC_SCHEMA_VERSION
     cook_id: _NonBlankString | None
     captured_at_ms: _NonNegativeInt
     controllers: tuple[_NonBlankString, ...]
     reports: tuple[ControllerLearningReport, ...]
     control_trace: CookControlTrace
     model_evidence: CookModelEvidence
+    trajectory_segments: tuple[CookTrajectorySegmentReference, ...]
+    trajectory_schema_versions: tuple[_PositiveInt, ...]
+    corpus: CookTrajectoryCorpusReport | None
     capture_errors: tuple[CookDiagnosticCaptureError, ...]
 
 
@@ -123,6 +213,16 @@ class ReadModelEvidence(Protocol):
     def __call__(self, *, cook_id: str) -> Sequence[ModelEvidenceRecord]: ...
 
 
+class ReadTrajectorySegments(Protocol):
+    def __call__(self, cook_id: str, /) -> Sequence[LearningTrajectorySegment]: ...
+
+
+class ReadCorpusReport(Protocol):
+    def __call__(
+        self,
+    ) -> TrajectoryCorpusReport | CookTrajectoryCorpusReport: ...
+
+
 type ClockMs = Callable[[], int]
 type WarningSink = Callable[[str], object]
 
@@ -130,6 +230,73 @@ type WarningSink = Callable[[str], object]
 def wall_clock_ms() -> int:
     """Return wall-clock milliseconds."""
     return time.time_ns() // 1_000_000
+
+
+def _read_persisted_trajectory_segments(
+    cook_id: str,
+) -> tuple[LearningTrajectorySegment, ...]:
+    return LearningTrajectoryRepository().read_cook_segments(cook_id)
+
+
+def _read_persisted_corpus_report() -> TrajectoryCorpusReport:
+    return LearningTrajectoryRepository().corpus_report()
+
+
+def _trajectory_reference(
+    segment: LearningTrajectorySegment,
+) -> CookTrajectorySegmentReference:
+    return CookTrajectorySegmentReference(
+        cook_id=segment.cook_id,
+        segment_schema_version=segment.schema_version,
+        observation_schema_version=segment.observation_schema_version,
+        segment_id=segment.segment_id,
+        trajectory_session_id=segment.trajectory_session_id,
+        trace_session_ids=segment.trace_session_ids,
+        state=segment.state,
+        source_trace_digest=segment.source_trace_digest,
+        content_digest=segment.content_digest,
+        fit_partition_digest=segment.fit_partition_digest,
+        source_row_digest=segment.source_row_digest,
+        source_schema_version=segment.source_schema_version,
+        pre_roll_frame_count=len(segment.pre_roll_frames),
+        scored_hold_frame_count=len(segment.scored_hold_frames),
+        terminal_break_reason=segment.terminal_break_reason,
+    )
+
+
+def _corpus_projection(
+    report: TrajectoryCorpusReport | CookTrajectoryCorpusReport,
+) -> CookTrajectoryCorpusReport:
+    if not isinstance(report, (TrajectoryCorpusReport, CookTrajectoryCorpusReport)):
+        raise TypeError(f"reader returned unsupported corpus report type: {type(report).__name__}")
+    return CookTrajectoryCorpusReport(
+        schema_version=report.schema_version,
+        corpus_revision=report.corpus_revision,
+        segment_count=report.segment_count,
+        pre_roll_count=report.pre_roll_count,
+        pre_roll_capacity=report.pre_roll_capacity,
+        scored_count=report.scored_count,
+        scored_capacity=report.scored_capacity,
+        evicted_segment_count=report.evicted_segment_count,
+        evicted_pre_roll_count=report.evicted_pre_roll_count,
+        evicted_scored_count=report.evicted_scored_count,
+        open_segment_count=report.open_segment_count,
+        finalized_segment_count=report.finalized_segment_count,
+        quarantined_segment_count=report.quarantined_segment_count,
+        distinct_cook_count=report.distinct_cook_count,
+        distinct_session_count=report.distinct_session_count,
+        earliest_wall_ms=report.earliest_wall_ms,
+        latest_wall_ms=report.latest_wall_ms,
+        break_reason_counts=tuple(
+            CookTrajectoryBreakReasonCount(
+                reason=item.reason,
+                count=item.count,
+            )
+            for item in report.break_reason_counts
+        ),
+        last_persistence_error=report.last_persistence_error,
+        last_recovery_error=report.last_recovery_error,
+    )
 
 
 def _exception_detail(exc: Exception) -> str:
@@ -152,7 +319,7 @@ def _capture_error(
     try:
         warn(f"{source}: {detail}")
     except Exception:
-        pass
+        return
 
 
 def _valid_cook_id(cook_id: object) -> TypeGuard[str]:
@@ -172,6 +339,9 @@ def _empty_diagnostics(
         reports=(),
         control_trace=CookControlTrace(records=(), record_schema_versions=()),
         model_evidence=CookModelEvidence(records=(), record_schema_versions=()),
+        trajectory_segments=(),
+        trajectory_schema_versions=(),
+        corpus=None,
         capture_errors=capture_errors,
     )
 
@@ -182,6 +352,8 @@ def _collect_cook_learning_diagnostics(
     *,
     read_trace: ReadControlTrace,
     read_evidence: ReadModelEvidence,
+    read_trajectory_segments: ReadTrajectorySegments,
+    read_corpus_report: ReadCorpusReport,
     clock_ms: ClockMs,
     warn: WarningSink,
 ) -> CookLearningDiagnostics:
@@ -284,7 +456,7 @@ def _collect_cook_learning_diagnostics(
                 errors,
                 source=f"report:{controller}",
                 code="report-type-invalid",
-                detail=f"provider returned unsupported report type: {type(report).__name__}",
+                detail=(f"provider returned unsupported report type: {type(report).__name__}"),
                 warn=warn,
             )
             continue
@@ -299,6 +471,50 @@ def _collect_cook_learning_diagnostics(
             continue
         reports.append(report)
 
+    try:
+        raw_trajectory_segments = tuple(read_trajectory_segments(cook_id))
+        if any(not isinstance(segment, LearningTrajectorySegment) for segment in raw_trajectory_segments):
+            invalid = next(
+                segment for segment in raw_trajectory_segments if not isinstance(segment, LearningTrajectorySegment)
+            )
+            invalid_type = type(invalid).__name__
+            raise TypeError(f"reader returned unsupported trajectory segment type: {invalid_type}")
+        matching_trajectory_segments = tuple(
+            segment for segment in raw_trajectory_segments if segment.cook_id == cook_id
+        )
+        trajectory_segments = tuple(_trajectory_reference(segment) for segment in matching_trajectory_segments)
+    except Exception as exc:
+        raw_trajectory_segments = ()
+        trajectory_segments = ()
+        _capture_error(
+            errors,
+            source="learning_trajectory",
+            code="learning-trajectory-read-failed",
+            detail=_exception_detail(exc),
+            warn=warn,
+        )
+    else:
+        if len(matching_trajectory_segments) != len(raw_trajectory_segments):
+            _capture_error(
+                errors,
+                source="learning_trajectory",
+                code="learning-trajectory-cook-mismatch",
+                detail="segment cook_id does not match requested cook_id",
+                warn=warn,
+            )
+
+    try:
+        corpus = _corpus_projection(read_corpus_report())
+    except Exception as exc:
+        corpus = None
+        _capture_error(
+            errors,
+            source="trajectory_corpus",
+            code="trajectory-corpus-read-failed",
+            detail=_exception_detail(exc),
+            warn=warn,
+        )
+
     return CookLearningDiagnostics(
         cook_id=cook_id,
         captured_at_ms=captured_at_ms,
@@ -312,6 +528,9 @@ def _collect_cook_learning_diagnostics(
             records=evidence_records,
             record_schema_versions=tuple(sorted({record.schema_version for record in evidence_records})),
         ),
+        trajectory_segments=trajectory_segments,
+        trajectory_schema_versions=tuple(sorted({segment.segment_schema_version for segment in trajectory_segments})),
+        corpus=corpus,
         capture_errors=tuple(errors),
     )
 
@@ -322,6 +541,8 @@ def collect_cook_learning_diagnostics(
     *,
     read_trace: ReadControlTrace = read_control_trace_cook,
     read_evidence: ReadModelEvidence = read_model_evidence,
+    read_trajectory_segments: ReadTrajectorySegments = (_read_persisted_trajectory_segments),
+    read_corpus_report: ReadCorpusReport = _read_persisted_corpus_report,
     clock_ms: ClockMs = wall_clock_ms,
     warn: WarningSink = logger.warning,
 ) -> CookLearningDiagnostics:
@@ -332,6 +553,8 @@ def collect_cook_learning_diagnostics(
             report_provider,
             read_trace=read_trace,
             read_evidence=read_evidence,
+            read_trajectory_segments=read_trajectory_segments,
+            read_corpus_report=read_corpus_report,
             clock_ms=clock_ms,
             warn=warn,
         )

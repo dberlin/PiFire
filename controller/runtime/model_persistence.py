@@ -146,12 +146,7 @@ class TrajectoryAppendBatch:
         ):
             if value is not None and not isinstance(value, LearningTrajectorySegment):
                 raise TypeError(f"{label} must be a LearningTrajectorySegment")
-        append_payload = bool(
-            self.pre_roll
-            or self.hold_entry is not None
-            or self.scored
-            or self.evidence
-        )
+        append_payload = bool(self.pre_roll or self.hold_entry is not None or self.scored or self.evidence)
         if self.begin_segment is not None:
             if (
                 self.cursor is not None
@@ -169,9 +164,7 @@ class TrajectoryAppendBatch:
                 or append_payload
                 or self.finalize_reason is not None
             ):
-                raise ValueError(
-                    "break-and-begin requires cursor, reason, and next segment"
-                )
+                raise ValueError("break-and-begin requires cursor, reason, and next segment")
             if self.next_segment.segment_id == self.cursor.segment_id:
                 raise ValueError("break-and-begin requires a new segment identity")
         elif self.finalize_reason is not None:
@@ -208,10 +201,7 @@ class TrajectoryAppendBatch:
         object.__setattr__(
             self,
             "evidence",
-            tuple(
-                ModelEvidenceRecord.model_validate_json(record.model_dump_json())
-                for record in self.evidence
-            ),
+            tuple(ModelEvidenceRecord.model_validate_json(record.model_dump_json()) for record in self.evidence),
         )
 
 
@@ -233,6 +223,7 @@ class PersistenceReceipt:
         self._error = error if not accepted else None
         self._gap = gap
         self._cursor = cursor
+        self._segments: tuple[LearningTrajectorySegment, ...] = ()
 
     @property
     def completed(self) -> bool:
@@ -259,11 +250,14 @@ class PersistenceReceipt:
         with self._condition:
             return self._cursor
 
+    @property
+    def segments(self) -> tuple[LearningTrajectorySegment, ...]:
+        with self._condition:
+            return self._segments
+
     def wait(self, timeout: float | None = None) -> bool:
         if timeout is not None and (
-            not isinstance(timeout, (int, float))
-            or isinstance(timeout, bool)
-            or timeout < 0.0
+            not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or timeout < 0.0
         ):
             raise ValueError("persistence receipt timeout must be nonnegative")
         with self._condition:
@@ -277,6 +271,7 @@ class PersistenceReceipt:
         error: BaseException | None = None,
         gap: TrajectoryPersistenceGap | None = None,
         cursor: SegmentCursor | None = None,
+        segments: tuple[LearningTrajectorySegment, ...] = (),
     ) -> None:
         with self._condition:
             if self._completed:
@@ -285,6 +280,7 @@ class PersistenceReceipt:
             self._error = None if error is None else f"{type(error).__name__}: {error}"
             self._gap = gap
             self._cursor = cursor
+            self._segments = segments
             self._completed = True
             self._condition.notify_all()
 
@@ -350,6 +346,11 @@ class ModelPersistenceWorker:
         batch: TrajectoryAppendBatch
         receipt: PersistenceReceipt
 
+    @dataclass(slots=True)
+    class _TrajectoryQuarantineWork:
+        segment_id: str
+        receipt: PersistenceReceipt
+
     def __init__(
         self,
         store: _ModelStore,
@@ -366,24 +367,14 @@ class ModelPersistenceWorker:
         persist_activation_phase: Callable[
             [PreparedActivationRecord, ActivationPhase | None], None
         ] = _default_persist_activation_phase,
-        persist_trajectory_batch: Callable[
-            [TrajectoryAppendBatch], SegmentCursor
-        ] | None = None,
+        persist_trajectory_batch: Callable[[TrajectoryAppendBatch], SegmentCursor] | None = None,
     ) -> None:
         self._validate_capacity(evidence_capacity, "evidence_capacity")
         self._validate_capacity(trajectory_capacity, "trajectory_capacity")
         self._validate_capacity(work_capacity, "work_capacity")
-        if (
-            isinstance(activation_reserve, bool)
-            or not isinstance(activation_reserve, int)
-            or activation_reserve < 1
-        ):
+        if isinstance(activation_reserve, bool) or not isinstance(activation_reserve, int) or activation_reserve < 1:
             raise ValueError("activation_reserve must be a positive integer")
-        if (
-            isinstance(boundary_reserve, bool)
-            or not isinstance(boundary_reserve, int)
-            or boundary_reserve < 1
-        ):
+        if isinstance(boundary_reserve, bool) or not isinstance(boundary_reserve, int) or boundary_reserve < 1:
             raise ValueError("boundary_reserve must be a positive integer")
         if activation_reserve + boundary_reserve >= work_capacity:
             raise ValueError("work capacity must exceed its reserved capacity")
@@ -394,9 +385,7 @@ class ModelPersistenceWorker:
         self._persist_activation_phase = persist_activation_phase
         self._trajectory_repository = trajectory_repository
         self._persist_trajectory_batch_callback = (
-            self._default_persist_trajectory_batch
-            if persist_trajectory_batch is None
-            else persist_trajectory_batch
+            self._default_persist_trajectory_batch if persist_trajectory_batch is None else persist_trajectory_batch
         )
         self._evidence_capacity = evidence_capacity
         self._trajectory_capacity = trajectory_capacity
@@ -425,13 +414,10 @@ class ModelPersistenceWorker:
 
     @staticmethod
     def _validate_timeout(timeout: float, context: str) -> float:
-        if (
-            not isinstance(timeout, (int, float))
-            or isinstance(timeout, bool)
-            or timeout < 0.0
-        ):
+        if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or timeout < 0.0:
             raise ValueError(f"{context} timeout must be nonnegative")
         return float(timeout)
+
     def _total_work_locked(self) -> int:
         return len(self._pending_work) + int(self._work_active)
 
@@ -441,13 +427,8 @@ class ModelPersistenceWorker:
         elif priority == self._SEGMENT_BOUNDARY_PRIORITY:
             limit = self._work_capacity - self._activation_reserve
         else:
-            limit = (
-                self._work_capacity
-                - self._activation_reserve
-                - self._boundary_reserve
-            )
+            limit = self._work_capacity - self._activation_reserve - self._boundary_reserve
         return self._total_work_locked() < limit
-
 
     @property
     def evidence_blocked(self) -> bool:
@@ -473,11 +454,8 @@ class ModelPersistenceWorker:
                 return True
             self._logger.error(f"Could not stage {name} model checkpoint")
         except Exception as error:
-            self._logger.error(
-                f"Could not stage {name} model checkpoint: {error}"
-            )
+            self._logger.error(f"Could not stage {name} model checkpoint: {error}")
         return False
-
 
     def submit_checkpoint(self, name: str, snapshot: dict[str, object]) -> bool:
         """Copy and coalesce a checkpoint without crossing a barrier fence."""
@@ -485,20 +463,14 @@ class ModelPersistenceWorker:
             raise ValueError("checkpoint name must be non-blank")
         owned_snapshot = copy_valid_snapshot(snapshot)
         if owned_snapshot is None:
-            self._logger.error(
-                f"Could not own {name} model checkpoint: invalid persistence snapshot"
-            )
+            self._logger.error(f"Could not own {name} model checkpoint: invalid persistence snapshot")
             return False
         with self._condition:
             if self._failed:
-                self._logger.error(
-                    f"Could not checkpoint {name} model after persistence failed"
-                )
+                self._logger.error(f"Could not checkpoint {name} model after persistence failed")
                 return False
             if self._stopping:
-                self._logger.error(
-                    f"Could not checkpoint {name} model after teardown began"
-                )
+                self._logger.error(f"Could not checkpoint {name} model after teardown began")
                 return False
             accepted_revisions = [
                 revision
@@ -506,11 +478,7 @@ class ModelPersistenceWorker:
                     self._revision(accepted)
                     for accepted in (
                         *self._pending_checkpoint_snapshots_locked(name),
-                        *(
-                            (self._inflight_checkpoints[name],)
-                            if name in self._inflight_checkpoints
-                            else ()
-                        ),
+                        *((self._inflight_checkpoints[name],) if name in self._inflight_checkpoints else ()),
                     )
                 )
                 if revision is not None
@@ -520,10 +488,7 @@ class ModelPersistenceWorker:
                 accepted_revisions.append(last_saved)
             if accepted_revisions:
                 submitted_revision = self._revision(owned_snapshot)
-                if (
-                    submitted_revision is None
-                    or submitted_revision <= max(accepted_revisions)
-                ):
+                if submitted_revision is None or submitted_revision <= max(accepted_revisions):
                     return True
             for queued in reversed(self._pending_work):
                 if queued.kind != "checkpoint":
@@ -532,8 +497,7 @@ class ModelPersistenceWorker:
                 if queued_name != name:
                     continue
                 barrier_after = any(
-                    candidate.kind == "barrier"
-                    and candidate.sequence > queued.sequence
+                    candidate.kind == "barrier" and candidate.sequence > queued.sequence
                     for candidate in self._pending_work
                 )
                 if not barrier_after:
@@ -544,9 +508,7 @@ class ModelPersistenceWorker:
                     return True
                 break
             if not self._admits_priority_locked(self._ORDINARY_PRIORITY):
-                self._logger.error(
-                    f"Could not checkpoint {name} model: persistence-queue-overflow"
-                )
+                self._logger.error(f"Could not checkpoint {name} model: persistence-queue-overflow")
                 return False
             if not self._stage_checkpoint_owned(name, owned_snapshot):
                 return False
@@ -634,53 +596,60 @@ class ModelPersistenceWorker:
                 return self._rejected_trajectory_receipt("persistence-failed")
             if self._stopping:
                 return self._rejected_trajectory_receipt("persistence-closed")
-            if (
-                owned.begin_segment is not None
-                and owned.begin_segment.segment_id in self._blocked_segments
-            ):
-                return self._rejected_trajectory_receipt(
-                    "trajectory-lineage-blocked"
-                )
+            if owned.begin_segment is not None and owned.begin_segment.segment_id in self._blocked_segments:
+                return self._rejected_trajectory_receipt("trajectory-lineage-blocked")
             priority = self._trajectory_priority(owned)
             segment_id = self._trajectory_segment_id(owned)
-            if (
-                self._is_trajectory_append(owned)
-                and segment_id in self._blocked_segments
-            ):
-                return self._rejected_trajectory_receipt(
-                    "trajectory-lineage-blocked"
-                )
+            if self._is_trajectory_append(owned) and segment_id in self._blocked_segments:
+                return self._rejected_trajectory_receipt("trajectory-lineage-blocked")
             pending = sum(
                 queued.kind == "trajectory"
                 and isinstance(queued.payload, self._TrajectoryWork)
                 and self._is_trajectory_append(queued.payload.batch)
                 for queued in self._pending_work
             )
-            if (
-                self._is_trajectory_append(owned)
-                and pending >= self._trajectory_capacity
-            ):
+            if self._is_trajectory_append(owned) and pending >= self._trajectory_capacity:
                 self._evidence_blocked = True
                 if segment_id is not None:
                     self._blocked_segments.add(segment_id)
-                self._logger.error(
-                    "Learning trajectory was not queued: trajectory-queue-overflow"
-                )
-                return self._rejected_trajectory_receipt(
-                    "trajectory-queue-overflow"
-                )
+                self._logger.error("Learning trajectory was not queued: trajectory-queue-overflow")
+                return self._rejected_trajectory_receipt("trajectory-queue-overflow")
             if not self._admits_priority_locked(priority):
                 if self._is_trajectory_append(owned) and segment_id is not None:
                     self._evidence_blocked = True
                     self._blocked_segments.add(segment_id)
-                return self._rejected_trajectory_receipt(
-                    "persistence-queue-overflow"
-                )
+                return self._rejected_trajectory_receipt("persistence-queue-overflow")
             receipt = PersistenceReceipt(accepted=True)
             self._enqueue_locked(
                 "trajectory",
                 self._TrajectoryWork(owned, receipt),
                 priority,
+            )
+            self._start_locked()
+            self._condition.notify()
+            return receipt
+
+    def submit_trajectory_quarantine(
+        self,
+        segment_id: str,
+    ) -> PersistenceReceipt:
+        """Queue fail-closed removal of an untraceable durable segment."""
+        if not isinstance(segment_id, str) or not segment_id or segment_id != segment_id.strip():
+            raise ValueError("segment_id must be a non-blank string")
+        with self._condition:
+            self._evidence_blocked = True
+            self._blocked_segments.add(segment_id)
+            if self._failed:
+                return self._rejected_trajectory_receipt("persistence-failed")
+            if self._stopping:
+                return self._rejected_trajectory_receipt("persistence-closed")
+            if not self._admits_priority_locked(self._SEGMENT_BOUNDARY_PRIORITY):
+                return self._rejected_trajectory_receipt("persistence-queue-overflow")
+            receipt = PersistenceReceipt(accepted=True)
+            self._enqueue_locked(
+                "trajectory-quarantine",
+                self._TrajectoryQuarantineWork(segment_id, receipt),
+                self._SEGMENT_BOUNDARY_PRIORITY,
             )
             self._start_locked()
             self._condition.notify()
@@ -698,27 +667,19 @@ class ModelPersistenceWorker:
             raise TypeError("decision must be ModelEvidenceRecord")
         if timeout is not None:
             self._validate_timeout(timeout, "activation persistence")
-        owned_decision = ModelEvidenceRecord.model_validate_json(
-            decision.model_dump_json()
-        )
+        owned_decision = ModelEvidenceRecord.model_validate_json(decision.model_dump_json())
         if owned_decision.kind is not EvidenceKind.ACTIVATION:
             raise ValueError("activation worker requires activation evidence")
         work = _ActivationWork(owned_decision)
         with self._condition:
             if self._failed:
-                self._logger.error(
-                    "Could not commit model activation after persistence failed"
-                )
+                self._logger.error("Could not commit model activation after persistence failed")
                 return False
             if self._stopping:
-                self._logger.error(
-                    "Could not commit model activation after teardown began"
-                )
+                self._logger.error("Could not commit model activation after teardown began")
                 return False
             if not self._admits_priority_locked(self._ACTIVATION_PRIORITY):
-                self._logger.error(
-                    "Could not commit model activation: persistence-queue-overflow"
-                )
+                self._logger.error("Could not commit model activation: persistence-queue-overflow")
                 return False
             self._enqueue_locked(
                 "activation",
@@ -748,45 +709,29 @@ class ModelPersistenceWorker:
             preceding_evidence,
             (str, bytes),
         ):
-            raise TypeError(
-                "preceding_evidence must be a sequence of ModelEvidenceRecord"
-            )
+            raise TypeError("preceding_evidence must be a sequence of ModelEvidenceRecord")
         owned_preceding: list[ModelEvidenceRecord] = []
         for record in preceding_evidence:
             if not isinstance(record, ModelEvidenceRecord):
-                raise TypeError(
-                    "preceding_evidence records must be ModelEvidenceRecord"
-                )
-            owned_record = ModelEvidenceRecord.model_validate_json(
-                record.model_dump_json()
-            )
-            if (
-                owned_record.kind is not EvidenceKind.CANDIDATE_ASSESSMENT
-                or not isinstance(
-                    owned_record.payload,
-                    CandidateAssessmentEvidence,
-                )
+                raise TypeError("preceding_evidence records must be ModelEvidenceRecord")
+            owned_record = ModelEvidenceRecord.model_validate_json(record.model_dump_json())
+            if owned_record.kind is not EvidenceKind.CANDIDATE_ASSESSMENT or not isinstance(
+                owned_record.payload,
+                CandidateAssessmentEvidence,
             ):
-                raise ValueError(
-                    "preceding_evidence requires candidate-assessment evidence"
-                )
+                raise ValueError("preceding_evidence requires candidate-assessment evidence")
             owned_preceding.append(owned_record)
         owned = ModelEvidenceRecord.model_validate_json(decision.model_dump_json())
-        if (
-            owned.kind is not EvidenceKind.CONFIDENCE_DECISION
-            or not isinstance(owned.payload, ConfidenceDecisionEvidence)
+        if owned.kind is not EvidenceKind.CONFIDENCE_DECISION or not isinstance(
+            owned.payload, ConfidenceDecisionEvidence
         ):
-            raise ValueError(
-                "activation confidence requires confidence-decision evidence"
-            )
+            raise ValueError("activation confidence requires confidence-decision evidence")
         if any(
             record.payload.decision_id != owned.payload.decision_id
             for record in owned_preceding
             if isinstance(record.payload, CandidateAssessmentEvidence)
         ):
-            raise ValueError(
-                "preceding candidate-assessment decision_id must match confidence"
-            )
+            raise ValueError("preceding candidate-assessment decision_id must match confidence")
         receipt = DurableActivationReceipt(accepted=True)
         with self._condition:
             if self._failed or self._stopping:
@@ -840,11 +785,7 @@ class ModelPersistenceWorker:
         with self._condition:
             if self._close_called:
                 thread = self._thread
-                if (
-                    self._close_result is False
-                    and thread is not None
-                    and not thread.is_alive()
-                ):
+                if self._close_result is False and thread is not None and not thread.is_alive():
                     self._close_result = True
                 if self._close_result is not None:
                     return self._close_result
@@ -892,9 +833,7 @@ class ModelPersistenceWorker:
                 self._close_result = completed
             self._condition.notify_all()
         if not completed:
-            self._logger.error(
-                "Model persistence close is still pending after its timeout"
-            )
+            self._logger.error("Model persistence close is still pending after its timeout")
         return completed
 
     @staticmethod
@@ -904,11 +843,7 @@ class ModelPersistenceWorker:
     @staticmethod
     def _revision(snapshot: dict[str, object]) -> int | None:
         revision = snapshot.get("revision")
-        if (
-            isinstance(revision, int)
-            and not isinstance(revision, bool)
-            and revision >= 0
-        ):
+        if isinstance(revision, int) and not isinstance(revision, bool) and revision >= 0:
             return revision
         return None
 
@@ -979,11 +914,7 @@ class ModelPersistenceWorker:
                 reason=reason,
             ),
         )
-        if (
-            not self._stopping
-            and not self._failed
-            and self._admits_priority_locked(self._ORDINARY_PRIORITY)
-        ):
+        if not self._stopping and not self._failed and self._admits_priority_locked(self._ORDINARY_PRIORITY):
             self._enqueue_locked(
                 "recorder-gap",
                 (gap,),
@@ -996,11 +927,7 @@ class ModelPersistenceWorker:
 
     @staticmethod
     def _is_trajectory_append(batch: TrajectoryAppendBatch) -> bool:
-        return (
-            batch.begin_segment is None
-            and batch.break_reason is None
-            and batch.finalize_reason is None
-        )
+        return batch.begin_segment is None and batch.break_reason is None and batch.finalize_reason is None
 
     @staticmethod
     def _trajectory_segment_id(
@@ -1012,11 +939,7 @@ class ModelPersistenceWorker:
 
     @staticmethod
     def _trajectory_priority(batch: TrajectoryAppendBatch) -> int:
-        if (
-            batch.begin_segment is not None
-            or batch.break_reason is not None
-            or batch.finalize_reason is not None
-        ):
+        if batch.begin_segment is not None or batch.break_reason is not None or batch.finalize_reason is not None:
             return ModelPersistenceWorker._SEGMENT_BOUNDARY_PRIORITY
         if batch.scored:
             return ModelPersistenceWorker._COMPOUND_TRAJECTORY_PRIORITY
@@ -1055,15 +978,10 @@ class ModelPersistenceWorker:
             for queued in self._pending_work
         )
 
-
     def _next_work_locked(self) -> _QueuedWork | None:
         if not self._pending_work:
             return None
-        barrier_sequences = [
-            queued.sequence
-            for queued in self._pending_work
-            if queued.kind == "barrier"
-        ]
+        barrier_sequences = [queued.sequence for queued in self._pending_work if queued.kind == "barrier"]
         fence = min(barrier_sequences) if barrier_sequences else None
         eligible = [
             (index, queued)
@@ -1112,9 +1030,8 @@ class ModelPersistenceWorker:
             ):
                 payload.completed = True
                 payload.succeeded = False
-            elif queued.kind == "trajectory" and isinstance(
-                payload,
-                self._TrajectoryWork,
+            elif (queued.kind == "trajectory" and isinstance(payload, self._TrajectoryWork)) or (
+                queued.kind == "trajectory-quarantine" and isinstance(payload, self._TrajectoryQuarantineWork)
             ):
                 payload.receipt._complete(
                     durable=False,
@@ -1137,10 +1054,7 @@ class ModelPersistenceWorker:
         cursor = self._segment_cursors.get(batch.cursor.segment_id, batch.cursor)
         if batch.cursor.next_ordinal > cursor.next_ordinal:
             raise ValueError("queued trajectory cursor is ahead of durable lineage")
-        if (
-            batch.cursor.next_ordinal == cursor.next_ordinal
-            and batch.cursor.chain_digest != cursor.chain_digest
-        ):
+        if batch.cursor.next_ordinal == cursor.next_ordinal and batch.cursor.chain_digest != cursor.chain_digest:
             raise ValueError("queued trajectory cursor conflicts with durable lineage")
         return TrajectoryAppendBatch(
             cursor=cursor,
@@ -1203,6 +1117,45 @@ class ModelPersistenceWorker:
                 )
             return cursor
 
+    def _quarantine_trajectory_segment(self, segment_id: str) -> None:
+        repository = self._trajectory_repository
+        if repository is None:
+            repository = LearningTrajectoryRepository()
+            self._trajectory_repository = repository
+        repository.quarantine_segment(
+            segment_id,
+            TrajectoryBreakReason.RECORDER_GAP,
+        )
+
+    def _readback_trajectory_segments(
+        self,
+        batch: TrajectoryAppendBatch,
+    ) -> tuple[LearningTrajectorySegment, ...]:
+        repository = self._trajectory_repository
+        if repository is None:
+            return ()
+        segment_ids: tuple[str, ...]
+        if batch.begin_segment is not None:
+            segment_ids = (batch.begin_segment.segment_id,)
+        elif batch.break_reason is not None and batch.next_segment is not None:
+            if batch.cursor is None:
+                raise TypeError("break-and-begin work has no source segment")
+            segment_ids = (
+                batch.cursor.segment_id,
+                batch.next_segment.segment_id,
+            )
+        elif batch.cursor is not None:
+            segment_ids = (batch.cursor.segment_id,)
+        else:
+            raise TypeError("durable trajectory work has no segment identity")
+        materialized: list[LearningTrajectorySegment] = []
+        for segment_id in segment_ids:
+            segment = repository.read_segment(segment_id)
+            if segment is None:
+                raise RuntimeError(f"durable trajectory segment readback failed: {segment_id}")
+            materialized.append(segment)
+        return tuple(materialized)
+
     def _record_trajectory_success_locked(
         self,
         batch: TrajectoryAppendBatch,
@@ -1246,9 +1199,7 @@ class ModelPersistenceWorker:
     def _run(self) -> None:
         while True:
             with self._condition:
-                while (
-                    queued := self._next_work_locked()
-                ) is None and not self._stopping:
+                while (queued := self._next_work_locked()) is None and not self._stopping:
                     self._condition.wait()
                 if queued is None:
                     if self._close_called:
@@ -1264,38 +1215,23 @@ class ModelPersistenceWorker:
                 with self._condition:
                     self._condition.notify_all()
                 continue
-            inflight_checkpoint_name = (
-                self._checkpoint_payload(payload)[0]
-                if kind == "checkpoint"
-                else None
-            )
-            activation_work = (
-                payload
-                if kind == "activation" and isinstance(payload, _ActivationWork)
-                else None
-            )
-            phase_work = (
-                payload
-                if kind == "activation-phase"
-                and isinstance(payload, _ActivationPhaseWork)
-                else None
-            )
+            inflight_checkpoint_name = self._checkpoint_payload(payload)[0] if kind == "checkpoint" else None
+            activation_work = payload if kind == "activation" and isinstance(payload, _ActivationWork) else None
+            phase_work = payload if kind == "activation-phase" and isinstance(payload, _ActivationPhaseWork) else None
             confidence_work = (
-                payload
-                if kind == "activation-confidence"
-                and isinstance(payload, _ActivationConfidenceWork)
-                else None
+                payload if kind == "activation-confidence" and isinstance(payload, _ActivationConfidenceWork) else None
             )
-            trajectory_work = (
+            trajectory_work = payload if kind == "trajectory" and isinstance(payload, self._TrajectoryWork) else None
+            quarantine_work = (
                 payload
-                if kind == "trajectory"
-                and isinstance(payload, self._TrajectoryWork)
+                if kind == "trajectory-quarantine" and isinstance(payload, self._TrajectoryQuarantineWork)
                 else None
             )
             succeeded = False
             checkpoint_revision = None
             effective_trajectory_batch: TrajectoryAppendBatch | None = None
             trajectory_cursor: SegmentCursor | None = None
+            trajectory_segments: tuple[LearningTrajectorySegment, ...] = ()
             try:
                 if kind == "checkpoint":
                     name, snapshot = self._checkpoint_payload(payload)
@@ -1307,17 +1243,13 @@ class ModelPersistenceWorker:
                         CheckpointSaveOutcome.SAVED,
                         CheckpointSaveOutcome.NONADVANCING,
                     ):
-                        raise RuntimeError(
-                            f"unknown checkpoint store outcome: {outcome!r}"
-                        )
+                        raise RuntimeError(f"unknown checkpoint store outcome: {outcome!r}")
                 elif kind in ("evidence", "recorder-gap"):
                     self._append_evidence(self._durable_evidence_batch(payload))
                 elif confidence_work is not None:
                     self._append_evidence(confidence_work.records)
                 elif activation_work is not None:
-                    result = self._commit_activation(
-                        activation_work.decision
-                    )
+                    result = self._commit_activation(activation_work.decision)
                     if result is False:
                         raise RuntimeError("activation transaction declined")
                 elif phase_work is not None:
@@ -1326,21 +1258,18 @@ class ModelPersistenceWorker:
                         phase_work.expected_phase,
                     )
                     if result is False:
-                        raise RuntimeError(
-                            "activation phase transaction declined"
-                        )
+                        raise RuntimeError("activation phase transaction declined")
                 elif trajectory_work is not None:
-                    effective_trajectory_batch = self._effective_trajectory_batch(
-                        trajectory_work.batch
-                    )
-                    result = self._persist_trajectory_batch_callback(
-                        effective_trajectory_batch
-                    )
+                    effective_trajectory_batch = self._effective_trajectory_batch(trajectory_work.batch)
+                    result = self._persist_trajectory_batch_callback(effective_trajectory_batch)
                     if not isinstance(result, SegmentCursor):
-                        raise TypeError(
-                            "persist_trajectory_batch must return SegmentCursor"
-                        )
+                        raise TypeError("persist_trajectory_batch must return SegmentCursor")
                     trajectory_cursor = result
+                    trajectory_segments = self._readback_trajectory_segments(effective_trajectory_batch)
+                elif quarantine_work is not None:
+                    self._quarantine_trajectory_segment(
+                        quarantine_work.segment_id,
+                    )
                 else:
                     raise TypeError(f"{kind} work is malformed")
                 succeeded = True
@@ -1349,9 +1278,7 @@ class ModelPersistenceWorker:
                     self._failed = True
                     self._evidence_blocked = True
                     if trajectory_work is not None:
-                        segment_id = self._trajectory_segment_id(
-                            trajectory_work.batch
-                        )
+                        segment_id = self._trajectory_segment_id(trajectory_work.batch)
                         if segment_id is not None:
                             self._blocked_segments.add(segment_id)
                     if phase_work is not None:
@@ -1368,23 +1295,27 @@ class ModelPersistenceWorker:
                         trajectory_work.receipt._complete(
                             durable=False,
                             error=error,
-                            gap=self._trajectory_gap(
-                                "trajectory-persistence-failed"
-                            ),
+                            gap=self._trajectory_gap("trajectory-persistence-failed"),
+                        )
+                    if quarantine_work is not None:
+                        quarantine_work.receipt._complete(
+                            durable=False,
+                            error=error,
+                            gap=self._trajectory_gap("trajectory-quarantine-failed"),
                         )
                     if activation_work is not None:
                         activation_work.succeeded = False
                         activation_work.completed = True
                     self._fail_pending_locked(error)
                     self._condition.notify_all()
-                self._logger.error(
-                    f"Could not persist model {kind}: {error}"
-                )
+                self._logger.error(f"Could not persist model {kind}: {error}")
             else:
                 if phase_work is not None:
                     phase_work.receipt._complete(durable=True)
                 if confidence_work is not None:
                     confidence_work.receipt._complete(durable=True)
+                if quarantine_work is not None:
+                    quarantine_work.receipt._complete(durable=True)
                 if trajectory_work is not None:
                     with self._condition:
                         self._record_trajectory_success_locked(
@@ -1398,6 +1329,7 @@ class ModelPersistenceWorker:
                     trajectory_work.receipt._complete(
                         durable=True,
                         cursor=trajectory_cursor,
+                        segments=trajectory_segments,
                     )
             finally:
                 with self._condition:
@@ -1407,16 +1339,9 @@ class ModelPersistenceWorker:
                             None,
                         )
                         if succeeded and checkpoint_revision is not None:
-                            previous = self._last_saved_revisions.get(
-                                inflight_checkpoint_name
-                            )
-                            if (
-                                previous is None
-                                or checkpoint_revision > previous
-                            ):
-                                self._last_saved_revisions[
-                                    inflight_checkpoint_name
-                                ] = checkpoint_revision
+                            previous = self._last_saved_revisions.get(inflight_checkpoint_name)
+                            if previous is None or checkpoint_revision > previous:
+                                self._last_saved_revisions[inflight_checkpoint_name] = checkpoint_revision
                     self._work_active = False
                     if activation_work is not None:
                         activation_work.succeeded = succeeded
@@ -1428,12 +1353,8 @@ class ModelPersistenceWorker:
         payload: object,
     ) -> tuple[ModelEvidenceRecord, ...]:
         """Stamp atomicity only on the immutable tuple handed to a transaction."""
-        if not isinstance(payload, tuple) or not all(
-            isinstance(record, ModelEvidenceRecord) for record in payload
-        ):
-            raise TypeError(
-                "evidence work must contain one immutable record batch"
-            )
+        if not isinstance(payload, tuple) or not all(isinstance(record, ModelEvidenceRecord) for record in payload):
+            raise TypeError("evidence work must contain one immutable record batch")
         return tuple(
             record.model_copy(
                 update={

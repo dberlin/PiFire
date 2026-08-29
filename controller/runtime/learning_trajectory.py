@@ -10,7 +10,7 @@ from dataclasses import dataclass, field, replace
 from functools import wraps
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal, Protocol
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from common.learning_trajectory import (
     TRAJECTORY_OBSERVATION_SCHEMA_VERSION,
@@ -43,7 +43,10 @@ def _replay_synchronized(method):
             return method(runtime, *args, **kwargs)
 
     return locked
+
+
 _DEFAULT_TIMEOUT = 2.0
+
 
 def _append_batch(**values: object) -> TrajectoryAppendBatch:
     # The persistence worker also owns activation/evidence machinery. Import it
@@ -63,6 +66,8 @@ def _owned_mapping(value: Mapping[str, object]) -> Mapping[str, object]:
         return deepcopy(item)
 
     return MappingProxyType({str(key): own(item) for key, item in value.items()})
+
+
 def _plain_mapping(value: Mapping[str, object]) -> dict[str, object]:
     def plain(item: object) -> object:
         if isinstance(item, Mapping):
@@ -72,8 +77,6 @@ def _plain_mapping(value: Mapping[str, object]) -> dict[str, object]:
         return deepcopy(item)
 
     return {str(key): plain(item) for key, item in value.items()}
-
-
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,9 +181,17 @@ class _PersistenceReceipt(Protocol):
     cursor: SegmentCursor | None
     error: str | None
 
+    @property
+    def segments(self) -> tuple[LearningTrajectorySegment, ...]: ...
+
 
 class _Persistence(Protocol):
     def submit_trajectory_batch(self, batch: TrajectoryAppendBatch) -> _PersistenceReceipt: ...
+
+    def submit_trajectory_quarantine(
+        self,
+        segment_id: str,
+    ) -> _PersistenceReceipt: ...
 
     def barrier(self, timeout: float = _DEFAULT_TIMEOUT) -> bool: ...
 
@@ -198,6 +209,12 @@ class _PendingReceipt:
 
 
 @dataclass(slots=True)
+class _PendingQuarantineReceipt:
+    receipt: _PersistenceReceipt
+    segment_id: str
+
+
+@dataclass(slots=True)
 class LearningTrajectoryRuntime:
     """Own one cross-mode trajectory recorder for the control-process lifetime.
 
@@ -210,7 +227,19 @@ class LearningTrajectoryRuntime:
     persistence: _Persistence
     segment_id_factory: Callable[[], str] = field(default=lambda: uuid4().hex)
     sample_age_limit_ms: int = _DEFAULT_SAMPLE_AGE_LIMIT_MS
+    trajectory_session_id_factory: Callable[[], str] = field(default=lambda: str(uuid4()))
     _mode: ModeEntered | None = field(init=False, default=None)
+    _trajectory_session_id: str = field(init=False)
+    _trace_session_id: str | None = field(init=False, default=None)
+    _trace_publishers: dict[
+        str,
+        Callable[[LearningTrajectorySegment], bool],
+    ] = field(init=False, default_factory=dict, repr=False)
+    _failure_handler: Callable[[str], None] | None = field(
+        init=False,
+        default=None,
+        repr=False,
+    )
     _segment_id: str | None = field(init=False, default=None)
     _cursor: SegmentCursor | None = field(init=False, default=None)
     _next_sequence: int = field(init=False, default=0)
@@ -220,9 +249,15 @@ class LearningTrajectoryRuntime:
     _samples: list[ThermalSample] = field(init=False, default_factory=list)
     _seen_hold_frames: set[tuple[object, ...]] = field(init=False, default_factory=set)
     _pending_receipts: list[_PendingReceipt] = field(init=False, default_factory=list)
-    _pending_break: tuple[SegmentCursor, TrajectoryBreakReason] | None = field(
-        init=False, default=None
+    _pending_quarantine_receipts: list[_PendingQuarantineReceipt] = field(
+        init=False,
+        default_factory=list,
     )
+    _quarantine_retry_segment_ids: set[str] = field(
+        init=False,
+        default_factory=set,
+    )
+    _pending_break: tuple[SegmentCursor, TrajectoryBreakReason] | None = field(init=False, default=None)
     _counts: dict[str, list[int]] = field(init=False, default_factory=dict)
     _failed_counts: tuple[int, int] = field(init=False, default=(0, 0))
     _last_sample_ms: int | None = field(init=False, default=None)
@@ -234,14 +269,21 @@ class LearningTrajectoryRuntime:
     _close_result: bool | None = field(init=False, default=None)
     _lineage_token: int = field(init=False, default=0)
     _staged_partial: LearningTrajectoryFrame | None = field(init=False, default=None)
-    _pending_boundary: tuple[
-        int,
-        TrajectoryBreakReason,
-        int,
-        int,
-        ModeEntered | None,
-        bool,
-    ] | None = field(init=False, default=None)
+    _buffered_pre_roll: list[LearningTrajectoryFrame] = field(
+        init=False,
+        default_factory=list,
+    )
+    _pending_boundary: (
+        tuple[
+            int,
+            TrajectoryBreakReason,
+            int,
+            int,
+            ModeEntered | None,
+            bool,
+        ]
+        | None
+    ) = field(init=False, default=None)
     _draining_boundary: bool = field(init=False, default=False)
     _last_boundary_signature: tuple[object, ...] | None = field(
         init=False,
@@ -264,6 +306,115 @@ class LearningTrajectoryRuntime:
     def __post_init__(self) -> None:
         if isinstance(self.sample_age_limit_ms, bool) or self.sample_age_limit_ms < 0:
             raise ValueError("sample age limit must be a non-negative integer")
+        session_id = self.trajectory_session_id_factory()
+        if not isinstance(session_id, str) or not session_id or session_id != session_id.strip():
+            raise ValueError("trajectory session identity must be a non-blank string")
+        self._trajectory_session_id = session_id
+
+    @property
+    def trajectory_session_id(self) -> str:
+        return self._trajectory_session_id
+
+    @property
+    def trace_session_id(self) -> str | None:
+        return self._trace_session_id
+
+    @_replay_synchronized
+    def bind_trace_session(
+        self,
+        session_id: str,
+        cook_id: str,
+        publish_segment: Callable[[LearningTrajectorySegment], bool],
+        *,
+        failure_handler: Callable[[str], None] | None = None,
+    ) -> bool:
+        """Bind capture to the UUID owned by the open control-trace session."""
+
+        if self._closed or not self._enabled:
+            return False
+        if failure_handler is not None and not callable(failure_handler):
+            self._persistence_failed("control-trace-failure-handler-invalid")
+            return False
+        self._failure_handler = failure_handler
+        try:
+            UUID(session_id)
+        except AttributeError, TypeError, ValueError:
+            self._persistence_failed("control-trace-session-identity-invalid")
+            return False
+        if not isinstance(cook_id, str) or not cook_id or cook_id != cook_id.strip() or not callable(publish_segment):
+            self._persistence_failed("control-trace-session-context-invalid")
+            return False
+        previous_session_id = self._trace_session_id
+        if (
+            previous_session_id is not None
+            and previous_session_id != session_id
+            and self._segment_id is not None
+            and self._pending_break is None
+            and self._pending_boundary is None
+        ):
+            self._persistence_failed("control-trace-session-rotated-without-trajectory-boundary")
+            return False
+        mode = self._mode
+        if mode is not None and mode.cook_id != cook_id:
+            self._persistence_failed("control-trace-cook-identity-mismatch")
+            return False
+        self._trace_session_id = session_id
+        self._trace_publishers[session_id] = publish_segment
+        if mode is not None:
+            self._mode = self._mode_with_trace_identity(mode, session_id)
+        pending_boundary = self._pending_boundary
+        if pending_boundary is not None and pending_boundary[4] is not None:
+            (
+                token,
+                reason,
+                monotonic_ms,
+                wall_ms,
+                replacement,
+                terminal,
+            ) = pending_boundary
+            self._pending_boundary = (
+                token,
+                reason,
+                monotonic_ms,
+                wall_ms,
+                self._mode_with_trace_identity(replacement, session_id),
+                terminal,
+            )
+        if self._replay_mode is not None:
+            self._replay_mode = self._mode_with_trace_identity(
+                self._replay_mode,
+                session_id,
+            )
+        return self._flush_buffered_pre_roll()
+
+    @_replay_synchronized
+    def mark_trace_unavailable(self, reason: str) -> None:
+        if self._enabled:
+            self._persistence_failed(reason)
+
+    def _mode_with_trace_identity(
+        self,
+        mode: ModeEntered,
+        session_id: str,
+    ) -> ModeEntered:
+        return replace(
+            mode,
+            trajectory_session_id=self._trajectory_session_id,
+            trace_session_id=session_id,
+            source_trace_digest=canonical_trajectory_digest(
+                {
+                    "cook_id": mode.cook_id,
+                    "trace_session_id": session_id,
+                }
+            ),
+            source_row_digest=canonical_trajectory_digest(
+                {
+                    "trace_session_id": session_id,
+                    "trajectory_session_id": self._trajectory_session_id,
+                    "settings_revision": mode.settings_revision,
+                }
+            ),
+        )
 
     def _discard_replay_suffix(self, *, uncertain: bool = False) -> None:
         with self._replay_lock:
@@ -377,14 +528,10 @@ class LearningTrajectoryRuntime:
         if anchor_exact:
             measured = anchor[1]
         replay_compatible = (
-            anchor_exact
-            and self._replay_mode is not None
-            and self._compatible(self._replay_mode, self._mode)
+            anchor_exact and self._replay_mode is not None and self._compatible(self._replay_mode, self._mode)
         )
 
-        if self._replay_uncertain or (
-            self._replay_frames and not replay_compatible
-        ):
+        if self._replay_uncertain or (self._replay_frames and not replay_compatible):
             status: Literal["uncertain"] = "uncertain"
             return EstimatorSeed(
                 delay_states=(),
@@ -432,11 +579,7 @@ class LearningTrajectoryRuntime:
                 if replayed_ms >= target_ms:
                     break
             selected = tuple(reversed(suffix))
-            expected_end_ms = (
-                at_ms
-                if selected[-1].effective_mode == "Hold"
-                else self._mode.monotonic_ms
-            )
+            expected_end_ms = at_ms if selected[-1].effective_mode == "Hold" else self._mode.monotonic_ms
             if selected[-1].monotonic_end_ms != expected_end_ms:
                 status_uncertain: Literal["uncertain"] = "uncertain"
                 return EstimatorSeed(
@@ -455,26 +598,14 @@ class LearningTrajectoryRuntime:
                     status=status_uncertain,
                 )
         selected_count = len(selected)
-        remaining_frames = (
-            0
-            if required == 0
-            else math.ceil(
-                max(0, required * _FRAME_MS - replayed_ms) / _FRAME_MS
-            )
-        )
+        remaining_frames = 0 if required == 0 else math.ceil(max(0, required * _FRAME_MS - replayed_ms) / _FRAME_MS)
         reported_frame_count = required - remaining_frames
-        seed_status: Literal["exact", "short"] = (
-            "exact" if remaining_frames == 0 else "short"
-        )
+        seed_status: Literal["exact", "short"] = "exact" if remaining_frames == 0 else "short"
         delay_states = replay_delay_chain(
             selected,
             theta=theta_value,
             n_delay=n_delay,
-            initial_load=(
-                0.0
-                if not selected
-                else selected[0].normalized_combustion_load
-            ),
+            initial_load=(0.0 if not selected else selected[0].normalized_combustion_load),
         )
         return EstimatorSeed(
             delay_states=delay_states,
@@ -497,6 +628,18 @@ class LearningTrajectoryRuntime:
         if self._closed:
             return
         self._reap_receipts()
+        if event.effective_mode != "Hold":
+            self._trace_session_id = None
+            event = replace(event, trace_session_id="")
+        event = replace(
+            event,
+            trajectory_session_id=self._trajectory_session_id,
+        )
+        if self._trace_session_id is not None:
+            event = self._mode_with_trace_identity(
+                event,
+                self._trace_session_id,
+            )
         previous = self._mode
         if previous is not None and previous.effective_mode != event.effective_mode:
             if previous.effective_mode == "Hold" and event.effective_mode == "Smoke":
@@ -545,10 +688,7 @@ class LearningTrajectoryRuntime:
         if self._closed:
             return
         self._reap_receipts()
-        if (
-            event.effective_mode == "Smoke"
-            and not self._drain_due_smoke_boundary(event.monotonic_ms)
-        ):
+        if event.effective_mode == "Smoke" and not self._drain_due_smoke_boundary(event.monotonic_ms):
             self.barrier()
             return
         if event.effective_mode == "Smoke" and event.next_effective_mode == "Hold" and event.reason is None:
@@ -559,8 +699,7 @@ class LearningTrajectoryRuntime:
             ):
                 failure_reason = (
                     TrajectoryBreakReason.ACTUATION_UNKNOWN
-                    if self._last_break_reason
-                    is TrajectoryBreakReason.ACTUATION_UNKNOWN
+                    if self._last_break_reason is TrajectoryBreakReason.ACTUATION_UNKNOWN
                     else TrajectoryBreakReason.PROBE_GAP
                 )
                 self._finalize(failure_reason)
@@ -693,11 +832,7 @@ class LearningTrajectoryRuntime:
             pwm_start=fan_duty,
             pwm_end=fan_duty,
             auger_certainty=FrameDeliveryCertainty.EXACT,
-            fan_certainty=(
-                FrameDeliveryCertainty.EXACT
-                if fan_exact
-                else FrameDeliveryCertainty.UNKNOWN
-            ),
+            fan_certainty=(FrameDeliveryCertainty.EXACT if fan_exact else FrameDeliveryCertainty.UNKNOWN),
             unknown_reasons=() if fan_exact else ("hold-fan-delivery-unknown",),
         )
         frame = self._frame_from_integral(
@@ -733,10 +868,7 @@ class LearningTrajectoryRuntime:
             boundary.wall_ms,
             boundary.detail,
         )
-        if (
-            boundary.reason is TrajectoryBreakReason.RESET
-            and self._reset_boundary_open
-        ):
+        if boundary.reason is TrajectoryBreakReason.RESET and self._reset_boundary_open:
             return
         if boundary.reason is TrajectoryBreakReason.RESET:
             self._reset_boundary_open = True
@@ -776,6 +908,7 @@ class LearningTrajectoryRuntime:
             replacement=boundary.replacement_mode,
         )
 
+    @_replay_synchronized
     def status(self) -> TrajectoryStatus:
         self._reap_receipts()
         counts = (
@@ -793,6 +926,7 @@ class LearningTrajectoryRuntime:
             gap=self._gap,
         )
 
+    @_replay_synchronized
     def barrier(self, timeout: float = _DEFAULT_TIMEOUT) -> bool:
         for _attempt in range(4):
             try:
@@ -804,42 +938,44 @@ class LearningTrajectoryRuntime:
                 self._persistence_failed("persistence-barrier-timeout")
                 return False
             self._reap_receipts()
-            if not self._pending_receipts:
+            if (
+                not self._pending_receipts
+                and not self._pending_quarantine_receipts
+                and not self._quarantine_retry_segment_ids
+            ):
                 return self._enabled
         self._persistence_failed("persistence-barrier-timeout")
         return False
 
+    @_replay_synchronized
     def close(self) -> bool:
         if self._closed:
             return bool(self._close_result)
         self._closed = True
         drained = (
             self.barrier(timeout=_DEFAULT_TIMEOUT)
-            if self._pending_receipts
+            if (self._pending_receipts or self._pending_quarantine_receipts or self._quarantine_retry_segment_ids)
             else True
         )
         if self._segment_id is not None or self._pending_break is not None:
             self._finalize(TrajectoryBreakReason.UNCLEAN_RESTART)
         terminal_drained = (
             self.barrier(timeout=_DEFAULT_TIMEOUT)
-            if self._pending_receipts
+            if (self._pending_receipts or self._pending_quarantine_receipts or self._quarantine_retry_segment_ids)
             else True
         )
         try:
-            worker_closed = bool(
-                self.persistence.close(timeout=_DEFAULT_TIMEOUT)
-            )
+            worker_closed = bool(self.persistence.close(timeout=_DEFAULT_TIMEOUT))
         except Exception as error:
             self._last_error = str(error)
             worker_closed = False
         self._reap_receipts()
-        receipts_settled = not self._pending_receipts
-        closed = (
-            drained
-            and terminal_drained
-            and worker_closed
-            and receipts_settled
+        receipts_settled = (
+            not self._pending_receipts
+            and not self._pending_quarantine_receipts
+            and not self._quarantine_retry_segment_ids
         )
+        closed = drained and terminal_drained and worker_closed and receipts_settled
         if not closed and self._last_error is None:
             self._last_error = "persistence-close-timeout"
         self._close_result = closed
@@ -901,20 +1037,13 @@ class LearningTrajectoryRuntime:
         ):
             return True
         if self._segment_id is not None and self._cursor is None:
-            self._persistence_failed(
-                "pending-cursor-prevented-exact-boundary-closure"
-            )
+            self._persistence_failed("pending-cursor-prevented-exact-boundary-closure")
             return False
         self._close_due_smoke_frames(boundary_ms)
         if not self._enabled:
             return False
-        if (
-            self._smoke_frame_start_ms is not None
-            and self._smoke_frame_start_ms + _FRAME_MS <= boundary_ms
-        ):
-            self._persistence_failed(
-                "pending-cursor-prevented-exact-boundary-closure"
-            )
+        if self._smoke_frame_start_ms is not None and self._smoke_frame_start_ms + _FRAME_MS <= boundary_ms:
+            self._persistence_failed("pending-cursor-prevented-exact-boundary-closure")
             return False
         return True
 
@@ -979,12 +1108,7 @@ class LearningTrajectoryRuntime:
     ) -> bool:
         start_ms = self._smoke_frame_start_ms
         wall_start_ms = self._smoke_frame_start_wall_ms
-        if (
-            start_ms is None
-            or wall_start_ms is None
-            or end_ms <= start_ms
-            or end_ms - start_ms >= _FRAME_MS
-        ):
+        if start_ms is None or wall_start_ms is None or end_ms <= start_ms or end_ms - start_ms >= _FRAME_MS:
             return True
         sample = self._sample_for_frame_end(end_ms)
         if sample is None:
@@ -1048,10 +1172,7 @@ class LearningTrajectoryRuntime:
             temperature_sample_wall_ms=sample.wall_ms,
             temperature_sample_age_ms=end_ms - sample.monotonic_ms,
             temperature_sample_wall_age_ms=wall_end_ms - sample.wall_ms,
-            temperature_sample_clock_skew_ms=(
-                (wall_end_ms - sample.wall_ms)
-                - (end_ms - sample.monotonic_ms)
-            ),
+            temperature_sample_clock_skew_ms=((wall_end_ms - sample.wall_ms) - (end_ms - sample.monotonic_ms)),
             source_temperature_units=sample.units,
             settings_revision=sample.settings_revision,
             probe_valid=True,
@@ -1090,15 +1211,23 @@ class LearningTrajectoryRuntime:
         mode = self._mode
         if mode is None:
             return False
+        if not (self._trace_session_id or mode.trace_session_id):
+            if scored:
+                self._persistence_failed("control-trace-session-unavailable-before-scored-frame")
+                return False
+            self._buffered_pre_roll.append(frame)
+            self._next_sequence += 1
+            self._retain_replay_frame(frame)
+            return True
         if self._segment_id is None:
             self._lineage_token += 1
             segment_id = self.segment_id_factory()
-            segment = self._segment_from_first_frame(
+            segment = self._segment_from_frames(
                 segment_id,
                 mode,
-                frame,
-                scored=scored,
-                hold_entry=hold_entry,
+                pre_roll=() if scored else (frame,),
+                scored=(frame,) if scored else (),
+                hold_entry=hold_entry if scored else None,
             )
             pending_break = self._pending_break
             batch = (
@@ -1152,26 +1281,72 @@ class LearningTrajectoryRuntime:
             self._retain_replay_frame(frame)
         return True
 
-    def _segment_from_first_frame(
+    def _flush_buffered_pre_roll(self) -> bool:
+        if not self._buffered_pre_roll:
+            return self._enabled
+        mode = self._replay_mode or self._mode
+        if mode is None or self._trace_session_id is None or self._segment_id is not None:
+            return False
+        self._lineage_token += 1
+        segment_id = self.segment_id_factory()
+        mode = self._mode_with_trace_identity(mode, self._trace_session_id)
+        frames = tuple(self._buffered_pre_roll)
+        segment = self._segment_from_frames(
+            segment_id,
+            mode,
+            pre_roll=frames,
+            scored=(),
+            hold_entry=None,
+        )
+        pending_break = self._pending_break
+        batch = (
+            _append_batch(
+                cursor=pending_break[0],
+                break_reason=pending_break[1],
+                next_segment=segment,
+            )
+            if pending_break is not None
+            else _append_batch(begin_segment=segment)
+        )
+        self._segment_id = segment_id
+        self._replay_segment_id = segment_id
+        self._counts.setdefault(segment_id, [0, 0])
+        accepted = self._submit(
+            batch,
+            segment_id,
+            pre_roll_count=len(frames),
+        )
+        if not accepted:
+            self._segment_id = None
+            return False
+        self._buffered_pre_roll.clear()
+        self._pending_break = None
+        self._reset_boundary_open = False
+        return True
+
+    def _segment_from_frames(
         self,
         segment_id: str,
         mode: ModeEntered,
-        frame: LearningTrajectoryFrame,
         *,
-        scored: bool,
+        pre_roll: tuple[LearningTrajectoryFrame, ...],
+        scored: tuple[LearningTrajectoryFrame, ...],
         hold_entry: HoldEntrySample | None,
     ) -> LearningTrajectorySegment:
+        frames = (*pre_roll, *scored)
+        if not frames:
+            raise ValueError("trajectory segment requires at least one frame")
+        first = frames[0]
+        last = frames[-1]
         return LearningTrajectorySegment(
             schema_version=1,
             observation_schema_version=TRAJECTORY_OBSERVATION_SCHEMA_VERSION,
             segment_id=segment_id,
             cook_id=mode.cook_id,
-            trajectory_session_id=mode.trajectory_session_id,
+            trajectory_session_id=self._trajectory_session_id,
             trace_session_ids=(mode.trace_session_id,),
             collection_provenance=_plain_mapping(mode.collection_provenance),
-            configuration_provenance=_plain_mapping(
-                mode.configuration_provenance
-            ),
+            configuration_provenance=_plain_mapping(mode.configuration_provenance),
             cadence_digest=mode.cadence_digest,
             model_structure_digest=mode.model_structure_digest,
             held_physics_digest=mode.held_physics_digest,
@@ -1179,16 +1354,16 @@ class LearningTrajectoryRuntime:
             actuation_mapping_digest=mode.actuation_mapping_digest,
             scored_fan_regime_digest=mode.scored_fan_regime_digest,
             ambient_semantics_digest=mode.ambient_semantics_digest,
-            pre_roll_frames=() if scored else (frame,),
-            hold_entry=hold_entry if scored else None,
-            scored_hold_frames=(frame,) if scored else (),
+            pre_roll_frames=pre_roll,
+            hold_entry=hold_entry,
+            scored_hold_frames=scored,
             generation_audit_ranges=(),
-            start_monotonic_ms=frame.monotonic_start_ms,
-            end_monotonic_ms=frame.monotonic_end_ms,
-            start_wall_ms=frame.wall_start_ms,
-            end_wall_ms=frame.wall_end_ms,
-            start_sequence=frame.sequence,
-            end_sequence=frame.sequence,
+            start_monotonic_ms=first.monotonic_start_ms,
+            end_monotonic_ms=last.monotonic_end_ms,
+            start_wall_ms=first.wall_start_ms,
+            end_wall_ms=last.wall_end_ms,
+            start_sequence=first.sequence,
+            end_sequence=last.sequence,
             pre_roll_end_reason=None,
             terminal_break_reason=None,
             state="open",
@@ -1229,7 +1404,19 @@ class LearningTrajectoryRuntime:
 
     def _reap_receipts(self) -> None:
         remaining: list[_PendingReceipt] = []
+        quarantine_segment_ids: set[str] = set()
         failure_error: str | None = None
+        quarantine_remaining: list[_PendingQuarantineReceipt] = []
+        for pending in self._pending_quarantine_receipts:
+            receipt = pending.receipt
+            if not receipt.completed:
+                quarantine_remaining.append(pending)
+                continue
+            if not receipt.durable:
+                self._quarantine_retry_segment_ids.add(pending.segment_id)
+                if failure_error is None:
+                    failure_error = receipt.error or "trajectory-quarantine-persistence-failed"
+        self._pending_quarantine_receipts = quarantine_remaining
         for pending in self._pending_receipts:
             receipt = pending.receipt
             if not receipt.completed:
@@ -1237,33 +1424,79 @@ class LearningTrajectoryRuntime:
                 continue
             if not receipt.durable:
                 if failure_error is None:
-                    failure_error = (
-                        receipt.error or "trajectory-persistence-failed"
-                    )
+                    failure_error = receipt.error or "trajectory-persistence-failed"
+                continue
+            segments = getattr(receipt, "segments", ())
+            for segment in segments:
+                trace_session_ids = segment.trace_session_ids
+                publish = self._trace_publishers.get(trace_session_ids[0]) if len(trace_session_ids) == 1 else None
+                if publish is None:
+                    quarantine_segment_ids.add(segment.segment_id)
+                    if failure_error is None:
+                        failure_error = "trajectory-trace-publisher-unavailable"
+                    continue
+                try:
+                    published = publish(segment)
+                except Exception as error:
+                    quarantine_segment_ids.add(segment.segment_id)
+                    if failure_error is None:
+                        failure_error = f"trajectory-trace-publication-failed: {error}"
+                    continue
+                if not published:
+                    quarantine_segment_ids.add(segment.segment_id)
+                    if failure_error is None:
+                        failure_error = "trajectory-trace-publication-failed"
+            if failure_error is not None:
                 continue
             if pending.lineage_token != self._lineage_token:
                 continue
             counts = self._counts.setdefault(pending.segment_id, [0, 0])
             counts[0] += pending.pre_roll_count
             counts[1] += pending.scored_count
-            if (
-                receipt.cursor is not None
-                and not pending.closes_segment
-                and pending.segment_id == self._segment_id
-            ):
+            if receipt.cursor is not None and not pending.closes_segment and pending.segment_id == self._segment_id:
                 self._cursor = receipt.cursor
         self._pending_receipts = remaining
+        self._quarantine_retry_segment_ids.update(quarantine_segment_ids)
+        for segment_id in sorted(self._quarantine_retry_segment_ids):
+            try:
+                receipt = self.persistence.submit_trajectory_quarantine(segment_id)
+            except Exception as error:
+                if failure_error is None:
+                    failure_error = f"trajectory-quarantine-submission-failed: {error}"
+                continue
+            if not receipt.accepted:
+                if failure_error is None:
+                    failure_error = receipt.error or "trajectory-quarantine-submission-rejected"
+                continue
+            self._pending_quarantine_receipts.append(
+                _PendingQuarantineReceipt(
+                    receipt=receipt,
+                    segment_id=segment_id,
+                )
+            )
+            self._quarantine_retry_segment_ids.discard(segment_id)
         if failure_error is not None:
             self._persistence_failed(failure_error)
             return
         self._drain_staged_boundary()
+        self._prune_trace_publishers()
+
+    def _prune_trace_publishers(self) -> None:
+        if (
+            self._pending_receipts
+            or self._pending_quarantine_receipts
+            or self._quarantine_retry_segment_ids
+            or self._pending_break is not None
+            or self._pending_boundary is not None
+        ):
+            return
+        active_session_id = self._trace_session_id
+        self._trace_publishers = (
+            {} if active_session_id is None else {active_session_id: self._trace_publishers[active_session_id]}
+        )
 
     def _drain_staged_boundary(self) -> None:
-        if (
-            self._draining_boundary
-            or not self._enabled
-            or self._cursor is None
-        ):
+        if self._draining_boundary or not self._enabled or self._cursor is None:
             return
         self._draining_boundary = True
         try:
@@ -1272,10 +1505,7 @@ class LearningTrajectoryRuntime:
                 self._staged_partial = None
                 if not self._submit_frame(staged_partial, scored=False):
                     return
-                if any(
-                    item.lineage_token == self._lineage_token
-                    for item in self._pending_receipts
-                ):
+                if any(item.lineage_token == self._lineage_token for item in self._pending_receipts):
                     return
             pending = self._pending_boundary
             if pending is None:
@@ -1298,9 +1528,10 @@ class LearningTrajectoryRuntime:
             self._draining_boundary = False
 
     def _finalize(self, reason: TrajectoryBreakReason) -> None:
-        self._discard_replay_suffix(
-            uncertain=reason is TrajectoryBreakReason.ACTUATION_UNKNOWN
-        )
+        self._discard_replay_suffix(uncertain=reason is TrajectoryBreakReason.ACTUATION_UNKNOWN)
+        if self._segment_id is None and self._buffered_pre_roll:
+            self._buffered_pre_roll.clear()
+            self._next_sequence = 0
         if self._segment_id is None:
             pending_break = self._pending_break
             if pending_break is not None:
@@ -1349,6 +1580,7 @@ class LearningTrajectoryRuntime:
         replacement: ModeEntered | None,
     ) -> None:
         self._discard_replay_suffix()
+        self._buffered_pre_roll.clear()
         if self._segment_id is not None and self._cursor is not None:
             self._pending_break = (self._cursor, reason)
         self._lineage_token += 1
@@ -1390,8 +1622,7 @@ class LearningTrajectoryRuntime:
         ):
             failure_reason = (
                 TrajectoryBreakReason.ACTUATION_UNKNOWN
-                if self._last_break_reason
-                is TrajectoryBreakReason.ACTUATION_UNKNOWN
+                if self._last_break_reason is TrajectoryBreakReason.ACTUATION_UNKNOWN
                 else TrajectoryBreakReason.PROBE_GAP
             )
             self._finalize(failure_reason)
@@ -1437,6 +1668,12 @@ class LearningTrajectoryRuntime:
         self._gap = True
         self._last_break_reason = TrajectoryBreakReason.RECORDER_GAP
         self._last_error = error
+        failure_handler = self._failure_handler
+        if failure_handler is not None:
+            try:
+                failure_handler(error)
+            except Exception as handler_error:
+                self._last_error = f"{error}; learning-failure-handler-failed: {handler_error}"
         if self._segment_id is not None:
             durable = self._counts.get(self._segment_id, [0, 0])
             self._failed_counts = (durable[0], durable[1])
@@ -1446,6 +1683,7 @@ class LearningTrajectoryRuntime:
         self._pending_break = None
         self._pending_boundary = None
         self._staged_partial = None
+        self._buffered_pre_roll.clear()
         self._next_sequence = 0
         self._hold_entry = None
 

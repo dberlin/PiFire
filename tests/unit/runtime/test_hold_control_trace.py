@@ -68,6 +68,7 @@ def _open_trace_session(mode, now):
     assert context is not None
     previous = trace.identity
     identity = trace.ensure_open(context, timestamp_ms=int(now * 1_000))
+    mode._bind_trajectory_trace(identity)
     learning = mode._hold_learning
     if previous is None and identity is not None and learning is not None:
         learning.bind_generation(mode._runner_configuration_revision)
@@ -443,12 +444,21 @@ def test_mpc_hold_records_update_allocation_and_framed_feedback_once_per_revisio
     mode.on_tick(22.0, 220.0, mode.grill.get_output_status())
 
     event_kinds = [record.event_kind for record in recorder.records]
-    assert event_kinds[:4] == [
+    assert event_kinds[:5] == [
         TraceEventKind.SESSION,
+        TraceEventKind.ESTIMATOR_SEED,
         TraceEventKind.CONTROL_UPDATE,
         TraceEventKind.ALLOCATION,
         TraceEventKind.APPLIED_OUTPUT,
     ]
+    seed_record = recorder.records[1]
+    assert seed_record.session_id == _identity(mode).session_id
+    assert seed_record.cook_id == "cook-mpc"
+    assert seed_record.ts_ms == 2_000
+    assert seed_record.payload.segment_id == "hold-test-segment"
+    assert seed_record.payload.status == "exact"
+    assert seed_record.payload.role_generation == 0
+    assert seed_record.payload.candidate_generation == 0
     timestamps = [record.ts_ms for record in recorder.records]
     assert timestamps == sorted(timestamps)
     update_record = next(record for record in recorder.records if record.event_kind is TraceEventKind.CONTROL_UPDATE)
@@ -653,13 +663,21 @@ def test_production_hold_seed_lifecycle_rereads_into_calibration(hold_cycle, tmp
     session_id = _identity(mode).session_id
     assert session_id is not None
     records = read_control_trace_session(session_id)
-    assert [record.event_kind for record in records[:4]] == [
+    assert [record.event_kind for record in records[:5]] == [
         TraceEventKind.SESSION,
+        TraceEventKind.ESTIMATOR_SEED,
         TraceEventKind.CONTROL_UPDATE,
         TraceEventKind.ALLOCATION,
         TraceEventKind.APPLIED_OUTPUT,
     ]
-    seed_index = 3
+    estimator_seed = records[1]
+    assert estimator_seed.session_id == session_id
+    assert estimator_seed.cook_id == "calibration-seed"
+    assert estimator_seed.payload.segment_id == "hold-test-segment"
+    assert estimator_seed.payload.status == "exact"
+    assert estimator_seed.payload.role_generation == 0
+    assert estimator_seed.payload.candidate_generation == 0
+    seed_index = 4
     seed = records[seed_index].payload
     assert seed.result_revision == 0
     assert seed.output_source is OutputSource.SEED
@@ -904,8 +922,7 @@ def test_reconfigure_finishes_the_old_pid_session_before_opening_coherent_mpc_se
     seed_records = [
         record
         for record in new_session_events
-        if record.event_kind is TraceEventKind.APPLIED_OUTPUT
-        and record.payload.result_revision == 0
+        if record.event_kind is TraceEventKind.APPLIED_OUTPUT and record.payload.result_revision == 0
     ]
     assert len(seed_records) == 1
     seed_record = seed_records[0]
@@ -914,13 +931,10 @@ def test_reconfigure_finishes_the_old_pid_session_before_opening_coherent_mpc_se
     result_two = next(
         record
         for record in new_session_events
-        if record.event_kind is TraceEventKind.CONTROL_UPDATE
-        and record.payload.result_revision == 2
+        if record.event_kind is TraceEventKind.CONTROL_UPDATE and record.payload.result_revision == 2
     )
     assert new_session_events.index(result_two) < new_session_events.index(seed_record)
-    old_session_events = [
-        record for record in recorder.records if record.session_id == old_session_id
-    ]
+    old_session_events = [record for record in recorder.records if record.session_id == old_session_id]
     assert validate_records(old_session_events).valid
     assert validate_records(new_session_events).valid
     assert (
@@ -1330,8 +1344,7 @@ def test_base_manual_auger_on_reasserts_manual_output_after_framed_reset(hold_cy
     seeds = [
         record.payload
         for record in recorder.records
-        if record.event_kind is TraceEventKind.APPLIED_OUTPUT
-        and record.payload.output_source is OutputSource.SEED
+        if record.event_kind is TraceEventKind.APPLIED_OUTPUT and record.payload.output_source is OutputSource.SEED
     ]
     assert seeds == []
     manual = [
@@ -1541,6 +1554,9 @@ def test_historical_evidence_rotation_preserves_live_applied_interval(hold_cycle
     mode.control["cook_id"] = "historical-evidence-rotation"
     old_identity = _open_trace_session(mode, 0.0)
     assert old_identity is not None
+    trajectory = mode.ctx.learning_trajectory
+    assert trajectory is not None
+    trajectory_session_id = trajectory.trace_session_id
     trace = _trace(mode)
     trace.prepare_applied_output(
         AppliedOutput(0.4, OutputSource.CONTROLLER, 2.0, requested=0.5),
@@ -1567,6 +1583,7 @@ def test_historical_evidence_rotation_preserves_live_applied_interval(hold_cycle
 
     assert _identity(mode).session_id != old_identity.session_id
     assert _identity(mode).controller is ControllerType.MPC
+    assert trajectory.trace_session_id == trajectory_session_id
     assert trace.record_applied_interval(
         TraceAppliedIntervalContext(
             timestamp_ms=4_000,
@@ -1679,7 +1696,10 @@ def test_threaded_stop_timeout_rotates_reserved_generation_gaps_and_fences_late_
     core = _BlockingObservationCore()
     runner = ThreadedControllerRunner(core, wait_for_period=gate)
     worker = _EvidenceWorker()
-    monkeypatch.setattr("controller.runtime.modes.hold.ModelPersistenceWorker", lambda *_args: worker)
+    monkeypatch.setattr(
+        "controller.runtime.modes.hold.ModelPersistenceWorker",
+        lambda *_args, **_kwargs: worker,
+    )
     mode = hold_cycle(runner, controller="mpc")
     try:
         assert gate.waiting.wait(1.0)

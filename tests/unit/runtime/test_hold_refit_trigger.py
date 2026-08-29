@@ -142,9 +142,7 @@ def test_stop_corpus_fit_gate_follows_identification_not_online_adaptation(
 
     result = hold.teardown(225.0)
 
-    assert runner.fit_requests == (
-        [CandidateOrigin.COOK_REFIT] if scheduled else []
-    )
+    assert runner.fit_requests == ([CandidateOrigin.COOK_REFIT] if scheduled else [])
     assert runner.legacy_refits == 0
     assert runner.legacy_finalizations == 0
     assert result is None
@@ -176,6 +174,39 @@ def test_stop_finalizes_and_barriers_before_submit_then_closes_without_adoption(
     assert runner.legacy_finalizations == 0
 
 
+def test_stop_fit_waits_for_trajectory_publication_and_quarantine_barrier(
+    hold_cycle,
+    monkeypatch,
+) -> None:
+    events: list[str] = []
+    persistence = _PersistenceBarrier(events)
+    runner = _CorpusFitRunner(events)
+    hold = _hold(
+        hold_cycle,
+        runner,
+        identification=True,
+        persistence=persistence,
+    )
+    trajectory = hold.ctx.learning_trajectory
+    assert trajectory is not None
+
+    def trajectory_barrier(timeout: float = 2.0) -> bool:
+        assert timeout == 2.0
+        events.append("trajectory-barrier")
+        return False
+
+    monkeypatch.setattr(
+        trajectory,
+        "barrier",
+        trajectory_barrier,
+    )
+
+    hold.teardown(225.0)
+
+    assert "trajectory-barrier" in events
+    assert runner.fit_requests == []
+
+
 def test_mpc_start_command_authorizes_collection_without_scheduling_a_fit():
     controller = object.__new__(MpcController)
     commands = []
@@ -201,11 +232,7 @@ def _calibration_decision(
     event=None,
     generation=1,
 ) -> CalibrationDecision:
-    events = (
-        ()
-        if event is None
-        else (CalibrationEvent(event, "low", 0.1, 0.1, 0.0),)
-    )
+    events = () if event is None else (CalibrationEvent(event, "low", 0.1, 0.1, 0.0),)
     return CalibrationDecision(
         active=active,
         probe_q=0.1 if active else 0.0,

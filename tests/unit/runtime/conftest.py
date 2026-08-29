@@ -21,8 +21,10 @@ def _off():
     return {"auger": False, "fan": False, "igniter": False, "power": False, "pwm": 100}
 
 
-
 class _ExactSeedSource:
+    def __init__(self) -> None:
+        self.trace_session_id = None
+
     def seed_for(
         self,
         theta: float,
@@ -44,6 +46,18 @@ class _ExactSeedSource:
             status="exact",
         )
 
+    def bind_trace_session(
+        self,
+        session_id,
+        cook_id,
+        publish_segment,
+        *,
+        failure_handler=None,
+    ) -> bool:
+        del cook_id, publish_segment, failure_handler
+        self.trace_session_id = session_id
+        return True
+
     def intervention(self, boundary) -> None:
         del boundary
 
@@ -52,6 +66,10 @@ class _ExactSeedSource:
 
     def observe_hold_frame(self, observation, *, replay_only=False) -> None:
         del observation, replay_only
+
+    def barrier(self, timeout=2.0) -> bool:
+        del timeout
+        return True
 
 
 @pytest.fixture

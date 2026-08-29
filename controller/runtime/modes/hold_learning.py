@@ -151,6 +151,7 @@ def parse_model_lifecycle_payload(
 
 class _LearningTrajectoryObserver(Protocol):
     def observe_hold_frame(self, observation: FrameObservation) -> None: ...
+    def barrier(self, timeout: float = 2.0) -> bool: ...
 
 
 class _HoldLearningRunner(ModelLifecycleRunner, Protocol):
@@ -225,7 +226,6 @@ class _LifecycleLogger(Protocol):
     def warning(self, message: str, /) -> None: ...
 
     def error(self, message: str, /) -> None: ...
-
 
 
 @dataclass(frozen=True, slots=True)
@@ -312,30 +312,40 @@ class HoldLearningRuntime:
         return self._seed_warmup_remaining
 
     def set_seed_warmup_remaining(self, frame_count: int) -> None:
-        if (
-            isinstance(frame_count, bool)
-            or not isinstance(frame_count, int)
-            or frame_count < 0
-        ):
+        if isinstance(frame_count, bool) or not isinstance(frame_count, int) or frame_count < 0:
             raise ValueError("seed warm-up count must be a nonnegative integer")
         self._seed_warmup_remaining = frame_count
 
     def mark_evidence_unavailable(self) -> None:
         self._evidence_available = False
 
+    def _trajectory_fit_barrier(self) -> bool:
+        trajectory = self._learning_trajectory
+        if trajectory is None:
+            return True
+        try:
+            durable = trajectory.barrier(timeout=2.0)
+        except Exception as error:
+            self.mark_evidence_unavailable()
+            self._logger.warning(f"Learning trajectory barrier failed: {error}")
+            return False
+        if not durable:
+            self.mark_evidence_unavailable()
+        return durable
+
     def _calibration_fit_barrier(self) -> bool:
+        trajectory_durable = self._trajectory_fit_barrier()
         persistence = self._persistence
         if persistence is None:
             self.mark_evidence_unavailable()
             return False
         try:
-            durable = persistence.barrier(timeout=2.0) and not persistence.failed
+            persistence_durable = persistence.barrier(timeout=2.0) and not persistence.failed
         except Exception as error:
             self.mark_evidence_unavailable()
-            self._logger.warning(
-                f"Calibration trajectory barrier failed: {error}"
-            )
+            self._logger.warning(f"Calibration fit persistence barrier failed: {error}")
             return False
+        durable = trajectory_durable and persistence_durable
         if not durable:
             self.mark_evidence_unavailable()
         return durable
@@ -670,19 +680,18 @@ class HoldLearningRuntime:
                 self.submit_online_checkpoint(self._last_checkpoint_snapshot)
             except Exception as error:
                 self.mark_evidence_unavailable()
-                self._logger.warning(
-                    f"Final online checkpoint retry failed: {error}"
-                )
+                self._logger.warning(f"Final online checkpoint retry failed: {error}")
         self._persistence_finished = True
+        trajectory_drained = self._trajectory_fit_barrier()
         persistence = self._persistence
-        drained = persistence is None
+        persistence_drained = persistence is None
         if persistence is not None:
             try:
-                drained = persistence.barrier(timeout=2.0) and not persistence.failed
+                persistence_drained = persistence.barrier(timeout=2.0) and not persistence.failed
             except Exception as error:
-                drained = False
+                persistence_drained = False
                 self._logger.warning(f"Model persistence barrier failed: {error}")
-        self._persistence_drained = drained
+        drained = trajectory_drained and persistence_drained
         if not drained:
             self.mark_evidence_unavailable()
         return drained
@@ -725,11 +734,7 @@ class HoldLearningRuntime:
         """Submit one completed frame while retaining its exact immutable identity."""
         if self._seed_warmup_remaining > 0:
             trajectory = self._learning_trajectory
-            replay = (
-                None
-                if trajectory is None
-                else getattr(trajectory, "observe_hold_frame", None)
-            )
+            replay = None if trajectory is None else getattr(trajectory, "observe_hold_frame", None)
             replayed_exactly = False
             if callable(replay):
                 replay(observation, replay_only=True)
@@ -739,15 +744,8 @@ class HoldLearningRuntime:
                     None,
                 )
                 anchor = anchor_reader() if callable(anchor_reader) else None
-                replayed_exactly = (
-                    isinstance(anchor, tuple)
-                    and anchor[0] == round(observation.frame_end_s * 1_000)
-                )
-            if (
-                replayed_exactly
-                and observation.probe_valid
-                and observation.continuous
-            ):
+                replayed_exactly = isinstance(anchor, tuple) and anchor[0] == round(observation.frame_end_s * 1_000)
+            if replayed_exactly and observation.probe_valid and observation.continuous:
                 self._seed_warmup_remaining -= 1
             return
         self._submit_calibration_frame_evidence(observation)
@@ -898,9 +896,7 @@ class HoldLearningRuntime:
                 try:
                     trajectory.observe_hold_frame(delivered)
                 except Exception as error:
-                    self._logger.warning(
-                        f"Learning trajectory observation failed: {error}"
-                    )
+                    self._logger.warning(f"Learning trajectory observation failed: {error}")
             records: list[_TraceRecord] = [(TraceEventKind.MODEL_OBSERVATION, observation_payload)]
             if evaluation is not None:
                 records.append((TraceEventKind.MODEL_EVALUATION, evaluation))

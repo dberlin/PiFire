@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Iterator, Mapping, Sequence
+from dataclasses import asdict
 from dataclasses import dataclass as std_dataclass
 from dataclasses import field as std_field
 from enum import StrEnum
@@ -43,9 +44,7 @@ type Digest = Annotated[
 type JsonValue = str | int | float | bool | None | dict[str, JsonValue] | list[JsonValue]
 
 
-type FrozenJsonValue = (
-    str | int | float | bool | None | FrozenJsonArray | FrozenJsonObject
-)
+type FrozenJsonValue = str | int | float | bool | None | FrozenJsonArray | FrozenJsonObject
 
 
 @std_dataclass(frozen=True, slots=True, eq=False)
@@ -59,14 +58,10 @@ class FrozenJsonArray(Sequence[FrozenJsonValue]):
         if type(raw_items) not in (tuple, list):
             raise ValueError("frozen JSON array items must be a tuple or list")
         items = cast(tuple[object, ...] | list[object], raw_items)
-        frozen = tuple(
-            _validated_frozen_json_value(item, context="frozen JSON array") for item in items
-        )
+        frozen = tuple(_validated_frozen_json_value(item, context="frozen JSON array") for item in items)
         object.__setattr__(self, "_items", frozen)
 
-    def __getitem__(
-        self, index: int | slice
-    ) -> FrozenJsonValue | tuple[FrozenJsonValue, ...]:
+    def __getitem__(self, index: int | slice) -> FrozenJsonValue | tuple[FrozenJsonValue, ...]:
         return self._items[index]
 
     def __len__(self) -> int:
@@ -106,9 +101,7 @@ class FrozenJsonObject(Mapping[str, FrozenJsonValue]):
             if key in seen:
                 raise ValueError("frozen JSON object keys must be unique")
             seen.add(key)
-            frozen_items.append(
-                (key, _validated_frozen_json_value(value, context="frozen JSON object"))
-            )
+            frozen_items.append((key, _validated_frozen_json_value(value, context="frozen JSON object")))
         frozen_items.sort(key=lambda item: item[0])
         object.__setattr__(self, "_items", tuple(frozen_items))
 
@@ -188,10 +181,7 @@ def _owned_json_value(value: object, *, context: str) -> JsonValue:
         mapping = cast(dict[object, object], value)
         if any(type(key) is not str for key in mapping):
             raise ValueError(f"{context} object keys must be strings")
-        return {
-            cast(str, key): _owned_json_value(item, context=context)
-            for key, item in mapping.items()
-        }
+        return {cast(str, key): _owned_json_value(item, context=context) for key, item in mapping.items()}
     raise ValueError(f"{context} must contain only JSON values")
 
 
@@ -326,25 +316,14 @@ class LearningTrajectoryFrame:
             raise ValueError("wall and monotonic frame durations must agree")
         if self.temperature_sample_monotonic_ms > self.monotonic_end_ms:
             raise ValueError("temperature sample must not follow its frame end")
-        monotonic_sample_age_ms = (
-            self.monotonic_end_ms - self.temperature_sample_monotonic_ms
-        )
+        monotonic_sample_age_ms = self.monotonic_end_ms - self.temperature_sample_monotonic_ms
         wall_sample_age_ms = self.wall_end_ms - self.temperature_sample_wall_ms
         if self.temperature_sample_age_ms != monotonic_sample_age_ms:
-            raise ValueError(
-                "temperature sample monotonic age must match the monotonic frame-end difference"
-            )
+            raise ValueError("temperature sample monotonic age must match the monotonic frame-end difference")
         if self.temperature_sample_wall_age_ms != wall_sample_age_ms:
-            raise ValueError(
-                "temperature sample wall age must match the wall frame-end difference"
-            )
-        if (
-            self.temperature_sample_clock_skew_ms
-            != wall_sample_age_ms - monotonic_sample_age_ms
-        ):
-            raise ValueError(
-                "temperature sample clock skew must equal wall age minus monotonic age"
-            )
+            raise ValueError("temperature sample wall age must match the wall frame-end difference")
+        if self.temperature_sample_clock_skew_ms != wall_sample_age_ms - monotonic_sample_age_ms:
+            raise ValueError("temperature sample clock skew must equal wall age minus monotonic age")
         if self.partial:
             if monotonic_duration_ms >= _FRAME_MILLISECONDS:
                 raise ValueError("partial trajectory frame must be shorter than twenty seconds")
@@ -427,11 +406,7 @@ def _frame_json(frame: LearningTrajectoryFrame) -> dict[str, JsonValue]:
         "complete": frame.complete,
         "continuous": frame.continuous,
         "partial": frame.partial,
-        "boundary_reason": (
-            frame.boundary_reason.value
-            if frame.boundary_reason is not None
-            else None
-        ),
+        "boundary_reason": (frame.boundary_reason.value if frame.boundary_reason is not None else None),
     }
     if frame.calibration_origin:
         payload["calibration_origin"] = True
@@ -521,13 +496,8 @@ class LearningTrajectorySegment:
 
     @model_validator(mode="after")
     def validate_segment(self) -> LearningTrajectorySegment:
-        if (
-            self.observation_schema_version
-            != TRAJECTORY_OBSERVATION_SCHEMA_VERSION
-        ):
-            raise ValueError(
-                "older trajectory observation schema is non-scoreable"
-            )
+        if self.observation_schema_version != TRAJECTORY_OBSERVATION_SCHEMA_VERSION:
+            raise ValueError("older trajectory observation schema is non-scoreable")
         if not self.pre_roll_frames and not self.scored_hold_frames:
             raise ValueError("trajectory segment requires at least one frame")
         if not self.trace_session_ids or len(set(self.trace_session_ids)) != len(self.trace_session_ids):
@@ -572,8 +542,7 @@ class LearningTrajectorySegment:
             if current.wall_start_ms < previous.wall_end_ms:
                 raise ValueError("pre-roll and scored wall intervals overlap")
             has_gap = (
-                current.monotonic_start_ms != previous.monotonic_end_ms
-                or current.wall_start_ms != previous.wall_end_ms
+                current.monotonic_start_ms != previous.monotonic_end_ms or current.wall_start_ms != previous.wall_end_ms
             )
             if has_gap and not (previous.partial and previous.boundary_reason is not None):
                 raise ValueError("pre-roll and scored frames must be contiguous")
@@ -602,17 +571,12 @@ class LearningTrajectorySegment:
                 self.hold_entry.monotonic_ms - first_scored.monotonic_start_ms
                 != self.hold_entry.wall_ms - first_scored.wall_start_ms
             ):
-                raise ValueError(
-                    "Hold-entry wall and monotonic offsets must agree inside the first scored interval"
-                )
+                raise ValueError("Hold-entry wall and monotonic offsets must agree inside the first scored interval")
             if (
-                self.hold_entry.monotonic_ms
-                > first_scored.temperature_sample_monotonic_ms
+                self.hold_entry.monotonic_ms > first_scored.temperature_sample_monotonic_ms
                 or self.hold_entry.wall_ms > first_scored.temperature_sample_wall_ms
             ):
-                raise ValueError(
-                    "Hold-entry sample must not follow the first scored temperature sample"
-                )
+                raise ValueError("Hold-entry sample must not follow the first scored temperature sample")
             if not self.hold_entry.probe_valid:
                 raise ValueError("Hold-entry anchor must be probe-valid")
         elif self.hold_entry is not None:
@@ -661,18 +625,14 @@ class LearningTrajectorySegment:
             "pre_roll_frames": [_frame_json(frame) for frame in self.pre_roll_frames],
             "hold_entry": _hold_entry_json(self.hold_entry) if self.hold_entry is not None else None,
             "scored_hold_frames": [_frame_json(frame) for frame in self.scored_hold_frames],
-            "generation_audit_ranges": [
-                trajectory_json_value(item) for item in self.generation_audit_ranges
-            ],
+            "generation_audit_ranges": [trajectory_json_value(item) for item in self.generation_audit_ranges],
             "start_monotonic_ms": self.start_monotonic_ms,
             "end_monotonic_ms": self.end_monotonic_ms,
             "start_wall_ms": self.start_wall_ms,
             "end_wall_ms": self.end_wall_ms,
             "start_sequence": self.start_sequence,
             "end_sequence": self.end_sequence,
-            "pre_roll_end_reason": (
-                self.pre_roll_end_reason.value if self.pre_roll_end_reason is not None else None
-            ),
+            "pre_roll_end_reason": (self.pre_roll_end_reason.value if self.pre_roll_end_reason is not None else None),
             "terminal_break_reason": (
                 self.terminal_break_reason.value if self.terminal_break_reason is not None else None
             ),
@@ -773,3 +733,18 @@ class ModelFitLineage:
         if self.result_status != "succeeded" and self.candidate_digest is not None:
             raise ValueError("only successful fit lineage may carry a candidate digest")
         return self
+
+
+def canonical_model_fit_lineage_digest(lineage: ModelFitLineage) -> str:
+    """Return the canonical digest of one complete immutable fit lineage."""
+
+    if not isinstance(lineage, ModelFitLineage):
+        raise TypeError("lineage must be a ModelFitLineage")
+    encoded = json.dumps(
+        asdict(lineage),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    return sha256(encoded).hexdigest()

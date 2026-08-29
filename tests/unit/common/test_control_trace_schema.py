@@ -17,11 +17,13 @@ from common.control_trace import (
     AppliedOutputPayload,
     CalibrationEventType,
     CalibrationTracePayload,
+    ChallengerProgressTracePayload,
     CompletedOriginPayload,
     ControllerBranch,
     ControllerType,
     ControlTraceDbRow,
     ControlTraceRecord,
+    EstimatorSeedTracePayload,
     FramedPulseFramePayload,
     GreyActivationLifecyclePayload,
     GreyCandidateAssessmentPayload,
@@ -44,6 +46,7 @@ from common.control_trace import (
     SessionPayload,
     TraceEventKind,
     TraceSetting,
+    TrajectorySegmentTracePayload,
 )
 from controller.applied_output import OutputSource
 
@@ -66,6 +69,9 @@ def test_trace_enums_have_exact_members():
         TraceEventKind.CANDIDATE_ASSESSMENT,
         TraceEventKind.ACTIVATION_LIFECYCLE,
         TraceEventKind.LEARNING_FAILURE,
+        TraceEventKind.ESTIMATOR_SEED,
+        TraceEventKind.TRAJECTORY_SEGMENT,
+        TraceEventKind.CHALLENGER_PROGRESS,
     }
     assert set(ActuationMode) == {ActuationMode.FRAMED_PULSE}
     assert set(ResultStaleState) == {ResultStaleState.FRESH, ResultStaleState.STALE}
@@ -91,6 +97,65 @@ def test_trace_enums_have_exact_members():
         ControllerBranch.RESET,
         ControllerBranch.OVERSHOOT,
     }
+
+
+def _estimator_seed_trace_payload() -> EstimatorSeedTracePayload:
+    return EstimatorSeedTracePayload(
+        delay_states=(0.25, 0.50),
+        chamber_temperature_c=110.0,
+        disturbance=0.0,
+        segment_id="segment-1",
+        pre_roll_digest="a" * 64,
+        pre_roll_frame_count=2,
+        required_frame_count=2,
+        status="exact",
+        role_generation=4,
+        candidate_generation=5,
+    )
+
+
+def _trajectory_segment_trace_payload() -> TrajectorySegmentTracePayload:
+    return TrajectorySegmentTracePayload(
+        segment_id="segment-1",
+        trajectory_session_id="trajectory-session-1",
+        trace_session_ids=("trace-session-1", "trace-session-2"),
+        cook_id="cook-1",
+        segment_schema_version=1,
+        observation_schema_version=2,
+        state="finalized",
+        source_trace_digest="b" * 64,
+        content_digest="c" * 64,
+        fit_partition_digest="d" * 64,
+        source_row_digest="e" * 64,
+        pre_roll_frame_count=2,
+        scored_hold_frame_count=5,
+        terminal_break_reason="stop",
+    )
+
+
+def _challenger_progress_trace_payload() -> ChallengerProgressTracePayload:
+    return ChallengerProgressTracePayload(
+        challenger_id="challenger-1",
+        challenger_revision=3,
+        phase="evaluating",
+        origin="passive-online",
+        policy="causal-auto",
+        incumbent_digest="1" * 64,
+        incumbent_generation=4,
+        candidate_digest="2" * 64,
+        candidate_generation=5,
+        corpus_digest="3" * 64,
+        lineage_digest="4" * 64,
+        result_digest="5" * 64,
+        evaluation_epoch=2,
+        evaluation_round=1,
+        consecutive_wins=1,
+        required_wins=2,
+        completed_horizons=(3, 15),
+        required_horizons=(3, 15, 45, 90, 180),
+        resumed_from_previous_cook=True,
+        reset_reason=None,
+    )
 
 
 def _payload_cases():
@@ -411,6 +476,21 @@ def _payload_cases():
             TraceEventKind.RECORDER_GAP,
             RecorderGapPayload(lost_record_count=3, gap_start_ms=101, gap_end_ms=102),
         ),
+        (
+            ControllerType.MPC,
+            TraceEventKind.ESTIMATOR_SEED,
+            _estimator_seed_trace_payload(),
+        ),
+        (
+            ControllerType.MPC,
+            TraceEventKind.TRAJECTORY_SEGMENT,
+            _trajectory_segment_trace_payload(),
+        ),
+        (
+            ControllerType.MPC,
+            TraceEventKind.CHALLENGER_PROGRESS,
+            _challenger_progress_trace_payload(),
+        ),
     ]
 
 
@@ -509,6 +589,265 @@ def test_every_payload_round_trips_through_pydantic_json(controller, event_kind,
     assert restored.payload.__class__.__slots__
     with pytest.raises(FrozenInstanceError):
         restored.payload.payload_type = "not-allowed"
+
+
+def _segmented_learning_trace_payload_cases():
+    return (
+        (TraceEventKind.ESTIMATOR_SEED, _estimator_seed_trace_payload()),
+        (TraceEventKind.TRAJECTORY_SEGMENT, _trajectory_segment_trace_payload()),
+        (TraceEventKind.CHALLENGER_PROGRESS, _challenger_progress_trace_payload()),
+    )
+
+
+@pytest.mark.parametrize(("event_kind", "payload"), _segmented_learning_trace_payload_cases())
+def test_schema_v8_segmented_learning_payloads_round_trip_through_db(event_kind, payload) -> None:
+    record = ControlTraceRecord(
+        ts_ms=25_000,
+        session_id="trace-session-2",
+        cook_id="cook-1",
+        controller=ControllerType.MPC,
+        event_kind=event_kind,
+        payload=payload,
+    )
+
+    row = record.to_db_row()
+    restored = ControlTraceRecord.from_db_row(row)
+
+    assert row.schema_version == 8
+    assert json.loads(row.payload)["payload_type"] == event_kind.value
+    assert restored == record
+    assert type(restored.payload) is type(payload)
+
+
+@pytest.mark.parametrize(
+    ("factory", "field"),
+    (
+        (_estimator_seed_trace_payload, "pre_roll_digest"),
+        (_trajectory_segment_trace_payload, "source_trace_digest"),
+        (_trajectory_segment_trace_payload, "content_digest"),
+        (_trajectory_segment_trace_payload, "fit_partition_digest"),
+        (_trajectory_segment_trace_payload, "source_row_digest"),
+        (_challenger_progress_trace_payload, "incumbent_digest"),
+        (_challenger_progress_trace_payload, "candidate_digest"),
+        (_challenger_progress_trace_payload, "corpus_digest"),
+        (_challenger_progress_trace_payload, "lineage_digest"),
+        (_challenger_progress_trace_payload, "result_digest"),
+    ),
+)
+def test_segmented_learning_payloads_require_lowercase_sha256_digests(factory, field) -> None:
+    with pytest.raises(ValidationError):
+        replace(factory(), **{field: "A" * 64})
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    (
+        {"pre_roll_frame_count": 3},
+        {"status": "exact", "pre_roll_frame_count": 1},
+        {"status": "short", "pre_roll_frame_count": 0},
+        {"status": "short", "pre_roll_frame_count": 2},
+        {"status": "absent", "pre_roll_frame_count": 1},
+        {"segment_id": ""},
+        {"required_frame_count": -1},
+        {"role_generation": -1},
+        {"candidate_generation": -1},
+        {"status": "unsupported"},
+        {"status": "uncertain", "delay_states": (0.25,)},
+    ),
+)
+def test_estimator_seed_trace_rejects_invalid_identity_status_and_counts(replacement) -> None:
+    with pytest.raises(ValidationError):
+        replace(_estimator_seed_trace_payload(), **replacement)
+
+
+@pytest.mark.parametrize(
+    ("status", "pre_roll_frame_count", "delay_states"),
+    (
+        ("exact", 2, (0.25, 0.50)),
+        ("short", 1, (0.25, 0.50)),
+        ("absent", 0, ()),
+        ("uncertain", 0, ()),
+    ),
+)
+def test_estimator_seed_trace_accepts_each_truthful_status(status, pre_roll_frame_count, delay_states) -> None:
+    payload = replace(
+        _estimator_seed_trace_payload(),
+        status=status,
+        pre_roll_frame_count=pre_roll_frame_count,
+        delay_states=delay_states,
+    )
+
+    assert payload.status == status
+    assert payload.pre_roll_frame_count == pre_roll_frame_count
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    (
+        {"segment_id": ""},
+        {"trajectory_session_id": ""},
+        {"trace_session_ids": ("trace-session-1", "")},
+        {"cook_id": ""},
+        {"segment_schema_version": 0},
+        {"observation_schema_version": 0},
+        {"trace_session_ids": ()},
+        {"trace_session_ids": ("trace-session-1", "trace-session-1")},
+        {"pre_roll_frame_count": -1},
+        {"scored_hold_frame_count": -1},
+        {"pre_roll_frame_count": 0, "scored_hold_frame_count": 0},
+        {"state": "open"},
+        {"state": "finalized", "terminal_break_reason": None},
+        {"state": "quarantined", "terminal_break_reason": None},
+    ),
+)
+def test_trajectory_segment_trace_rejects_invalid_links_counts_and_state(replacement) -> None:
+    with pytest.raises(ValidationError):
+        replace(_trajectory_segment_trace_payload(), **replacement)
+
+
+def test_trajectory_segment_trace_accepts_an_open_segment_without_a_terminal_reason() -> None:
+    payload = replace(
+        _trajectory_segment_trace_payload(),
+        state="open",
+        terminal_break_reason=None,
+    )
+
+    assert payload.state == "open"
+    assert payload.terminal_break_reason is None
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    (
+        {"challenger_id": ""},
+        {"origin": "passive-online", "policy": "cook-refit"},
+        {"challenger_revision": -1},
+        {"incumbent_generation": -1},
+        {"candidate_generation": -1},
+        {"evaluation_epoch": -1},
+        {"evaluation_round": -1},
+        {"consecutive_wins": 3},
+        {"required_wins": 0},
+        {"completed_horizons": (15, 3)},
+        {"completed_horizons": (3, 3)},
+        {"completed_horizons": (3, 360)},
+        {"required_horizons": (15, 3, 45, 90, 180)},
+        {"required_horizons": (3, 15, 15, 45, 90, 180)},
+        {"phase": "unsupported"},
+        {"reset_reason": ""},
+    ),
+)
+def test_challenger_progress_trace_rejects_inconsistent_authority_and_progress(
+    replacement,
+) -> None:
+    with pytest.raises(ValidationError):
+        replace(_challenger_progress_trace_payload(), **replacement)
+
+
+@pytest.mark.parametrize(
+    ("phase", "replacement"),
+    (
+        (
+            "built",
+            {
+                "evaluation_epoch": 0,
+                "evaluation_round": 0,
+                "consecutive_wins": 0,
+                "completed_horizons": (),
+                "resumed_from_previous_cook": False,
+            },
+        ),
+        ("evaluating", {}),
+        (
+            "qualified",
+            {
+                "consecutive_wins": 2,
+                "completed_horizons": (3, 15, 45, 90, 180),
+            },
+        ),
+        (
+            "activating",
+            {
+                "consecutive_wins": 2,
+                "completed_horizons": (3, 15, 45, 90, 180),
+            },
+        ),
+        ("retired", {"reset_reason": "incumbent-changed"}),
+    ),
+)
+def test_challenger_progress_trace_round_trips_every_durable_phase(phase, replacement) -> None:
+    payload = replace(
+        _challenger_progress_trace_payload(),
+        phase=phase,
+        **replacement,
+    )
+    record = ControlTraceRecord(
+        ts_ms=25_000,
+        session_id="trace-session-2",
+        cook_id="cook-1",
+        controller=ControllerType.MPC,
+        event_kind=TraceEventKind.CHALLENGER_PROGRESS,
+        payload=payload,
+    )
+
+    restored = ControlTraceRecord.model_validate_json(record.model_dump_json())
+
+    assert restored.payload == payload
+    assert restored.payload.phase == phase
+
+
+@pytest.mark.parametrize(
+    ("factory", "replacement"),
+    (
+        (_estimator_seed_trace_payload, {"pre_roll_frame_count": True}),
+        (_trajectory_segment_trace_payload, {"segment_schema_version": True}),
+        (_challenger_progress_trace_payload, {"resumed_from_previous_cook": 1}),
+    ),
+)
+def test_segmented_learning_payloads_reject_coercible_scalar_values(factory, replacement) -> None:
+    with pytest.raises(ValidationError):
+        replace(factory(), **replacement)
+
+
+@pytest.mark.parametrize(("event_kind", "payload"), _segmented_learning_trace_payload_cases())
+@pytest.mark.parametrize("controller", (ControllerType.PID, ControllerType.PID_SP))
+def test_segmented_learning_payloads_are_mpc_only(controller, event_kind, payload) -> None:
+    with pytest.raises(ValidationError, match="MPC-only"):
+        ControlTraceRecord(
+            ts_ms=25_000,
+            session_id="trace-session-2",
+            cook_id="cook-1",
+            controller=controller,
+            event_kind=event_kind,
+            payload=payload,
+        )
+
+
+@pytest.mark.parametrize(("event_kind", "payload"), _segmented_learning_trace_payload_cases())
+def test_segmented_learning_payloads_require_their_exact_event_kind(event_kind, payload) -> None:
+    with pytest.raises(ValidationError, match="event_kind"):
+        ControlTraceRecord(
+            ts_ms=25_000,
+            session_id="trace-session-2",
+            cook_id="cook-1",
+            controller=ControllerType.MPC,
+            event_kind=TraceEventKind.RECORDER_GAP,
+            payload=payload,
+        )
+
+
+@pytest.mark.parametrize(("event_kind", "payload"), _segmented_learning_trace_payload_cases())
+def test_schema_v7_rejects_segmented_learning_payloads(event_kind, payload) -> None:
+    with pytest.raises(ValidationError, match="schema version 7"):
+        ControlTraceRecord(
+            ts_ms=25_000,
+            session_id="trace-session-2",
+            cook_id="cook-1",
+            controller=ControllerType.MPC,
+            event_kind=event_kind,
+            schema_version=7,
+            payload=payload,
+        )
 
 
 def test_pid_sp_update_round_trips_owned_learning_snapshot() -> None:
@@ -1132,8 +1471,8 @@ def test_strict_db_json_path_still_decodes_valid_enum_values():
     assert ControlTraceRecord.from_db_row(row) == record
 
 
-def test_schema_four_has_one_canonical_model_evidence_contract():
-    assert TRACE_SCHEMA_VERSION == 7
+def test_schema_eight_has_one_canonical_model_evidence_contract():
+    assert TRACE_SCHEMA_VERSION == 8
     assert {"u_min", "u_max", "hold_cycle_seconds"}.isdisjoint(SessionPayload.__annotations__)
     assert {"pulse_slot_seconds", "pulse_frame_seconds"} <= SessionPayload.__annotations__.keys()
     assert "FAN_ASSIST" not in OutputSource.__members__

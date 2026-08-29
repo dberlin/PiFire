@@ -6,7 +6,7 @@ import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from types import MappingProxyType
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from common.control_trace import (
     ActuationMode,
@@ -15,6 +15,7 @@ from common.control_trace import (
     ControllerType,
     ControlTracePayload,
     ControlTraceRecord,
+    EstimatorSeedTracePayload,
     FramedPulseFramePayload,
     InhibitReason,
     LearningSnapshotPayload,
@@ -29,7 +30,9 @@ from common.control_trace import (
     SessionPayload,
     TraceEventKind,
     TraceSetting,
+    TrajectorySegmentTracePayload,
 )
+from common.learning_trajectory import LearningTrajectorySegment
 from common.persistence.protocols import JsonValue
 from controller.applied_output import (
     AppliedOutput,
@@ -41,6 +44,9 @@ from controller.base import MpcTraceDiagnostics, PidSpTraceDiagnostics, PidTrace
 from controller.model_promotion import ReachabilityState
 from controller.runtime.framed_pulse import FramedPulseCompletion
 from controller.runtime.runner import ControllerUpdateResult
+
+if TYPE_CHECKING:
+    from controller.mpc_model import EstimatorSeed
 
 
 class TraceRecorder(Protocol):
@@ -299,9 +305,25 @@ class ControlTraceSession:
         return identity
 
     def record(self, event_kind: TraceEventKind, payload: ControlTracePayload, timestamp_ms: int) -> bool:
-        recorder = self._recorder
         identity = self._identity
-        if recorder is None or identity is None or self._closed:
+        if identity is None:
+            return False
+        return self._record_for_identity(
+            identity,
+            event_kind,
+            payload,
+            timestamp_ms,
+        )
+
+    def _record_for_identity(
+        self,
+        identity: TraceSessionIdentity,
+        event_kind: TraceEventKind,
+        payload: ControlTracePayload,
+        timestamp_ms: int,
+    ) -> bool:
+        recorder = self._recorder
+        if recorder is None or self._closed:
             return False
         try:
             recorder.record(
@@ -319,6 +341,82 @@ class ControlTraceSession:
             return False
         self._recover_warning()
         return True
+
+    def record_estimator_seed(
+        self,
+        seed: EstimatorSeed,
+        *,
+        role_generation: int,
+        candidate_generation: int,
+        timestamp_ms: int,
+    ) -> bool:
+        return self.record(
+            TraceEventKind.ESTIMATOR_SEED,
+            EstimatorSeedTracePayload(
+                delay_states=tuple(float(value) for value in seed.delay_states),
+                chamber_temperature_c=float(seed.chamber_temperature_c),
+                disturbance=float(seed.disturbance),
+                segment_id=seed.segment_id,
+                pre_roll_digest=seed.pre_roll_digest,
+                pre_roll_frame_count=seed.pre_roll_frame_count,
+                required_frame_count=seed.required_frame_count,
+                status=seed.status,
+                role_generation=role_generation,
+                candidate_generation=candidate_generation,
+            ),
+            timestamp_ms,
+        )
+
+    def trajectory_segment_publisher(
+        self,
+        identity: TraceSessionIdentity,
+    ) -> Callable[[LearningTrajectorySegment], bool]:
+        """Capture immutable trace identity for delayed durable readback."""
+
+        def publish(segment: LearningTrajectorySegment) -> bool:
+            return self._record_trajectory_segment_for(identity, segment)
+
+        return publish
+
+    def record_trajectory_segment(
+        self,
+        segment: LearningTrajectorySegment,
+    ) -> bool:
+        identity = self._identity
+        if identity is None:
+            return False
+        return self._record_trajectory_segment_for(identity, segment)
+
+    def _record_trajectory_segment_for(
+        self,
+        identity: TraceSessionIdentity,
+        segment: LearningTrajectorySegment,
+    ) -> bool:
+        if identity.cook_id != segment.cook_id or segment.trace_session_ids != (identity.session_id,):
+            return False
+        return self._record_for_identity(
+            identity,
+            TraceEventKind.TRAJECTORY_SEGMENT,
+            TrajectorySegmentTracePayload(
+                segment_id=segment.segment_id,
+                trajectory_session_id=segment.trajectory_session_id,
+                trace_session_ids=segment.trace_session_ids,
+                cook_id=segment.cook_id,
+                segment_schema_version=segment.schema_version,
+                observation_schema_version=segment.observation_schema_version,
+                state=segment.state,
+                source_trace_digest=segment.source_trace_digest,
+                content_digest=segment.content_digest,
+                fit_partition_digest=segment.fit_partition_digest,
+                source_row_digest=segment.source_row_digest,
+                pre_roll_frame_count=len(segment.pre_roll_frames),
+                scored_hold_frame_count=len(segment.scored_hold_frames),
+                terminal_break_reason=(
+                    None if segment.terminal_break_reason is None else segment.terminal_break_reason.value
+                ),
+            ),
+            segment.end_wall_ms,
+        )
 
     def queue_model_event(self, payload: ModelEventPayload, timestamp_ms: int) -> None:
         self._pending_model_events.append((payload, timestamp_ms))
@@ -810,7 +908,8 @@ class ControlTraceSession:
         try:
             self._warning(message)
         except Exception:
-            pass
+            self._warning_active = True
+            return
         self._warning_active = True
 
     def _recover_warning(self) -> None:

@@ -123,10 +123,7 @@ def _segment(
         for sequence in range(start_sequence, start_sequence + pre_roll_count)
     )
     scored_start = start_sequence + pre_roll_count
-    scored = tuple(
-        _frame(sequence, epoch_ms=epoch_ms)
-        for sequence in range(scored_start, scored_start + scored_count)
-    )
+    scored = tuple(_frame(sequence, epoch_ms=epoch_ms) for sequence in range(scored_start, scored_start + scored_count))
     all_frames = (*pre_roll, *scored)
     hold_entry = _hold_entry(scored[0]) if scored else None
     return LearningTrajectorySegment(
@@ -235,12 +232,7 @@ def _seed_v8_database(path: Path) -> None:
 def _table_names(path: Path) -> set[str]:
     connection = sqlite3.connect(path)
     try:
-        return {
-            row[0]
-            for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
-        }
+        return {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     finally:
         connection.close()
 
@@ -291,9 +283,7 @@ def _scalar(path: Path, sql: str, parameters: tuple[object, ...] = ()) -> object
         connection.close()
 
 
-def _rows(
-    path: Path, sql: str, parameters: tuple[object, ...] = ()
-) -> list[tuple[Any, ...]]:
+def _rows(path: Path, sql: str, parameters: tuple[object, ...] = ()) -> list[tuple[Any, ...]]:
     connection = sqlite3.connect(path)
     try:
         return connection.execute(sql, parameters).fetchall()
@@ -334,12 +324,11 @@ def test_schema_v9_migration_is_additive_and_declares_corpus_tables(database_pat
         connection = datastore.connection()
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 9
         assert _TABLES <= _table_names(database_path)
-        assert connection.execute(
-            "SELECT value FROM kv WHERE key='preserved-v8'"
-        ).fetchone()[0] == '{"value":8}'
-        assert connection.execute(
-            "SELECT payload FROM legacy_v8_data WHERE identity='legacy-row'"
-        ).fetchone()[0] == "untouched"
+        assert connection.execute("SELECT value FROM kv WHERE key='preserved-v8'").fetchone()[0] == '{"value":8}'
+        assert (
+            connection.execute("SELECT payload FROM legacy_v8_data WHERE identity='legacy-row'").fetchone()[0]
+            == "untouched"
+        )
 
         assert {
             "singleton",
@@ -379,9 +368,7 @@ def test_schema_v9_migration_is_additive_and_declares_corpus_tables(database_pat
             "frame_digest",
         } <= _columns(database_path, "learning_trajectory_frame")
         frame_ddl = str(
-            connection.execute(
-                "SELECT sql FROM sqlite_master WHERE name='learning_trajectory_frame'"
-            ).fetchone()[0]
+            connection.execute("SELECT sql FROM sqlite_master WHERE name='learning_trajectory_frame'").fetchone()[0]
         )
         assert "payload_schema_version = 2" in frame_ddl
         assert {
@@ -401,9 +388,7 @@ def test_schema_v9_migration_is_additive_and_declares_corpus_tables(database_pat
             "completed_ms",
         } <= _columns(database_path, "learning_fit_run")
 
-        foreign_keys = connection.execute(
-            "PRAGMA foreign_key_list(learning_trajectory_frame)"
-        ).fetchall()
+        foreign_keys = connection.execute("PRAGMA foreign_key_list(learning_trajectory_frame)").fetchall()
         assert any(
             row[2] == "learning_trajectory_segment"
             and row[3] == "segment_id"
@@ -445,9 +430,10 @@ def test_schema_v9_migration_rolls_back_before_version_bump(
         try:
             assert check.execute("PRAGMA user_version").fetchone()[0] == 8
             assert not (_TABLES & _table_names(database_path))
-            assert check.execute(
-                "SELECT payload FROM legacy_v8_data WHERE identity='legacy-row'"
-            ).fetchone()[0] == "untouched"
+            assert (
+                check.execute("SELECT payload FROM legacy_v8_data WHERE identity='legacy-row'").fetchone()[0]
+                == "untouched"
+            )
         finally:
             check.close()
 
@@ -472,6 +458,50 @@ def test_schema_v9_migration_is_idempotent_and_preserves_trajectory_rows(
     assert reopened.begin_segment(current) == cursor
     assert reopened.status() == before
     assert _scalar(database_path, "PRAGMA user_version") == 9
+
+
+def test_finalized_import_batch_is_atomic_and_idempotent(
+    database_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = LearningTrajectoryRepository(str(database_path))
+    first = _segment(
+        "atomic-import-first",
+        scored_count=1,
+        state="finalized",
+    )
+    second = _segment(
+        "atomic-import-second",
+        epoch_ms=1_000_000,
+        scored_count=1,
+        state="finalized",
+    )
+    original_update = LearningTrajectoryRepository._update_segment
+
+    def crash_on_second(connection, segment, **kwargs):
+        if segment.segment_id == second.segment_id:
+            raise RuntimeError("injected atomic import crash")
+        return original_update(connection, segment, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            LearningTrajectoryRepository,
+            "_update_segment",
+            staticmethod(crash_on_second),
+        )
+        with pytest.raises(RuntimeError, match="injected atomic import crash"):
+            repository.import_finalized_segments((first, second))
+
+    assert repository.read_segment(first.segment_id) is None
+    assert repository.read_segment(second.segment_id) is None
+    assert repository.status().segment_count == 0
+
+    assert repository.import_finalized_segments((first, second)) == 2
+    imported_status = repository.status()
+    assert repository.import_finalized_segments((first, second)) == 0
+    assert repository.status() == imported_status
+    assert repository.read_segment(first.segment_id) == first
+    assert repository.read_segment(second.segment_id) == second
 
 
 def test_begin_append_finalize_updates_cursor_chain_and_corpus_atomically(
@@ -499,17 +529,12 @@ def test_begin_append_finalize_updates_cursor_chain_and_corpus_atomically(
 
     canonical_rows = _rows(
         database_path,
-        (
-            "SELECT canonical_json FROM learning_trajectory_frame "
-            "WHERE segment_id=? AND ordinal>=? ORDER BY ordinal"
-        ),
+        ("SELECT canonical_json FROM learning_trajectory_frame WHERE segment_id=? AND ordinal>=? ORDER BY ordinal"),
         (segment.segment_id, cursor.next_ordinal),
     )
     expected_digest = cursor.chain_digest
     for (canonical_json,) in canonical_rows:
-        expected_digest = sha256(
-            bytes.fromhex(expected_digest) + canonical_json.encode()
-        ).hexdigest()
+        expected_digest = sha256(bytes.fromhex(expected_digest) + canonical_json.encode()).hexdigest()
     assert receipt.cursor.chain_digest == expected_digest
 
     final = repository.finalize(receipt.cursor, TrajectoryBreakReason.STOP)
@@ -539,10 +564,7 @@ def test_per_frame_calibration_origin_round_trips_without_reclassifying_legacy_r
 
     canonical_rows = _rows(
         database_path,
-        (
-            "SELECT canonical_json FROM learning_trajectory_frame "
-            "WHERE segment_id=? AND kind='scored' ORDER BY ordinal"
-        ),
+        ("SELECT canonical_json FROM learning_trajectory_frame WHERE segment_id=? AND kind='scored' ORDER BY ordinal"),
         (segment.segment_id,),
     )
     stored = repository.read_segment(segment.segment_id)
@@ -595,13 +617,9 @@ def test_exact_duplicate_begin_append_and_finalize_are_idempotent(
     assert duplicate_append == first_append
     assert repository.status() == after_append
 
-    first_finalize = repository.finalize(
-        first_append.cursor, TrajectoryBreakReason.STOP
-    )
+    first_finalize = repository.finalize(first_append.cursor, TrajectoryBreakReason.STOP)
     after_finalize = repository.status()
-    duplicate_finalize = repository.finalize(
-        first_append.cursor, TrajectoryBreakReason.STOP
-    )
+    duplicate_finalize = repository.finalize(first_append.cursor, TrajectoryBreakReason.STOP)
     assert duplicate_finalize == first_finalize
     assert repository.status() == after_finalize
 
@@ -615,32 +633,30 @@ def test_conflicting_duplicate_interval_quarantines_without_overwrite(
     _append_scored(repository, cursor, (original,))
     stored_before = _scalar(
         database_path,
-        (
-            "SELECT canonical_json FROM learning_trajectory_frame "
-            "WHERE segment_id=? AND ordinal=1"
-        ),
+        ("SELECT canonical_json FROM learning_trajectory_frame WHERE segment_id=? AND ordinal=1"),
         (segment.segment_id,),
     )
 
-    conflicting = replace(
-        original, chamber_temperature_c=original.chamber_temperature_c + 5.0
-    )
+    conflicting = replace(original, chamber_temperature_c=original.chamber_temperature_c + 5.0)
     with pytest.raises(LearningTrajectoryConflictError, match="conflict"):
         _append_scored(repository, cursor, (conflicting,))
 
-    assert _scalar(
-        database_path,
-        (
-            "SELECT canonical_json FROM learning_trajectory_frame "
-            "WHERE segment_id=? AND ordinal=1"
-        ),
-        (segment.segment_id,),
-    ) == stored_before
-    assert _scalar(
-        database_path,
-        "SELECT state FROM learning_trajectory_segment WHERE segment_id=?",
-        (segment.segment_id,),
-    ) == "quarantined"
+    assert (
+        _scalar(
+            database_path,
+            ("SELECT canonical_json FROM learning_trajectory_frame WHERE segment_id=? AND ordinal=1"),
+            (segment.segment_id,),
+        )
+        == stored_before
+    )
+    assert (
+        _scalar(
+            database_path,
+            "SELECT state FROM learning_trajectory_segment WHERE segment_id=?",
+            (segment.segment_id,),
+        )
+        == "quarantined"
+    )
     assert repository.status().quarantined_segment_count == 1
 
 
@@ -657,11 +673,14 @@ def test_conflicting_duplicate_segment_identity_quarantines_original(
     with pytest.raises(LearningTrajectoryConflictError, match="conflict"):
         repository.begin_segment(conflicting)
 
-    assert _scalar(
-        database_path,
-        "SELECT state FROM learning_trajectory_segment WHERE segment_id=?",
-        (segment.segment_id,),
-    ) == "quarantined"
+    assert (
+        _scalar(
+            database_path,
+            "SELECT state FROM learning_trajectory_segment WHERE segment_id=?",
+            (segment.segment_id,),
+        )
+        == "quarantined"
+    )
     assert repository.status().segment_count == 1
     assert repository.status().quarantined_segment_count == 1
 
@@ -716,11 +735,14 @@ def test_append_rolls_back_frame_header_counters_and_revision_on_sql_failure(
     assert stored is not None
     assert stored.scored_hold_frames == ()
     assert repository.status() == status_before
-    assert _scalar(
-        database_path,
-        "SELECT COUNT(*) FROM learning_trajectory_frame WHERE segment_id=?",
-        (segment.segment_id,),
-    ) == 1
+    assert (
+        _scalar(
+            database_path,
+            "SELECT COUNT(*) FROM learning_trajectory_frame WHERE segment_id=?",
+            (segment.segment_id,),
+        )
+        == 1
+    )
 
 
 def test_break_and_begin_is_atomic_idempotent_and_preserves_new_epoch(
@@ -730,9 +752,7 @@ def test_break_and_begin_is_atomic_idempotent_and_preserves_new_epoch(
     current_cursor = repository.begin_segment(current)
     next_segment = _segment("break-next", epoch_ms=0)
 
-    next_cursor = repository.break_and_begin(
-        current_cursor, TrajectoryBreakReason.PROCESS_RESTART, next_segment
-    )
+    next_cursor = repository.break_and_begin(current_cursor, TrajectoryBreakReason.PROCESS_RESTART, next_segment)
     assert next_cursor.segment_id == next_segment.segment_id
     closed = repository.read_segment(current.segment_id)
     opened = repository.read_segment(next_segment.segment_id)
@@ -743,9 +763,9 @@ def test_break_and_begin_is_atomic_idempotent_and_preserves_new_epoch(
     assert opened.start_monotonic_ms < closed.start_monotonic_ms
 
     after = repository.status()
-    assert repository.break_and_begin(
-        current_cursor, TrajectoryBreakReason.PROCESS_RESTART, next_segment
-    ) == next_cursor
+    assert (
+        repository.break_and_begin(current_cursor, TrajectoryBreakReason.PROCESS_RESTART, next_segment) == next_cursor
+    )
     assert repository.status() == after
 
 
@@ -769,9 +789,7 @@ def test_break_and_begin_rolls_back_both_sides_when_new_begin_fails(
     )
 
     with pytest.raises(sqlite3.IntegrityError, match="injected next segment failure"):
-        repository.break_and_begin(
-            cursor, TrajectoryBreakReason.PROCESS_RESTART, next_segment
-        )
+        repository.break_and_begin(cursor, TrajectoryBreakReason.PROCESS_RESTART, next_segment)
 
     stored = repository.read_segment(current.segment_id)
     assert stored is not None and stored.state == "open"
@@ -846,9 +864,7 @@ def test_recovery_finalizes_open_segment_at_last_committed_frame_and_new_epoch_b
     assert recovered.end_monotonic_ms == committed[-1].monotonic_end_ms
 
     after_recovery = restarted.status()
-    duplicate_recovery = restarted.recover_open_segments(
-        now_ms=_WALL_EPOCH_MS + 20_000_001
-    )
+    duplicate_recovery = restarted.recover_open_segments(now_ms=_WALL_EPOCH_MS + 20_000_001)
     assert duplicate_recovery.finalized_segment_ids == ()
     assert duplicate_recovery.quarantined_segment_ids == ()
     assert duplicate_recovery.interrupted_fit_request_ids == ()
@@ -865,24 +881,15 @@ def test_recovery_finalizes_open_segment_at_last_committed_frame_and_new_epoch_b
     [
         (
             "header",
-            (
-                "UPDATE learning_trajectory_segment SET next_ordinal=next_ordinal+1 "
-                "WHERE segment_id='corrupt-header'"
-            ),
+            ("UPDATE learning_trajectory_segment SET next_ordinal=next_ordinal+1 WHERE segment_id='corrupt-header'"),
         ),
         (
             "count",
-            (
-                "UPDATE learning_trajectory_segment SET scored_count=scored_count+1 "
-                "WHERE segment_id='corrupt-count'"
-            ),
+            ("UPDATE learning_trajectory_segment SET scored_count=scored_count+1 WHERE segment_id='corrupt-count'"),
         ),
         (
             "digest",
-            (
-                f"UPDATE learning_trajectory_segment SET rolling_digest='{'0' * 64}' "
-                "WHERE segment_id='corrupt-digest'"
-            ),
+            (f"UPDATE learning_trajectory_segment SET rolling_digest='{'0' * 64}' WHERE segment_id='corrupt-digest'"),
         ),
         (
             "payload",
@@ -914,37 +921,41 @@ def test_recovery_quarantines_whole_corrupt_segment_and_preserves_authority(
     report = restarted.recover_open_segments(now_ms=_WALL_EPOCH_MS + 30_000_000)
     assert report.quarantined_segment_ids == (segment_id,)
     assert report.finalized_segment_ids == ()
-    assert _scalar(
-        database_path,
-        "SELECT state FROM learning_trajectory_segment WHERE segment_id=?",
-        (segment_id,),
-    ) == "quarantined"
-    assert _scalar(
-        database_path,
-        "SELECT COUNT(*) FROM learning_trajectory_frame WHERE segment_id=?",
-        (segment_id,),
-    ) == 2
+    assert (
+        _scalar(
+            database_path,
+            "SELECT state FROM learning_trajectory_segment WHERE segment_id=?",
+            (segment_id,),
+        )
+        == "quarantined"
+    )
+    assert (
+        _scalar(
+            database_path,
+            "SELECT COUNT(*) FROM learning_trajectory_frame WHERE segment_id=?",
+            (segment_id,),
+        )
+        == 2
+    )
     assert restarted.status().quarantined_segment_count == 1
-    assert _scalar(
-        database_path,
-        "SELECT value FROM kv WHERE key='mpc:active-model-authority'",
-    ) == '{"generation":4,"digest":"authority"}'
+    assert (
+        _scalar(
+            database_path,
+            "SELECT value FROM kv WHERE key='mpc:active-model-authority'",
+        )
+        == '{"generation":4,"digest":"authority"}'
+    )
 
     counts = _rows(
         database_path,
-        (
-            "SELECT pre_roll_count,scored_count,next_ordinal "
-            "FROM learning_trajectory_segment WHERE segment_id=?"
-        ),
+        ("SELECT pre_roll_count,scored_count,next_ordinal FROM learning_trajectory_segment WHERE segment_id=?"),
         (segment_id,),
     )
     assert counts == [(0, 0, 0)]
     assert restarted.status().pre_roll_count == 0
     assert restarted.status().scored_count == 0
     after_recovery = restarted.status()
-    duplicate_recovery = restarted.recover_open_segments(
-        now_ms=_WALL_EPOCH_MS + 30_000_001
-    )
+    duplicate_recovery = restarted.recover_open_segments(now_ms=_WALL_EPOCH_MS + 30_000_001)
     assert duplicate_recovery.finalized_segment_ids == ()
     assert duplicate_recovery.quarantined_segment_ids == ()
     assert duplicate_recovery.interrupted_fit_request_ids == ()
@@ -969,15 +980,16 @@ def test_recovery_revalidates_finalized_segments_and_excludes_corruption_from_sn
     report = reopened.recover_open_segments(now_ms=_WALL_EPOCH_MS + 50_000_000)
 
     assert report.quarantined_segment_ids == (corrupt.segment_id,)
-    assert _scalar(
-        database_path,
-        "SELECT state FROM learning_trajectory_segment WHERE segment_id=?",
-        (corrupt.segment_id,),
-    ) == "quarantined"
-    snapshot = reopened.snapshot_fit_corpus(healthy.fit_partition_digest)
-    assert tuple(item.segment_id for item in snapshot.identity.slices) == (
-        healthy.segment_id,
+    assert (
+        _scalar(
+            database_path,
+            "SELECT state FROM learning_trajectory_segment WHERE segment_id=?",
+            (corrupt.segment_id,),
+        )
+        == "quarantined"
     )
+    snapshot = reopened.snapshot_fit_corpus(healthy.fit_partition_digest)
+    assert tuple(item.segment_id for item in snapshot.identity.slices) == (healthy.segment_id,)
 
 
 def test_reopen_rebuilds_retained_counts_from_physical_frame_kinds(
@@ -988,10 +1000,7 @@ def test_reopen_rebuilds_retained_counts_from_physical_frame_kinds(
     repository.begin_segment(segment)
     _execute(
         database_path,
-        (
-            "UPDATE learning_trajectory_corpus SET "
-            "pre_roll_count=9999,scored_count=9999 WHERE singleton=1"
-        ),
+        ("UPDATE learning_trajectory_corpus SET pre_roll_count=9999,scored_count=9999 WHERE singleton=1"),
     )
 
     reopened = LearningTrajectoryRepository(str(database_path))
@@ -1077,16 +1086,10 @@ def test_delayed_break_retry_returns_advanced_next_segment_cursor(
     current = _segment("delayed-break-current")
     current_cursor = repository.begin_segment(current)
     next_segment = _segment("delayed-break-next", epoch_ms=1_000_000)
-    next_cursor = repository.break_and_begin(
-        current_cursor, TrajectoryBreakReason.PROCESS_RESTART, next_segment
-    )
-    advanced = _append_scored(
-        repository, next_cursor, (_frame(1, epoch_ms=1_000_000),)
-    )
+    next_cursor = repository.break_and_begin(current_cursor, TrajectoryBreakReason.PROCESS_RESTART, next_segment)
+    advanced = _append_scored(repository, next_cursor, (_frame(1, epoch_ms=1_000_000),))
 
-    retried = repository.break_and_begin(
-        current_cursor, TrajectoryBreakReason.PROCESS_RESTART, next_segment
-    )
+    retried = repository.break_and_begin(current_cursor, TrajectoryBreakReason.PROCESS_RESTART, next_segment)
 
     assert retried == advanced.cursor
     assert repository.status().quarantined_segment_count == 0
@@ -1104,19 +1107,14 @@ def test_break_and_begin_auto_rolls_a_full_next_segment_and_returns_rolled_curso
         scored_count=180,
     )
 
-    rolled_cursor = repository.break_and_begin(
-        current_cursor, TrajectoryBreakReason.PROCESS_RESTART, full_next
-    )
+    rolled_cursor = repository.break_and_begin(current_cursor, TrajectoryBreakReason.PROCESS_RESTART, full_next)
 
     assert rolled_cursor.segment_id != full_next.segment_id
     stored_next = repository.read_segment(full_next.segment_id)
     stored_roll = repository.read_segment(rolled_cursor.segment_id)
     assert stored_next is not None and stored_roll is not None
     assert stored_next.state == "finalized"
-    assert (
-        stored_next.terminal_break_reason
-        is TrajectoryBreakReason.RETENTION_ROLLOVER
-    )
+    assert stored_next.terminal_break_reason is TrajectoryBreakReason.RETENTION_ROLLOVER
     assert stored_roll.state == "open"
     assert len(stored_roll.pre_roll_frames) == 180
     assert stored_roll.scored_hold_frames == ()
@@ -1134,14 +1132,14 @@ def test_append_operation_receipts_are_deterministically_bounded_per_retained_se
             scored=(_frame(sequence),),
         ).cursor
 
-    assert _scalar(
-        database_path,
-        (
-            "SELECT COUNT(*) FROM learning_trajectory_operation_receipt "
-            "WHERE source_segment_id=?"
-        ),
-        (segment.segment_id,),
-    ) <= repository.operation_receipt_limit_per_segment
+    assert (
+        _scalar(
+            database_path,
+            ("SELECT COUNT(*) FROM learning_trajectory_operation_receipt WHERE source_segment_id=?"),
+            (segment.segment_id,),
+        )
+        <= repository.operation_receipt_limit_per_segment
+    )
 
 
 def test_earliest_one_frame_append_receipt_survives_auto_roll_until_source_eviction(
@@ -1225,11 +1223,14 @@ def test_scored_retention_evicts_oldest_finalized_whole_segment_and_never_open(
     assert repository.read_segment(first_id) is None
     opened = repository.read_segment(open_id)
     assert opened is not None and opened.state == "open"
-    assert _scalar(
-        database_path,
-        "SELECT COUNT(*) FROM learning_trajectory_frame WHERE segment_id=?",
-        (first_id,),
-    ) == 0
+    assert (
+        _scalar(
+            database_path,
+            "SELECT COUNT(*) FROM learning_trajectory_frame WHERE segment_id=?",
+            (first_id,),
+        )
+        == 0
+    )
 
     retained = repository.read_segment("scored-001")
     assert retained is not None
@@ -1281,10 +1282,13 @@ def test_segment_cap_uses_end_wall_then_identity_and_never_evicts_open(
     assert repository.read_segment("segment-001") is not None
     stored_open = repository.read_segment(open_segment.segment_id)
     assert stored_open is not None and stored_open.state == "open"
-    assert _scalar(
-        database_path,
-        "SELECT COUNT(*) FROM learning_trajectory_frame WHERE segment_id='segment-000'",
-    ) == 0
+    assert (
+        _scalar(
+            database_path,
+            "SELECT COUNT(*) FROM learning_trajectory_frame WHERE segment_id='segment-000'",
+        )
+        == 0
+    )
 
 
 def test_retention_eviction_rolls_back_triggering_begin_and_counters_on_failure(
@@ -1310,10 +1314,13 @@ def test_retention_eviction_rolls_back_triggering_begin_and_counters_on_failure(
     assert repository.status() == before
     assert repository.read_segment("rollback-retention-overflow") is None
     assert repository.read_segment("rollback-retention-000") is not None
-    assert _scalar(
-        database_path,
-        "SELECT COUNT(*) FROM learning_trajectory_segment",
-    ) == 256
+    assert (
+        _scalar(
+            database_path,
+            "SELECT COUNT(*) FROM learning_trajectory_segment",
+        )
+        == 256
+    )
 
 
 def test_randomized_retention_holds_after_every_append_with_fixed_seed(
@@ -1332,8 +1339,7 @@ def test_randomized_retention_holds_after_every_append_with_fixed_seed(
         cursor = repository.begin_segment(segment)
 
         pre_roll = tuple(
-            _frame(sequence, epoch_ms=epoch_ms, effective_mode="Smoke")
-            for sequence in range(1, pre_roll_count)
+            _frame(sequence, epoch_ms=epoch_ms, effective_mode="Smoke") for sequence in range(1, pre_roll_count)
         )
         offset = 0
         while offset < len(pre_roll):
@@ -1349,8 +1355,7 @@ def test_randomized_retention_holds_after_every_append_with_fixed_seed(
             assert repository.read_segment(cursor.segment_id) is not None
 
         scored = tuple(
-            _frame(sequence, epoch_ms=epoch_ms)
-            for sequence in range(pre_roll_count, pre_roll_count + scored_count)
+            _frame(sequence, epoch_ms=epoch_ms) for sequence in range(pre_roll_count, pre_roll_count + scored_count)
         )
         offset = 0
         while offset < len(scored):
@@ -1408,8 +1413,7 @@ def test_snapshot_open_prefix_is_immutable_while_later_frames_append_and_reopens
     snapshot = repository.snapshot_fit_corpus(second.fit_partition_digest)
     original_identity = snapshot.identity
     original_sequences = tuple(
-        tuple(frame.sequence for frame in segment.scored_hold_frames)
-        for segment in snapshot.segments
+        tuple(frame.sequence for frame in segment.scored_hold_frames) for segment in snapshot.segments
     )
 
     later = _frame(2, epoch_ms=1_000_000)
@@ -1421,21 +1425,17 @@ def test_snapshot_open_prefix_is_immutable_while_later_frames_append_and_reopens
     )
 
     assert snapshot.identity == original_identity
-    assert tuple(
-        tuple(frame.sequence for frame in segment.scored_hold_frames)
-        for segment in snapshot.segments
-    ) == original_sequences
+    assert (
+        tuple(tuple(frame.sequence for frame in segment.scored_hold_frames) for segment in snapshot.segments)
+        == original_sequences
+    )
     assert historical.identity == original_identity
     assert tuple(item.segment_id for item in snapshot.identity.slices) == (
         "snapshot-a",
         "snapshot-b",
     )
-    assert current.identity.slices[-1].through_ordinal == (
-        snapshot.identity.slices[-1].through_ordinal + 1
-    )
-    assert snapshot.identity.corpus_digest == canonical_trajectory_digest(
-        _corpus_payload(snapshot.identity)
-    )
+    assert current.identity.slices[-1].through_ordinal == (snapshot.identity.slices[-1].through_ordinal + 1)
+    assert snapshot.identity.corpus_digest == canonical_trajectory_digest(_corpus_payload(snapshot.identity))
 
 
 def test_fit_manifest_is_unique_ordered_bounded_and_has_exact_digest(
@@ -1460,9 +1460,7 @@ def test_fit_manifest_is_unique_ordered_bounded_and_has_exact_digest(
     assert len(set(segment_ids)) == len(segment_ids)
     assert segment_ids == tuple(f"manifest-{index:03d}" for index in range(256))
     assert all(isinstance(item, FitCorpusSlice) for item in slices)
-    assert snapshot.identity.corpus_digest == canonical_trajectory_digest(
-        _corpus_payload(snapshot.identity)
-    )
+    assert snapshot.identity.corpus_digest == canonical_trajectory_digest(_corpus_payload(snapshot.identity))
 
 
 def test_fit_run_queued_running_success_failure_stale_and_conflicting_completion(
@@ -1478,20 +1476,14 @@ def test_fit_run_queued_running_success_failure_stale_and_conflicting_completion
     assert queued.status == "queued"
     assert repository.record_fit_request(snapshot, queued_lineage) == queued
 
-    running = repository.record_fit_request(
-        snapshot, replace(queued_lineage, result_status="running")
-    )
+    running = repository.record_fit_request(snapshot, replace(queued_lineage, result_status="running"))
     assert running.status == "running"
     candidate = _digest("candidate-success")
-    succeeded = repository.complete_fit(
-        queued.request_id, candidate_digest=candidate, error=None
-    )
+    succeeded = repository.complete_fit(queued.request_id, candidate_digest=candidate, error=None)
     assert succeeded.status == "succeeded"
     assert succeeded.candidate_digest == candidate
     assert succeeded.error is None
-    assert repository.complete_fit(
-        queued.request_id, candidate_digest=candidate, error=None
-    ) == succeeded
+    assert repository.complete_fit(queued.request_id, candidate_digest=candidate, error=None) == succeeded
     with pytest.raises(LearningTrajectoryConflictError, match="conflict"):
         repository.complete_fit(
             queued.request_id,
@@ -1501,18 +1493,14 @@ def test_fit_run_queued_running_success_failure_stale_and_conflicting_completion
 
     failed_lineage = _lineage(snapshot, "fit-failure", status="running")
     repository.record_fit_request(snapshot, failed_lineage)
-    failed = repository.complete_fit(
-        failed_lineage.request_id, candidate_digest=None, error="solver failed"
-    )
+    failed = repository.complete_fit(failed_lineage.request_id, candidate_digest=None, error="solver failed")
     assert failed.status == "failed"
     assert failed.candidate_digest is None
     assert failed.error == "solver failed"
 
     stale_lineage = _lineage(snapshot, "fit-stale")
     repository.record_fit_request(snapshot, stale_lineage)
-    repository.record_fit_request(
-        snapshot, replace(stale_lineage, result_status="running")
-    )
+    repository.record_fit_request(snapshot, replace(stale_lineage, result_status="running"))
     stale = repository.mark_fit_stale(stale_lineage.request_id)
     assert stale.status == "stale"
     assert stale.candidate_digest is None
@@ -1526,9 +1514,7 @@ def test_fit_run_queued_running_success_failure_stale_and_conflicting_completion
         )
 
     with pytest.raises(ValueError, match="candidate|error"):
-        repository.complete_fit(
-            "fit-failure", candidate_digest=None, error=None
-        )
+        repository.complete_fit("fit-failure", candidate_digest=None, error=None)
     with pytest.raises(ValueError, match="candidate|error"):
         repository.complete_fit(
             "fit-failure",
@@ -1565,21 +1551,19 @@ def test_recovery_interrupts_queued_and_running_fit_runs(
     repository.begin_segment(segment)
     snapshot = repository.snapshot_fit_corpus(segment.fit_partition_digest)
     repository.record_fit_request(snapshot, _lineage(snapshot, "queued-fit"))
-    repository.record_fit_request(
-        snapshot, _lineage(snapshot, "running-fit", status="running")
-    )
+    repository.record_fit_request(snapshot, _lineage(snapshot, "running-fit", status="running"))
 
     restarted = LearningTrajectoryRepository(str(database_path))
     report = restarted.recover_open_segments(now_ms=_WALL_EPOCH_MS + 40_000_000)
     assert report.interrupted_fit_request_ids == ("queued-fit", "running-fit")
     connection = sqlite3.connect(database_path)
     try:
-        rows = connection.execute(
-            "SELECT request_id, status FROM learning_fit_run ORDER BY request_id"
-        ).fetchall()
+        rows = connection.execute("SELECT request_id, status FROM learning_fit_run ORDER BY request_id").fetchall()
     finally:
         connection.close()
     assert rows == [("queued-fit", "interrupted"), ("running-fit", "interrupted")]
+    assert restarted.replay_fit("queued-fit").identity == snapshot.identity
+    assert restarted.replay_fit("running-fit").identity == snapshot.identity
 
 
 def test_fit_replay_is_exact_until_retention_evicts_source_without_pinning_it(
@@ -1590,19 +1574,16 @@ def test_fit_replay_is_exact_until_retention_evicts_source_without_pinning_it(
     snapshot = repository.snapshot_fit_corpus(source.fit_partition_digest)
     original_identity = snapshot.identity
     original_sequences = tuple(
-        tuple(frame.sequence for frame in segment.scored_hold_frames)
-        for segment in snapshot.segments
+        tuple(frame.sequence for frame in segment.scored_hold_frames) for segment in snapshot.segments
     )
-    repository.record_fit_request(
-        snapshot, _lineage(snapshot, "evictable-fit", status="running")
-    )
+    repository.record_fit_request(snapshot, _lineage(snapshot, "evictable-fit", status="running"))
 
     replayed = repository.replay_fit("evictable-fit")
     assert replayed.identity == original_identity
-    assert tuple(
-        tuple(frame.sequence for frame in segment.scored_hold_frames)
-        for segment in replayed.segments
-    ) == original_sequences
+    assert (
+        tuple(tuple(frame.sequence for frame in segment.scored_hold_frames) for segment in replayed.segments)
+        == original_sequences
+    )
 
     for index in range(255):
         _finalize_segment(
@@ -1618,13 +1599,94 @@ def test_fit_replay_is_exact_until_retention_evicts_source_without_pinning_it(
 
     assert repository.read_segment(source.segment_id) is None
     assert snapshot.identity == original_identity
-    assert tuple(
-        tuple(frame.sequence for frame in segment.scored_hold_frames)
-        for segment in snapshot.segments
-    ) == original_sequences
+    assert (
+        tuple(tuple(frame.sequence for frame in segment.scored_hold_frames) for segment in snapshot.segments)
+        == original_sequences
+    )
     with pytest.raises(FitCorpusEvictedError, match="corpus-evicted") as error:
         repository.replay_fit("evictable-fit")
     assert error.value.code == "corpus-evicted"
+
+
+@pytest.mark.parametrize(
+    ("corruption_sql", "parameters"),
+    [
+        (
+            (
+                "UPDATE learning_fit_run SET manifest_json="
+                "json_set(manifest_json, '$.corpus_digest', ?) "
+                "WHERE request_id=?"
+            ),
+            ("0" * 64, "digest-validated-fit"),
+        ),
+        (
+            (
+                "UPDATE learning_fit_run SET manifest_json="
+                "json_set(manifest_json, '$.slices[0].content_digest', ?) "
+                "WHERE request_id=?"
+            ),
+            ("0" * 64, "digest-validated-fit"),
+        ),
+        (
+            (
+                "UPDATE learning_trajectory_segment SET header_json="
+                "json_set(header_json, '$.cadence_digest', ?) "
+                "WHERE segment_id=?"
+            ),
+            ("0" * 64, "fit-replay-corruption"),
+        ),
+        (
+            "UPDATE learning_trajectory_segment SET source_trace_digest=? WHERE segment_id=?",
+            ("0" * 64, "fit-replay-corruption"),
+        ),
+        (
+            "UPDATE learning_trajectory_segment SET fit_partition_digest=? WHERE segment_id=?",
+            ("0" * 64, "fit-replay-corruption"),
+        ),
+        (
+            "UPDATE learning_fit_run SET parent_incumbent_digest=? WHERE request_id=?",
+            ("0" * 64, "digest-validated-fit"),
+        ),
+        (
+            "UPDATE learning_fit_run SET parent_incumbent_generation=parent_incumbent_generation+1 WHERE request_id=?",
+            ("digest-validated-fit",),
+        ),
+        (
+            "UPDATE learning_fit_run SET candidate_generation=candidate_generation+1 WHERE request_id=?",
+            ("digest-validated-fit",),
+        ),
+        (
+            "UPDATE learning_fit_run SET trigger_origin=? WHERE request_id=?",
+            ("corrupt-origin", "digest-validated-fit"),
+        ),
+        (
+            "UPDATE learning_fit_run SET status='succeeded' WHERE request_id=?",
+            ("digest-validated-fit",),
+        ),
+        (
+            "UPDATE learning_fit_run SET candidate_digest=? WHERE request_id=?",
+            ("0" * 64, "digest-validated-fit"),
+        ),
+    ],
+)
+def test_fit_replay_rejects_manifest_and_segment_digest_corruption(
+    repository: LearningTrajectoryRepository,
+    database_path: Path,
+    corruption_sql: str,
+    parameters: tuple[object, ...],
+) -> None:
+    source = _segment("fit-replay-corruption", scored_count=1)
+    _finalize_segment(repository, source)
+    snapshot = repository.snapshot_fit_corpus(source.fit_partition_digest)
+    repository.record_fit_request(
+        snapshot,
+        _lineage(snapshot, "digest-validated-fit", status="running"),
+    )
+
+    _execute(database_path, corruption_sql, parameters)
+
+    with pytest.raises(FitCorpusEvictedError, match="corpus-evicted"):
+        repository.replay_fit("digest-validated-fit")
 
 
 def test_terminal_fit_manifests_use_repository_visible_deterministic_bound(
@@ -1638,12 +1700,8 @@ def test_terminal_fit_manifests_use_repository_visible_deterministic_bound(
 
     for index in range(limit + 3):
         request_id = f"terminal-fit-{index:04d}"
-        repository.record_fit_request(
-            snapshot, _lineage(snapshot, request_id, status="running")
-        )
-        repository.complete_fit(
-            request_id, candidate_digest=None, error=f"failure-{index:04d}"
-        )
+        repository.record_fit_request(snapshot, _lineage(snapshot, request_id, status="running"))
+        repository.complete_fit(request_id, candidate_digest=None, error=f"failure-{index:04d}")
 
     connection = sqlite3.connect(database_path)
     try:
@@ -1656,9 +1714,7 @@ def test_terminal_fit_manifests_use_repository_visible_deterministic_bound(
         connection.close()
     retained_request_ids = tuple(row[0] for row in rows)
     assert len(retained_request_ids) == limit
-    assert retained_request_ids == tuple(
-        f"terminal-fit-{index:04d}" for index in range(3, limit + 3)
-    )
+    assert retained_request_ids == tuple(f"terminal-fit-{index:04d}" for index in range(3, limit + 3))
     assert repository.replay_fit(f"terminal-fit-{limit + 2:04d}").identity == snapshot.identity
 
 
@@ -1683,3 +1739,24 @@ def test_older_frame_payload_schema_is_explicitly_non_scoreable(
 
     assert reopened.read_segment("old-frame-schema") is None
     assert reopened.status().quarantined_segment_count == 1
+
+
+def test_trace_publication_gap_quarantines_segment_from_fit_corpus(tmp_path: Path) -> None:
+    repository = LearningTrajectoryRepository(tmp_path / "trajectory.db")
+    segment = _segment(
+        "trace-gap",
+        pre_roll_count=1,
+        scored_count=2,
+        state="finalized",
+    )
+    assert repository.import_finalized_segments((segment,)) == 1
+
+    assert repository.quarantine_segment(
+        segment.segment_id,
+        TrajectoryBreakReason.RECORDER_GAP,
+    )
+
+    assert repository.read_segment(segment.segment_id) is None
+    status = repository.status()
+    assert status.quarantined_segment_count == 1
+    assert status.scored_count == 0

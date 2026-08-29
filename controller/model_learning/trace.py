@@ -46,15 +46,26 @@ def _to_c(value: float, unit: str) -> float:
     raise TraceSelectionError(f"unsupported recorded temperature unit {unit!r}")
 
 
-def learning_observations(records: Iterable[ControlTraceRecord]) -> tuple[FrameObservation, ...]:
+def learning_observations(
+    records: Iterable[ControlTraceRecord],
+    *,
+    required_schema_version: int = TRACE_SCHEMA_VERSION,
+) -> tuple[FrameObservation, ...]:
     """Return exact learning events, or a strictly reconstructable legacy history.
+
+    Live callers require the current trace schema by default.  Explicit archive
+    importers may select an older exact schema deliberately; accepting a schema
+    there is never inferred from the records themselves.
 
     The fallback deliberately accepts only complete framed-pulse frames paired with
     one controller-owned, same-revision update at the frame endpoint.  Anything
     less is evidence of an unknown input or temperature and must not be filled in.
     """
     trace = tuple(records)
-    session = _validate_session(trace)
+    session = _validate_session(
+        trace,
+        required_schema_version=required_schema_version,
+    )
     exact = tuple(record.payload for record in trace if isinstance(record.payload, ModelObservationPayload))
     if exact:
         return _exact_observations(exact, _allocation_payloads(trace))
@@ -86,10 +97,14 @@ def _allocation_result(payload: AllocationPayload | None) -> AllocationResult | 
     )
 
 
-def _validate_session(records: tuple[ControlTraceRecord, ...]) -> SessionPayload:
+def _validate_session(
+    records: tuple[ControlTraceRecord, ...],
+    *,
+    required_schema_version: int = TRACE_SCHEMA_VERSION,
+) -> SessionPayload:
     if not records:
         raise TraceSelectionError("selected control trace contains no records")
-    if any(record.schema_version != TRACE_SCHEMA_VERSION for record in records):
+    if any(record.schema_version != required_schema_version for record in records):
         raise TraceSelectionError("selected control trace has an evidence-incompatible schema version")
     if any(record.controller is not ControllerType.MPC for record in records):
         raise TraceSelectionError("selected control trace mixes controller types")
