@@ -114,10 +114,10 @@ _V9_INDEXES = {
 _V10_OBJECTS = {"model_challenger_state", "ix_model_challenger_identity"}
 
 
-def _assert_legacy_v10_schema_complete(path: Path) -> None:
+def _assert_current_schema_complete(path: Path) -> None:
     connection = sqlite3.connect(path)
     try:
-        assert connection.execute("PRAGMA user_version").fetchone() == (10,)
+        assert connection.execute("PRAGMA user_version").fetchone() == (datastore.DB_SCHEMA_VERSION,)
         objects = {
             (row[0], row[1])
             for row in connection.execute("SELECT name, type FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'")
@@ -134,6 +134,9 @@ def _assert_legacy_v10_schema_complete(path: Path) -> None:
         ).fetchone()[0]
         assert " ".join(trigger_sql.split()) == " ".join(datastore._logs_retention_ddl().split())
         assert not {name for name, _type in objects if name == "history_new" or name.endswith("_new")}
+        assert connection.execute("SELECT migration_set, name FROM _sqlite_migrations").fetchall() == [
+            ("pifire-schema", "v0011_adopt_sqlite_utils_registry")
+        ]
     finally:
         connection.close()
 
@@ -191,8 +194,8 @@ def test_simultaneous_schema_start_is_serialized_and_complete(tmp_path: Path, fi
         path = tmp_path / f"{fixture}-{attempt}.db"
         _seed_wal_database(path, version=fixture)
         reports = _run_simultaneous_schema_start(path)
-        assert reports == [("ok", 10)] * 6
-        _assert_legacy_v10_schema_complete(path)
+        assert reports == [("ok", datastore.DB_SCHEMA_VERSION)] * 6
+        _assert_current_schema_complete(path)
 
 
 def test_legacy_bootstrap_failure_rolls_back_the_entire_batch_and_retries(tmp_path: Path) -> None:
@@ -217,6 +220,6 @@ def test_legacy_bootstrap_failure_rolls_back_the_entire_batch_and_retries(tmp_pa
     )
 
     datastore._ensure_schema(connection)
-    assert connection.execute("PRAGMA user_version").fetchone() == (10,)
+    assert connection.execute("PRAGMA user_version").fetchone() == (datastore.DB_SCHEMA_VERSION,)
     connection.close()
-    _assert_legacy_v10_schema_complete(path)
+    _assert_current_schema_complete(path)

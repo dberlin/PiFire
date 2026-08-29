@@ -468,13 +468,16 @@ def test_schema_v10_migration_is_additive_and_preserves_every_v9_authority_row(
     try:
         connection = datastore.connection()
 
-        assert datastore.DB_SCHEMA_VERSION == 10
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 10
+        assert datastore.DB_SCHEMA_VERSION == 11
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == datastore.DB_SCHEMA_VERSION
         assert connection.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='model_challenger_state'"
         ).fetchone() == ("model_challenger_state",)
         assert connection.execute("SELECT COUNT(*) FROM model_challenger_state").fetchone() == (0,)
         assert _preserved_v9_rows(database_path) == preserved
+        assert connection.execute("SELECT migration_set, name FROM _sqlite_migrations").fetchall() == [
+            ("pifire-schema", "v0011_adopt_sqlite_utils_registry")
+        ]
     finally:
         datastore._reset_for_tests(None)
 
@@ -520,6 +523,18 @@ def test_schema_v10_migration_rolls_back_ddl_and_version_bump_together(
         assert _preserved_v9_rows(database_path) == preserved
 
         datastore._reset_for_tests(str(database_path))
-        assert datastore.connection().execute("PRAGMA user_version").fetchone()[0] == 10
+        connection = datastore.connection()
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == (datastore.DB_SCHEMA_VERSION)
+        assert connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='model_challenger_state'"
+        ).fetchone() == ("model_challenger_state",)
+        assert connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='ix_model_challenger_identity'"
+        ).fetchone() == ("ix_model_challenger_identity",)
+        assert connection.execute("SELECT COUNT(*) FROM model_challenger_state").fetchone() == (0,)
+        assert _preserved_v9_rows(database_path) == preserved
+        assert connection.execute("SELECT migration_set, name FROM _sqlite_migrations").fetchall() == [
+            ("pifire-schema", "v0011_adopt_sqlite_utils_registry")
+        ]
     finally:
         datastore._reset_for_tests(None)

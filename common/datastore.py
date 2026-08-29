@@ -461,6 +461,7 @@ def _ensure_schema(conn):
     with transaction(conn):
         database = schema_migrations.database_for_connection(conn)
         _ensure_legacy_schema(database)
+        schema_migrations.apply_registered_migrations(database)
 
 
 def _ensure_legacy_schema(database: Database) -> None:

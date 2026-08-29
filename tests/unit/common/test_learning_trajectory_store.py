@@ -198,13 +198,16 @@ def test_schema_v10_migration_from_v8_is_additive_and_declares_learning_tables(d
     datastore._reset_for_tests(str(database_path))
     try:
         connection = datastore.connection()
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 10
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == datastore.DB_SCHEMA_VERSION == 11
         assert _SCHEMA_V10_TABLES <= _table_names(database_path)
         assert connection.execute("SELECT value FROM kv WHERE key='preserved-v8'").fetchone()[0] == '{"value":8}'
         assert (
             connection.execute("SELECT payload FROM legacy_v8_data WHERE identity='legacy-row'").fetchone()[0]
             == "untouched"
         )
+        assert connection.execute("SELECT migration_set, name FROM _sqlite_migrations").fetchall() == [
+            ("pifire-schema", "v0011_adopt_sqlite_utils_registry")
+        ]
 
         assert {
             "singleton",
@@ -342,7 +345,7 @@ def test_schema_v10_migration_failure_rolls_back_entire_v8_batch_and_retries(
 
         datastore._reset_for_tests(str(database_path))
         connection = datastore.connection()
-        assert connection.execute("PRAGMA user_version").fetchone() == (10,)
+        assert connection.execute("PRAGMA user_version").fetchone() == (datastore.DB_SCHEMA_VERSION,)
         assert v9_v10_objects <= schema_object_names(connection)
         assert connection.execute(
             """
@@ -358,6 +361,9 @@ def test_schema_v10_migration_failure_rolls_back_entire_v8_batch_and_retries(
         assert connection.execute("SELECT payload FROM legacy_v8_data WHERE identity='legacy-row'").fetchone() == (
             "untouched",
         )
+        assert connection.execute("SELECT migration_set, name FROM _sqlite_migrations").fetchall() == [
+            ("pifire-schema", "v0011_adopt_sqlite_utils_registry")
+        ]
     finally:
         datastore._reset_for_tests(None)
 
@@ -369,6 +375,16 @@ def test_schema_v10_migration_is_idempotent_and_preserves_trajectory_rows(
     segment = _segment("migration-idempotency")
     cursor = repository.begin_segment(segment)
     before = repository.status()
+    audit_rows = _rows(
+        database_path,
+        "SELECT migration_set, name, applied_at FROM _sqlite_migrations",
+    )
+    assert len(audit_rows) == 1
+    assert audit_rows[0][0:2] == (
+        "pifire-schema",
+        "v0011_adopt_sqlite_utils_registry",
+    )
+    assert audit_rows[0][2]
 
     reopened = LearningTrajectoryRepository(str(database_path))
     current = reopened.read_segment(segment.segment_id)
@@ -376,8 +392,15 @@ def test_schema_v10_migration_is_idempotent_and_preserves_trajectory_rows(
     assert current == segment
     assert reopened.begin_segment(current) == cursor
     assert reopened.status() == before
-    assert _scalar(database_path, "PRAGMA user_version") == 10
+    assert _scalar(database_path, "PRAGMA user_version") == datastore.DB_SCHEMA_VERSION
     assert _SCHEMA_V10_TABLES <= _table_names(database_path)
+    assert (
+        _rows(
+            database_path,
+            "SELECT migration_set, name, applied_at FROM _sqlite_migrations",
+        )
+        == audit_rows
+    )
 
 
 def test_finalized_import_batch_is_atomic_and_idempotent(
