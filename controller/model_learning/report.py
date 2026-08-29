@@ -31,7 +31,6 @@ from .contracts import (
     CheckStatus,
     FitStatus,
     LearningStatus,
-    activation_policy_for_origin,
 )
 
 REPORT_SCHEMA_VERSION = 3
@@ -39,17 +38,6 @@ ARTIFACT_SCHEMA = "pifire-grey-learning-report/v3"
 _REPORT_CACHE_MAX_ENTRIES = 8
 _REPORT_CACHE: OrderedDict[str, LearningReport] = OrderedDict()
 _REPORT_CACHE_LOCK = threading.Lock()
-_LEGACY_COOK_REFIT_OUTCOMES = frozenset(
-    {
-        "disabled",
-        "insufficient",
-        "rejected",
-        "failed",
-        "ready-for-review",
-        "accepted-next-cook",
-        "checkpoint-failure",
-    }
-)
 
 
 def _json_value(value: object) -> object:
@@ -175,7 +163,8 @@ def _challenger_projection(value: object) -> dict[str, object]:
     preparation = _json_value(value.fit_preparation)
     if not isinstance(preparation, dict):
         raise TypeError("challenger fit preparation must be an object")
-    window = preparation.get("window")
+    fit_result = preparation.get("fit_result")
+    fit_result = fit_result if isinstance(fit_result, dict) else {}
     configuration = _json_value(value.candidate.configuration)
     if not isinstance(configuration, dict):
         raise TypeError("challenger candidate configuration must be an object")
@@ -196,11 +185,10 @@ def _challenger_projection(value: object) -> dict[str, object]:
         "policy": value.policy.value,
         "candidate_digest": value.candidate.model_digest,
         "candidate_generation": value.candidate.candidate_generation,
-        "candidate_parameters": candidate_parameters,
-        "incumbent_digest": value.incumbent.model_digest,
         "role_generation": value.incumbent.role_generation,
-        "decision_id": value.last_decision_id,
-        "window": window,
+        "candidate_parameters": candidate_parameters,
+        "fit_quality": fit_result.get("rmse_c"),
+        "identifiability": fit_result.get("identifiability"),
         "evaluation_epoch": value.evaluation_epoch,
         "evaluation_round": value.evaluation_round,
         "consecutive_wins": value.consecutive_wins,
@@ -281,13 +269,11 @@ def build_learning_report(
     current_records = tuple(record for record in records if record.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION)
 
     errors: list[str] = []
-    schema_invalidated = False
     if checkpoint_map:
         try:
             checkpoint_map = _validated_checkpoint(checkpoint_map)
         except TypeError, ValueError:
             errors.append("checkpoint-schema-invalid")
-            schema_invalidated = True
     elif checkpoint_required or (not activation and not live):
         errors.append("checkpoint-missing")
     challenger = _challenger_projection(challenger_state)
@@ -326,23 +312,6 @@ def build_learning_report(
         fit_status = FitStatus.FAILED.value
         errors.append("live-fit-status-invalid")
 
-    cook_refit_value = checkpoint_map.get("cook_refit", {"status": FitStatus.IDLE.value, "latest": None})
-    if not isinstance(cook_refit_value, Mapping) or set(cook_refit_value) != {"status", "latest"}:
-        raise ValueError("invalid cook_refit")
-    cook_refit_status = _enum_value(
-        cook_refit_value["status"],
-        FitStatus,
-        "cook_refit status",
-    )
-    cook_refit_latest = cook_refit_value["latest"]
-    if cook_refit_latest is not None and (
-        not isinstance(cook_refit_latest, str) or cook_refit_latest not in _LEGACY_COOK_REFIT_OUTCOMES
-    ):
-        raise ValueError("invalid cook_refit latest")
-    if cook_refit_latest == "ready-for-review":
-        cook_refit_latest = "rejected"
-    cook_refit_authorization = "not-run" if cook_refit_latest is None else "blocked"
-
     identities = checkpoint_map.get("identities")
     identities = identities if isinstance(identities, Mapping) else {}
     challenger_candidate_identity = _candidate_identity(challenger)
@@ -361,12 +330,25 @@ def build_learning_report(
     )
     activation_authority = activation if not current_candidate_identities or activation_matches_candidate else {}
     activation_projection = dict(activation_authority)
-    activation_policy = activation_projection.get("policy")
     activation_origin = activation_projection.get("origin")
-    if activation_policy in {"operator-reviewed", "passive-auto"}:
+    if activation_origin is not None:
         try:
-            activation_projection["policy"] = activation_policy_for_origin(CandidateOrigin(activation_origin)).value
-        except TypeError, ValueError:
+            activation_projection["origin"] = _enum_value(
+                activation_origin,
+                CandidateOrigin,
+                "activation origin",
+            )
+        except ValueError:
+            activation_projection.pop("origin", None)
+    activation_policy = activation_projection.get("policy")
+    if activation_policy is not None:
+        try:
+            activation_projection["policy"] = _enum_value(
+                activation_policy,
+                ActivationPolicy,
+                "activation policy",
+            )
+        except ValueError:
             activation_projection.pop("policy", None)
     phase = activation_authority.get(
         "phase",
@@ -534,15 +516,21 @@ def build_learning_report(
             errors.append(cast(str, live_failure["code"]))
         else:
             errors.append("live-failure-invalid")
+    invalidation_failure = None
     if invalidation is not None and not _superseded_invalidation(current_records, invalidation):
-        schema_invalidated = True
-    if schema_invalidated:
-        status = LearningStatus.SCHEMA_INVALIDATED.value
-    elif errors:
+        invalidation_payload = cast(SchemaInvalidationEvidence, invalidation.payload)
+        invalidation_failure = {
+            "code": "evidence-schema-invalidation",
+            "detail": (
+                f"{invalidation_payload.reason}; previous schema version {invalidation_payload.previous_schema_version}"
+            ),
+            "terminal": True,
+        }
+        errors.append("evidence-schema-invalidation")
+    if errors:
         status = LearningStatus.ERROR.value
 
     candidate_parameters = challenger.get("candidate_parameters")
-    candidate_metadata: Mapping[str, object] = {}
     rejection_reasons = [] if assessment is None or not challenger else list(assessment.rejection_reasons)
     assessment_projection = None
     if assessment is not None and challenger:
@@ -558,7 +546,7 @@ def build_learning_report(
             assessment_projection = _json_value(assessment)
             if isinstance(assessment_projection, dict):
                 assessment_projection["policy"] = candidate_policy
-    if errors and not schema_invalidated:
+    if errors:
         status = LearningStatus.ERROR.value
     blockers = list(dict.fromkeys([*rejection_reasons, *errors]))
     decision_id = challenger.get("decision_id")
@@ -608,22 +596,12 @@ def build_learning_report(
             "candidate_generation": challenger["candidate_generation"],
             "parameters": candidate_parameters,
             "parameter_deltas": live.get("parameter_deltas"),
-            "fit_quality": candidate_metadata.get("rmse"),
-            "identifiability": live.get("identifiability"),
+            "fit_quality": challenger.get("fit_quality"),
+            "identifiability": challenger.get("identifiability"),
             "assessment": assessment_projection,
         }
 
     lifecycle_projection = None if lifecycle is None else _json_value(lifecycle)
-    if isinstance(lifecycle_projection, dict) and lifecycle_projection.get("policy") in {
-        "operator-reviewed",
-        "passive-auto",
-    }:
-        try:
-            lifecycle_projection["policy"] = activation_policy_for_origin(
-                CandidateOrigin(lifecycle_projection.get("origin"))
-            ).value
-        except TypeError, ValueError:
-            lifecycle_projection = None
 
     payload: dict[str, object] = {
         "schema_version": REPORT_SCHEMA_VERSION,
@@ -641,17 +619,9 @@ def build_learning_report(
         "fit": {
             "status": fit_status,
             "request_id": None if fit_payload is None else fit_payload.request_id,
-            "window_id": None if fit_payload is None else fit_payload.window_id,
+            "fit_corpus_digest": (None if fit_payload is None else fit_payload.fit_corpus_digest),
             "error": None if fit_payload is None else fit_payload.error,
         },
-        "cook_refit": {
-            "status": cook_refit_status,
-            "latest": cook_refit_latest,
-            "final_status": cook_refit_latest or cook_refit_status,
-            "authorization": cook_refit_authorization,
-            "next_cook": False,
-        },
-        "window": challenger.get("window"),
         "checks": checks,
         "evaluation": evaluation_projection,
         "corpus": corpus_projection,
@@ -683,7 +653,11 @@ def build_learning_report(
         },
         "latest_lifecycle": lifecycle_projection,
         "failure": (
-            _json_value(live_failure) if live_failure is not None else None if failure is None else _json_value(failure)
+            _json_value(live_failure)
+            if live_failure is not None
+            else _json_value(failure)
+            if failure is not None
+            else invalidation_failure
         ),
         "gates": [
             {

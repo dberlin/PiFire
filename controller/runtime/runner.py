@@ -49,6 +49,7 @@ from controller.base import (
     MpcTraceDiagnostics,
     normalize_controller_output,
 )
+from controller.model_learning.contracts import CandidateOrigin
 from controller.mpc_allocator import AllocationResult
 from controller.runtime.model_lifecycle import ModelLifecycleRunner
 from controller.runtime.model_persistence import (
@@ -59,16 +60,14 @@ from controller.runtime.model_persistence import (
 if TYPE_CHECKING:
     from common.persistence.learning_trajectory import LearningTrajectoryRepository
     from controller.model_learning.calibration import CalibrationDecision
-    from controller.model_learning.contracts import CandidateOrigin, FrameObservation
+    from controller.model_learning.contracts import FrameObservation
     from controller.model_learning.grey_runtime import GreyLearningProcessOwner
     from controller.mpc_calibration import CalibrationCommand
     from controller.mpc_model import EstimatorSeed
 
 
 type StatusScalar = None | bool | int | float | str
-type StatusValue = (
-    StatusScalar | Mapping[str, StatusValue] | tuple[StatusValue, ...]
-)
+type StatusValue = StatusScalar | Mapping[str, StatusValue] | tuple[StatusValue, ...]
 
 
 @runtime_checkable
@@ -96,7 +95,6 @@ class _ActivationCore(Protocol):
     def advance_activation(self) -> bool: ...
 
     def terminate_mpc_activation(self, reason: str) -> None: ...
-
 
 
 @dataclass(frozen=True, slots=True)
@@ -280,11 +278,7 @@ def _freeze_status(status: Mapping[str, object]) -> Mapping[str, StatusValue]:
     return MappingProxyType({key: _freeze_status_value(value) for key, value in status.items()})
 
 
-type MutableStatusValue = (
-    StatusScalar
-    | dict[str, MutableStatusValue]
-    | list[MutableStatusValue]
-)
+type MutableStatusValue = StatusScalar | dict[str, MutableStatusValue] | list[MutableStatusValue]
 
 
 def _thaw_status_value(value: object) -> MutableStatusValue:
@@ -616,13 +610,13 @@ class ControllerRunner(ABC, ModelLifecycleRunner):
         """
         return None
 
-    def stop_for_refit(self) -> bool | None:
+    def stop_and_retain_for_teardown(self) -> bool | None:
         """Stop control ownership while retaining the joined core for teardown."""
         self.stop()
         return None
 
     def finish_teardown(self) -> None:
-        """Release resources retained by stop_for_refit()."""
+        """Release resources retained by stop_and_retain_for_teardown()."""
 
     @abstractmethod
     def stop(self): ...
@@ -789,7 +783,7 @@ class SyncControllerRunner(ControllerRunner):
     def runs_async(self) -> bool:
         return False
 
-    def stop_for_refit(self) -> bool | None:
+    def stop_and_retain_for_teardown(self) -> bool | None:
         if self._stopped:
             return self._retained_for_teardown
         self._stopped = True
@@ -996,6 +990,7 @@ class ThreadedControllerRunner(ControllerRunner):
         self._learning_poll_failure: str | None = None
         self._work_event = threading.Event()
         if wait_for_period is None:
+
             def wait_for_work(period: float) -> None:
                 self._work_event.wait(period)
                 self._work_event.clear()
@@ -1064,17 +1059,10 @@ class ThreadedControllerRunner(ControllerRunner):
                 poll = getattr(core, "poll_learning_off_path", None)
                 if callable(poll):
                     with self._lock:
-                        plan = (
-                            self._corpus_fit_plans[0]
-                            if self._corpus_fit_plans
-                            else None
-                        )
+                        plan = self._corpus_fit_plans[0] if self._corpus_fit_plans else None
                     if plan is not None and not plan.scheduled:
                         try:
-                            barrier_ready = (
-                                plan.before_schedule is None
-                                or bool(plan.before_schedule())
-                            )
+                            barrier_ready = plan.before_schedule is None or bool(plan.before_schedule())
                         except Exception as error:
                             self._fail_scheduled_corpus_fit(
                                 "corpus-barrier-failed",
@@ -1126,11 +1114,7 @@ class ThreadedControllerRunner(ControllerRunner):
                                             plan.ticket = ticket
                                             plan.scheduled = True
                     result = poll()
-                    delivery = (
-                        result[0]
-                        if isinstance(result, tuple)
-                        else result
-                    )
+                    delivery = result[0] if isinstance(result, tuple) else result
                     request = getattr(
                         getattr(delivery, "message", None),
                         "request",
@@ -1155,10 +1139,7 @@ class ThreadedControllerRunner(ControllerRunner):
                         )
                     ):
                         with self._lock:
-                            if (
-                                self._corpus_fit_plans
-                                and self._corpus_fit_plans[0] is plan
-                            ):
+                            if self._corpus_fit_plans and self._corpus_fit_plans[0] is plan:
                                 self._corpus_fit_plans.popleft()
             except Exception as error:
                 # Learning is optional control evidence. Fail its corpus
@@ -1170,9 +1151,7 @@ class ThreadedControllerRunner(ControllerRunner):
                 )
                 with self._lock:
                     self._corpus_fit_plans.clear()
-                    self._learning_poll_failure = (
-                        f"{type(error).__name__}: {error}"
-                    )
+                    self._learning_poll_failure = f"{type(error).__name__}: {error}"
             finally:
                 with self._learning_condition:
                     if self._learning_poll_core is core:
@@ -1333,17 +1312,11 @@ class ThreadedControllerRunner(ControllerRunner):
                             self._observations_discontinuous.discard(generation)
                         for sequence, _, _ in pending_observations:
                             self._inflight_observations.add(sequence)
-                        update_temp = (
-                            _UNSET
-                            if pending_observations or self._seed_pending_for_solve
-                            else self._temp
-                        )
+                        update_temp = _UNSET if pending_observations or self._seed_pending_for_solve else self._temp
                     else:
                         pending_observations = []
                         handoff_batch = False
-                        update_temp = (
-                            _UNSET if self._seed_pending_for_solve else self._temp
-                        )
+                        update_temp = _UNSET if self._seed_pending_for_solve else self._temp
                 if pending_observations:
                     observe = getattr(self._core, "observe_frame", None)
                     for sequence, generation, observation in pending_observations:
@@ -1731,10 +1704,7 @@ class ThreadedControllerRunner(ControllerRunner):
         if not callable(getattr(self._core, "_schedule_corpus_fit_ticket", None)):
             return False
         with self._lock:
-            live_dispatcher = (
-                not self._learning_stop_event.is_set()
-                and not self._controller_worker_finished
-            )
+            live_dispatcher = not self._learning_stop_event.is_set() and not self._controller_worker_finished
             if live_dispatcher:
                 self._corpus_fit_plans.append(
                     _CorpusFitPlan(origin, before_schedule),
@@ -1768,9 +1738,7 @@ class ThreadedControllerRunner(ControllerRunner):
             fail(code, error)
         except Exception as failure_error:
             with self._lock:
-                self._learning_poll_failure = (
-                    f"{type(failure_error).__name__}: {failure_error}"
-                )
+                self._learning_poll_failure = f"{type(failure_error).__name__}: {failure_error}"
 
     def _drain_scheduled_corpus_fit(self) -> None:
         try:
@@ -1783,10 +1751,7 @@ class ThreadedControllerRunner(ControllerRunner):
                     plan = self._corpus_fit_plans[0]
                 if not plan.scheduled:
                     try:
-                        barrier_ready = (
-                            plan.before_schedule is None
-                            or bool(plan.before_schedule())
-                        )
+                        barrier_ready = plan.before_schedule is None or bool(plan.before_schedule())
                     except Exception as error:
                         self._fail_scheduled_corpus_fit(
                             "corpus-barrier-failed",
@@ -1814,6 +1779,11 @@ class ThreadedControllerRunner(ControllerRunner):
                             self._corpus_fit_plans.clear()
                         return
                     if not isinstance(ticket, str) or not ticket:
+                        if plan.origin is CandidateOrigin.PASSIVE_ONLINE:
+                            with self._lock:
+                                if self._corpus_fit_plans and self._corpus_fit_plans[0] is plan:
+                                    self._corpus_fit_plans.popleft()
+                            continue
                         self._fail_scheduled_corpus_fit(
                             "fit-submission-failed",
                             "core rejected corpus fit scheduling",
@@ -1850,18 +1820,12 @@ class ThreadedControllerRunner(ControllerRunner):
                     and callable(consume_terminal)
                     and bool(consume_terminal(plan.ticket, plan.origin))
                 )
-                if (
-                    ticket_terminal
-                    or (
-                        getattr(request, "request_id", None) == plan.ticket
-                        and getattr(request, "origin", None) is plan.origin
-                    )
+                if ticket_terminal or (
+                    getattr(request, "request_id", None) == plan.ticket
+                    and getattr(request, "origin", None) is plan.origin
                 ):
                     with self._lock:
-                        if (
-                            self._corpus_fit_plans
-                            and self._corpus_fit_plans[0] is plan
-                        ):
+                        if self._corpus_fit_plans and self._corpus_fit_plans[0] is plan:
                             self._corpus_fit_plans.popleft()
                     continue
                 diagnostics = getattr(
@@ -1880,10 +1844,7 @@ class ThreadedControllerRunner(ControllerRunner):
                         with self._lock:
                             self._corpus_fit_plans.clear()
                         return
-                    if (
-                        isinstance(state, Mapping)
-                        and state.get("failure") is not None
-                    ):
+                    if isinstance(state, Mapping) and state.get("failure") is not None:
                         with self._lock:
                             self._corpus_fit_plans.clear()
                         return
@@ -1898,9 +1859,7 @@ class ThreadedControllerRunner(ControllerRunner):
                     )
                 self._corpus_fit_thread = successor
                 should_close = (
-                    successor is None
-                    and self._close_final_core_when_idle
-                    and self._controller_worker_finished
+                    successor is None and self._close_final_core_when_idle and self._controller_worker_finished
                 )
             if successor is not None:
                 successor.start()
@@ -1928,7 +1887,7 @@ class ThreadedControllerRunner(ControllerRunner):
                 for sequence in tuple(self._accepted_observations):
                     self._terminalize_observation_locked(sequence, "runner-stop-timeout")
 
-    def stop_for_refit(self) -> bool | None:
+    def stop_and_retain_for_teardown(self) -> bool | None:
         with self._lock:
             self._retain_core_for_teardown = True
             self._close_final_core_when_idle = False
@@ -1940,10 +1899,7 @@ class ThreadedControllerRunner(ControllerRunner):
         with self._lock:
             self._retain_core_for_teardown = False
             self._close_final_core_when_idle = True
-            should_close = (
-                self._controller_worker_finished
-                and self._corpus_fit_thread is None
-            )
+            should_close = self._controller_worker_finished and self._corpus_fit_thread is None
         if should_close:
             self._close_final_core()
 
@@ -1953,10 +1909,7 @@ class ThreadedControllerRunner(ControllerRunner):
             self._close_final_core_when_idle = True
         self._stop_and_join()
         with self._lock:
-            should_close = (
-                self._controller_worker_finished
-                and self._corpus_fit_thread is None
-            )
+            should_close = self._controller_worker_finished and self._corpus_fit_thread is None
         if should_close:
             self._close_final_core()
 
@@ -1991,16 +1944,12 @@ def _raise_banner(text, logger=None):
         errors.append(text)
         write_errors(ErrorKind.CONTROL, errors)
     except Exception:
-        logging.getLogger(__name__).exception(
-            "Could not persist controller failure banner"
-        )
+        logging.getLogger(__name__).exception("Could not persist controller failure banner")
     if logger is not None:
         try:
             logger.error(text)
         except Exception:
-            logging.getLogger(__name__).exception(
-                "Configured controller logger rejected failure banner"
-            )
+            logging.getLogger(__name__).exception("Configured controller logger rejected failure banner")
 
 
 def _dependency_hint(controller_type, settings):

@@ -47,7 +47,7 @@ from controller.runtime.runner import (
     ThreadedControllerRunner,
 )
 from tests.fakes.runner import FakeControllerRunner
-from tests.unit.common.test_learning_trajectory_store import _finalize_segment, _segment
+from tests.unit.common._learning_trajectory_helpers import _finalize_segment, _segment
 from tests.unit.runtime._persistence_helpers import _pair_phase_state
 from tests.unit.runtime.conftest import _off, _output
 
@@ -130,7 +130,6 @@ class _SharedPersistence(ModelPersistenceWorker):
             gap=None,
             wait=lambda _timeout=None: True,
         )
-
 
     def barrier(self, timeout=2.0):
         self.barrier_calls.append(timeout)
@@ -284,9 +283,7 @@ def test_persistence_failure_cannot_change_hold_actuator_outcome(hold_cycle) -> 
     assert accepting["final_evidence_available"]
     assert not failing["final_evidence_available"]
     checkpoint = ("pid_sp", {"revision": 1, "K": 700.0})
-    assert accepting["tick_checkpoints"] == failing["tick_checkpoints"] == [
-        checkpoint
-    ]
+    assert accepting["tick_checkpoints"] == failing["tick_checkpoints"] == [checkpoint]
     assert all(
         attempt == checkpoint
         for attempt in (
@@ -361,7 +358,16 @@ def test_mpc_setup_migrates_v3_before_restore_and_activation_reconcile(hold_cycl
     hold.setup()
 
     assert calls[:2] == ["migrate", "restore-load"]
-    assert runner.restored[0]["version"] == 4
+    restored = runner.restored[0]
+    assert restored["version"] == 6
+    assert restored["schema"] == "pifire-grey-learning/v6"
+    assert restored["active_pair"] is None
+    assert restored["challenger_authority"] is None
+    assert restored["activation"] == {
+        "phase": "aborted",
+        "pending_persistence": False,
+        "pending_swap": False,
+    }
 
 
 def test_mpc_setup_uses_default_migration_config_when_selected_config_is_malformed(
@@ -1203,6 +1209,7 @@ class _CrashRecoveryRunnerGate:
 )
 def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
     hold_cycle,
+    ds,
     monkeypatch,
     tmp_path,
     crash_boundary,
@@ -1261,9 +1268,7 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
             chamber_temperature_c=225.0,
             disturbance=0.0,
             segment_id="crash-recovery-incumbent",
-            pre_roll_digest=sha256(
-                f"crash-recovery:{incumbent.model_digest}".encode()
-            ).hexdigest(),
+            pre_roll_digest=sha256(f"crash-recovery:{incumbent.model_digest}".encode()).hexdigest(),
             pre_roll_frame_count=incumbent_seed_frames,
             required_frame_count=incumbent_seed_frames,
             status="exact",
@@ -1296,9 +1301,7 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
             chamber_temperature_c=225.0,
             disturbance=0.0,
             segment_id="crash-recovery-test",
-            pre_roll_digest=sha256(
-                f"crash-recovery:{candidate.model_digest}".encode()
-            ).hexdigest(),
+            pre_roll_digest=sha256(f"crash-recovery:{candidate.model_digest}".encode()).hexdigest(),
             pre_roll_frame_count=required_seed_frames,
             required_frame_count=required_seed_frames,
             status="exact",
@@ -1309,7 +1312,7 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
         incumbent=incumbent,
         candidate=candidate,
         origin=CandidateOrigin.PASSIVE_ONLINE,
-        policy=ActivationPolicy.PASSIVE_AUTO,
+        policy=ActivationPolicy.CAUSAL_AUTO,
         decision_id=f"crash-{crash_boundary}",
     )
 
@@ -1451,13 +1454,32 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
     assert first_core.active_control_pair is expected_precrash_pair
     assert first_core.activation_output_authorized is precrash_authorized
     assert (first_core.rollback_control_pair is incumbent_pair) is precrash_has_rollback
+    expected_durable_owner = candidate if durable_phase is ActivationPhase.ACTIVE else incumbent
     precrash_authority = read_model_activation(database_path=database_path)
     if durable_phase is None:
         assert precrash_authority is None
     else:
         assert precrash_authority is not None
         assert precrash_authority.phase == durable_phase.value
+        assert precrash_authority.origin == CandidateOrigin.PASSIVE_ONLINE.value
+        assert precrash_authority.policy == ActivationPolicy.CAUSAL_AUTO.value
+        assert precrash_authority.active_pair == expected_durable_owner
+        assert precrash_authority.incumbent_pair == incumbent
+        assert precrash_authority.candidate_pair == candidate
+        assert precrash_authority.rollback_pair == incumbent
     precrash_records = tuple(read_model_evidence(database_path=database_path))
+    if durable_phase is not None:
+        confidence_records = tuple(
+            record for record in precrash_records if isinstance(record.payload, ConfidenceDecisionEvidence)
+        )
+        assert len(confidence_records) == 1
+        confidence_authority = confidence_records[0]
+        assert confidence_authority.role_generation == incumbent.role_generation
+        assert confidence_authority.model_digest == candidate.model_digest
+        assert confidence_authority.provenance_digest == incumbent.model_digest
+        assert confidence_authority.payload.decision_id == prepared.decision_id
+        assert confidence_authority.payload.blocked is False
+        assert confidence_authority.payload.reason is None
     if not installs_candidate:
         candidate_pair.close()
     if first_boundary_runner is None:
@@ -1466,6 +1488,7 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
         assert first_boundary_gate is not None
         first_boundary_gate.open()
         first_boundary_runner.stop()
+    assert persistence_worker.close(timeout=1.0)
     first_runtime_handles = (
         incumbent_pair.estimator,
         incumbent_pair.solver,
@@ -1555,13 +1578,21 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
         elif durable_phase is not None:
             assert converged is not None
             assert converged.phase == durable_phase.value
+            assert converged.active_pair == expected_durable_owner
     finally:
         restart_gate.open()
         hold.ctx.clock.advance(400.0)
         hold.teardown(225.0)
+        runner.stop()
+        assert restart_worker.close(timeout=1.0)
     handles = (
         *_CrashRecoveryEstimator.created,
         *_CrashRecoverySolver.created,
     )
+    deadline = time.monotonic() + 1.0
+    while any(handle.closed == 0 for handle in handles) and time.monotonic() < deadline:
+        time.sleep(0.01)
     assert handles
-    assert all(type(handle.closed) is int and handle.closed == 1 for handle in handles)
+    assert all(type(handle.closed) is int and handle.closed == 1 for handle in handles), [
+        handle.closed for handle in handles
+    ]

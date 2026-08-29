@@ -19,10 +19,10 @@ from controller.model_learning.contracts import (
     CandidateOrigin,
     LearningStatus,
 )
-from tests.unit.common.test_model_challenger_store import (
+from tests.unit.common._model_challenger_helpers import (
     _manifest,
 )
-from tests.unit.common.test_model_challenger_store import (
+from tests.unit.common._model_challenger_helpers import (
     _state as _challenger_state,
 )
 from tests.unit.mpc._confidence_helpers import _qualifying, _rebuild, _record, _state
@@ -173,12 +173,6 @@ def test_distinct_role_and_candidate_generations_select_evidence_using_canonical
     assert report.generation == 9
     assert report.blockers == ()
     assert all(interval.replicate_count == 10_000 for interval in report.bootstrap_intervals)
-
-
-def test_cook_refit_also_does_not_inherit_operator_calibration_completeness() -> None:
-    report = _report(_qualifying(), origin=CandidateOrigin.COOK_REFIT)
-
-    assert "calibration-completeness" not in report.blockers
 
 
 def test_operator_calibration_requires_all_completed_probe_stages() -> None:

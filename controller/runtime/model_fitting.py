@@ -301,12 +301,8 @@ class GreyFitJob:
             raise ValueError(f"pre-roll rows must be bounded to {MAX_FIT_OBSERVATIONS}")
         if total_scored > MAX_FIT_OBSERVATIONS:
             raise ValueError(f"scored rows must be bounded to {MAX_FIT_OBSERVATIONS}")
-        first_sequence = min(int(segment.observation_sequences[0]) for segment in segments)
-        last_sequence = max(int(segment.observation_sequences[-1]) for segment in segments)
-        if self.request.window.first_observation_sequence > first_sequence:
-            raise ValueError("request window must include the first scored sequence")
-        if self.request.window.last_observation_sequence != last_sequence:
-            raise ValueError("request window must end at the last scored sequence")
+        if self.request.fit_corpus != self.corpus:
+            raise ValueError("request fit corpus must exactly match the job corpus")
         object.__setattr__(self, "segments", segments)
 
 
@@ -1451,55 +1447,43 @@ def stale_result_reasons(
     result: Any,
     *,
     request: Any,
-    current_window: Any,
-    current_candidate_generation: int,
+    current_identity: Any,
     current_origin: Any,
 ) -> tuple[str, ...]:
-    from controller.model_learning.contracts import FitRequest, FitResult, FitWindowIdentity
+    from controller.model_learning.contracts import FitRequest, FitResult
 
     if not isinstance(result, FitResult):
         raise TypeError("result must be a FitResult")
     if not isinstance(request, FitRequest):
         raise TypeError("request must be a FitRequest")
-    if not isinstance(current_window, FitWindowIdentity):
-        raise TypeError("current_window must be a FitWindowIdentity")
-    current_generation = _nonnegative_int(current_candidate_generation, "current_candidate_generation")
-    submitted = request.window
-    returned = result.window
+    if not isinstance(current_identity, LiveLearningIdentity):
+        raise TypeError("current_identity must be a LiveLearningIdentity")
+    returned = result.request
     reasons: list[str] = []
-    if result.origin != request.origin or current_origin != request.origin:
+    if returned.origin != request.origin or current_origin != request.origin:
         reasons.append("origin-changed")
-    if result.request_id != request.request_id:
+    if returned.request_id != request.request_id:
         reasons.append("request-changed")
-    if returned.session_id != submitted.session_id or current_window.session_id != submitted.session_id:
-        reasons.append("session-changed")
-    if returned.cook_id != submitted.cook_id or current_window.cook_id != submitted.cook_id:
-        reasons.append("cook-changed")
+    if returned.fit_corpus != request.fit_corpus:
+        reasons.append("corpus-changed")
     if (
-        returned.first_observation_sequence != submitted.first_observation_sequence
-        or returned.last_observation_sequence != submitted.last_observation_sequence
-        or current_window.first_observation_sequence != submitted.first_observation_sequence
-        or current_window.last_observation_sequence != submitted.last_observation_sequence
-    ):
-        reasons.append("window-changed")
-    if (
-        returned.configuration_digest != submitted.configuration_digest
-        or current_window.configuration_digest != submitted.configuration_digest
+        returned.configuration_digest != request.configuration_digest
+        or current_identity.configuration_digest != request.configuration_digest
     ):
         reasons.append("configuration-changed")
     if (
-        returned.incumbent_digest != submitted.incumbent_digest
-        or current_window.incumbent_digest != submitted.incumbent_digest
+        returned.parent_incumbent_digest != request.parent_incumbent_digest
+        or current_identity.incumbent_digest != request.parent_incumbent_digest
     ):
         reasons.append("incumbent-changed")
     if (
-        returned.role_generation != submitted.role_generation
-        or current_window.role_generation != submitted.role_generation
+        returned.parent_incumbent_generation != request.parent_incumbent_generation
+        or current_identity.role_generation != request.parent_incumbent_generation
     ):
         reasons.append("role-generation-changed")
     if (
-        result.candidate_generation != request.candidate_generation
-        or current_generation != request.candidate_generation
+        returned.candidate_generation != request.candidate_generation
+        or current_identity.candidate_generation != request.candidate_generation
     ):
         reasons.append("candidate-generation-changed")
     return tuple(reasons)
@@ -1787,19 +1771,17 @@ def handoff_candidate(
         blockers.append("consecutive-confidence")
     request = prepared.candidate.request
     if (
-        getattr(evaluation, "role_generation", None) != request.window.role_generation
+        getattr(evaluation, "role_generation", None) != request.parent_incumbent_generation
         or getattr(evaluation, "candidate_generation", None) != request.candidate_generation
     ):
         blockers.append("stale-generation")
-    if getattr(evaluation, "incumbent_digest", None) != request.window.incumbent_digest:
+    if getattr(evaluation, "incumbent_digest", None) != request.parent_incumbent_digest:
         blockers.append("incumbent-changed")
     if getattr(evaluation, "challenger_digest", None) != prepared.candidate_digest:
         blockers.append("challenger-changed")
     if not confidence_accepted:
         blockers.append("confidence")
     origin = request.origin
-    if origin is CandidateOrigin.COOK_REFIT:
-        raise ValueError("cook-refit handoff is not owned by this pipeline")
     policy = activation_policy_for_origin(origin)
     if origin is CandidateOrigin.PASSIVE_ONLINE and not online_enabled:
         blockers.append("online-disabled")
@@ -1833,18 +1815,12 @@ class LiveLearningIdentity:
     candidate_generation: int
 
     def __post_init__(self) -> None:
-        from controller.model_learning.contracts import FitWindowIdentity
-
-        # Reuse the neutral validator with an empty-but-valid sequence window.
-        FitWindowIdentity(
-            session_id=self.session_id,
-            cook_id=self.cook_id,
-            first_observation_sequence=0,
-            last_observation_sequence=0,
-            configuration_digest=self.configuration_digest,
-            incumbent_digest=self.incumbent_digest,
-            role_generation=self.role_generation,
-        )
+        if not isinstance(self.session_id, str) or not self.session_id.strip():
+            raise ValueError("session_id must be non-blank")
+        if self.cook_id is not None and (not isinstance(self.cook_id, str) or not self.cook_id.strip()):
+            raise ValueError("cook_id must be non-blank when present")
+        _digest(self.configuration_digest, "configuration_digest")
+        _digest(self.incumbent_digest, "incumbent_digest")
         object.__setattr__(
             self,
             "role_generation",
@@ -1854,19 +1830,6 @@ class LiveLearningIdentity:
             self,
             "candidate_generation",
             _nonnegative_int(self.candidate_generation, "candidate_generation"),
-        )
-
-    def window(self, first_sequence: int, last_sequence: int) -> Any:
-        from controller.model_learning.contracts import FitWindowIdentity
-
-        return FitWindowIdentity(
-            session_id=self.session_id,
-            cook_id=self.cook_id,
-            first_observation_sequence=first_sequence,
-            last_observation_sequence=last_sequence,
-            configuration_digest=self.configuration_digest,
-            incumbent_digest=self.incumbent_digest,
-            role_generation=self.role_generation,
         )
 
 
@@ -2271,24 +2234,14 @@ class GreyLearningOrchestrator:
             return GreyLearningDelivery(message, (), None, ("fit-error",))
         success = message.outcome
         result = FitResult(
-            request_id=request.request_id,
-            origin=request.origin,
-            window=request.window,
-            candidate_generation=request.candidate_generation,
+            request=success.request,
             status=FitStatus.SUCCEEDED,
             candidate_digest=grey_config_digest(success.config),
-        )
-        current_window = replace(
-            request.window,
-            configuration_digest=live_identity.configuration_digest,
-            incumbent_digest=live_identity.incumbent_digest,
-            role_generation=live_identity.role_generation,
         )
         stale = stale_result_reasons(
             result,
             request=request,
-            current_window=current_window,
-            current_candidate_generation=live_identity.candidate_generation,
+            current_identity=live_identity,
             current_origin=live_origin,
         )
         if stale:
@@ -2310,7 +2263,7 @@ class GreyLearningOrchestrator:
             from controller.model_learning.evaluation import CausalForecastEvaluator
 
             self._evaluator = CausalForecastEvaluator(
-                role_generation=request.window.role_generation,
+                role_generation=request.parent_incumbent_generation,
                 candidate_generation=request.candidate_generation,
             )
             self._evaluation_cursor = 0
@@ -2346,7 +2299,7 @@ class GreyLearningOrchestrator:
             self._prepared = preparation
         request = preparation.candidate.request
         self._evaluator = CausalForecastEvaluator(
-            role_generation=request.window.role_generation,
+            role_generation=request.parent_incumbent_generation,
             candidate_generation=request.candidate_generation,
         )
         self._evaluation_cursor = 0
@@ -2373,7 +2326,7 @@ class GreyLearningOrchestrator:
                 frame,
                 horizon_steps=horizon,
                 candidate_generation=request.candidate_generation,
-                incumbent_digest=request.window.incumbent_digest,
+                incumbent_digest=request.parent_incumbent_digest,
                 challenger_digest=self._prepared.candidate_digest,
                 incumbent_predict=incumbent_predict,
                 challenger_predict=challenger_predict,
@@ -2395,7 +2348,7 @@ class GreyLearningOrchestrator:
         request = self._prepared.candidate.request
         decision = evaluate_forecasts(
             tuple(rows),
-            role_generation=request.window.role_generation,
+            role_generation=request.parent_incumbent_generation,
             candidate_generation=request.candidate_generation,
             prior_consecutive_wins=self._consecutive_wins,
             config=self.evaluation_config,

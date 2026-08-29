@@ -20,7 +20,7 @@ from common.learning_trajectory import (
     canonical_trajectory_digest,
 )
 from controller.acados.contracts import GreyBoxMPCConfig
-from controller.model_learning.contracts import CandidateOrigin, FitRequest, FitWindowIdentity
+from controller.model_learning.contracts import CandidateOrigin, FitRequest
 from controller.runtime import model_fitting as fitting
 from controller.runtime.model_fitting import (
     FIT_VALUE_BOUNDS,
@@ -51,19 +51,20 @@ def _config(**overrides: Any) -> GreyBoxMPCConfig:
     return GreyBoxMPCConfig(**values)
 
 
-def _request(first: int, last: int, *, origin: CandidateOrigin = CandidateOrigin.PASSIVE_ONLINE) -> FitRequest:
+def _request(
+    first: int,
+    last: int,
+    fit_corpus: FitCorpusIdentity,
+    *,
+    origin: CandidateOrigin = CandidateOrigin.PASSIVE_ONLINE,
+) -> FitRequest:
     return FitRequest(
         request_id=f"segmented-{first}-{last}-{origin.value}",
         origin=origin,
-        window=FitWindowIdentity(
-            session_id="segmented-corpus",
-            cook_id="cumulative-corpus",
-            first_observation_sequence=first,
-            last_observation_sequence=last,
-            configuration_digest=_PARTITION,
-            incumbent_digest=_INCUMBENT,
-            role_generation=4,
-        ),
+        fit_corpus=fit_corpus,
+        configuration_digest=_PARTITION,
+        parent_incumbent_digest=_INCUMBENT,
+        parent_incumbent_generation=4,
         candidate_generation=9,
     )
 
@@ -204,9 +205,10 @@ def _corpus(segments: tuple[GreyFitSegmentArrays, ...], *, partition: str = _PAR
 def _job(segments: tuple[GreyFitSegmentArrays, ...], config: GreyBoxMPCConfig) -> GreyFitJob:
     first = min(int(segment.observation_sequences[0]) for segment in segments)
     last = max(int(segment.observation_sequences[-1]) for segment in segments)
+    corpus = _corpus(segments)
     return GreyFitJob(
-        request=_request(first, last),
-        corpus=_corpus(segments),
+        request=_request(first, last, corpus),
+        corpus=corpus,
         segments=segments,
         config=config,
     )
@@ -332,9 +334,7 @@ def test_segmented_result_differs_from_illegal_concatenation_across_a_gap(
     for duration, load in zip(first.pre_roll_duration_s, first.pre_roll_load, strict=True):
         state = _advance_linear_state(state, float(duration), float(load), config.T_amb, config)
     state[-1] = first.hold_anchor_c
-    for duration, load, ambient in zip(
-        first.scored_duration_s, first.scored_load, first.scored_ambient_c, strict=True
-    ):
+    for duration, load, ambient in zip(first.scored_duration_s, first.scored_load, first.scored_ambient_c, strict=True):
         state = _advance_linear_state(state, float(duration), float(load), float(ambient), config)
     illegal_second = []
     for duration, load, ambient in zip(
@@ -695,9 +695,7 @@ def test_each_structurally_supported_cook_must_be_individually_identifiable(
     ) -> float:
         del columns
         active_cooks = {
-            segment.cook_id
-            for segment, mask in zip((good, rank_deficient), masks, strict=True)
-            if np.any(mask)
+            segment.cook_id for segment, mask in zip((good, rank_deficient), masks, strict=True) if np.any(mask)
         }
         return 0.0 if active_cooks == {"cook-rank-deficient"} else 0.8
 
@@ -751,8 +749,7 @@ def test_stacked_independent_jacobians_drive_identifiability(monkeypatch: pytest
             upper = replace(config, **{key: base * math.exp(_IDENT_STEP)})
             lower = replace(config, **{key: base * math.exp(-_IDENT_STEP)})
             columns.append(
-                (_oracle_prediction(segment, upper) - _oracle_prediction(segment, lower))
-                / (2 * _IDENT_STEP)
+                (_oracle_prediction(segment, upper) - _oracle_prediction(segment, lower)) / (2 * _IDENT_STEP)
             )
         rows.append(np.column_stack(columns)[mask])
     stacked = np.vstack(rows) / math.sqrt(sum(len(row) for row in rows))
@@ -812,11 +809,12 @@ def test_incompatible_or_malformed_segment_fails_before_compatible_rows_are_used
         replace(valid, scored_ambient_c=(20.0, 20.0))
     incompatible = replace(valid, segment_id="incompatible", fit_partition_digest="9" * 64)
     calls = _pin_optimizer(monkeypatch, config, config)
+    corpus = _corpus((valid, incompatible))
 
     with pytest.raises(ValueError, match="fit partition"):
         GreyFitJob(
-            request=_request(0, 2),
-            corpus=_corpus((valid, incompatible)),
+            request=_request(0, 2, corpus),
+            corpus=corpus,
             segments=(valid, incompatible),
             config=config,
         )
@@ -899,7 +897,7 @@ def test_supplied_sequence_21_through_140_uses_warm_lineage_not_fabricated_zero_
     )
     corpus = _corpus((segment,))
     job = GreyFitJob(
-        request=_request(21, 140),
+        request=_request(21, 140, corpus),
         corpus=corpus,
         segments=(segment,),
         config=config,

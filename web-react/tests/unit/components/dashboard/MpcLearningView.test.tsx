@@ -1,4 +1,4 @@
-import type { CookRefitOutcome, ModelEvidenceReport } from "@pifire/core/contracts/learning";
+import type { ModelEvidenceReport } from "@pifire/core/contracts/learning";
 import { afterEach, beforeEach, describe, expect, it, type Mock, rs } from "@rstest/core";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen } from "@testing-library/react";
@@ -28,24 +28,8 @@ const REPORT: ModelEvidenceReport = {
   fit: {
     status: "succeeded",
     request_id: "fit-request-7",
-    window_id: "fit-window-7",
+    fit_corpus_digest: CORPUS_DIGEST,
     error: null,
-  },
-  cook_refit: {
-    status: "idle",
-    latest: "disabled",
-    final_status: "disabled",
-    authorization: "blocked",
-    next_cook: false,
-  },
-  window: {
-    session_id: "session-7",
-    cook_id: "cook-7",
-    first_observation_sequence: 101,
-    last_observation_sequence: 220,
-    configuration_digest: "f".repeat(64),
-    incumbent_digest: ACTIVE_DIGEST,
-    role_generation: 12,
   },
   checks: {
     identifiability: "passed",
@@ -302,7 +286,6 @@ describe("MpcLearningView", () => {
     ["active", "Active"],
     ["fallback", "Fallback"],
     ["error", "Error"],
-    ["schema-invalidated", "Schema invalidated"],
   ] as const)(
     "projects the backend %s status into the pill and open panel",
     async (status, label) => {
@@ -334,9 +317,7 @@ describe("MpcLearningView", () => {
       renderPanel();
       await openPanel();
 
-      const fit = screen
-        .getByRole("heading", { name: "Fit and evidence window" })
-        .closest("section");
+      const fit = screen.getByRole("heading", { name: "Fit request" }).closest("section");
       expect(fit).not.toBeNull();
       expect(fit!).toHaveTextContent(`Status: ${fitStatus}`);
       if (fitStatus === "failed") expect(fit!).toHaveTextContent("native fitter failed");
@@ -366,6 +347,7 @@ describe("MpcLearningView", () => {
     expect(dialog).toHaveTextContent(CANDIDATE_DIGEST);
     expect(dialog).toHaveTextContent(ACTIVE_DIGEST);
     expect(dialog).toHaveTextContent("fit-request-7");
+    expect(dialog).toHaveTextContent("Fit corpus:");
 
     expect(dialog).toHaveTextContent("Corpus revision: 17");
     expect(dialog).toHaveTextContent(CORPUS_DIGEST);
@@ -386,6 +368,23 @@ describe("MpcLearningView", () => {
     expect(dialog).toHaveTextContent("Current evidence: 8");
     expect(dialog).toHaveTextContent("Audit evidence: 10");
     expect(dialog).toHaveTextContent("Retired schema entries excluded: 2");
+  });
+
+  it("renders current corpus and fit identity without a candidate or evaluation", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        ...REPORT,
+        candidate: null,
+        evaluation: null,
+      }),
+    );
+    renderPanel();
+    const dialog = await openPanel();
+
+    expect(dialog).toHaveTextContent("No causal evaluation progress is currently reported.");
+    expect(dialog).toHaveTextContent("No challenger is currently active.");
+    expect(dialog).toHaveTextContent(`Fit corpus: ${CORPUS_DIGEST}`);
+    expect(dialog).toHaveTextContent(`Corpus digest: ${CORPUS_DIGEST}`);
   });
 
   it("gates calibration start on acknowledgements and advances from backend command high-water", async () => {
@@ -426,57 +425,6 @@ describe("MpcLearningView", () => {
     expect(start).toBeEnabled();
     await userEvent.click(start);
     expect(await screen.findByText("Accepted command high-water: 5")).toBeVisible();
-  });
-
-  it.each([
-    ["disabled", "blocked", false],
-    ["insufficient", "blocked", false],
-    ["rejected", "blocked", false],
-    ["failed", "blocked", false],
-    ["accepted-next-cook", "next-cook", true],
-    ["checkpoint-failure", "blocked", false],
-  ] as const)(
-    "renders cook-refit outcome %s with exact authorization and next-cook state",
-    async (latest, authorization, nextCook) => {
-      const cookRefit = {
-        status: "idle" as const,
-        latest: latest as CookRefitOutcome,
-        final_status: latest as CookRefitOutcome,
-        authorization,
-        next_cook: nextCook,
-      };
-      fetchMock.mockResolvedValue(jsonResponse({ ...REPORT, cook_refit: cookRefit }));
-      renderPanel();
-      await openPanel();
-
-      const section = screen.getByRole("heading", { name: "Cook refit" }).closest("section");
-      expect(section).not.toBeNull();
-      expect(section!).toHaveTextContent(`Final outcome: ${latest}`);
-      expect(section!).toHaveTextContent(`Authorization: ${authorization}`);
-      expect(section!).toHaveTextContent(`Next cook: ${nextCook ? "yes" : "no"}`);
-    },
-  );
-
-  it("reports a cook refit that has never run as not run rather than blocked", async () => {
-    // An idle cook_refit with no latest outcome has never had a refit reach it.
-    // Rendering that as "blocked" sends an operator hunting for a block that
-    // does not exist, which is what a stale checkpoint on a live grill did.
-    const cookRefit = {
-      status: "idle" as const,
-      latest: null,
-      final_status: "idle" as const,
-      authorization: "not-run" as const,
-      next_cook: false,
-    };
-    fetchMock.mockResolvedValue(jsonResponse({ ...REPORT, cook_refit: cookRefit }));
-    renderPanel();
-    await openPanel();
-
-    const section = screen.getByRole("heading", { name: "Cook refit" }).closest("section");
-    expect(section).not.toBeNull();
-    expect(section!).toHaveTextContent("Final outcome: not run yet");
-    expect(section!).toHaveTextContent("Authorization: none yet");
-    expect(section!).not.toHaveTextContent("blocked");
   });
 
   it("shows an interrupted causal evaluation as resumable durable progress", async () => {
@@ -644,7 +592,7 @@ describe("MpcLearningView", () => {
     expect(alert).toHaveTextContent("native solver crashed");
     expect(alert).toHaveTextContent("terminal");
     expect(
-      screen.getByRole("heading", { name: "Fit and evidence window" }).closest("section"),
+      screen.getByRole("heading", { name: "Fit request" }).closest("section"),
     ).toHaveTextContent("optimizer-nonconvergence");
     expect(
       screen.getByRole("heading", { name: "Readiness and rejection" }).closest("section"),

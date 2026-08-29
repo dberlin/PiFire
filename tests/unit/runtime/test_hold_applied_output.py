@@ -2,7 +2,8 @@
 
 from dataclasses import replace
 
-from controller.applied_output import OutputSource
+from controller.applied_output import FrameFeedbackDisposition, OutputSource
+from controller.runtime.logic.pulse import PulseResetReason
 from tests.fakes.runner import FakeControllerRunner
 from tests.unit.runtime.conftest import _off, _output
 
@@ -49,29 +50,40 @@ def test_manual_takeover_resets_the_active_frame_before_manual_feedback(hold_cyc
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
-    hold._last_now = 3.0
+    hold._last_now = 2.5
     hold._last_ptemp = 200.0
     runner.applied.clear()
     events = []
     set_output = runner.set_output
     observe_frame = runner.observe_frame
+    runtime = hold._framed_pulse
+    assert runtime is not None
+    reset = runtime.reset
 
     def record_output(applied):
         if applied.source is OutputSource.MANUAL_OVERRIDE:
-            events.append("manual-feedback")
+            events.append(("manual-feedback", applied.feedback_disposition))
         set_output(applied)
 
     def record_observation(observation):
-        if observation.reset:
-            events.append("frame-reset")
+        events.append(("runner-observation", observation.reset))
         return observe_frame(observation)
+
+    def record_reset(*args, **kwargs):
+        result = reset(*args, **kwargs)
+        events.append(("frame-reset", args[0]))
+        return result
 
     monkeypatch.setattr(runner, "set_output", record_output)
     monkeypatch.setattr(runner, "observe_frame", record_observation)
+    monkeypatch.setattr(runtime, "reset", record_reset)
 
     hold._on_manual_output("auger", False)
 
-    assert events == ["frame-reset", "manual-feedback"]
+    assert events == [
+        ("frame-reset", PulseResetReason.MANUAL),
+        ("manual-feedback", FrameFeedbackDisposition.PROGRESS),
+    ]
 
 
 def test_manual_release_reseeds_before_fresh_controller_authority(hold_cycle, monkeypatch):

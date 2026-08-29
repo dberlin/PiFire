@@ -283,12 +283,15 @@ class ControllerModelStore:
         revision = owned_snapshot["revision"]
         with self._backend.latest_lock:
             latest = self._backend.latest.get(name)
-            if latest is None or revision > latest["revision"]:
+            committed_revision = self._backend.committed.get(name)
+            if (
+                latest is None
+                or revision > latest["revision"]
+                or (committed and revision == latest["revision"] and committed_revision == revision)
+            ):
                 self._backend.latest[name] = owned_snapshot
-            if committed:
-                committed_revision = self._backend.committed.get(name)
-                if committed_revision is None or revision > committed_revision:
-                    self._backend.committed[name] = revision
+            if committed and (committed_revision is None or revision > committed_revision):
+                self._backend.committed[name] = revision
 
     @staticmethod
     def _log_non_advancing(name, revision, baseline):

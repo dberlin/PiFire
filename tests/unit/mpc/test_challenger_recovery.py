@@ -18,14 +18,14 @@ from common.persistence.model_challenger import (
 from common.persistence.model_evidence import read_model_activation
 from controller.model_learning.activation import ActivationPhase, PreparedActivationRecord
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
-from tests.unit.common.test_model_challenger_store import (
+from tests.unit.common._model_challenger_helpers import (
     _corpus,
     _descriptor,
     _manifest,
     _qualified,
     _state,
 )
-from tests.unit.mpc.test_grey_online_learning import (
+from tests.unit.mpc._grey_online_helpers import (
     _frame,
     _prepared_supersession_harness,
 )

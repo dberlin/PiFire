@@ -77,6 +77,11 @@ def test_legacy_subcadence_trace_is_aggregated_into_nominal_scored_rows() -> Non
     assert segment.observation_sequences.tolist() == [1, 2]
     assert job.corpus.slices[0].pre_roll_count == 0
     assert job.corpus.slices[0].scored_count == 2
+    assert job.request.fit_corpus == job.corpus
+    assert job.request.configuration_digest == job.request.parent_incumbent_digest
+    assert job.request.configuration_digest != job.corpus.fit_partition_digest
+    assert job.request.parent_incumbent_generation == 0
+    assert job.request.candidate_generation == 0
     assert supported_segmented_cooks(job, theta=25.0) == ()
 
     with pytest.raises(ValueError, match="incompatible sampling gap"):

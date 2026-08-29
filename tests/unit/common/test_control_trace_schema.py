@@ -721,6 +721,7 @@ def test_trajectory_segment_trace_accepts_an_open_segment_without_a_terminal_rea
     (
         {"challenger_id": ""},
         {"origin": "passive-online", "policy": "cook-refit"},
+        {"origin": "cook-refit", "policy": "cook-refit"},
         {"challenger_revision": -1},
         {"incumbent_generation": -1},
         {"candidate_generation": -1},
@@ -1483,6 +1484,24 @@ def test_schema_eight_has_one_canonical_model_evidence_contract():
         replace(session, pulse_frame_seconds=None)
 
 
+def test_schema_eight_fit_lifecycle_requires_a_corpus_sha256():
+    with pytest.raises(ValidationError, match="current fit corpus digest"):
+        ControlTraceRecord(
+            ts_ms=10,
+            session_id="session-grey",
+            cook_id="cook-grey",
+            controller=ControllerType.MPC,
+            event_kind=TraceEventKind.FIT_LIFECYCLE,
+            payload=GreyFitLifecyclePayload(
+                request_id="invalid-corpus",
+                status="running",
+                origin="passive-online",
+                policy="causal-auto",
+                fit_corpus_digest="legacy-window",
+            ),
+        )
+
+
 @pytest.mark.parametrize(
     ("kind", "payload"),
     (
@@ -1492,8 +1511,8 @@ def test_schema_eight_has_one_canonical_model_evidence_contract():
                 request_id="request-grey",
                 status="running",
                 origin="passive-online",
-                policy="passive-auto",
-                window_id="window-grey",
+                policy="causal-auto",
+                fit_corpus_digest="6" * 64,
                 error=None,
             ),
         ),
@@ -1502,7 +1521,7 @@ def test_schema_eight_has_one_canonical_model_evidence_contract():
             GreyCandidateAssessmentPayload(
                 decision_id="decision-grey",
                 origin="operator-calibration",
-                policy="operator-reviewed",
+                policy="causal-auto",
                 fit_accepted=True,
                 identifiability_accepted=True,
                 native_build="passed",
@@ -1517,7 +1536,7 @@ def test_schema_eight_has_one_canonical_model_evidence_contract():
                 decision_id="decision-grey",
                 phase="prepared",
                 origin="operator-calibration",
-                policy="operator-reviewed",
+                policy="causal-auto",
             ),
         ),
         (
@@ -1530,7 +1549,7 @@ def test_schema_eight_has_one_canonical_model_evidence_contract():
         ),
     ),
 )
-def test_schema_five_round_trips_grey_lifecycle_with_grey_native_fields(kind, payload):
+def test_schema_eight_round_trips_current_grey_lifecycle_vocabulary(kind, payload):
     record = ControlTraceRecord(
         ts_ms=10,
         session_id="session-grey",
@@ -1544,6 +1563,136 @@ def test_schema_five_round_trips_grey_lifecycle_with_grey_native_fields(kind, pa
     assert restored == record
     encoded = restored.model_dump_json()
     assert "state_space_refresh" not in encoded
+
+
+_RETIRED_GREY_LIFECYCLE_PAYLOADS = (
+    (
+        TraceEventKind.FIT_LIFECYCLE,
+        GreyFitLifecyclePayload(
+            request_id="legacy-request",
+            status="running",
+            origin="passive-online",
+            policy="passive-auto",
+            fit_corpus_digest="legacy-window",
+        ),
+    ),
+    (
+        TraceEventKind.CANDIDATE_ASSESSMENT,
+        GreyCandidateAssessmentPayload(
+            decision_id="legacy-assessment",
+            origin="operator-calibration",
+            policy="operator-reviewed",
+            fit_accepted=True,
+            identifiability_accepted=True,
+            native_build="passed",
+            native_dry_solve="passed",
+            target_timing="passed",
+            confidence_accepted=True,
+        ),
+    ),
+    (
+        TraceEventKind.ACTIVATION_LIFECYCLE,
+        GreyActivationLifecyclePayload(
+            decision_id="legacy-activation",
+            phase="prepared",
+            origin="cook-refit",
+            policy="cook-refit",
+        ),
+    ),
+    (
+        TraceEventKind.MODEL_EVENT,
+        ModelEventPayload(
+            event=ModelEventType.SCHEMA_INVALIDATED,
+            model_revision=None,
+            provenance=None,
+            detail="legacy schema invalidation",
+        ),
+    ),
+)
+
+
+@pytest.mark.parametrize(("kind", "payload"), _RETIRED_GREY_LIFECYCLE_PAYLOADS)
+def test_schema_eight_rejects_retired_lifecycle_authority(kind, payload):
+    with pytest.raises(ValidationError, match="retired"):
+        ControlTraceRecord(
+            ts_ms=10,
+            session_id="session-grey",
+            cook_id="cook-grey",
+            controller=ControllerType.MPC,
+            event_kind=kind,
+            payload=payload,
+        )
+
+
+def test_schema_eight_writer_revalidates_copied_retired_lifecycle_payload():
+    valid = ControlTraceRecord(
+        ts_ms=10,
+        session_id="session-grey",
+        cook_id="cook-grey",
+        controller=ControllerType.MPC,
+        event_kind=TraceEventKind.FIT_LIFECYCLE,
+        payload=GreyFitLifecyclePayload(
+            request_id="current-request",
+            status="running",
+            origin="passive-online",
+            policy="causal-auto",
+            fit_corpus_digest="6" * 64,
+        ),
+    )
+    copied = valid.model_copy(update={"payload": _RETIRED_GREY_LIFECYCLE_PAYLOADS[0][1]})
+
+    with pytest.raises(ValueError, match="retired"):
+        copied.to_db_row()
+
+
+@pytest.mark.parametrize("schema_version", (5, 6, 7))
+@pytest.mark.parametrize(("kind", "payload"), _RETIRED_GREY_LIFECYCLE_PAYLOADS)
+def test_old_trace_schemas_explicitly_round_trip_retired_lifecycle_vocabulary(
+    schema_version,
+    kind,
+    payload,
+):
+    record = ControlTraceRecord(
+        ts_ms=10,
+        session_id="session-grey",
+        cook_id="cook-grey",
+        controller=ControllerType.MPC,
+        event_kind=kind,
+        schema_version=schema_version,
+        payload=payload,
+    )
+
+    assert ControlTraceRecord.from_db_row(record.to_db_row()) == record
+
+
+def test_old_fit_window_trace_row_migrates_to_corpus_lifecycle_identity():
+    row = ControlTraceDbRow(
+        ts_ms=10,
+        session_id="session-grey",
+        cook_id="cook-grey",
+        controller=ControllerType.MPC.value,
+        event_kind=TraceEventKind.FIT_LIFECYCLE.value,
+        schema_version=7,
+        payload=json.dumps(
+            {
+                "request_id": "legacy-request",
+                "status": "running",
+                "origin": "passive-online",
+                "policy": "passive-auto",
+                "window_id": "session-grey:1:99",
+                "error": None,
+                "payload_type": "fit_lifecycle",
+            }
+        ),
+    )
+
+    restored = ControlTraceRecord.from_db_row(row)
+
+    assert isinstance(restored.payload, GreyFitLifecyclePayload)
+    assert restored.payload.fit_corpus_digest == "session-grey:1:99"
+    migrated_payload = json.loads(restored.to_db_row().payload)
+    assert migrated_payload["fit_corpus_digest"] == "session-grey:1:99"
+    assert "window_id" not in migrated_payload
 
 
 @pytest.mark.parametrize("controller", [ControllerType.PID, ControllerType.PID_SP, ControllerType.MPC])

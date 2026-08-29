@@ -509,6 +509,7 @@ def test_multiframe_catchup_pairs_each_exact_feedback_with_its_observation(hold_
 def test_hold_stamps_latched_probe_frame_before_reconfigure_reset(hold_cycle):
     runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1)])
     hold = hold_cycle(runner, controller="mpc")
+    hold.control["cook_id"] = "reconfigure-calibration-reset"
     hold.setup()
 
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
@@ -526,6 +527,7 @@ def test_hold_stamps_latched_probe_frame_before_reconfigure_reset(hold_cycle):
 def test_hold_does_not_carry_cancelled_frame_status_into_later_baseline(hold_cycle):
     runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1), _result(2)])
     hold = hold_cycle(runner, controller="mpc")
+    hold.control["cook_id"] = "reconfigure-calibration-baseline"
     hold.setup()
 
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
@@ -567,6 +569,7 @@ def test_runtime_intervention_cancels_probe_to_exact_grey_box_baseline(
     inactive = _result(3)
     runner = FakeControllerRunner(period=1.0).script([active, following, inactive])
     hold = hold_cycle(runner, controller="mpc")
+    hold.control["cook_id"] = f"calibration-intervention-{intervention}"
     hold.setup()
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
 
@@ -605,6 +608,7 @@ def test_manual_callback_then_in_flight_result_uses_one_cancellation_path(
 ) -> None:
     runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1), _result(2, probe=0.1)])
     hold = hold_cycle(runner, controller="mpc")
+    hold.control["cook_id"] = "manual-callback-calibration"
     hold.setup()
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
 
@@ -1218,6 +1222,7 @@ def test_manual_release_still_records_once_without_active_probe(
 def test_manual_release_cancels_an_active_probe_once(hold_cycle) -> None:
     runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1), _result(2, probe=0.1)])
     hold = hold_cycle(runner, controller="mpc")
+    hold.control["cook_id"] = "manual-release-calibration"
     hold.setup()
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
 
@@ -1271,8 +1276,13 @@ def test_cancelled_frame_persists_matching_raw_and_compact_evidence_once(hold_cy
     real_worker = hold_module.ModelPersistenceWorker
 
     class CapturingWorker(real_worker):
-        def __init__(self, store, logger):
-            super().__init__(store, logger, append_evidence=persisted.extend)
+        def __init__(self, store, logger, *, trajectory_repository=None):
+            super().__init__(
+                store,
+                logger,
+                trajectory_repository=trajectory_repository,
+                append_evidence=persisted.extend,
+            )
             workers.append(self)
 
     monkeypatch.setattr(hold_module, "ControlTraceRecorder", lambda *, warning: recorder)
@@ -1346,8 +1356,13 @@ def test_current_stale_probe_result_does_not_claim_prior_interval_evidence(
     real_worker = hold_module.ModelPersistenceWorker
 
     class CapturingWorker(real_worker):
-        def __init__(self, store, logger):
-            super().__init__(store, logger, append_evidence=persisted.extend)
+        def __init__(self, store, logger, *, trajectory_repository=None):
+            super().__init__(
+                store,
+                logger,
+                trajectory_repository=trajectory_repository,
+                append_evidence=persisted.extend,
+            )
             workers.append(self)
 
     monkeypatch.setattr(
@@ -1462,8 +1477,13 @@ def test_hold_persists_measured_completed_stages_on_coast_evidence(hold_cycle, m
     real_worker = hold_module.ModelPersistenceWorker
 
     class CapturingWorker(real_worker):
-        def __init__(self, store, logger):
-            super().__init__(store, logger, append_evidence=persisted.extend)
+        def __init__(self, store, logger, *, trajectory_repository=None):
+            super().__init__(
+                store,
+                logger,
+                trajectory_repository=trajectory_repository,
+                append_evidence=persisted.extend,
+            )
             workers.append(self)
 
     monkeypatch.setattr(hold_module, "ControlTraceRecorder", lambda *, warning: Recorder(warning=warning))

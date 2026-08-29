@@ -140,7 +140,7 @@ def test_control_trace_schema_has_indexed_typed_envelope(ds):
     assert index_columns == {("session_id", "id"), ("cook_id", "id"), ("ts_ms",)}
 
 
-def test_v4_database_upgrades_to_v7_without_altering_existing_rows(tmp_path):
+def test_v4_database_upgrades_to_current_schema_without_altering_existing_rows(tmp_path):
     db_path = str(tmp_path / "v4.db")
     conn = sqlite3.connect(db_path)
     try:
@@ -154,7 +154,7 @@ def test_v4_database_upgrades_to_v7_without_altering_existing_rows(tmp_path):
     datastore._reset_for_tests(db_path)
     try:
         upgraded = datastore.connection()
-        assert upgraded.execute("PRAGMA user_version").fetchone()[0] == 8
+        assert upgraded.execute("PRAGMA user_version").fetchone()[0] == datastore.DB_SCHEMA_VERSION
         assert upgraded.execute("SELECT value FROM kv WHERE key='preserved'").fetchone()[0] == '{"value": 1}'
         assert upgraded.execute("SELECT COUNT(*) FROM control_trace").fetchone()[0] == 0
     finally:
@@ -184,7 +184,7 @@ def test_current_schema_store_round_trip_retains_learning_state(ds):
     append_control_trace([session, update])
 
     restored = read_control_trace_session("learning-session")
-    assert [record.schema_version for record in restored] == [TRACE_SCHEMA_VERSION, TRACE_SCHEMA_VERSION]
+    assert [record.schema_version for record in restored] == [TRACE_SCHEMA_VERSION] * 2
     assert isinstance(restored[1].payload, PidUpdatePayload)
     assert restored[1].payload.learning is not None
     assert restored[1].payload.learning.state == {

@@ -31,12 +31,7 @@ from controller.model_learning.activation import (
     PreparedActivationRecord,
     canonical_snapshot_digest,
 )
-from controller.model_learning.contracts import (
-    ActivationPolicy,
-    CandidateOrigin,
-    FitRequest,
-    FitWindowIdentity,
-)
+from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
 from controller.model_learning.rollback_service import (
     RollbackAccepted,
     RollbackRejected,
@@ -83,8 +78,6 @@ def test_empty_report_route_surfaces_missing_authority_terminally(client):
         "decision_id",
         "evidence",
         "fit",
-        "cook_refit",
-        "window",
         "checks",
         "evaluation",
         "corpus",
@@ -100,14 +93,7 @@ def test_empty_report_route_surfaces_missing_authority_terminally(client):
         "errors",
         "revision",
     }
-    assert set(payload["fit"]) == {"status", "request_id", "window_id", "error"}
-    assert set(payload["cook_refit"]) == {
-        "status",
-        "latest",
-        "final_status",
-        "authorization",
-        "next_cook",
-    }
+    assert set(payload["fit"]) == {"status", "request_id", "fit_corpus_digest", "error"}
     assert payload["evaluation"] is None
     assert payload["corpus"] == {
         "digest": None,
@@ -141,7 +127,7 @@ def test_report_route_reads_current_grey_ledger_without_changing_activation_stat
                 CandidateAssessmentEvidence(
                     decision_id="decision-api-3",
                     origin="operator-calibration",
-                    policy="operator-reviewed",
+                    policy="causal-auto",
                     fit_accepted=True,
                     identifiability_accepted=False,
                     native_build="passed",
@@ -175,7 +161,7 @@ def test_artifact_route_contains_the_identical_report_projection_and_revision(cl
                 CandidateAssessmentEvidence(
                     decision_id="decision-api-3",
                     origin="operator-calibration",
-                    policy="operator-reviewed",
+                    policy="causal-auto",
                     fit_accepted=True,
                     identifiability_accepted=False,
                     native_build="passed",

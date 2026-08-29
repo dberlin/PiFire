@@ -9,6 +9,7 @@ import pytest
 
 from common.control_trace import (
     ActuationMode,
+    AllocationClampReason,
     ControllerType,
     HorizonScorePayload,
     ModelEvaluationPayload,
@@ -16,7 +17,10 @@ from common.control_trace import (
     ResultStaleState,
     TraceEventKind,
 )
+from common.learning_trajectory import FitCorpusIdentity
 from common.model_evidence import (
+    AllocationEvidence,
+    CalibrationSummaryEvidence,
     ConfidenceDecisionEvidence,
     EvidenceKind,
     FallbackEvidence,
@@ -25,7 +29,7 @@ from common.model_evidence import (
     RefreshDiagnosticsEvidence,
     SessionSummaryEvidence,
 )
-from common.persistence.model_evidence import ModelActivationState
+from common.persistence.model_evidence import ModelActivationState, append_model_evidence
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.base import ControllerLearningDiagnostics
 from controller.model_learning.activation import (
@@ -2255,6 +2259,7 @@ class _CorpusDrainCore(CloseAwareCore):
         self.poll_entered = threading.Event()
         self.poll_release = threading.Event()
         self.block_poll = False
+        self.fit_failures = []
 
     def schedule_corpus_fit(self, origin):
         return self._schedule_corpus_fit_ticket(origin) is not None
@@ -2284,6 +2289,9 @@ class _CorpusDrainCore(CloseAwareCore):
     def get_learning_diagnostics(self):
         return SimpleNamespace(state={"failure": None})
 
+    def fail_corpus_fit(self, code, error):
+        self.fit_failures.append((code, str(error)))
+
 
 class _RuntimeCorpusOwnerCore(_CorpusDrainCore):
     def __init__(self, harness):
@@ -2292,10 +2300,16 @@ class _RuntimeCorpusOwnerCore(_CorpusDrainCore):
         self.scheduled_tickets = []
 
     def schedule_corpus_fit(self, origin):
-        return self.harness.runtime.request_corpus_fit(origin)
+        return self.harness.runtime.request_corpus_fit(
+            origin,
+            replace_owned_prepared=True,
+        )
 
     def _schedule_corpus_fit_ticket(self, origin):
-        ticket = self.harness.runtime._request_corpus_fit_ticket(origin)
+        ticket = self.harness.runtime._request_corpus_fit_ticket(
+            origin,
+            replace_owned_prepared=True,
+        )
         if ticket is not None:
             self.scheduled_tickets.append(ticket)
         return ticket
@@ -2320,9 +2334,87 @@ class _RuntimeCorpusOwnerCore(_CorpusDrainCore):
         super().close()
 
 
+def _append_complete_calibration_trigger(repository) -> None:
+    segment = repository.read_segment("segment-b")
+    assert segment is not None
+    frame = next(item for item in segment.scored_hold_frames if item.calibration_origin)
+    stage_order = ("low", "middle", "high", "coast")
+
+    def allocation(load: float) -> AllocationEvidence:
+        return AllocationEvidence(
+            normalized_combustion_load=load,
+            auger_duty=load,
+            fan_duty=None,
+            u_max=1.0,
+            fan_min_pct=0.0,
+            fan_max_pct=100.0,
+            fan_enabled=False,
+            auger_clamp_reason=AllocationClampReason.NONE,
+            fan_clamp_reason=AllocationClampReason.NONE,
+            allocator_revision=2,
+        )
+
+    records = []
+    for index, stage in enumerate(stage_order):
+        probe_q = 0.0 if stage == "coast" else 0.1
+        combined_q = 0.3 + probe_q
+        records.append(
+            ModelEvidenceRecord(
+                evidence_id=f"threaded-calibration-{stage}",
+                kind=EvidenceKind.CALIBRATION_SUMMARY,
+                session_id=segment.trajectory_session_id,
+                cook_id=segment.cook_id,
+                timestamp_ms=frame.monotonic_start_ms + index,
+                role_generation=4,
+                model_digest="a" * 64,
+                provenance_digest="b" * 64,
+                payload=CalibrationSummaryEvidence(
+                    accepted=True,
+                    probe_count=0 if stage == "coast" else 1,
+                    result_revision=index + 1,
+                    command_revision=17,
+                    command_action="start",
+                    baseline_q=0.3,
+                    probe_q=probe_q,
+                    combined_q=combined_q,
+                    baseline_allocation=allocation(0.3),
+                    combined_allocation=allocation(combined_q),
+                    scheduled_on_seconds=6.0,
+                    delivered_on_seconds=6.0,
+                    status="active",
+                    stage=stage,
+                    completed_stages=stage_order[:index],
+                    continuous=True,
+                ),
+            ),
+        )
+    append_model_evidence(
+        records,
+        database_path=repository._database_path,
+    )
+
+
+def _append_newer_passive_fit_corpus(repository, *, segment_id: str) -> FitCorpusIdentity:
+    from tests.unit.common._learning_trajectory_helpers import (
+        _finalize_segment,
+        _segment,
+    )
+
+    segment = _segment(
+        segment_id,
+        epoch_ms=5_000_000,
+        start_sequence=10_000,
+        scored_count=2,
+    )
+    _finalize_segment(repository, segment)
+    fit_corpus = repository.snapshot_fit_corpus(segment.fit_partition_digest).identity
+    assert isinstance(fit_corpus, FitCorpusIdentity)
+    return fit_corpus
+
+
 def _prepared_process_candidate(tmp_path, origin):
     from controller.model_learning.grey_runtime import GreyLearningProcessOwner
-    from tests.unit.mpc.test_grey_learning_runtime import (
+    from tests.unit.mpc._grey_learning_runtime_helpers import (
         _ControlledDeliveryCorpusWorker,
         _CorpusRepositoryProbe,
         _harness,
@@ -2330,12 +2422,10 @@ def _prepared_process_candidate(tmp_path, origin):
         _reopened_ready_passive_corpus,
     )
 
-    corpus_factory = (
-        _reopened_ready_passive_corpus
-        if origin is CandidateOrigin.PASSIVE_ONLINE
-        else _reopened_corpus
-    )
+    corpus_factory = _reopened_ready_passive_corpus if origin is CandidateOrigin.PASSIVE_ONLINE else _reopened_corpus
     repository, partition = corpus_factory(tmp_path)
+    if origin is CandidateOrigin.OPERATOR_CALIBRATION:
+        _append_complete_calibration_trigger(repository)
     owner = GreyLearningProcessOwner()
     _ControlledDeliveryCorpusWorker.instances.clear()
     first = _harness(
@@ -2354,6 +2444,8 @@ def _prepared_process_candidate(tmp_path, origin):
     assert delivery is not None
     prepared = owner.learning.prepared
     assert prepared is not None and prepared.accepted
+    assert prepared.candidate.request.origin is origin
+    assert isinstance(prepared.candidate.request.fit_corpus, FitCorpusIdentity)
     return repository, partition, owner, first, worker, prepared
 
 
@@ -2367,6 +2459,7 @@ def test_live_fit_barrier_and_submission_run_on_learning_dispatcher():
     def barrier() -> bool:
         barrier_threads.append(threading.get_ident())
         return True
+
     try:
         assert runner._schedule_corpus_fit_after_barrier(
             CandidateOrigin.OPERATOR_CALIBRATION,
@@ -2384,15 +2477,28 @@ def test_stop_fit_drain_ignores_unrelated_delivery_until_requested_origin_termin
     core = _CorpusDrainCore()
     runner = ThreadedControllerRunner(core)
     try:
-        assert runner.stop_for_refit()
+        assert runner.stop_and_retain_for_teardown()
         core.deliveries.append(
-            ("f" * 64, CandidateOrigin.PASSIVE_ONLINE),
+            ("f" * 64, CandidateOrigin.OPERATOR_CALIBRATION),
         )
         core.deliver_on_schedule = True
-        assert runner.schedule_corpus_fit(CandidateOrigin.COOK_REFIT)
+        assert runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
         assert _wait_for(lambda: runner._corpus_fit_thread is None)
-        assert core.fit_requests == [CandidateOrigin.COOK_REFIT]
+        assert core.fit_requests == [CandidateOrigin.PASSIVE_ONLINE]
         assert not core.deliveries
+    finally:
+        runner.stop()
+
+
+def test_stop_passive_fit_rejection_preserves_an_existing_challenger() -> None:
+    core = _CorpusDrainCore()
+    core._schedule_corpus_fit_ticket = lambda _origin: None
+    runner = ThreadedControllerRunner(core)
+    try:
+        assert runner.stop_and_retain_for_teardown()
+        assert runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+        assert _wait_for(lambda: runner._corpus_fit_thread is None)
+        assert core.fit_failures == []
     finally:
         runner.stop()
 
@@ -2401,47 +2507,34 @@ def test_stop_fit_drain_ignores_older_same_origin_ticket() -> None:
     core = _CorpusDrainCore()
     runner = ThreadedControllerRunner(core)
     try:
-        assert runner.stop_for_refit()
-        core.deliveries.append(("f" * 64, CandidateOrigin.COOK_REFIT))
+        assert runner.stop_and_retain_for_teardown()
+        core.deliveries.append(("f" * 64, CandidateOrigin.PASSIVE_ONLINE))
         core.deliver_on_schedule = True
 
-        assert runner.schedule_corpus_fit(CandidateOrigin.COOK_REFIT)
+        assert runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
         assert _wait_for(lambda: runner._corpus_fit_thread is None)
 
-        assert core.fit_requests == [CandidateOrigin.COOK_REFIT]
+        assert core.fit_requests == [CandidateOrigin.PASSIVE_ONLINE]
         assert core.fit_tickets == ["0" * 63 + "1"]
         assert not core.deliveries
     finally:
         runner.stop()
 
 
-@pytest.mark.parametrize(
-    "prepared_origin",
-    (
-        CandidateOrigin.COOK_REFIT,
-        CandidateOrigin.PASSIVE_ONLINE,
-    ),
-)
 def test_process_owned_newer_stop_fit_supersedes_prepared_candidate_and_closes(
     tmp_path,
     monkeypatch,
-    prepared_origin,
 ) -> None:
     from controller.model_learning.grey_runtime import GreyLearningProcessOwner
     from controller.runtime.model_fitting import GreyLearningOrchestrator
-    from tests.unit.mpc.test_grey_learning_runtime import (
+    from tests.unit.mpc._grey_learning_runtime_helpers import (
         _ControlledDeliveryCorpusWorker,
         _CorpusRepositoryProbe,
         _harness,
-        _reopened_corpus,
         _reopened_ready_passive_corpus,
     )
-    corpus_factory = (
-        _reopened_ready_passive_corpus
-        if prepared_origin is CandidateOrigin.PASSIVE_ONLINE
-        else _reopened_corpus
-    )
-    repository, partition = corpus_factory(tmp_path)
+
+    repository, partition = _reopened_ready_passive_corpus(tmp_path)
     owner = GreyLearningProcessOwner()
     _ControlledDeliveryCorpusWorker.instances.clear()
 
@@ -2455,20 +2548,30 @@ def test_process_owned_newer_stop_fit_supersedes_prepared_candidate_and_closes(
     first.runtime.bind_learning_identity("session-a", "cook-a", 0)
     first_core = _RuntimeCorpusOwnerCore(first)
     first_runner = ThreadedControllerRunner(first_core)
-    assert first_runner.stop_for_refit()
-    assert first_runner.schedule_corpus_fit(prepared_origin)
+    assert first_runner.stop_and_retain_for_teardown()
+    assert first_runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
     first_runner.finish_teardown()
     assert _wait_for(
-        lambda: bool(_ControlledDeliveryCorpusWorker.instances)
-        and _ControlledDeliveryCorpusWorker.instances[-1].job is not None
+        lambda: (
+            bool(_ControlledDeliveryCorpusWorker.instances)
+            and _ControlledDeliveryCorpusWorker.instances[-1].job is not None
+        )
     )
     worker = _ControlledDeliveryCorpusWorker.instances[-1]
     worker.released = True
     assert _wait_for(
-        lambda: first_core.closed == 1
-        and owner.learning.prepared is not None
-        and owner.learning.prepared.accepted
+        lambda: first_core.closed == 1 and owner.learning.prepared is not None and owner.learning.prepared.accepted
     )
+    prepared = owner.learning.prepared
+    assert prepared is not None
+    old_pair = prepared.candidate_pair
+    old_request = worker.job.request
+    newer_corpus = _append_newer_passive_fit_corpus(
+        repository,
+        segment_id="newer-passive-supersession",
+    )
+    assert newer_corpus.corpus_revision > old_request.fit_corpus.corpus_revision
+    assert newer_corpus.corpus_digest != old_request.fit_corpus.corpus_digest
 
     second = _harness(
         trajectory_repository=_CorpusRepositoryProbe(repository),
@@ -2477,10 +2580,9 @@ def test_process_owned_newer_stop_fit_supersedes_prepared_candidate_and_closes(
         process_owner=owner,
     )
     second.runtime.bind_learning_identity("session-b", "cook-b", 0)
+    assert owner.learning.prepared is prepared
     superseded_pairs = []
-    original_superseding_submit = (
-        GreyLearningOrchestrator.submit_superseding_corpus_fit
-    )
+    original_superseding_submit = GreyLearningOrchestrator.submit_superseding_corpus_fit
 
     def record_superseded(orchestrator, job, expected, *, persist):
         result = original_superseding_submit(
@@ -2500,37 +2602,42 @@ def test_process_owned_newer_stop_fit_supersedes_prepared_candidate_and_closes(
     )
     second_core = _RuntimeCorpusOwnerCore(second)
     second_runner = ThreadedControllerRunner(second_core)
-    assert second_runner.stop_for_refit()
-    assert second_runner.schedule_corpus_fit(CandidateOrigin.COOK_REFIT)
+    assert second_runner.stop_and_retain_for_teardown()
+    assert second_runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
     second_runner.finish_teardown()
 
-    assert _wait_for(
-        lambda: second_core.closed == 1 and bool(superseded_pairs)
-    )
-    old_pair = superseded_pairs[0]
-    assert old_pair is not None
+    assert _wait_for(lambda: second_core.closed == 1 and bool(superseded_pairs))
+    assert superseded_pairs == [old_pair]
     assert old_pair.controller.closed
-    assert worker.job.request.request_id == second_core.scheduled_tickets[-1]
+    new_request = worker.job.request
+    assert new_request.request_id == second_core.scheduled_tickets[-1]
+    assert new_request.origin is CandidateOrigin.PASSIVE_ONLINE
+    assert new_request.fit_corpus == newer_corpus
     owner.close()
 
 
 def test_stopped_runner_terminalizes_stop_behind_owned_operator_candidate(
     tmp_path,
 ) -> None:
-    from tests.unit.mpc.test_grey_learning_runtime import (
+    from tests.unit.mpc._grey_learning_runtime_helpers import (
         _CorpusRepositoryProbe,
         _harness,
     )
 
-    repository, partition, owner, first, worker, prepared = (
-        _prepared_process_candidate(
-            tmp_path,
-            CandidateOrigin.OPERATOR_CALIBRATION,
-        )
+    repository, partition, owner, first, worker, prepared = _prepared_process_candidate(
+        tmp_path,
+        CandidateOrigin.OPERATOR_CALIBRATION,
     )
     old_request = worker.job.request
+    newer_corpus = _append_newer_passive_fit_corpus(
+        repository,
+        segment_id="newer-behind-operator",
+    )
+    assert newer_corpus.corpus_revision > old_request.fit_corpus.corpus_revision
+    assert newer_corpus.corpus_digest != old_request.fit_corpus.corpus_digest
+    probe = _CorpusRepositoryProbe(repository)
     second = _harness(
-        trajectory_repository=_CorpusRepositoryProbe(repository),
+        trajectory_repository=probe,
         fit_partition_digest=lambda: partition,
         fit_worker_factory=type(worker),
         process_owner=owner,
@@ -2538,8 +2645,8 @@ def test_stopped_runner_terminalizes_stop_behind_owned_operator_candidate(
     second.runtime.bind_learning_identity("session-b", "cook-b", 0)
     second_core = _RuntimeCorpusOwnerCore(second)
     second_runner = ThreadedControllerRunner(second_core)
-    assert second_runner.stop_for_refit()
-    assert second_runner.schedule_corpus_fit(CandidateOrigin.COOK_REFIT)
+    assert second_runner.stop_and_retain_for_teardown()
+    assert second_runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
     second_runner.finish_teardown()
 
     assert _wait_for(lambda: second_core.closed == 1)
@@ -2547,10 +2654,14 @@ def test_stopped_runner_terminalizes_stop_behind_owned_operator_candidate(
     assert prepared.candidate_pair.controller.closed is False
     assert worker.job.request is old_request
     assert second.runtime._corpus_fit_failure is None
+    assert second_core.scheduled_tickets
+    terminal_ticket = second_core.scheduled_tickets[-1]
+    assert ("record", terminal_ticket) in probe.events
+    assert ("stale", terminal_ticket) in probe.events
     supersession = second.persistence.evidence[-1].payload
-    assert supersession.rejection_reasons == (
-        "superseded-by-prepared-operator-calibration-candidate",
-    )
+    assert supersession.origin == CandidateOrigin.PASSIVE_ONLINE.value
+    assert supersession.policy == ActivationPolicy.CAUSAL_AUTO.value
+    assert supersession.rejection_reasons == ("superseded-by-prepared-operator-calibration-candidate",)
     first.runtime.close()
     first.activation.close()
     owner.close()
@@ -2559,24 +2670,22 @@ def test_stopped_runner_terminalizes_stop_behind_owned_operator_candidate(
 def test_stopped_runner_clears_transferred_preparation_without_closing_authority(
     tmp_path,
 ) -> None:
-    from tests.unit.mpc.test_grey_learning_runtime import (
+    from tests.unit.mpc._grey_learning_runtime_helpers import (
         _CorpusRepositoryProbe,
         _harness,
     )
 
-    repository, partition, owner, first, worker, prepared = (
-        _prepared_process_candidate(
-            tmp_path,
-            CandidateOrigin.PASSIVE_ONLINE,
-        )
+    repository, partition, owner, first, worker, prepared = _prepared_process_candidate(
+        tmp_path,
+        CandidateOrigin.PASSIVE_ONLINE,
     )
     request = prepared.candidate.request
     owner.learning._last_evaluation = SimpleNamespace(
         accepted=True,
         consecutive_wins=2,
-        role_generation=request.window.role_generation,
+        role_generation=request.parent_incumbent_generation,
         candidate_generation=request.candidate_generation,
-        incumbent_digest=request.window.incumbent_digest,
+        incumbent_digest=request.parent_incumbent_digest,
         challenger_digest=prepared.candidate_digest,
     )
     handoff = owner.learning.handoff_if_ready(
@@ -2586,6 +2695,12 @@ def test_stopped_runner_clears_transferred_preparation_without_closing_authority
     )
     assert handoff is not None and not handoff.blockers
     transferred_controller = prepared.candidate_pair.controller
+    newer_corpus = _append_newer_passive_fit_corpus(
+        repository,
+        segment_id="newer-after-transfer",
+    )
+    assert newer_corpus.corpus_revision > request.fit_corpus.corpus_revision
+    assert newer_corpus.corpus_digest != request.fit_corpus.corpus_digest
 
     second = _harness(
         trajectory_repository=_CorpusRepositoryProbe(repository),
@@ -2596,36 +2711,43 @@ def test_stopped_runner_clears_transferred_preparation_without_closing_authority
     second.runtime.bind_learning_identity("session-b", "cook-b", 0)
     second_core = _RuntimeCorpusOwnerCore(second)
     second_runner = ThreadedControllerRunner(second_core)
-    assert second_runner.stop_for_refit()
-    assert second_runner.schedule_corpus_fit(CandidateOrigin.COOK_REFIT)
+    assert second_runner.stop_and_retain_for_teardown()
+    assert second_runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
     second_runner.finish_teardown()
 
     assert _wait_for(lambda: second_core.closed == 1)
+    assert second_core.scheduled_tickets
     newer_ticket = second_core.scheduled_tickets[-1]
-    assert worker.job.request.request_id == newer_ticket
+    newer_request = worker.job.request
+    assert newer_request.request_id == newer_ticket
+    assert newer_request.origin is CandidateOrigin.PASSIVE_ONLINE
+    assert newer_request.fit_corpus == newer_corpus
     assert transferred_controller.closed is False
+    assert owner.learning.prepared is not None
     assert owner.learning.prepared.candidate.request.request_id == newer_ticket
     first.runtime.close()
     first.activation.close()
     owner.close()
+    assert transferred_controller.closed is False
     transferred_controller.close()
+    assert transferred_controller.closed
 
 
 def test_overlapping_fit_schedule_attaches_to_the_existing_drain_truthfully():
     core = _CorpusDrainCore()
     runner = ThreadedControllerRunner(core)
     try:
-        assert runner.stop_for_refit()
+        assert runner.stop_and_retain_for_teardown()
         core.block_poll = True
         core.deliver_on_schedule = True
         core.poll_entered.clear()
-        assert runner.schedule_corpus_fit(CandidateOrigin.COOK_REFIT)
+        assert runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
         assert core.poll_entered.wait(2.0)
         assert runner.schedule_corpus_fit(CandidateOrigin.OPERATOR_CALIBRATION)
         core.poll_release.set()
         assert _wait_for(lambda: runner._corpus_fit_thread is None)
         assert core.fit_requests == [
-            CandidateOrigin.COOK_REFIT,
+            CandidateOrigin.PASSIVE_ONLINE,
             CandidateOrigin.OPERATOR_CALIBRATION,
         ]
         assert not core.deliveries
@@ -2638,11 +2760,11 @@ def test_finish_teardown_closes_once_after_fit_thread_terminalizes():
     core = _CorpusDrainCore()
     runner = ThreadedControllerRunner(core)
 
-    assert runner.stop_for_refit()
+    assert runner.stop_and_retain_for_teardown()
     core.block_poll = True
     core.deliver_on_schedule = True
     core.poll_entered.clear()
-    assert runner.schedule_corpus_fit(CandidateOrigin.COOK_REFIT)
+    assert runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
     assert core.poll_entered.wait(2.0)
     runner.finish_teardown()
     assert core.closed == 0
@@ -2651,7 +2773,7 @@ def test_finish_teardown_closes_once_after_fit_thread_terminalizes():
     assert runner._corpus_fit_thread is None
 
 
-def test_finish_teardown_closes_after_stop_for_refit_timeout_worker_exits():
+def test_finish_teardown_closes_after_stop_and_retain_timeout_worker_exits():
     core = BlockingCore()
     core.closed = 0
     core.close = lambda: setattr(core, "closed", core.closed + 1)
@@ -2659,7 +2781,7 @@ def test_finish_teardown_closes_after_stop_for_refit_timeout_worker_exits():
     runner.submit(200.0)
     assert core.entered.wait(2.0)
 
-    assert runner.stop_for_refit() is False
+    assert runner.stop_and_retain_for_teardown() is False
     runner.finish_teardown()
     assert core.closed == 0
     core.gate.set()
@@ -3068,7 +3190,7 @@ def test_failed_active_recovery_terminalizes_before_configured_pair_can_update()
         incumbent=incumbent,
         candidate=candidate,
         origin=CandidateOrigin.PASSIVE_ONLINE,
-        policy=ActivationPolicy.PASSIVE_AUTO,
+        policy=ActivationPolicy.CAUSAL_AUTO,
         decision_id="failed-active-recovery",
     ).transition(ActivationPhase.ACTIVE)
     persisted = ModelActivationState(

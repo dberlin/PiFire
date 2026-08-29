@@ -11,7 +11,6 @@ import pytest
 
 from common import datastore
 from common.controller_model_state import MODEL_STATE_KEY, SCHEMA_VERSION
-from common.model_evidence import MODEL_EVIDENCE_SCHEMA_VERSION
 from common.persistence.model_challenger import (
     compare_and_swap_model_challenger,
     read_model_challenger,
@@ -113,6 +112,19 @@ def _v4(revision=17, *, theta=47.0):
         },
         "failure": None,
     }
+
+
+def _v5(revision=17, *, theta=47.0):
+    snapshot = _v4(revision=revision, theta=theta)
+    snapshot["version"] = 5
+    snapshot["schema"] = "pifire-grey-learning/v5"
+    snapshot.pop("challenger")
+    snapshot.pop("window")
+    snapshot.pop("candidate_pair")
+    snapshot["identities"].pop("candidate_digest")
+    snapshot["identities"].pop("candidate_generation")
+    snapshot["challenger_authority"] = None
+    return snapshot
 
 
 def _ready_review_v4():
@@ -234,14 +246,14 @@ def _stored_controller():
     return json.loads(datastore.get_blob(MODEL_STATE_KEY))["models"]["mpc"]
 
 
-def test_model_schema_is_grey_v5():
-    assert MODEL_SCHEMA == 5
+def test_model_schema_is_grey_v6():
+    assert MODEL_SCHEMA == 6
 
 
 def test_v3_migration_preserves_only_bounded_top_level_grey_data():
     migrated = migrate_grey_learning_snapshot(_v3())
 
-    assert migrated["version"] == 5
+    assert migrated["version"] == 6
     assert migrated["revision"] == 17
     assert migrated["structure"] == {"kind": "grey-box", "n_delay": 8, "state_count": 10}
     assert migrated["active"]["parameters"] == PARAMS
@@ -262,6 +274,7 @@ def test_v3_migration_preserves_only_bounded_top_level_grey_data():
         "window",
         "candidate_pair",
     }.isdisjoint(migrated)
+    assert "cook_refit" not in migrated
     assert set(migrated["identities"]) == {
         "active_digest",
         "active_generation",
@@ -270,13 +283,44 @@ def test_v3_migration_preserves_only_bounded_top_level_grey_data():
     }
 
 
-def test_v4_normalizes_to_v5_without_importing_an_inline_candidate():
+def test_v4_normalizes_to_v6_without_importing_an_inline_candidate():
     migrated = migrate_grey_learning_snapshot(_v4())
 
-    assert migrated["version"] == 5
-    assert migrated["schema"] == "pifire-grey-learning/v5"
+    assert migrated["version"] == 6
+    assert migrated["schema"] == "pifire-grey-learning/v6"
     assert migrated["challenger_authority"] is None
-    assert {"challenger", "window", "candidate_pair"}.isdisjoint(migrated)
+    assert {"challenger", "window", "candidate_pair", "cook_refit"}.isdisjoint(migrated)
+
+
+def test_v5_normalizes_to_v6_without_retaining_cook_refit():
+    migrated = migrate_grey_learning_snapshot(_v5())
+
+    assert migrated["version"] == 6
+    assert migrated["schema"] == "pifire-grey-learning/v6"
+    assert migrated["challenger_authority"] is None
+    assert "cook_refit" not in migrated
+
+
+def test_retired_cook_refit_origin_is_safely_retired_during_v5_migration():
+    legacy = _v5()
+    legacy["origin"] = "cook-refit"
+    legacy["policy"] = "cook-refit"
+    legacy["activation"] = {
+        "phase": "active",
+        "pending_persistence": False,
+        "pending_swap": False,
+    }
+
+    migrated = migrate_grey_learning_snapshot(legacy)
+
+    assert migrated["origin"] is None
+    assert migrated["policy"] is None
+    assert migrated["challenger_authority"] is None
+    assert migrated["activation"] == {
+        "phase": "aborted",
+        "pending_persistence": False,
+        "pending_swap": False,
+    }
 
 
 @pytest.mark.parametrize("delay", [0, 4, 7, 9, 8.5])
@@ -319,7 +363,7 @@ def test_atomic_authority_migration_matrix(ds, activation, controller, expected_
     assert result.source == expected_source
     assert result.reason == reason
     assert stored == result.snapshot
-    assert stored["version"] == 5
+    assert stored["version"] == 6
     assert stored["active"]["parameters"]["theta"] == expected_theta
     migration = json.loads(datastore.get_blob("mpc:model_activation_migration_input"))
     assert migration["current"]["snapshot"] == stored
@@ -450,16 +494,12 @@ def test_migration_invalidation_is_durable_and_surfaces_from_real_backend(ds):
     _seed_controller({"version": 3, "broken": True})
 
     result = migrate_mpc_learning_authority(defaults=PARAMS)
-    report, records = backend_learning_report()
+    _, records = backend_learning_report()
 
-    invalidations = [
-        record
-        for record in records
-        if record.kind.value == "schema_invalidation" and record.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION
-    ]
+    invalidations = [record for record in records if record.kind.value == "schema_invalidation"]
     assert result.reason == "schema-invalidated"
     assert len(invalidations) == 1
-    assert report.as_dict()["status"] == "schema-invalidated"
+    assert invalidations[0].schema_version == 3
     assert _stored_controller() == result.snapshot
 
 
@@ -546,8 +586,8 @@ def test_current_active_precedes_rollback_and_controller_authorities(ds):
         (
             {
                 "model_kind": "grey-box",
-                "model_schema": 5,
-                "snapshot": {"version": 5},
+                "model_schema": 6,
+                "snapshot": {"version": 6},
             },
             "schema-invalidated",
         ),
@@ -600,7 +640,7 @@ def test_malformed_serialized_documents_are_replaced_by_defaults_without_partial
         "candidate": None,
         "current": {
             "model_kind": "grey-box",
-            "model_schema": 5,
+            "model_schema": 6,
             "snapshot": result.snapshot,
             "source": "defaults",
         },
@@ -804,7 +844,7 @@ def test_controller_only_v5_legacy_policy_canonicalizes_without_reactivation(
     origin: CandidateOrigin,
     policy: str,
 ) -> None:
-    checkpoint = migrate_grey_learning_snapshot(_v4())
+    checkpoint = _v5()
     checkpoint["origin"] = origin.value
     checkpoint["policy"] = policy
     checkpoint["activation"] = {
@@ -905,7 +945,7 @@ def test_invalid_legacy_v4_candidate_is_absent_or_retired(ds, invalid_lineage: s
             "incumbent_digest": "f" * 64,
         }
     else:
-        legacy["policy"] = ActivationPolicy.PASSIVE_AUTO.value
+        legacy["policy"] = "passive-auto"
     _seed_controller(legacy)
 
     result = migrate_mpc_learning_authority(defaults=PARAMS)
@@ -940,7 +980,7 @@ def test_legacy_v4_prepared_activation_aborts_without_importing_candidate(ds):
 
 
 @pytest.mark.parametrize("mismatch", ["challenger-id", "revision"])
-def test_v5_challenger_reference_mismatch_retires_instead_of_projecting(ds, mismatch: str) -> None:
+def test_v6_challenger_reference_mismatch_retires_instead_of_projecting(ds, mismatch: str) -> None:
     legacy, _, _ = _ready_review_v4()
     _seed_controller(legacy)
     imported = migrate_mpc_learning_authority(defaults=PARAMS)
@@ -964,7 +1004,7 @@ def test_v5_challenger_reference_mismatch_retires_instead_of_projecting(ds, mism
     assert retired.retirement_reason is not None and "reference" in retired.retirement_reason
 
 
-def test_v5_older_revision_reference_adopts_newer_durable_progress(ds) -> None:
+def test_v6_older_revision_reference_adopts_newer_durable_progress(ds) -> None:
     legacy, _, _ = _ready_review_v4()
     _seed_controller(legacy)
     imported = migrate_mpc_learning_authority(defaults=PARAMS)

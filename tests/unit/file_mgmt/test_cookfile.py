@@ -70,7 +70,7 @@ class _FrozenDateTime:
 
     import datetime as _dt
 
-    _frozen = _dt.datetime(2026, 7, 18, 12, 34)
+    _frozen = _dt.datetime(2026, 7, 18, 12, 34)  # noqa: DTZ001 - replaces naive datetime.now()
 
     @classmethod
     def now(cls, tz=None):
@@ -1272,7 +1272,7 @@ def test_new_cookfile_contains_complete_learning_diagnostics(
     assert status == "OK"
     assert reread["learning_diagnostics"] == payload
 
-    assert payload["schema_version"] == 1
+    assert payload["schema_version"] == 2
     assert payload["cook_id"] == cook_id
     assert payload["controllers"] == ["pid_sp"]
     assert payload["reports"] == [
@@ -1287,6 +1287,10 @@ def test_new_cookfile_contains_complete_learning_diagnostics(
     assert {record["cook_id"] for record in payload["control_trace"]["records"]} == {cook_id}
     assert payload["model_evidence"]["records"]
     assert {record["cook_id"] for record in payload["model_evidence"]["records"]} == {cook_id}
+    assert payload["trajectory_segments"] == []
+    assert payload["trajectory_schema_versions"] == []
+    assert payload["corpus"]["schema_version"] == 1
+    assert payload["corpus"]["segment_count"] == 0
     assert payload["capture_errors"] == []
     assert flush_calls == [None]
     assert read_history() == []

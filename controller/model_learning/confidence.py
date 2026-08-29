@@ -181,7 +181,6 @@ def evaluate_confidence(
     origins, duplicate_conflict = _origins(selected)
     assessment = _newest_payload(selected, CandidateAssessmentEvidence)
     timing = _newest_payload(selected, TimingDistributionEvidence)
-    schema_invalidated = _text(state.get("status")) == LearningStatus.SCHEMA_INVALIDATED.value
 
     gates: list[GateResult] = []
     _gate(gates, "ledger-integrity", ledger_valid and not duplicate_conflict, "ledger-integrity")
@@ -244,9 +243,7 @@ def evaluate_confidence(
     _gate(
         gates,
         "schema-integrity",
-        bool(selected)
-        and all(record.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION for record in selected)
-        and not schema_invalidated,
+        bool(selected) and all(record.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION for record in selected),
         "schema-integrity",
     )
     continuity_records = (
@@ -306,7 +303,7 @@ def evaluate_confidence(
         _gate(gates, f"cook-weight:{label}", _cook_weight_ok(origins, interval), "cook-effective-weight")
 
     blockers = tuple(gate.reason for gate in gates if not gate.passed and gate.reason is not None)
-    status = _status(authoritative, schema_invalidated, selected, assessment, blockers)
+    status = _status(authoritative, selected, assessment, blockers)
     return ConfidenceReport(
         status,
         active_kind,
@@ -538,15 +535,12 @@ def _gate(gates: list[GateResult], name: str, passed: bool, reason: str) -> None
 
 def _status(
     authoritative: LearningStatus | None,
-    invalidated: bool,
     records: Sequence[ModelEvidenceRecord],
     assessment: CandidateAssessmentEvidence | None,
     blockers: Sequence[str],
 ) -> LearningStatus:
     if authoritative is not None:
         return authoritative
-    if invalidated:
-        return LearningStatus.SCHEMA_INVALIDATED
     if not any(record.kind is not EvidenceKind.RECORDER_GAP for record in records):
         return LearningStatus.COLLECTING
     if not isinstance(assessment, CandidateAssessmentEvidence):
@@ -565,7 +559,6 @@ def _authoritative_status(state: Mapping[object, object]) -> LearningStatus | No
         LearningStatus.ACTIVE.value,
         LearningStatus.FALLBACK.value,
         LearningStatus.ERROR.value,
-        LearningStatus.SCHEMA_INVALIDATED.value,
     }:
         return LearningStatus(value)
     return None

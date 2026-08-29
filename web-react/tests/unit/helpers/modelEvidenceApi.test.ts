@@ -22,22 +22,11 @@ const VALID_REPORT = {
   mode: "passive-online",
   decision_id: "causal-round-2-1",
   evidence: { count: 4, audit_count: 4, high_water: [200, "round-1"], retired_excluded: 0 },
-  fit: { status: "succeeded", request_id: "fit-4", window_id: "window-4", error: null },
-  cook_refit: {
-    status: "idle",
-    latest: "disabled",
-    final_status: "disabled",
-    authorization: "blocked",
-    next_cook: false,
-  },
-  window: {
-    session_id: "session-4",
-    cook_id: "cook-4",
-    first_observation_sequence: 1,
-    last_observation_sequence: 200,
-    configuration_digest: "d".repeat(64),
-    incumbent_digest: ACTIVE_DIGEST,
-    role_generation: 4,
+  fit: {
+    status: "succeeded",
+    request_id: "fit-4",
+    fit_corpus_digest: CORPUS_DIGEST,
+    error: null,
   },
   checks: {},
   candidate: {
@@ -188,31 +177,16 @@ describe("fetchModelEvidenceReport", () => {
     },
   );
 
-  it("returns a strictly valid success report", async () => {
-    fetchMock.mockResolvedValue(
-      new Response(JSON.stringify(VALID_REPORT), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
-
-    const result = await fetchModelEvidenceReport();
-
-    expect(result.ok).toBe(true);
-    expect(result.data).toEqual(VALID_REPORT);
-  });
-
   it.each([
-    ["report schema v2", { ...VALID_REPORT, schema_version: 2 }],
-    ["MPC ready-for-review status", { ...VALID_REPORT, status: "ready-for-review" }],
     [
-      "operator-reviewed candidate policy",
+      "fit corpus digest",
       {
         ...VALID_REPORT,
-        candidate: { ...VALID_REPORT.candidate, policy: "operator-reviewed" },
+        fit: { ...VALID_REPORT.fit, fit_corpus_digest: "not-a-digest" },
       },
     ],
-  ])("rejects the retired %s current authority", async (_name, report) => {
+    ["corpus body", { ...VALID_REPORT, corpus: null }],
+  ])("rejects an invalid %s", async (_name, report) => {
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify(report), {
         status: 200,
@@ -225,5 +199,22 @@ describe("fetchModelEvidenceReport", () => {
     expect(result.ok).toBe(false);
     expect(result.data).toBeNull();
     expect(result.message).toMatch(/^Invalid model evidence report:/);
+  });
+
+  it.each([
+    ["active causal work", VALID_REPORT],
+    ["no candidate or evaluation", { ...VALID_REPORT, candidate: null, evaluation: null }],
+  ])("returns a strictly valid success report with %s", async (_name, report) => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify(report), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    const result = await fetchModelEvidenceReport();
+
+    expect(result.ok).toBe(true);
+    expect(result.data).toEqual(report);
   });
 });

@@ -58,17 +58,9 @@ function dashboardLearningReport(
     fit: {
       status: "idle",
       request_id: null,
-      window_id: null,
+      fit_corpus_digest: null,
       error: null,
     },
-    cook_refit: {
-      status: "idle",
-      latest: null,
-      final_status: "idle",
-      authorization: "not-run",
-      next_cook: false,
-    },
-    window: null,
     checks: {},
     candidate: {
       challenger_id: `challenger-${roleGeneration}`,

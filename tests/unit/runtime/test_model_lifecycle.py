@@ -29,7 +29,7 @@ def test_model_lifecycle_runner_publishes_exact_fixed_contract() -> None:
             {"record": ModelEvidenceRecord},
             DurableActivationReceipt | None,
         ),
-        "stop_for_refit": ({}, bool | None),
+        "stop_and_retain_for_teardown": ({}, bool | None),
         "schedule_corpus_fit": ({"origin": CandidateOrigin}, bool),
         "finish_teardown": ({}, type(None)),
     }

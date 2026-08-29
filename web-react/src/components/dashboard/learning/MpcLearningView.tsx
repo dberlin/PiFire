@@ -452,27 +452,16 @@ function ActiveMpcLearningView({
           </div>
 
           <section className={LEARNING_SECTION_CLASS}>
-            <h3 className="font-bold">Fit and evidence window</h3>
+            <h3 className="font-bold">Fit request</h3>
             <div className="mt-2 grid gap-1 text-sm md:grid-cols-2">
               <p>Status: {report.fit.status}</p>
               <p>Request: {report.fit.request_id ?? "none"}</p>
-              <p>Window ID: {report.fit.window_id ?? "none"}</p>
+              <p className="break-all font-mono text-xs">
+                Fit corpus: {report.fit.fit_corpus_digest ?? "none"}
+              </p>
               <p className={report.fit.error ? "text-danger" : "text-probe-label"}>
                 Fit error: {report.fit.error ?? "none"}
               </p>
-              {report.window && (
-                <>
-                  <p>Session: {report.window.session_id}</p>
-                  <p>Cook: {report.window.cook_id ?? "none"}</p>
-                  <p>
-                    Observation sequence: {report.window.first_observation_sequence}–
-                    {report.window.last_observation_sequence}
-                  </p>
-                  <p>Window role generation: {report.window.role_generation}</p>
-                  <p className="break-all">Configuration: {report.window.configuration_digest}</p>
-                  <p className="break-all">Incumbent: {report.window.incumbent_digest}</p>
-                </>
-              )}
             </div>
           </section>
 
@@ -641,26 +630,6 @@ function ActiveMpcLearningView({
               </button>
             </section>
           )}
-
-          <section className={LEARNING_SECTION_CLASS}>
-            <h3 className="font-bold">Cook refit</h3>
-            <div className="mt-2 grid gap-1 text-sm">
-              <p>Status: {report.cook_refit.status}</p>
-              <p>
-                Final outcome:{" "}
-                {report.cook_refit.authorization === "not-run"
-                  ? "not run yet"
-                  : report.cook_refit.final_status}
-              </p>
-              <p>
-                Authorization:{" "}
-                {report.cook_refit.authorization === "not-run"
-                  ? "none yet"
-                  : report.cook_refit.authorization}
-              </p>
-              <p>Next cook: {yesNo(report.cook_refit.next_cook)}</p>
-            </div>
-          </section>
         </>
       )}
     </LearningDialog>

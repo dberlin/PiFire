@@ -158,9 +158,9 @@ def test_typescript_output_is_biome_clean(tmp_path):
                 "enum": [
                     "insufficient-excitation",
                     "operator-calibration",
-                    "ready-for-review",
-                    "accepted-next-cook",
-                    "checkpoint-failure",
+                    "activation-terminal",
+                    "checkpoint-schema-invalid",
+                    "model-activation-rejected",
                 ],
                 "type": "string",
             },
@@ -183,6 +183,7 @@ def test_typescript_output_is_biome_clean(tmp_path):
         capture_output=True,
         text=True,
     )
+    assert write_result.returncode == 0, write_result.stdout + write_result.stderr
     # `biome check <path>` resolves a real on-disk path to an absolute path
     # via cwd before matching it against the config's includes, so a plain
     # tmp-dir target (unrelated to either biome.jsonc's directory or any

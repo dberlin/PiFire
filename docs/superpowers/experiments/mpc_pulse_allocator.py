@@ -25,7 +25,8 @@ import numpy as np
 
 from controller.grill_sim import GrillSim, MAKGrillSim
 from controller.mpc_config import DEFAULT_MPC_CONFIG
-from controller.update_mpc import fit_params, fit_quality
+from controller.runtime.model_fitting import GreyFitSuccess, fit_segmented_grey
+from controller.update_mpc import trace_fit_job
 
 U_MIN = 0.10
 U_MAX = 0.90
@@ -211,29 +212,30 @@ def run_open_loop() -> list[Row]:
 
 def _fit(t: np.ndarray, temp: np.ndarray, input_signal: np.ndarray) -> dict[str, float | bool]:
     init = {key: float(DEFAULT_MPC_CONFIG[key]) for key in ("C_c", "h_amb", "K_Q", "theta")}
-    result = fit_params(
-        t,
-        temp,
-        input_signal,
-        T_amb=float(DEFAULT_MPC_CONFIG["T_amb"]),
-        init=init,
-        sigma=float(DEFAULT_MPC_CONFIG["sigma"]),
-        n_delay=int(DEFAULT_MPC_CONFIG["n_delay"]),
+    outcome = fit_segmented_grey(
+        trace_fit_job(
+            t,
+            temp,
+            input_signal,
+            T_amb=float(DEFAULT_MPC_CONFIG["T_amb"]),
+            init=init,
+            sigma=float(DEFAULT_MPC_CONFIG["sigma"]),
+            n_delay=int(DEFAULT_MPC_CONFIG["n_delay"]),
+        )
     )
-    rmse, max_abs_error = fit_quality(
-        t,
-        temp,
-        input_signal,
-        result,
-        T_amb=float(DEFAULT_MPC_CONFIG["T_amb"]),
-    )
-    summary = {
-        key: (bool(value) if key == "converged" else float(value))
-        for key, value in result.items()
-        if key in {"C_c", "h_amb", "K_Q", "theta", "sigma", "converged", "nfev"}
-    }
-    summary.update(rmse=rmse, max_abs_error=max_abs_error)
-    return summary
+    if isinstance(outcome, GreyFitSuccess):
+        return {
+            "C_c": float(outcome.config.C_c),
+            "h_amb": float(outcome.config.h_amb),
+            "K_Q": float(outcome.config.K_Q),
+            "theta": float(outcome.config.theta),
+            "sigma": float(outcome.config.sigma),
+            "converged": True,
+            "nfev": float(outcome.nfev),
+            "rmse": outcome.rmse_c,
+            "max_abs_error": outcome.max_error_c,
+        }
+    raise RuntimeError(f"segmented grey fit failed: {outcome.error_type}: {outcome.detail}")
 
 
 def run_calibration_fits() -> dict[str, dict[str, float | bool]]:

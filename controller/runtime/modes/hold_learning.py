@@ -649,7 +649,7 @@ class HoldLearningRuntime:
             self.mark_evidence_unavailable()
             return False
         try:
-            scheduled = runner.schedule_corpus_fit(CandidateOrigin.COOK_REFIT)
+            scheduled = runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
         except Exception as error:
             self.mark_evidence_unavailable()
             self._logger.error(f"Model fit scheduling failed at cook end: {error}")

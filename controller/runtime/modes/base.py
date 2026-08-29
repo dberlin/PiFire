@@ -266,6 +266,8 @@ class ControlMode:
         controller_configs = controller_settings.get("config", {}) if isinstance(controller_settings, dict) else {}
         selected_config = controller_configs.get(selected, {}) if isinstance(controller_configs, dict) else {}
         units = globals_settings.get("units", "F") if isinstance(globals_settings, dict) else "F"
+        cycle_data = settings.get("cycle_data", {})
+        auger_duty_ceiling = cycle_data.get("u_max", 0.9) if isinstance(cycle_data, dict) else 0.9
         settings_digest = self._trajectory_digest(settings)
         settings_revision = int(settings_digest[:16], 16)
         persisted_mode = self._mode_value(control.get("mode", self.name))
@@ -318,6 +320,7 @@ class ControlMode:
                     "pwm": settings.get("pwm", {}),
                 }
             ),
+            auger_duty_ceiling=auger_duty_ceiling,
             scored_fan_regime_digest=self._trajectory_digest(
                 {
                     "platform": settings.get("platform", {}),

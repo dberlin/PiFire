@@ -14,7 +14,7 @@ from scipy import optimize
 
 from common.learning_trajectory import FitCorpusIdentity, FitCorpusSlice, canonical_trajectory_digest
 from controller.acados.contracts import GreyBoxMPCConfig
-from controller.model_learning.contracts import CandidateOrigin, FitRequest, FitWindowIdentity
+from controller.model_learning.contracts import CandidateOrigin, FitRequest
 from controller.runtime.model_fitting import (
     FIT_LOG_BOUNDS,
     FITTED_PARAMETERS,
@@ -40,19 +40,19 @@ _THREAD_VARIABLES = (
 )
 
 
-def _request(*, first: int, last: int) -> FitRequest:
+def _request(
+    *,
+    first: int,
+    last: int,
+    corpus: FitCorpusIdentity,
+) -> FitRequest:
     return FitRequest(
         request_id=f"fit-{first}-{last}",
         origin=CandidateOrigin.PASSIVE_ONLINE,
-        window=FitWindowIdentity(
-            session_id="session-a",
-            cook_id="cook-a",
-            first_observation_sequence=first,
-            last_observation_sequence=last,
-            configuration_digest=_DIGEST_A,
-            incumbent_digest=_DIGEST_B,
-            role_generation=4,
-        ),
+        fit_corpus=corpus,
+        configuration_digest=_DIGEST_A,
+        parent_incumbent_digest=_DIGEST_B,
+        parent_incumbent_generation=4,
         candidate_generation=9,
     )
 
@@ -127,9 +127,14 @@ def _job(
         if config is None
         else config
     )
+    corpus = _corpus(segment)
     return GreyFitJob(
-        request=_request(first=first, last=first + count - 1),
-        corpus=_corpus(segment),
+        request=_request(
+            first=first,
+            last=first + count - 1,
+            corpus=corpus,
+        ),
+        corpus=corpus,
         segments=(segment,),
         config=resolved,
     )
@@ -259,7 +264,7 @@ def test_result_identity_is_lossless_and_next_request_waits_for_result_drain() -
         assert worker.submit(second) is FitSubmission.ACCEPTED
         second_message = worker.receive(timeout_s=10.0)
     assert second_message.outcome.request == second.request
-    assert second_message.outcome.request.window == second.request.window
+    assert second_message.outcome.request.fit_corpus == second.request.fit_corpus
 
 
 def test_default_segmented_kernel_keeps_fixed_residual_shape_and_uses_no_continuous_job_path(

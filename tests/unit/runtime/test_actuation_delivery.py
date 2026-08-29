@@ -614,7 +614,7 @@ def test_unrelated_platform_apis_delegate_without_creating_trajectory_edges() ->
 
 def test_build_devices_returns_delivered_wrapper_and_preserves_platform_behavior(ds) -> None:
     from controller.runtime.devices import build_devices
-    from tests.unit.runtime.test_devices import _RecordingLogger, _settings
+    from tests.unit.runtime._device_helpers import _RecordingLogger, _settings
 
     devices, errors = build_devices(
         _settings(),

@@ -19,8 +19,8 @@ const endpoint = (baseUrl: string, path: string) => `${baseUrl}/api/${path}`;
 
 type UnknownRecord = Record<string, unknown>;
 
-const ORIGINS = ["passive-online", "operator-calibration", "cook-refit"] as const;
-const POLICIES = ["causal-auto", "passive-auto", "cook-refit"] as const;
+const ORIGINS = ["passive-online", "operator-calibration"] as const;
+const POLICIES = ["causal-auto"] as const;
 const REPORT_STATUSES = [
   "warming",
   "collecting",
@@ -32,21 +32,11 @@ const REPORT_STATUSES = [
   "active",
   "fallback",
   "error",
-  "schema-invalidated",
 ] as const;
 const FIT_STATUSES = ["idle", "queued", "running", "succeeded", "failed", "stale"] as const;
 const CHECK_STATUSES = ["not-run", "pending", "passed", "failed"] as const;
 const ACTIVATION_PHASES = ["prepared", "active", "aborted"] as const;
 const CANDIDATE_PHASES = ["built", "evaluating", "qualified", "activating"] as const;
-const COOK_REFIT_OUTCOMES = [
-  "disabled",
-  "insufficient",
-  "rejected",
-  "failed",
-  "accepted-next-cook",
-  "checkpoint-failure",
-] as const;
-const COOK_REFIT_AUTHORIZATIONS = ["not-run", "blocked", "next-cook"] as const;
 
 function invalidReport(detail: string): never {
   throw new Error(`Invalid model evidence report: ${detail}`);
@@ -160,50 +150,11 @@ function validateEvidence(value: unknown) {
 
 function validateFit(value: unknown, path: string) {
   const source = record(value, path);
-  exactKeys(source, ["status", "request_id", "window_id", "error"], path);
+  exactKeys(source, ["status", "request_id", "fit_corpus_digest", "error"], path);
   oneOf(source.status, FIT_STATUSES, `${path}.status`);
   nullable(source.request_id, (item) => stringValue(item, `${path}.request_id`));
-  nullable(source.window_id, (item) => stringValue(item, `${path}.window_id`));
+  nullable(source.fit_corpus_digest, (item) => digest(item, `${path}.fit_corpus_digest`));
   nullable(source.error, (item) => stringValue(item, `${path}.error`));
-}
-
-function validateCookRefit(value: unknown) {
-  const source = record(value, "cook_refit");
-  exactKeys(
-    source,
-    ["status", "latest", "final_status", "authorization", "next_cook"],
-    "cook_refit",
-  );
-  oneOf(source.status, FIT_STATUSES, "cook_refit.status");
-  nullable(source.latest, (item) => oneOf(item, COOK_REFIT_OUTCOMES, "cook_refit.latest"));
-  oneOf(source.final_status, [...FIT_STATUSES, ...COOK_REFIT_OUTCOMES], "cook_refit.final_status");
-  oneOf(source.authorization, COOK_REFIT_AUTHORIZATIONS, "cook_refit.authorization");
-  booleanValue(source.next_cook, "cook_refit.next_cook");
-}
-
-function validateWindow(value: unknown) {
-  if (value === null) return;
-  const source = record(value, "window");
-  exactKeys(
-    source,
-    [
-      "session_id",
-      "cook_id",
-      "first_observation_sequence",
-      "last_observation_sequence",
-      "configuration_digest",
-      "incumbent_digest",
-      "role_generation",
-    ],
-    "window",
-  );
-  nonBlankString(source.session_id, "window.session_id");
-  nullable(source.cook_id, (item) => nonBlankString(item, "window.cook_id"));
-  nonNegativeInteger(source.first_observation_sequence, "window.first_observation_sequence");
-  nonNegativeInteger(source.last_observation_sequence, "window.last_observation_sequence");
-  digest(source.configuration_digest, "window.configuration_digest");
-  digest(source.incumbent_digest, "window.incumbent_digest");
-  nonNegativeInteger(source.role_generation, "window.role_generation");
 }
 
 function validateParameters(value: unknown) {
@@ -535,8 +486,6 @@ function parseModelEvidenceReport(value: unknown): ModelEvidenceReport {
       "decision_id",
       "evidence",
       "fit",
-      "cook_refit",
-      "window",
       "checks",
       "candidate",
       "evaluation",
@@ -560,8 +509,6 @@ function parseModelEvidenceReport(value: unknown): ModelEvidenceReport {
   nullable(source.decision_id, (item) => stringValue(item, "decision_id"));
   validateEvidence(source.evidence);
   validateFit(source.fit, "fit");
-  validateCookRefit(source.cook_refit);
-  validateWindow(source.window);
   const checks = record(source.checks, "checks");
   for (const [name, status] of Object.entries(checks)) {
     oneOf(status, CHECK_STATUSES, `checks.${name}`);

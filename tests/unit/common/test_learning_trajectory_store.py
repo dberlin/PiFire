@@ -16,10 +16,7 @@ from common import datastore
 from common.learning_trajectory import (
     FitCorpusIdentity,
     FitCorpusSlice,
-    FrameDeliveryCertainty,
-    HoldEntrySample,
     LearningTrajectoryFrame,
-    LearningTrajectorySegment,
     ModelFitLineage,
     TrajectoryBreakReason,
     canonical_trajectory_digest,
@@ -37,135 +34,22 @@ from common.persistence.learning_trajectory import (
     SegmentCursor,
     StaleSegmentCursorError,
 )
+from tests.unit.common._learning_trajectory_helpers import (
+    _WALL_EPOCH_MS,
+    _digest,
+    _finalize_segment,
+    _frame,
+    _hold_entry,
+    _segment,
+)
 
-_FRAME_MS = 20_000
-_WALL_EPOCH_MS = 1_700_000_000_000
-_TABLES = {
+_CORPUS_TABLES = {
     "learning_trajectory_corpus",
     "learning_trajectory_segment",
     "learning_trajectory_frame",
     "learning_fit_run",
 }
-
-
-def _digest(label: str) -> str:
-    return sha256(label.encode()).hexdigest()
-
-
-def _frame(
-    sequence: int,
-    *,
-    epoch_ms: int = 0,
-    effective_mode: str = "Hold",
-    temperature_offset: float = 0.0,
-) -> LearningTrajectoryFrame:
-    start_ms = epoch_ms + sequence * _FRAME_MS
-    end_ms = start_ms + _FRAME_MS
-    return LearningTrajectoryFrame(
-        sequence=sequence,
-        monotonic_start_ms=start_ms,
-        monotonic_end_ms=end_ms,
-        wall_start_ms=_WALL_EPOCH_MS + start_ms,
-        wall_end_ms=_WALL_EPOCH_MS + end_ms,
-        chamber_temperature_c=110.0 + temperature_offset + sequence / 100.0,
-        temperature_sample_monotonic_ms=end_ms,
-        temperature_sample_wall_ms=_WALL_EPOCH_MS + end_ms,
-        temperature_sample_age_ms=0,
-        temperature_sample_wall_age_ms=0,
-        temperature_sample_clock_skew_ms=0,
-        source_temperature_units="C",
-        settings_revision=7,
-        probe_valid=True,
-        probe_source="grill-probe-1",
-        ambient_temperature_c=24.0,
-        ambient_source="configured",
-        ambient_uncertainty_c=1.5,
-        delivered_auger_on_seconds=8.0,
-        realized_auger_duty=0.4,
-        normalized_combustion_load=0.4,
-        delivered_fan_on_seconds=20.0,
-        fan_duty_integral_seconds=10.0,
-        mean_actual_fan_duty=0.5,
-        auger_delivery_certainty=FrameDeliveryCertainty.EXACT,
-        fan_delivery_certainty=FrameDeliveryCertainty.EXACT,
-        effective_mode=effective_mode,
-        recipe_step_id=None,
-        complete=True,
-        continuous=True,
-        partial=False,
-        boundary_reason=None,
-    )
-
-
-def _hold_entry(frame: LearningTrajectoryFrame) -> HoldEntrySample:
-    return HoldEntrySample(
-        monotonic_ms=frame.monotonic_start_ms,
-        wall_ms=frame.wall_start_ms,
-        chamber_temperature_c=frame.chamber_temperature_c,
-        probe_valid=True,
-        probe_source="grill-probe-1",
-    )
-
-
-def _segment(
-    segment_id: str,
-    *,
-    epoch_ms: int = 0,
-    start_sequence: int = 0,
-    pre_roll_count: int = 1,
-    scored_count: int = 0,
-    state: str = "open",
-) -> LearningTrajectorySegment:
-    if pre_roll_count + scored_count == 0:
-        raise AssertionError("test segments must contain at least one frame")
-    pre_roll = tuple(
-        _frame(sequence, epoch_ms=epoch_ms, effective_mode="Smoke")
-        for sequence in range(start_sequence, start_sequence + pre_roll_count)
-    )
-    scored_start = start_sequence + pre_roll_count
-    scored = tuple(_frame(sequence, epoch_ms=epoch_ms) for sequence in range(scored_start, scored_start + scored_count))
-    all_frames = (*pre_roll, *scored)
-    hold_entry = _hold_entry(scored[0]) if scored else None
-    return LearningTrajectorySegment(
-        schema_version=1,
-        observation_schema_version=2,
-        segment_id=segment_id,
-        cook_id=f"cook-{segment_id}",
-        trajectory_session_id=f"trajectory-{segment_id}",
-        trace_session_ids=(f"trace-{segment_id}",),
-        collection_provenance={"origin": "passive-online", "role_generation": 4},
-        configuration_provenance={"controller": "MPC", "revision": 7},
-        cadence_digest=_digest("cadence-20-seconds-v1"),
-        model_structure_digest=_digest("grey-one-zone-erlang-v1"),
-        held_physics_digest=_digest("held-grey-physics-v1"),
-        delay_input_mapping_digest=_digest("normalized-combustion-load-v1"),
-        actuation_mapping_digest=_digest("framed-pulse-v1"),
-        scored_fan_regime_digest=_digest("fan-regime-v1"),
-        ambient_semantics_digest=_digest("ambient-configured-celsius-v1"),
-        pre_roll_frames=pre_roll,
-        hold_entry=hold_entry,
-        scored_hold_frames=scored,
-        generation_audit_ranges=(
-            {
-                "start_sequence": all_frames[0].sequence,
-                "end_sequence": all_frames[-1].sequence,
-                "role_generation": 4,
-            },
-        ),
-        start_monotonic_ms=all_frames[0].monotonic_start_ms,
-        end_monotonic_ms=all_frames[-1].monotonic_end_ms,
-        start_wall_ms=all_frames[0].wall_start_ms,
-        end_wall_ms=all_frames[-1].wall_end_ms,
-        start_sequence=all_frames[0].sequence,
-        end_sequence=all_frames[-1].sequence,
-        pre_roll_end_reason=None,
-        terminal_break_reason=(None if state == "open" else TrajectoryBreakReason.STOP),
-        state=state,
-        source_trace_digest=_digest(f"source-trace-{segment_id}"),
-        source_schema_version=7,
-        source_row_digest=_digest(f"source-rows-{segment_id}"),
-        build_provenance={"builder": "trajectory-runtime", "revision": 1},
-    )
+_SCHEMA_V10_TABLES = {*_CORPUS_TABLES, "model_challenger_state"}
 
 
 def _lineage(
@@ -299,14 +183,6 @@ def _append_scored(
     return repository.append(cursor, hold_entry=_hold_entry(frames[0]), scored=frames)
 
 
-def _finalize_segment(
-    repository: LearningTrajectoryRepository,
-    segment: LearningTrajectorySegment,
-) -> FinalizeReceipt:
-    cursor = repository.begin_segment(segment)
-    return repository.finalize(cursor, TrajectoryBreakReason.STOP)
-
-
 @pytest.fixture
 def database_path(tmp_path: Path) -> Path:
     return tmp_path / "learning-trajectory.sqlite"
@@ -317,13 +193,13 @@ def repository(database_path: Path) -> LearningTrajectoryRepository:
     return LearningTrajectoryRepository(str(database_path))
 
 
-def test_schema_v9_migration_is_additive_and_declares_corpus_tables(database_path: Path) -> None:
+def test_schema_v10_migration_from_v8_is_additive_and_declares_learning_tables(database_path: Path) -> None:
     _seed_v8_database(database_path)
     datastore._reset_for_tests(str(database_path))
     try:
         connection = datastore.connection()
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 9
-        assert _TABLES <= _table_names(database_path)
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 10
+        assert _SCHEMA_V10_TABLES <= _table_names(database_path)
         assert connection.execute("SELECT value FROM kv WHERE key='preserved-v8'").fetchone()[0] == '{"value":8}'
         assert (
             connection.execute("SELECT payload FROM legacy_v8_data WHERE identity='legacy-row'").fetchone()[0]
@@ -387,6 +263,15 @@ def test_schema_v9_migration_is_additive_and_declares_corpus_tables(database_pat
             "started_ms",
             "completed_ms",
         } <= _columns(database_path, "learning_fit_run")
+        assert {
+            "singleton",
+            "challenger_id",
+            "revision",
+            "phase",
+            "schema_version",
+            "state_json",
+            "updated_ms",
+        } <= _columns(database_path, "model_challenger_state")
 
         foreign_keys = connection.execute("PRAGMA foreign_key_list(learning_trajectory_frame)").fetchall()
         assert any(
@@ -400,7 +285,7 @@ def test_schema_v9_migration_is_additive_and_declares_corpus_tables(database_pat
         datastore._reset_for_tests(None)
 
 
-def test_schema_v9_migration_rolls_back_before_version_bump(
+def test_schema_v10_migration_rolls_back_only_challenger_stage_before_version_bump(
     database_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _seed_v8_database(database_path)
@@ -410,8 +295,8 @@ def test_schema_v9_migration_rolls_back_before_version_bump(
     class _CrashingConnection(sqlite3.Connection):
         def execute(self, sql: str, *args: Any, **kwargs: Any):
             normalized = "".join(sql.lower().split())
-            if normalized == "pragmauser_version=9":
-                raise RuntimeError("injected v9 migration crash")
+            if normalized == "pragmauser_version=10":
+                raise RuntimeError("injected v10 migration crash")
             return super().execute(sql, *args, **kwargs)
 
     def crashing_connect(*args: Any, **kwargs: Any):
@@ -421,15 +306,18 @@ def test_schema_v9_migration_rolls_back_before_version_bump(
     try:
         with (
             monkeypatch.context() as patch,
-            pytest.raises(RuntimeError, match="injected v9 migration crash"),
+            pytest.raises(RuntimeError, match="injected v10 migration crash"),
         ):
             patch.setattr(datastore.sqlite3, "connect", crashing_connect)
             datastore.connection()
 
         check = sqlite3.connect(database_path)
         try:
-            assert check.execute("PRAGMA user_version").fetchone()[0] == 8
-            assert not (_TABLES & _table_names(database_path))
+            # The v9 corpus migration committed before the isolated v10 transaction began.
+            assert check.execute("PRAGMA user_version").fetchone()[0] == 9
+            assert _CORPUS_TABLES <= _table_names(database_path)
+            assert "model_challenger_state" not in _table_names(database_path)
+            assert check.execute("SELECT value FROM kv WHERE key='preserved-v8'").fetchone()[0] == '{"value":8}'
             assert (
                 check.execute("SELECT payload FROM legacy_v8_data WHERE identity='legacy-row'").fetchone()[0]
                 == "untouched"
@@ -438,13 +326,13 @@ def test_schema_v9_migration_rolls_back_before_version_bump(
             check.close()
 
         datastore._reset_for_tests(str(database_path))
-        assert datastore.connection().execute("PRAGMA user_version").fetchone()[0] == 9
-        assert _TABLES <= _table_names(database_path)
+        assert datastore.connection().execute("PRAGMA user_version").fetchone()[0] == 10
+        assert _SCHEMA_V10_TABLES <= _table_names(database_path)
     finally:
         datastore._reset_for_tests(None)
 
 
-def test_schema_v9_migration_is_idempotent_and_preserves_trajectory_rows(
+def test_schema_v10_migration_is_idempotent_and_preserves_trajectory_rows(
     database_path: Path,
 ) -> None:
     repository = LearningTrajectoryRepository(str(database_path))
@@ -455,9 +343,11 @@ def test_schema_v9_migration_is_idempotent_and_preserves_trajectory_rows(
     reopened = LearningTrajectoryRepository(str(database_path))
     current = reopened.read_segment(segment.segment_id)
     assert current is not None
+    assert current == segment
     assert reopened.begin_segment(current) == cursor
     assert reopened.status() == before
-    assert _scalar(database_path, "PRAGMA user_version") == 9
+    assert _scalar(database_path, "PRAGMA user_version") == 10
+    assert _SCHEMA_V10_TABLES <= _table_names(database_path)
 
 
 def test_finalized_import_batch_is_atomic_and_idempotent(
@@ -830,15 +720,37 @@ def test_reopen_restores_exact_open_cursor_and_continues_chain(
     segment = _segment("reopen")
     first_cursor = repository.begin_segment(segment)
     first_receipt = _append_scored(repository, first_cursor, (_frame(1),))
+    before_restart = repository.read_segment(segment.segment_id)
+    assert before_restart is not None
 
     reopened = LearningTrajectoryRepository(str(database_path))
     restored = reopened.read_segment(segment.segment_id)
-    assert restored is not None and restored.state == "open"
+    assert restored is not None
+    assert restored == before_restart
+    assert restored.state == "open"
+    assert (
+        restored.schema_version,
+        restored.observation_schema_version,
+        restored.source_schema_version,
+        restored.collection_provenance,
+        restored.configuration_provenance,
+        restored.build_provenance,
+    ) == (
+        segment.schema_version,
+        segment.observation_schema_version,
+        segment.source_schema_version,
+        segment.collection_provenance,
+        segment.configuration_provenance,
+        segment.build_provenance,
+    )
     restored_cursor = reopened.begin_segment(restored)
     assert restored_cursor == first_receipt.cursor
     second_receipt = reopened.append(restored_cursor, scored=(_frame(2),))
     assert second_receipt.cursor.next_ordinal == 3
     assert second_receipt.cursor.chain_digest != first_receipt.cursor.chain_digest
+    continued = reopened.read_segment(segment.segment_id)
+    assert continued is not None
+    assert continued.scored_hold_frames == (_frame(1), _frame(2))
 
 
 def test_recovery_finalizes_open_segment_at_last_committed_frame_and_new_epoch_begins(
@@ -848,6 +760,8 @@ def test_recovery_finalizes_open_segment_at_last_committed_frame_and_new_epoch_b
     cursor = repository.begin_segment(segment)
     committed = (_frame(1, epoch_ms=8_000_000), _frame(2, epoch_ms=8_000_000))
     _append_scored(repository, cursor, committed)
+    before_restart = repository.read_segment(segment.segment_id)
+    assert before_restart is not None and before_restart.state == "open"
 
     restarted = LearningTrajectoryRepository(str(database_path))
     report = restarted.recover_open_segments(now_ms=_WALL_EPOCH_MS + 20_000_000)
@@ -862,6 +776,16 @@ def test_recovery_finalizes_open_segment_at_last_committed_frame_and_new_epoch_b
     assert recovered.scored_hold_frames == committed
     assert recovered.end_sequence == committed[-1].sequence
     assert recovered.end_monotonic_ms == committed[-1].monotonic_end_ms
+    assert recovered.schema_version == before_restart.schema_version
+    assert recovered.observation_schema_version == before_restart.observation_schema_version
+    assert recovered.source_schema_version == before_restart.source_schema_version
+    assert recovered.source_trace_digest == before_restart.source_trace_digest
+    assert recovered.source_row_digest == before_restart.source_row_digest
+    assert recovered.collection_provenance == before_restart.collection_provenance
+    assert recovered.configuration_provenance == before_restart.configuration_provenance
+    assert recovered.build_provenance == before_restart.build_provenance
+    assert recovered.pre_roll_frames == before_restart.pre_roll_frames
+    assert recovered.hold_entry == before_restart.hold_entry
 
     after_recovery = restarted.status()
     duplicate_recovery = restarted.recover_open_segments(now_ms=_WALL_EPOCH_MS + 20_000_001)

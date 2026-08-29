@@ -2630,7 +2630,7 @@ class HoldMode(ControlMode):
         try:
             if runner is not None:
                 try:
-                    stopped = runner.stop_for_refit()
+                    stopped = runner.stop_and_retain_for_teardown()
                 except Exception as error:
                     stop_error = error
                 if stop_error is None:

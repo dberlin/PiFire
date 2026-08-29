@@ -199,6 +199,21 @@ def test_load_sees_a_newer_revision_written_after_the_shared_cache_warmed():
     assert store.load("mpc") == {"revision": 2, "K": 999.0}
 
 
+def test_load_refreshes_a_committed_snapshot_rewritten_at_the_same_revision():
+    store, fake = _store()
+    assert store.save("mpc", {"revision": 1, "schema": "legacy"}) is True
+    assert store.load("mpc") == {"revision": 1, "schema": "legacy"}
+
+    fake.blobs[MODEL_STATE_KEY] = json.dumps(
+        {
+            "version": SCHEMA_VERSION,
+            "models": {"mpc": {"revision": 1, "schema": "migrated"}},
+        }
+    )
+
+    assert store.load("mpc") == {"revision": 1, "schema": "migrated"}
+
+
 def test_load_keeps_a_staged_snapshot_that_storage_has_not_caught_up_to():
     # The other half of the same contract: staging exists so a worker can read
     # back what it has published but not yet written, so a re-read of older

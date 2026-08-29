@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import collections
 import logging
 import math
 import time
@@ -42,7 +41,6 @@ from controller.mpc_model import (
 from controller.runtime.context import EVENT_LOG_NAME
 
 _NATIVE_BOUND_TOLERANCE = 1e-6
-_HISTORY_MAX = 8640
 _LEARNED_RESIDUAL_WEIGHT = 1_000.0
 
 
@@ -192,7 +190,6 @@ class MpcOperatingState:
     measured_temperature_c: float | None
     delay_states: tuple[float, ...] | None
     disturbance: float
-    history: tuple[tuple[float, float, float], ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,7 +200,6 @@ class MpcModelIndependentState:
     applied_combustion_load: float
     last_safe_combustion_load: float
     measured_temperature_c: float | None
-    history: tuple[tuple[float, float, float], ...]
 
 
 def _authorized() -> bool:
@@ -336,7 +332,6 @@ class MpcCore:
         self._x_hat: npt.NDArray[np.float64] | None = None
         self._consecutive_policy_failures = 0
         self._native_failure_diagnostics: SolverDiagnostics | None = None
-        self._history: collections.deque[tuple[float, float, float]] = collections.deque(maxlen=_HISTORY_MAX)
         self._last_measured_temperature_c: float | None = None
         self._trajectory_seed: EstimatorSeed | None = None
         self._seed_anchor_pending = False
@@ -593,7 +588,6 @@ class MpcCore:
         n_delay = _int_setting(self.config, "n_delay")
         state_names = tuple(f"q{index}" for index in range(n_delay)) + ("T_c", "d")
         self._last_measured_temperature_c = measured_c
-        self._history.append((time.time(), measured_c, applied_load))
         revision, metadata = self._model_authority()
         model_provenance = "adopted" if metadata is not None else "configured"
         identified = model_is_identified(self.config, metadata)
@@ -770,7 +764,6 @@ class MpcCore:
             measured_temperature_c=self._last_measured_temperature_c,
             delay_states=delay_states,
             disturbance=disturbance,
-            history=tuple(self._history),
         )
 
     def capture_model_independent_state(self) -> MpcModelIndependentState:
@@ -779,7 +772,6 @@ class MpcCore:
             applied_combustion_load=self._applied_combustion_load,
             last_safe_combustion_load=self._last_combustion_load,
             measured_temperature_c=self._last_measured_temperature_c,
-            history=tuple(self._history),
         )
 
     def adopt_model_independent_state(self, state: MpcModelIndependentState) -> None:
@@ -789,11 +781,7 @@ class MpcCore:
             raise TypeError("state must be an MpcModelIndependentState")
         estimate = self._x_hat
         n_delay = _int_setting(self.config, "n_delay")
-        delay_states = (
-            None
-            if estimate is None
-            else tuple(float(value) for value in estimate[:n_delay])
-        )
+        delay_states = None if estimate is None else tuple(float(value) for value in estimate[:n_delay])
         disturbance = 0.0 if estimate is None else float(estimate[-1])
         self._set_point_c = state.set_point_c
         self._applied_combustion_load = state.applied_combustion_load
@@ -803,8 +791,6 @@ class MpcCore:
         self._last_residual_load = None
         self._last_feasibility = None
         self._last_measured_temperature_c = state.measured_temperature_c
-        self._history.clear()
-        self._history.extend(state.history)
         self._x_hat = self._estimator.reset(
             state.applied_combustion_load,
             state.measured_temperature_c,
@@ -829,8 +815,6 @@ class MpcCore:
         self._last_residual_load = None
         self._last_feasibility = None
         self._last_measured_temperature_c = state.measured_temperature_c
-        self._history.clear()
-        self._history.extend(state.history)
         self._x_hat = self._estimator.reset(
             state.applied_combustion_load,
             state.measured_temperature_c,
@@ -897,10 +881,6 @@ class MpcCore:
     @property
     def close_complete(self) -> bool:
         return self._closed and self._close_resources is None
-
-    @property
-    def history(self) -> collections.deque[tuple[float, float, float]]:
-        return self._history
 
     def close(self) -> None:
         if self._closed and self._close_resources is None:

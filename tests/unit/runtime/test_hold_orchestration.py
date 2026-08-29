@@ -8,9 +8,17 @@ import pytest
 from common.control_trace import ResultStaleState, TraceEventKind
 from common.model_evidence import EvidenceKind, FallbackEvidence, ModelEvidenceRecord
 from controller.applied_output import FrameFeedbackDisposition, OutputSource
+from controller.model_learning.contracts import CandidateOrigin
 from controller.runtime.model_persistence import EvidenceSubmission
 from controller.runtime.runner import ControllerUpdateResult
 from tests.fakes.runner import FakeControllerRunner
+
+_HARDWARE_OFF_EVENTS = (
+    "hardware:auger-off",
+    "hardware:fan-off",
+    "hardware:igniter-off",
+    "hardware:power-off",
+)
 
 
 class _OrderedRunner(FakeControllerRunner):
@@ -18,6 +26,7 @@ class _OrderedRunner(FakeControllerRunner):
         super().__init__(period=1.0)
         self.events = events
         self.failure = failure
+        self.stop_and_retain_calls = 0
         self.snapshot = {"version": 1, "revision": 1, "params": {}}
         self.result = ControllerUpdateResult(
             cycle_ratio=duty,
@@ -74,34 +83,39 @@ class _OrderedRunner(FakeControllerRunner):
         self.events.append(("runner:retire-evidence", generation))
         super().retire_evidence_context(generation)
 
-    def stop_for_refit(self):
-        self.events.append("runner:stop")
-        self.stop()
-        if self.failure == "runner-stop":
-            raise RuntimeError("runner stop failed")
+    def stop_and_retain_for_teardown(self) -> bool:
+        self.stop_and_retain_calls += 1
+        self.events.append("runner:stop-and-retain")
+        if self.failure == "runner-stop-and-retain":
+            raise RuntimeError("runner stop-and-retain failed")
+        return True
 
-    def schedule_corpus_fit(self, origin):
+    def schedule_corpus_fit(self, origin: CandidateOrigin) -> bool:
         return self._schedule_corpus_fit_after_barrier(origin, None)
 
-    def _schedule_corpus_fit_after_barrier(self, origin, before_schedule):
-        self.events.append("runner:schedule")
+    def _schedule_corpus_fit_after_barrier(self, origin: CandidateOrigin, before_schedule) -> bool:
+        assert isinstance(origin, CandidateOrigin)
+        self.events.append(("runner:schedule", origin))
         if self.failure == "schedule":
             raise RuntimeError("schedule failed")
         return super()._schedule_corpus_fit_after_barrier(origin, before_schedule)
 
-    def finish_teardown(self):
+    def finish_teardown(self) -> None:
         self.events.append("runner:finish")
         super().finish_teardown()
 
 
 class _OrderedPersistence:
-    failed = False
-
     def __init__(self, events, *, failure=None):
         self.events = events
         self.failure = failure
         self.evidence_batches = []
         self.checkpoints = []
+        self.trajectory_repository = None
+
+    @property
+    def failed(self) -> bool:
+        return False
 
     @property
     def evidence_blocked(self):
@@ -149,8 +163,22 @@ def _install_boundaries(monkeypatch, events, *, failure=None):
 
     persistence = _OrderedPersistence(events, failure=failure)
     trace = _OrderedTrace(events, failure=failure)
-    monkeypatch.setattr(hold_module, "ModelPersistenceWorker", lambda _store, _logger: persistence)
-    monkeypatch.setattr(hold_module, "ControlTraceRecorder", lambda *, warning: trace)
+
+    def persistence_factory(
+        _store,
+        _logger,
+        *,
+        trajectory_repository=None,
+    ):
+        persistence.trajectory_repository = trajectory_repository
+        return persistence
+
+    def trace_factory(*, warning):
+        del warning
+        return trace
+
+    monkeypatch.setattr(hold_module, "ModelPersistenceWorker", persistence_factory)
+    monkeypatch.setattr(hold_module, "ControlTraceRecorder", trace_factory)
     monkeypatch.setattr(hold_learning_module, "read_model_activation", lambda: None)
     monkeypatch.setattr(hold_learning_module, "read_model_evidence", lambda: ())
     return persistence, trace
@@ -165,6 +193,10 @@ def _record_hardware(monkeypatch, events, grill):
             original()
 
         monkeypatch.setattr(grill, method_name, record)
+
+
+def _assert_hardware_off_first(events):
+    assert tuple(events[:4]) == _HARDWARE_OFF_EVENTS
 
 
 def _assert_relative_order(events, expected):
@@ -359,13 +391,20 @@ def test_activation_lifecycle_evidence_keeps_fifo_ahead_of_checkpoint_and_trace_
     ("failure", "propagates"),
     [
         (None, False),
-        ("runner-stop", True),
+        ("runner-stop-and-retain", True),
         ("persistence-barrier", False),
         ("trace-close", False),
         ("schedule", False),
         ("checkpoint", False),
     ],
-    ids=["success", "runner-stop", "persistence-barrier", "trace-close", "schedule", "checkpoint"],
+    ids=[
+        "success",
+        "runner-stop-and-retain",
+        "persistence-barrier",
+        "trace-close",
+        "schedule",
+        "checkpoint",
+    ],
 )
 def test_teardown_orders_cleanup_and_owns_each_resource_at_most_once(hold_cycle, monkeypatch, failure, propagates):
     events = []
@@ -379,13 +418,12 @@ def test_teardown_orders_cleanup_and_owns_each_resource_at_most_once(hold_cycle,
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     hold.grill.igniter_on()
     hold.ctx.clock.advance(3.0)
-    stops_before_teardown = runner.stops
     finishes_before_teardown = runner.finished_teardowns
     events.clear()
     _record_hardware(monkeypatch, events, hold.grill)
 
     if propagates:
-        with pytest.raises(RuntimeError, match="runner stop failed"):
+        with pytest.raises(RuntimeError, match="runner stop-and-retain failed"):
             hold.teardown(200.0)
     else:
         hold.teardown(200.0)
@@ -394,24 +432,29 @@ def test_teardown_orders_cleanup_and_owns_each_resource_at_most_once(hold_cycle,
     terminal = next(
         event for event in events if isinstance(event, tuple) and event[0] == "runner:observation" and event[3] is True
     )
+    _assert_hardware_off_first(events)
     _assert_relative_order(
         events,
         [
-            "hardware:auger-off",
-            "hardware:fan-off",
-            "hardware:igniter-off",
-            "hardware:power-off",
+            *_HARDWARE_OFF_EVENTS,
             terminal,
-            "runner:stop",
+            "runner:stop-and-retain",
         ],
     )
-    if failure not in {"runner-stop", "persistence-barrier", "checkpoint"}:
+    schedule_attempted = failure not in {
+        "runner-stop-and-retain",
+        "persistence-barrier",
+        "checkpoint",
+    }
+    schedule_completed = schedule_attempted and failure != "schedule"
+    schedule_event = ("runner:schedule", CandidateOrigin.PASSIVE_ONLINE)
+    if schedule_attempted:
         _assert_relative_order(
             events,
             [
-                "runner:stop",
+                "runner:stop-and-retain",
                 "persistence:barrier",
-                "runner:schedule",
+                schedule_event,
                 "trace:close",
                 "runner:finish",
             ],
@@ -419,13 +462,17 @@ def test_teardown_orders_cleanup_and_owns_each_resource_at_most_once(hold_cycle,
     else:
         _assert_relative_order(
             events,
-            ["runner:stop", "persistence:barrier", "trace:close", "runner:finish"],
+            [
+                "runner:stop-and-retain",
+                "persistence:barrier",
+                "trace:close",
+                "runner:finish",
+            ],
         )
 
-    assert events.count("runner:stop") == 1
-    assert events.count("runner:schedule") == int(
-        failure not in {"runner-stop", "persistence-barrier", "checkpoint"}
-    )
+    assert events.count("runner:stop-and-retain") == 1
+    assert events.count(schedule_event) == int(schedule_attempted)
+    assert runner.fit_requests == ([CandidateOrigin.PASSIVE_ONLINE] if schedule_completed else [])
     assert events.count("persistence:barrier") == 1
     assert events.count("trace:close") == 1
     assert events.count("runner:finish") == 1
@@ -441,7 +488,7 @@ def test_teardown_orders_cleanup_and_owns_each_resource_at_most_once(hold_cycle,
         )
         == 1
     )
-    assert runner.stops - stops_before_teardown == 1
+    assert runner.stop_and_retain_calls == 1
     assert runner.finished_teardowns - finishes_before_teardown == 1
     assert len(persistence.checkpoints) <= (2 if failure == "checkpoint" else 1)
     assert hold.grill.get_output_status() == {
@@ -477,15 +524,17 @@ def test_teardown_retry_completes_cleanup_after_pre_cleanup_failure(hold_cycle, 
 
     monkeypatch.setattr(runtime, "advance", fail_once)
     events.clear()
+    _record_hardware(monkeypatch, events, hold.grill)
 
     with pytest.raises(RuntimeError, match="transient advance failure"):
         hold.teardown(200.0)
     hold.teardown(200.0)
     hold.teardown(200.0)
+    _assert_hardware_off_first(events)
 
     assert events.count("trace:close") == 1
     assert events.count("runner:finish") == 1
-    assert events.count("runner:stop") == 1
+    assert events.count("runner:stop-and-retain") == 1
 
 
 def test_teardown_retry_resumes_delivery_after_scheduler_advance(
@@ -542,6 +591,7 @@ def test_teardown_retry_resumes_delivery_after_scheduler_advance(
         fail_delivery_once,
     )
     events.clear()
+    _record_hardware(monkeypatch, events, hold.grill)
 
     with pytest.raises(
         RuntimeError,
@@ -550,6 +600,7 @@ def test_teardown_retry_resumes_delivery_after_scheduler_advance(
         hold.teardown(200.0)
     hold.teardown(200.0)
     hold.teardown(200.0)
+    _assert_hardware_off_first(events)
 
     assert calls == {"advance": 1, "feedback": 1, "reset": 1}
     assert delivery_attempts == 2
@@ -565,7 +616,7 @@ def test_teardown_retry_resumes_delivery_after_scheduler_advance(
         )
         == 1
     )
-    assert events.count("runner:stop") == 1
+    assert events.count("runner:stop-and-retain") == 1
     assert events.count("trace:close") == 1
     assert events.count("runner:finish") == 1
 
@@ -609,6 +660,8 @@ def test_teardown_retry_reprepares_feedback_without_repeating_advance(
     monkeypatch.setattr(runtime, "advance", count_advance)
     monkeypatch.setattr(runtime, "report_feedback", fail_feedback_once)
     monkeypatch.setattr(runtime, "reset", count_reset)
+    events.clear()
+    _record_hardware(monkeypatch, events, hold.grill)
 
     with pytest.raises(
         RuntimeError,
@@ -617,9 +670,10 @@ def test_teardown_retry_reprepares_feedback_without_repeating_advance(
         hold.teardown(200.0)
     hold.teardown(200.0)
     hold.teardown(200.0)
+    _assert_hardware_off_first(events)
 
     assert calls == {"advance": 1, "feedback": 2, "reset": 1}
-    assert events.count("runner:stop") == 1
+    assert events.count("runner:stop-and-retain") == 1
     assert events.count("trace:close") == 1
     assert events.count("runner:finish") == 1
 
@@ -669,6 +723,8 @@ def test_teardown_retry_reuses_prepared_feedback_after_dispatch_failure(
     monkeypatch.setattr(runtime, "report_feedback", count_feedback)
     monkeypatch.setattr(hold, "_dispatch_framed_feedback", fail_dispatch_once)
     monkeypatch.setattr(runtime, "reset", count_reset)
+    events.clear()
+    _record_hardware(monkeypatch, events, hold.grill)
 
     with pytest.raises(
         RuntimeError,
@@ -677,6 +733,7 @@ def test_teardown_retry_reuses_prepared_feedback_after_dispatch_failure(
         hold.teardown(200.0)
     hold.teardown(200.0)
     hold.teardown(200.0)
+    _assert_hardware_off_first(events)
 
     assert calls == {
         "advance": 1,
@@ -684,7 +741,7 @@ def test_teardown_retry_reuses_prepared_feedback_after_dispatch_failure(
         "dispatch": 2,
         "reset": 1,
     }
-    assert events.count("runner:stop") == 1
+    assert events.count("runner:stop-and-retain") == 1
     assert events.count("trace:close") == 1
     assert events.count("runner:finish") == 1
 
@@ -723,6 +780,8 @@ def test_teardown_retry_latches_first_timestamp_and_temperature(
 
     monkeypatch.setattr(runtime, "report_feedback", fail_feedback_once)
     monkeypatch.setattr(runtime, "reset", capture_reset)
+    events.clear()
+    _record_hardware(monkeypatch, events, hold.grill)
 
     with pytest.raises(
         RuntimeError,
@@ -731,11 +790,12 @@ def test_teardown_retry_latches_first_timestamp_and_temperature(
         hold.teardown(200.0)
     hold.ctx.clock.advance(10.0)
     hold.teardown(500.0)
+    _assert_hardware_off_first(events)
 
     assert feedback_times == [3.0, 3.0]
     assert [(item[1], item[2]) for item in reset_inputs] == [(3.0, 200.0)]
     assert reset_inputs[0][0].value == "mode_change"
-    assert events.count("runner:stop") == 1
+    assert events.count("runner:stop-and-retain") == 1
     assert events.count("trace:close") == 1
     assert events.count("runner:finish") == 1
 
@@ -771,7 +831,7 @@ def test_repeated_setup_starts_a_fresh_teardown_transaction(
     hold.teardown(300.0)
 
     assert second_runtime is not first_runtime
-    assert runner.stops == 2
+    assert runner.stop_and_retain_calls == 2
     assert runner.finished_teardowns == 2
     assert events.count("trace:close") == 2
     assert hold.grill.get_output_status()["igniter"] is False
@@ -788,6 +848,7 @@ def test_early_hardware_setup_failure_closes_created_trace_and_outputs(
 ) -> None:
     events = []
     runner = _OrderedRunner(events)
+    _persistence, trace_recorder = _install_boundaries(monkeypatch, events)
     hold = hold_cycle(runner, controller="mpc")
 
     def unavailable_output():
@@ -808,10 +869,18 @@ def test_early_hardware_setup_failure_closes_created_trace_and_outputs(
     assert trace is not None
     assert trace.status.closed is False
     status = hold.status_fragment()
+    events.clear()
+    _record_hardware(monkeypatch, events, hold.grill)
 
     hold.teardown(200.0)
+    hold.teardown(200.0)
+    _assert_hardware_off_first(events)
 
     assert trace.status.closed is True
+    assert trace_recorder.close_calls == 1
+    assert events.count("trace:close") == 1
+    assert runner.stop_and_retain_calls == 0
+    assert events.count("persistence:barrier") == 0
     assert "pulse" not in status
     assert hold.grill.get_output_status() == {
         "dc_fan": False,
@@ -829,7 +898,7 @@ def test_factory_failure_after_persistence_creation_closes_all_created_owners(
     import controller.runtime.modes.hold as hold_module
 
     events = []
-    _, trace_recorder = _install_boundaries(monkeypatch, events)
+    persistence, trace_recorder = _install_boundaries(monkeypatch, events)
 
     def unavailable_runner(*args, **kwargs):
         assert len(args) == 2
@@ -849,12 +918,21 @@ def test_factory_failure_after_persistence_creation_closes_all_created_owners(
     trace = hold._control_trace
     assert trace is not None
     assert "persistence:barrier" not in events
+    assert persistence.trajectory_repository is not None
+    events.clear()
+    _record_hardware(monkeypatch, events, hold.grill)
 
     hold.teardown(200.0)
+    hold.teardown(200.0)
+    _assert_hardware_off_first(events)
+    _assert_relative_order(
+        events,
+        [*_HARDWARE_OFF_EVENTS, "persistence:barrier", "trace:close"],
+    )
 
+    assert trace_recorder.close_calls == 1
     assert events.count("trace:close") == 1
     assert events.count("persistence:barrier") == 1
-    assert trace_recorder is not None
 
 
 def test_runner_revision_failure_before_learning_closes_every_created_owner(
@@ -881,10 +959,24 @@ def test_runner_revision_failure_before_learning_closes_every_created_owner(
     ):
         hold.setup()
     events.clear()
+    _record_hardware(monkeypatch, events, hold.grill)
 
     hold.teardown(200.0)
+    hold.teardown(200.0)
+    _assert_hardware_off_first(events)
+    _assert_relative_order(
+        events,
+        [
+            *_HARDWARE_OFF_EVENTS,
+            "runner:stop-and-retain",
+            "runner:finish",
+            "persistence:barrier",
+            "trace:close",
+        ],
+    )
 
-    assert events.count("runner:stop") == 1
+    assert events.count("runner:stop-and-retain") == 1
+    assert runner.stop_and_retain_calls == 1
     assert events.count("runner:finish") == 1
     assert events.count("persistence:barrier") == 1
     assert events.count("trace:close") == 1
@@ -957,10 +1049,22 @@ def test_partial_setup_cleanup_attempts_every_owner_once_after_boundary_failure(
         monkeypatch.setattr(runner, "finish_teardown", fail_runner_finish)
 
     events.clear()
+    _record_hardware(monkeypatch, events, hold.grill)
     hold.teardown(200.0)
     hold.teardown(200.0)
+    _assert_hardware_off_first(events)
+    _assert_relative_order(
+        events,
+        [
+            *_HARDWARE_OFF_EVENTS,
+            "runner:stop-and-retain",
+            "runner:finish",
+            "persistence:barrier",
+            "trace:close",
+        ],
+    )
 
-    assert events.count("runner:stop") == 1
+    assert events.count("runner:stop-and-retain") == 1
     assert events.count("persistence:barrier") == 1
     assert events.count("trace:flush-pending") == (1 if failure == "trace-flush" else 0)
     assert trace_recorder.close_calls == 1
@@ -986,16 +1090,21 @@ def test_partial_setup_failures_still_close_the_runner_once(hold_cycle, monkeypa
     hold.state.metrics = {"augerontime": 0.0}
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     hold.ctx.clock.advance(1.0)
-    stops_before_teardown = runner.stops
     finishes_before_teardown = runner.finished_teardowns
     events.clear()
+    _record_hardware(monkeypatch, events, hold.grill)
 
     hold.teardown(200.0)
     hold.teardown(200.0)
+    _assert_hardware_off_first(events)
+    _assert_relative_order(
+        events,
+        [*_HARDWARE_OFF_EVENTS, "runner:stop-and-retain", "runner:finish"],
+    )
 
-    assert events.count("runner:stop") == 1
+    assert events.count("runner:stop-and-retain") == 1
     assert events.count("runner:finish") == 1
-    assert runner.stops - stops_before_teardown == 1
+    assert runner.stop_and_retain_calls == 1
     assert runner.finished_teardowns - finishes_before_teardown == 1
     assert (
         sum(

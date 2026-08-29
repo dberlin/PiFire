@@ -167,7 +167,7 @@ def _activation_composition() -> _ActivationComposition:
         incumbent=incumbent.descriptor,
         candidate=candidate.descriptor,
         origin=CandidateOrigin.PASSIVE_ONLINE,
-        policy=ActivationPolicy.PASSIVE_AUTO,
+        policy=ActivationPolicy.CAUSAL_AUTO,
         decision_id="composition-transition",
     )
     persistence = _ActivationPersistence()
@@ -322,6 +322,7 @@ def test_controller_constructs_and_closes_focused_owners_in_dependency_order(
         "persistence-close",
         "pair-close",
     ]
+
 
 def test_injected_controller_normal_close_never_closes_worker(monkeypatch) -> None:
     events = []

@@ -3,18 +3,15 @@
 from __future__ import annotations
 
 import json
-import threading
-import time
 from dataclasses import FrozenInstanceError, replace
 from math import ceil
 from types import SimpleNamespace
 
 import pytest
 
-import controller.mpc as mpc_module
+import controller.model_learning.grey_runtime as grey_runtime_module
 import controller.mpc_core as mpc_core_module
 import controller.runtime.model_persistence as model_persistence_module
-from common.learning_trajectory import ModelFitLineage
 from common.model_evidence import (
     ConfidenceDecisionEvidence,
     EvidenceKind,
@@ -23,11 +20,10 @@ from common.model_evidence import (
     RollbackEvidence,
 )
 from common.persistence.model_challenger import (
-    ModelChallengerState,
-    create_model_challenger,
     prepare_model_challenger_activation,
+    read_model_challenger,
 )
-from common.persistence.model_evidence import ModelActivationState, read_model_activation
+from common.persistence.model_evidence import ModelActivationState
 from controller.acados import GreyBoxMPCConfig
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.model_learning.activation import (
@@ -49,7 +45,7 @@ from controller.mpc_core import MpcCore
 from controller.mpc_factory import MpcPairFactory, OwnedMpcPair
 from controller.mpc_model import EstimatorSeed
 from controller.runtime.model_fitting import CandidatePair
-from tests.unit.common.test_model_challenger_store import _corpus
+from tests.unit.mpc._model_activation_helpers import _seed_qualified_challenger
 from tests.unit.mpc._solver_fixtures import (
     CYCLE,
     _Estimator,
@@ -107,65 +103,6 @@ def _descriptor(
         candidate_generation=candidate_generation,
         role_generation=role_generation,
     )
-
-
-def _seed_qualified_challenger(
-    incumbent: GreyControlPairDescriptor,
-    candidate: GreyControlPairDescriptor,
-    *,
-    decision_id: str,
-) -> ModelChallengerState:
-    corpus = _corpus(decision_id)
-    request_id = f"fit-{decision_id}"
-    state = ModelChallengerState(
-        schema_version=1,
-        challenger_id=f"challenger-{decision_id}",
-        revision=0,
-        phase="qualified",
-        origin=CandidateOrigin.PASSIVE_ONLINE,
-        policy=ActivationPolicy.CAUSAL_AUTO,
-        fit_corpus=corpus,
-        fit_lineage=ModelFitLineage(
-            request_id=request_id,
-            parent_incumbent_digest=incumbent.model_digest,
-            parent_incumbent_generation=incumbent.role_generation,
-            candidate_generation=candidate.candidate_generation,
-            fit_corpus=corpus,
-            fit_corpus_digest=corpus.corpus_digest,
-            trigger_origin=CandidateOrigin.PASSIVE_ONLINE.value,
-            result_status="succeeded",
-            candidate_digest=candidate.model_digest,
-        ),
-        fit_preparation={
-            "request_id": request_id,
-            "accepted": True,
-            "candidate_digest": candidate.model_digest,
-            "native_build": "passed",
-            "dry_solve": "passed",
-            "target_timing": {
-                "target": "test",
-                "samples": 1,
-                "p99_ms": 1.0,
-                "limit_ms": 2.0,
-            },
-        },
-        controller_configuration_digest="c" * 64,
-        incumbent=incumbent,
-        candidate=candidate,
-        calibration_manifest=None,
-        evaluation_epoch=0,
-        evaluation_round=2,
-        consecutive_wins=2,
-        required_wins=2,
-        last_decision_id=decision_id,
-        last_evidence_id=f"evidence-{decision_id}",
-        activation_transaction_id=None,
-        retirement_reason=None,
-        created_ms=900,
-        updated_ms=900,
-        retired_ms=None,
-    )
-    return create_model_challenger(state)
 
 
 def _migrated_descriptor(
@@ -365,7 +302,6 @@ def test_every_candidate_validation_failure_closes_the_complete_candidate_pair(c
     [
         (CandidateOrigin.PASSIVE_ONLINE, ActivationPolicy.CAUSAL_AUTO),
         (CandidateOrigin.OPERATOR_CALIBRATION, ActivationPolicy.CAUSAL_AUTO),
-        (CandidateOrigin.COOK_REFIT, ActivationPolicy.COOK_REFIT),
     ],
 )
 def test_origin_policy_is_exact(origin: CandidateOrigin, policy: ActivationPolicy) -> None:
@@ -374,7 +310,7 @@ def test_origin_policy_is_exact(origin: CandidateOrigin, policy: ActivationPolic
     assert decision.accepted
 
 
-def test_prepare_requires_exact_digest_decision_and_causal_policy() -> None:
+def test_prepare_requires_exact_digest_decision_and_typed_policy() -> None:
     manager, descriptor, _incumbent, candidate, calls, *_ = _manager()
 
     wrong_digest = manager.prepare(
@@ -383,15 +319,15 @@ def test_prepare_requires_exact_digest_decision_and_causal_policy() -> None:
         origin=CandidateOrigin.OPERATOR_CALIBRATION,
         policy=ActivationPolicy.CAUSAL_AUTO,
     )
-    wrong_policy = manager.prepare(
-        _request(descriptor),
-        descriptor,
-        origin=CandidateOrigin.OPERATOR_CALIBRATION,
-        policy=ActivationPolicy.PASSIVE_AUTO,
-    )
+    with pytest.raises(TypeError, match="typed"):
+        manager.prepare(
+            _request(descriptor),
+            descriptor,
+            origin=CandidateOrigin.OPERATOR_CALIBRATION,
+            policy="causal-auto",  # type: ignore[arg-type]
+        )
 
     assert wrong_digest.reason == "candidate-digest-changed"
-    assert wrong_policy.reason == "origin-policy-mismatch"
     assert calls == []
     assert candidate.estimator.closed == 0
 
@@ -657,8 +593,17 @@ def _bare_mpc_pair_owner(
     return core, incumbent, candidate, prepared
 
 
-def test_automatic_preparation_drains_confidence_receipt_before_prepared_phase(ds) -> None:
+def test_automatic_preparation_makes_confidence_durable_before_prepared_authority(
+    ds,
+    monkeypatch,
+) -> None:
     calls = []
+
+    class _ConfidenceReceipt(model_persistence_module.DurableActivationReceipt):
+        def wait(self, timeout=None):
+            durable = super().wait(timeout)
+            calls.append(("confidence-durable", durable))
+            return durable
 
     class _Worker(model_persistence_module.ModelPersistenceWorker):
         def __init__(self):
@@ -670,7 +615,7 @@ def test_automatic_preparation_drains_confidence_receipt_before_prepared_phase(d
 
         def submit_activation_confidence(self, record):
             calls.append(("confidence", record))
-            receipt = model_persistence_module.DurableActivationReceipt(accepted=True)
+            receipt = _ConfidenceReceipt(accepted=True)
             receipt._complete(durable=True)
             return receipt
 
@@ -680,7 +625,8 @@ def test_automatic_preparation_drains_confidence_receipt_before_prepared_phase(d
             receipt._complete(durable=True)
             return receipt
 
-        def flush_and_stop(self, *, timeout=0.1):
+        def close(self, timeout=0.1):
+            del timeout
             return True
 
     core, _incumbent, _candidate, _prepared = _bare_mpc_pair_owner(_Worker())
@@ -699,7 +645,7 @@ def test_automatic_preparation_drains_confidence_receipt_before_prepared_phase(d
     request = SimpleNamespace(
         origin=CandidateOrigin.PASSIVE_ONLINE,
         candidate_generation=4,
-        window=SimpleNamespace(role_generation=4),
+        parent_incumbent_generation=4,
     )
     preparation = SimpleNamespace(
         candidate_pair=SimpleNamespace(
@@ -711,12 +657,23 @@ def test_automatic_preparation_drains_confidence_receipt_before_prepared_phase(d
         dry_solve_finite=True,
     )
     core._activation_runtime.active_pair.core.cfg = {"estimator": "ekf"}
-    _seed_qualified_challenger(
+    core._grey_learning_runtime._challenger_state = _seed_qualified_challenger(
         core.active_control_pair.descriptor,
         core._grey_learning_runtime._prepared_candidate_descriptor(preparation),
         decision_id=evaluation.decision_id,
     )
-    core._grey_learning_runtime.prepare_automatic_activation(
+    original_prepare = grey_runtime_module.prepare_model_challenger_activation
+
+    def record_prepared_authority(**kwargs):
+        calls.append(("prepared-authority", kwargs["activation"]))
+        return original_prepare(**kwargs)
+
+    monkeypatch.setattr(
+        grey_runtime_module,
+        "prepare_model_challenger_activation",
+        record_prepared_authority,
+    )
+    transaction_id = core._grey_learning_runtime.prepare_automatic_activation(
         preparation,
         ActivationPolicy.CAUSAL_AUTO,
         evaluation,
@@ -724,10 +681,16 @@ def test_automatic_preparation_drains_confidence_receipt_before_prepared_phase(d
 
     assert [kind for kind, *_ in calls] == [
         "confidence",
+        "confidence-durable",
+        "prepared-authority",
         "evidence",
     ]
-    assert read_model_activation().phase == ActivationPhase.PREPARED.value
+    authority = read_model_challenger()
+    assert authority is not None
+    assert authority.phase == "activating"
+    assert authority.activation_transaction_id == transaction_id
     confidence = next(record for kind, record, *_ in calls if kind == "confidence")
+    assert confidence.schema_version == 4
     assert isinstance(confidence.payload, ConfidenceDecisionEvidence)
     assert confidence.payload.decision_id == evaluation.decision_id
     assert confidence.payload.blocked is False
@@ -758,7 +721,8 @@ def test_hold_and_learning_share_one_injected_activation_persistence_fifo(ds) ->
             receipt._complete(durable=True)
             return receipt
 
-        def flush_and_stop(self, *, timeout=0.1):
+        def close(self, timeout=0.1):
+            del timeout
             return True
 
     worker = _Worker()
@@ -785,14 +749,14 @@ def test_hold_and_learning_share_one_injected_activation_persistence_fifo(ds) ->
             request=SimpleNamespace(
                 origin=CandidateOrigin.PASSIVE_ONLINE,
                 candidate_generation=4,
-                window=SimpleNamespace(role_generation=4),
+                parent_incumbent_generation=4,
             ),
             config=native_config,
         ),
         candidate_digest=canonical_snapshot_digest(configuration),
         dry_solve_finite=True,
     )
-    _seed_qualified_challenger(
+    core._grey_learning_runtime._challenger_state = _seed_qualified_challenger(
         core.active_control_pair.descriptor,
         core._grey_learning_runtime._prepared_candidate_descriptor(preparation),
         decision_id=evaluation.decision_id,
@@ -812,9 +776,10 @@ def test_hold_and_learning_share_one_injected_activation_persistence_fifo(ds) ->
             reason=None,
         ),
     )
+    assert hold_confidence.schema_version == 4
 
     core.submit_activation_confidence(hold_confidence)
-    core._grey_learning_runtime.prepare_automatic_activation(
+    transaction_id = core._grey_learning_runtime.prepare_automatic_activation(
         preparation,
         ActivationPolicy.CAUSAL_AUTO,
         evaluation,
@@ -822,7 +787,10 @@ def test_hold_and_learning_share_one_injected_activation_persistence_fifo(ds) ->
 
     evidence_index = next(index for index, call in enumerate(calls) if call[0] == "evidence")
     assert any(call[0] == "confidence" for call in calls[:evidence_index])
-    assert read_model_activation().phase == ActivationPhase.PREPARED.value
+    authority = read_model_challenger()
+    assert authority is not None
+    assert authority.phase == "activating"
+    assert authority.activation_transaction_id == transaction_id
     core._grey_learning_runtime.close()
     core.close()
 
@@ -851,7 +819,6 @@ def test_inert_candidate_receives_live_target_before_output_authorization() -> N
     core.set_point = 107.2
     incumbent.core.set_target(core.set_point)
     incumbent.core.set_output(AppliedOutput(0.45, OutputSource.CONTROLLER, 1.0))
-    incumbent.core.history.append((1.0, 100.0, 0.5))
 
     assert core.install_candidate_pair_inert(candidate, prepared)
 
@@ -859,7 +826,6 @@ def test_inert_candidate_receives_live_target_before_output_authorization() -> N
     assert candidate.core.set_point_c == pytest.approx(107.2)
     assert candidate.core.applied_combustion_load == pytest.approx(0.5)
     assert candidate.core.last_combustion_load == pytest.approx(0.35)
-    assert tuple(candidate.core.history) == ((1.0, 100.0, 0.5),)
     assert candidate.estimator.resets
     assert candidate.solver.resets
     core.close()

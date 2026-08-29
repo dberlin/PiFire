@@ -73,8 +73,6 @@ _FREE = ("K_Q", "C_c", "theta")
 _TIMESTAMP_TOLERANCE_S = 1e-9
 
 
-
-
 def _load_trace_calibration(
     *,
     cook_id: str | None = None,
@@ -132,10 +130,6 @@ _NOT_CONVERGED = (
 )
 
 
-
-
-
-
 def _canonical_digest(document):
     encoded = json.dumps(
         document,
@@ -151,15 +145,12 @@ def trace_fit_job(t, temp, Q, *, T_amb, init, sigma, n_delay, initial_load=None)
 
     from common.learning_trajectory import FitCorpusIdentity, FitCorpusSlice
     from controller.acados.contracts import GreyBoxMPCConfig
-    from controller.model_learning.contracts import (
-        CandidateOrigin,
-        FitRequest,
-        FitWindowIdentity,
-    )
+    from controller.model_learning.contracts import CandidateOrigin, FitRequest
     from controller.runtime.model_fitting import (
         FIT_CADENCE_S,
         GreyFitJob,
         GreyFitSegmentArrays,
+        grey_config_digest,
     )
 
     times = np.asarray(t, dtype=float)
@@ -169,28 +160,20 @@ def trace_fit_job(t, temp, Q, *, T_amb, init, sigma, n_delay, initial_load=None)
         raise ValueError("trace fit arrays must be one-dimensional")
     if len(times) < 2 or len(times) != len(temperatures) or len(times) != len(loads):
         raise ValueError("trace fit arrays must have the same length and at least two rows")
-    if not (
-        np.all(np.isfinite(times))
-        and np.all(np.isfinite(temperatures))
-        and np.all(np.isfinite(loads))
-    ):
+    if not (np.all(np.isfinite(times)) and np.all(np.isfinite(temperatures)) and np.all(np.isfinite(loads))):
         raise ValueError("trace fit arrays must contain only finite values")
     durations = np.diff(times)
     if np.any(durations <= 0.0):
         raise ValueError("trace fit times must be strictly increasing")
     source_cadence_s = float(np.median(durations))
     if source_cadence_s > FIT_CADENCE_S + _TIMESTAMP_TOLERANCE_S:
-        raise ValueError(
-            f"trace fit cadence must not exceed the nominal {FIT_CADENCE_S:g}-second cadence"
-        )
+        raise ValueError(f"trace fit cadence must not exceed the nominal {FIT_CADENCE_S:g}-second cadence")
     compatible_gap_s = min(FIT_CADENCE_S, 1.5 * source_cadence_s)
     if np.any((loads < 0.0) | (loads > 1.0)):
         raise ValueError("trace loads must be normalized to [0, 1]")
 
     elapsed_s = times - times[0]
-    scored_count = math.floor(
-        (float(elapsed_s[-1]) + _TIMESTAMP_TOLERANCE_S) / FIT_CADENCE_S
-    )
+    scored_count = math.floor((float(elapsed_s[-1]) + _TIMESTAMP_TOLERANCE_S) / FIT_CADENCE_S)
     if scored_count == 0:
         raise ValueError("trace fit requires at least one complete scored interval")
     scored_boundaries_s = FIT_CADENCE_S * np.arange(
@@ -198,13 +181,8 @@ def trace_fit_job(t, temp, Q, *, T_amb, init, sigma, n_delay, initial_load=None)
         scored_count + 1,
         dtype=float,
     )
-    scored_interval_mask = elapsed_s[:-1] < (
-        float(scored_boundaries_s[-1]) - _TIMESTAMP_TOLERANCE_S
-    )
-    if np.any(
-        durations[scored_interval_mask]
-        > compatible_gap_s + _TIMESTAMP_TOLERANCE_S
-    ):
+    scored_interval_mask = elapsed_s[:-1] < (float(scored_boundaries_s[-1]) - _TIMESTAMP_TOLERANCE_S)
+    if np.any(durations[scored_interval_mask] > compatible_gap_s + _TIMESTAMP_TOLERANCE_S):
         raise ValueError("trace fit times contain an incompatible sampling gap")
     cumulative_load_time = np.concatenate(
         (
@@ -240,19 +218,12 @@ def trace_fit_job(t, temp, Q, *, T_amb, init, sigma, n_delay, initial_load=None)
         if bracket_s > compatible_gap_s + _TIMESTAMP_TOLERANCE_S:
             raise ValueError("trace fit times contain an incompatible sampling gap")
         offset_s = float(boundary_s - elapsed_s[left_index])
-        boundary_load_time.append(
-            float(cumulative_load_time[left_index])
-            + float(loads[left_index]) * offset_s
-        )
+        boundary_load_time.append(float(cumulative_load_time[left_index]) + float(loads[left_index]) * offset_s)
         fraction = offset_s / bracket_s
         boundary_temperature_c.append(
-            float(temperatures[left_index])
-            + fraction
-            * float(temperatures[right_index] - temperatures[left_index])
+            float(temperatures[left_index]) + fraction * float(temperatures[right_index] - temperatures[left_index])
         )
-    scored_load = np.diff(
-        np.asarray([0.0, *boundary_load_time], dtype=float)
-    ) / FIT_CADENCE_S
+    scored_load = np.diff(np.asarray([0.0, *boundary_load_time], dtype=float)) / FIT_CADENCE_S
     scored_load = np.clip(scored_load, 0.0, 1.0)
     scored_duration_s = np.full(scored_count, FIT_CADENCE_S, dtype=float)
     scored_temperature_c = np.asarray(boundary_temperature_c, dtype=float)
@@ -357,20 +328,14 @@ def trace_fit_job(t, temp, Q, *, T_amb, init, sigma, n_delay, initial_load=None)
             "incumbent": {key: getattr(config, key) for key in _FREE},
         }
     )
+    incumbent_digest = grey_config_digest(config)
     request = FitRequest(
         request_id=request_id,
         origin=CandidateOrigin.OPERATOR_CALIBRATION,
-        window=FitWindowIdentity(
-            session_id="typed-trace-calibration",
-            cook_id=cook_id,
-            first_observation_sequence=1,
-            last_observation_sequence=scored_count,
-            configuration_digest=partition_digest,
-            incumbent_digest=_canonical_digest(
-                {key: getattr(config, key) for key in ("C_c", "K_Q", "theta")}
-            ),
-            role_generation=0,
-        ),
+        fit_corpus=corpus,
+        configuration_digest=incumbent_digest,
+        parent_incumbent_digest=incumbent_digest,
+        parent_incumbent_generation=0,
         candidate_generation=0,
     )
     return GreyFitJob(
@@ -413,8 +378,6 @@ def _fit_mapping(outcome, *, T_amb, init, sigma, n_delay):
         "nfev": int(outcome.nfev if source is not None else 0),
     }
     return fitted
-
-
 
 
 def _dump_json(document):

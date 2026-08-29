@@ -152,7 +152,7 @@ class FakeControllerRunner:
     def stop(self):
         self.stops += 1
 
-    def stop_for_refit(self) -> bool | None:
+    def stop_and_retain_for_teardown(self) -> bool | None:
         self.stop()
         return None
 

@@ -213,7 +213,7 @@ class _Runner:
     def drain_activation_events(self) -> tuple[ModelEvidenceRecord, ...]:
         return ()
 
-    def stop_for_refit(self) -> bool | None:
+    def stop_and_retain_for_teardown(self) -> bool | None:
         return None
 
     def controller_state(self) -> object:

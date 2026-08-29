@@ -6,7 +6,7 @@ type DecisionId = string;
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "CandidateOrigin".
  */
-export type CandidateOrigin = "passive-online" | "operator-calibration" | "cook-refit";
+export type CandidateOrigin = "passive-online" | "operator-calibration";
 type PayloadType = "activation_lifecycle";
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
@@ -17,7 +17,7 @@ export type ActivationPhase = "prepared" | "active" | "aborted";
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "ActivationPolicy".
  */
-export type ActivationPolicy = "causal-auto" | "passive-auto" | "cook-refit";
+export type ActivationPolicy = "causal-auto";
 type Reason = string | null;
 type ActiveSnapshotJson = string | null;
 type CandidateDigest = string | null;
@@ -93,29 +93,6 @@ type RequiredWins = number;
 type ResumedFromPreviousCook = boolean;
 type Round = number;
 type Wins = number;
-/**
- * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
- * via the `definition` "CookRefitAuthorization".
- */
-export type CookRefitAuthorization = "not-run" | "blocked" | "next-cook";
-/**
- * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
- * via the `definition` "CookRefitOutcome".
- */
-export type CookRefitOutcome =
-  | "disabled"
-  | "insufficient"
-  | "rejected"
-  | "failed"
-  | "accepted-next-cook"
-  | "checkpoint-failure";
-type FinalStatus = FitStatus | CookRefitOutcome;
-/**
- * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
- * via the `definition` "FitStatus".
- */
-export type FitStatus = "idle" | "queued" | "running" | "succeeded" | "failed" | "stale";
-type NextCook = boolean;
 type Digest2 = string | null;
 type FitPartitionDigest = string | null;
 type Revision1 = number | null;
@@ -138,15 +115,13 @@ type RetiredExcluded = number;
  */
 type FiniteNumber = number;
 type Error = string | null;
+type FitCorpusDigest1 = string | null;
 type RequestId1 = string | null;
-type WindowId = string | null;
-type ConfigurationDigest = string;
-type CookId = string | null;
-type FirstObservationSequence = number;
-type IncumbentDigest2 = string;
-type LastObservationSequence = number;
-type RoleGeneration4 = number;
-type SessionId = string;
+/**
+ * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
+ * via the `definition` "FitStatus".
+ */
+export type FitStatus = "idle" | "queued" | "running" | "succeeded" | "failed" | "stale";
 type K = number;
 type Form = "fopdt";
 type IdentifiedAtF = number | null;
@@ -197,13 +172,12 @@ export type ModelEvidenceStatus =
   | "activating"
   | "active"
   | "fallback"
-  | "error"
-  | "schema-invalidated";
+  | "error";
 type Accepted = true;
 type ActiveKind = "grey-box";
 type DecisionId4 = string;
 type Reason3 = string;
-type RoleGeneration5 = number;
+type RoleGeneration4 = number;
 type RollbackDigest1 = string;
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
@@ -429,17 +403,6 @@ export interface PendingForecastOriginReport {
 interface CommandResponseData {}
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
- * via the `definition` "CookRefitReport".
- */
-export interface CookRefitReport {
-  authorization: CookRefitAuthorization;
-  final_status: FinalStatus;
-  latest: CookRefitOutcome | null;
-  next_cook: NextCook;
-  status: FitStatus;
-}
-/**
- * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "CorpusStatusReport".
  */
 export interface CorpusStatusReport {
@@ -484,22 +447,9 @@ export interface EvidenceSummary {
  */
 export interface FitReport {
   error: Error;
+  fit_corpus_digest: FitCorpusDigest1;
   request_id: RequestId1;
   status: FitStatus;
-  window_id: WindowId;
-}
-/**
- * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
- * via the `definition` "FitWindowIdentity".
- */
-export interface FitWindowIdentity {
-  configuration_digest: ConfigurationDigest;
-  cook_id: CookId;
-  first_observation_sequence: FirstObservationSequence;
-  incumbent_digest: IncumbentDigest2;
-  last_observation_sequence: LastObservationSequence;
-  role_generation: RoleGeneration4;
-  session_id: SessionId;
 }
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
@@ -566,7 +516,6 @@ export interface ModelEvidenceReport {
   calibration: CalibrationReport;
   candidate: CandidateReport | null;
   checks: Checks;
-  cook_refit: CookRefitReport;
   corpus: CorpusStatusReport;
   decision_id: DecisionId3;
   errors: Errors;
@@ -581,7 +530,6 @@ export interface ModelEvidenceReport {
   revision: Revision4;
   schema_version: SchemaVersion;
   status: ModelEvidenceStatus;
-  window: FitWindowIdentity | null;
 }
 interface Checks {
   [k: string]: CheckStatus;
@@ -607,7 +555,7 @@ export interface ModelRollbackAccepted {
   active_kind: ActiveKind;
   decision_id: DecisionId4;
   reason: Reason3;
-  role_generation: RoleGeneration5;
+  role_generation: RoleGeneration4;
   rollback_digest: RollbackDigest1;
 }
 /**

@@ -77,7 +77,6 @@ from controller.model_learning.contracts import (
     CandidateOrigin,
     FitRequest,
     FitStatus,
-    FitWindowIdentity,
     FrameObservation,
     LearningStatus,
     activation_policy_for_origin,
@@ -145,6 +144,7 @@ class _ProcessLearningBinding:
 class _CorpusFitIntent:
     ticket: str
     origin: CandidateOrigin
+    replace_owned_prepared: bool = False
 
 
 class GreyLearningProcessOwner:
@@ -152,6 +152,9 @@ class GreyLearningProcessOwner:
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
+        self._condition = threading.Condition(self._lock)
+        self._active_runs = 0
+        self._transitioning = False
         self._learning: GreyLearningOrchestrator | None = None
         self._identity: LiveLearningIdentity | None = None
         self._lease = 0
@@ -179,25 +182,38 @@ class GreyLearningProcessOwner:
         controller_factory: Callable[..., object],
         timing_probe: Callable[..., object],
     ) -> _ProcessLearningBinding:
-        with self._lock:
+        with self._condition:
             if self._closed:
                 raise RuntimeError("grey learning process owner is closed")
-            learning = self._learning
-            if learning is None:
-                learning = builder()
-                self._learning = learning
-            else:
-                learning.rebind_process(
-                    identity,
-                    config=config,
-                    incumbent_pair=incumbent_pair,
-                    estimator_factory=estimator_factory,
-                    controller_factory=controller_factory,
-                    timing_probe=timing_probe,
-                )
-            self._identity = identity
-            self._lease += 1
-            return _ProcessLearningBinding(learning, self._lease)
+            self._transitioning = True
+            try:
+                self._condition.wait_for(lambda: self._active_runs == 0)
+                learning = self._learning
+                defer_rebind = False
+                if learning is None:
+                    learning = builder()
+                    self._learning = learning
+                elif learning.prepared is not None and learning.prepared.accepted:
+                    # A replacement controller has not restored its active
+                    # authority or bound the next cook yet. Keep the process-
+                    # owned challenger inert until rebind() can compare the
+                    # complete live identity.
+                    defer_rebind = True
+                else:
+                    learning.rebind_process(
+                        identity,
+                        config=config,
+                        incumbent_pair=incumbent_pair,
+                        estimator_factory=estimator_factory,
+                        controller_factory=controller_factory,
+                        timing_probe=timing_probe,
+                    )
+                self._identity = None if defer_rebind else identity
+                self._lease += 1
+                return _ProcessLearningBinding(learning, self._lease)
+            finally:
+                self._transitioning = False
+                self._condition.notify_all()
 
     def rebind(
         self,
@@ -206,17 +222,23 @@ class GreyLearningProcessOwner:
         config: GreyBoxMPCConfig,
         incumbent_pair: CandidatePair,
     ) -> _ProcessLearningBinding:
-        with self._lock:
+        with self._condition:
             if self._closed or self._learning is None:
                 raise RuntimeError("grey learning process owner is not bound")
-            self._learning.rebind_process(
-                identity,
-                config=config,
-                incumbent_pair=incumbent_pair,
-            )
-            self._identity = identity
-            self._lease += 1
-            return _ProcessLearningBinding(self._learning, self._lease)
+            self._transitioning = True
+            try:
+                self._condition.wait_for(lambda: self._active_runs == 0)
+                self._learning.rebind_process(
+                    identity,
+                    config=config,
+                    incumbent_pair=incumbent_pair,
+                )
+                self._identity = identity
+                self._lease += 1
+                return _ProcessLearningBinding(self._learning, self._lease)
+            finally:
+                self._transitioning = False
+                self._condition.notify_all()
 
     def run(
         self,
@@ -226,10 +248,25 @@ class GreyLearningProcessOwner:
             object,
         ],
     ):
-        with self._lock:
-            if self._closed or self._learning is None or self._identity is None or lease <= 0 or lease > self._lease:
+        with self._condition:
+            if (
+                self._closed
+                or self._transitioning
+                or self._learning is None
+                or self._identity is None
+                or lease <= 0
+                or lease > self._lease
+            ):
                 return None
-            return operation(self._learning, self._identity)
+            learning = self._learning
+            identity = self._identity
+            self._active_runs += 1
+        try:
+            return operation(learning, identity)
+        finally:
+            with self._condition:
+                self._active_runs -= 1
+                self._condition.notify_all()
 
     def record_terminal(
         self,
@@ -254,15 +291,23 @@ class GreyLearningProcessOwner:
 
     def prepared(self, lease: int) -> CandidatePreparation | None:
         with self._lock:
-            if self._closed or self._learning is None or lease != self._lease:
+            if (
+                self._closed
+                or self._transitioning
+                or self._learning is None
+                or self._identity is None
+                or lease != self._lease
+            ):
                 return None
             return self._learning.prepared
 
     def close(self) -> None:
-        with self._lock:
+        with self._condition:
             if self._closed:
                 return
             self._closed = True
+            self._transitioning = True
+            self._condition.wait_for(lambda: self._active_runs == 0)
             learning = self._learning
             self._learning = None
         if learning is not None:
@@ -337,7 +382,6 @@ class GreyLearningRuntime:
         self._corpus_fit_intents: deque[_CorpusFitIntent] = deque()
         self._corpus_fit_failure: tuple[str, str] | None = None
         self._terminal_fit_tickets: dict[str, CandidateOrigin] = {}
-        self._fit_corpus_identities: dict[str, FitCorpusIdentity] = {}
         self._challenger_state: ModelChallengerState | None = None
         self._checkpoint_origin: CandidateOrigin | None = None
         self._checkpoint_policy: ActivationPolicy | None = None
@@ -345,7 +389,6 @@ class GreyLearningRuntime:
         self._checkpoint_decision_id: str | None = None
         self._checkpoint_preparation: CandidatePreparation | None = None
         self._checkpoint_preparation_key: tuple[FitRequest, str] | None = None
-        self._checkpoint_cook_refit: tuple[Literal["idle", "succeeded", "failed"], str | None] = ("idle", None)
         self._checkpoint_activation: tuple[Literal["prepared", "active", "aborted"], bool, bool] = (
             "aborted",
             False,
@@ -727,19 +770,37 @@ class GreyLearningRuntime:
                                 prepared.candidate_pair if prepared is not None and prepared.accepted else None
                             )
 
-    def request_corpus_fit(self, origin: CandidateOrigin) -> bool:
-        return self._request_corpus_fit_ticket(origin) is not None
+    def request_corpus_fit(
+        self,
+        origin: CandidateOrigin,
+        *,
+        replace_owned_prepared: bool = False,
+    ) -> bool:
+        return (
+            self._request_corpus_fit_ticket(
+                origin,
+                replace_owned_prepared=replace_owned_prepared,
+            )
+            is not None
+        )
 
-    def _request_corpus_fit_ticket(self, origin: CandidateOrigin) -> str | None:
+    def _request_corpus_fit_ticket(
+        self,
+        origin: CandidateOrigin,
+        *,
+        replace_owned_prepared: bool = False,
+    ) -> str | None:
         """Queue an authorized persistent-corpus fit without touching storage."""
         if not isinstance(origin, CandidateOrigin):
             raise TypeError("origin must be a CandidateOrigin")
+        if type(replace_owned_prepared) is not bool:
+            raise TypeError("replace_owned_prepared must be a bool")
         if (
             self._closed
             or self._corpus_fit_failure is not None
             or self._trajectory_repository is None
             or self._fit_partition_digest is None
-            or (origin is CandidateOrigin.PASSIVE_ONLINE and not self._learning_enabled)
+            or (origin is CandidateOrigin.PASSIVE_ONLINE and not replace_owned_prepared and not self._learning_enabled)
         ):
             return None
         process_fit_pending = (
@@ -748,19 +809,32 @@ class GreyLearningRuntime:
             and self._process_owner.has_pending_fit()
         )
         with self._learning_lock:
-            for intent in self._corpus_fit_intents:
+            for index, intent in enumerate(self._corpus_fit_intents):
                 if intent.origin is origin:
+                    if replace_owned_prepared and not intent.replace_owned_prepared:
+                        self._corpus_fit_intents[index] = _CorpusFitIntent(
+                            intent.ticket,
+                            intent.origin,
+                            replace_owned_prepared=True,
+                        )
                     return intent.ticket
             if origin is CandidateOrigin.PASSIVE_ONLINE:
                 challenger = self._challenger_state
                 if (
                     process_fit_pending
-                    or self._learning_pending_origin is origin
-                    or challenger is not None
-                    and challenger.phase != "retired"
+                    or not replace_owned_prepared
+                    and (
+                        self._learning_pending_origin is origin
+                        or challenger is not None
+                        and challenger.phase != "retired"
+                    )
                 ):
                     return None
-            intent = _CorpusFitIntent(secrets.token_hex(32), origin)
+            intent = _CorpusFitIntent(
+                secrets.token_hex(32),
+                origin,
+                replace_owned_prepared=replace_owned_prepared,
+            )
             self._corpus_fit_intents.append(intent)
             self._learning_pending_origin = origin
             return intent.ticket
@@ -825,11 +899,11 @@ class GreyLearningRuntime:
             self._persist_fit_transition(
                 request,
                 status="stale",
-                model_digest=request.window.incumbent_digest,
+                model_digest=request.parent_incumbent_digest,
             )
             self._persist_rejected_candidate(
                 request,
-                model_digest=request.window.incumbent_digest,
+                model_digest=request.parent_incumbent_digest,
                 reasons=(reason,),
                 fit_accepted=False,
                 identifiability_accepted=False,
@@ -850,17 +924,16 @@ class GreyLearningRuntime:
         repository: _FitCorpusRepository,
         snapshot: FitCorpusSnapshot,
         request: FitRequest,
-        identity: LiveLearningIdentity,
     ) -> None:
         repository.record_fit_request(
             snapshot,
             ModelFitLineage(
                 request_id=request.request_id,
-                parent_incumbent_digest=identity.incumbent_digest,
-                parent_incumbent_generation=identity.role_generation,
-                candidate_generation=identity.candidate_generation,
-                fit_corpus=snapshot.identity,
-                fit_corpus_digest=snapshot.identity.corpus_digest,
+                parent_incumbent_digest=request.parent_incumbent_digest,
+                parent_incumbent_generation=request.parent_incumbent_generation,
+                candidate_generation=request.candidate_generation,
+                fit_corpus=request.fit_corpus,
+                fit_corpus_digest=request.fit_corpus.corpus_digest,
                 trigger_origin=request.origin.value,
                 result_status="running",
                 candidate_digest=None,
@@ -886,13 +959,9 @@ class GreyLearningRuntime:
         terminal_rejection_reason: str | None = None
         prepared = learning.prepared
         if prepared is not None and prepared.accepted:
-            prepared_is_owned_operator = (
-                prepared.candidate.request.origin is CandidateOrigin.OPERATOR_CALIBRATION
-                and learning._can_supersede_prepared_candidate(prepared)
-            )
-            if intent.origin is not CandidateOrigin.COOK_REFIT:
+            if not intent.replace_owned_prepared:
                 terminal_rejection_reason = "superseded-by-prepared-candidate"
-            elif prepared_is_owned_operator:
+            elif prepared.candidate.request.origin is CandidateOrigin.OPERATOR_CALIBRATION:
                 terminal_rejection_reason = "superseded-by-prepared-operator-calibration-candidate"
             else:
                 prepared_to_replace = prepared
@@ -909,7 +978,7 @@ class GreyLearningRuntime:
             self._fail_corpus_learning("corpus-snapshot-failed", error)
             return None
 
-        if origin is CandidateOrigin.PASSIVE_ONLINE:
+        if origin is CandidateOrigin.PASSIVE_ONLINE and not intent.replace_owned_prepared:
             trigger = persistent_corpus_trigger(
                 snapshot,
                 config=learning.trigger_config,
@@ -924,28 +993,13 @@ class GreyLearningRuntime:
                 self._record_terminal_fit_intent(intent)
                 return None
         identity = self.learning_identity() if identity is None else identity
-        scored_sequences = tuple(
-            frame.sequence for segment in snapshot.segments for frame in segment.scored_hold_frames
-        )
-        if not scored_sequences:
-            self._fail_corpus_learning(
-                "corpus-snapshot-failed",
-                "persistent corpus contains no scored observations",
-            )
-            return None
-        window = FitWindowIdentity(
-            session_id=identity.session_id,
-            cook_id=identity.cook_id,
-            first_observation_sequence=min(scored_sequences),
-            last_observation_sequence=max(scored_sequences),
-            configuration_digest=identity.configuration_digest,
-            incumbent_digest=identity.incumbent_digest,
-            role_generation=identity.role_generation,
-        )
         request = FitRequest(
             request_id=intent.ticket,
             origin=origin,
-            window=window,
+            fit_corpus=snapshot.identity,
+            configuration_digest=identity.configuration_digest,
+            parent_incumbent_digest=identity.incumbent_digest,
+            parent_incumbent_generation=identity.role_generation,
             candidate_generation=identity.candidate_generation,
         )
         if terminal_rejection_reason is not None:
@@ -954,7 +1008,6 @@ class GreyLearningRuntime:
                     repository,
                     snapshot,
                     request,
-                    identity,
                 )
             except Exception as error:
                 self._fail_corpus_learning("fit-run-persistence-failed", error)
@@ -983,7 +1036,6 @@ class GreyLearningRuntime:
                 repository,
                 snapshot,
                 request,
-                identity,
             )
         except Exception as error:
             self._fail_corpus_learning("fit-run-persistence-failed", error)
@@ -1003,9 +1055,7 @@ class GreyLearningRuntime:
             if submission is not FitSubmission.ACCEPTED:
                 raise RuntimeError("fitting worker was busy")
             if superseded:
-                self._clear_superseded_prepared_candidate(
-                    prepared_to_replace,
-                )
+                self._clear_superseded_prepared_candidate(prepared_to_replace)
         except Exception as error:
             try:
                 repository.complete_fit(
@@ -1026,7 +1076,6 @@ class GreyLearningRuntime:
                 self._corpus_fit_intents.popleft()
             self._learning_pending_origin = origin
             self._learning_pending_fit_transition = request
-            self._fit_corpus_identities[request.request_id] = snapshot.identity
         self._logger.info(f"[mpc] submitted cumulative corpus fit {request.request_id} for {request.origin.value}")
         return request
 
@@ -1186,10 +1235,7 @@ class GreyLearningRuntime:
         preparation: CandidatePreparation,
     ) -> ModelChallengerState:
         request = preparation.candidate.request
-        with self._learning_lock:
-            fit_corpus = self._fit_corpus_identities.get(request.request_id)
-        if fit_corpus is None:
-            raise RuntimeError("prepared challenger lost its exact fit corpus")
+        fit_corpus = request.fit_corpus
         calibration_manifest = (
             self._calibration_manifest_for_corpus(fit_corpus)
             if request.origin is CandidateOrigin.OPERATOR_CALIBRATION
@@ -1218,13 +1264,12 @@ class GreyLearningRuntime:
             and current.incumbent == incumbent
             and current.candidate == candidate
             and current.origin is request.origin
-            and current.controller_configuration_digest == request.window.configuration_digest
+            and current.controller_configuration_digest == request.configuration_digest
             and trajectory_json_value(current.calibration_manifest) == calibration_manifest
             and not manifest_blocked
         ):
             with self._learning_lock:
                 self._challenger_state = current
-                self._fit_corpus_identities.pop(request.request_id, None)
             self._adopt_prepared_checkpoint_lineage(preparation)
             return current
         timing = preparation.timing
@@ -1246,7 +1291,7 @@ class GreyLearningRuntime:
                 "native_build": "passed",
                 "dry_solve": "passed" if preparation.dry_solve_finite else "failed",
                 "target_timing": (None if timing is None else trajectory_json_value(asdict(timing))),
-                "window": asdict(request.window),
+                "fit_corpus_digest": request.fit_corpus.corpus_digest,
                 "fit_result": {
                     "rmse_c": preparation.candidate.rmse_c,
                     "max_error_c": preparation.candidate.max_error_c,
@@ -1257,7 +1302,7 @@ class GreyLearningRuntime:
                     "result_digest": preparation.candidate.result_digest,
                 },
             },
-            controller_configuration_digest=request.window.configuration_digest,
+            controller_configuration_digest=request.configuration_digest,
             incumbent=incumbent,
             candidate=candidate,
             calibration_manifest=calibration_manifest,
@@ -1283,7 +1328,6 @@ class GreyLearningRuntime:
         durable = create_model_challenger(state)
         with self._learning_lock:
             self._challenger_state = durable
-            self._fit_corpus_identities.pop(request.request_id, None)
         self._trace_durable_challenger(durable)
         if not manifest_blocked:
             self._adopt_prepared_checkpoint_lineage(preparation)
@@ -1461,7 +1505,9 @@ class GreyLearningRuntime:
                 required_wins=state.required_wins,
                 completed_horizons=completed_horizons,
                 required_horizons=required_horizons,
-                resumed_from_previous_cook=state.evaluation_epoch > 0,
+                resumed_from_previous_cook=(
+                    state.evaluation_epoch > 0 or bool(getattr(self._learning, "resumed_from_previous_cook", False))
+                ),
                 reset_reason=state.retirement_reason,
             )
             self._append_trace(
@@ -1558,7 +1604,7 @@ class GreyLearningRuntime:
         configured = self._pair_factory.configured(
             self._configuration(),
             candidate_generation=request.candidate_generation,
-            role_generation=request.window.role_generation + 1,
+            role_generation=request.parent_incumbent_generation + 1,
         )
         return self._pair_factory.descriptor(
             self._pair_factory.native(
@@ -1807,17 +1853,12 @@ class GreyLearningRuntime:
         error=None,
     ):
         policy = self._policy_for_learning_origin(request.origin)
-        window_id = (
-            f"{request.window.session_id}:"
-            f"{request.window.first_observation_sequence}:"
-            f"{request.window.last_observation_sequence}"
-        )
         payload = FitLifecycleEvidence(
             request_id=request.request_id,
             status=status,
             origin=request.origin.value,
             policy=policy.value,
-            window_id=window_id,
+            fit_corpus_digest=request.fit_corpus.corpus_digest,
             error=error,
         )
         return self._persist_grey_lifecycle(
@@ -1827,13 +1868,13 @@ class GreyLearningRuntime:
                 status=payload.status,
                 origin=payload.origin,
                 policy=payload.policy,
-                window_id=payload.window_id,
+                fit_corpus_digest=payload.fit_corpus_digest,
                 error=payload.error,
             ),
             timestamp_ms=self._clock_ms(),
-            role_generation=request.window.role_generation,
+            role_generation=request.parent_incumbent_generation,
             model_digest=model_digest,
-            provenance_digest=request.window.incumbent_digest,
+            provenance_digest=request.parent_incumbent_digest,
         )
 
     def _persist_rejected_candidate(
@@ -1891,9 +1932,9 @@ class GreyLearningRuntime:
                 rejection_reasons=assessment.rejection_reasons,
             ),
             timestamp_ms=self._clock_ms(),
-            role_generation=request.window.role_generation,
+            role_generation=request.parent_incumbent_generation,
             model_digest=model_digest,
-            provenance_digest=request.window.incumbent_digest,
+            provenance_digest=request.parent_incumbent_digest,
         )
 
     def prepare_automatic_activation(
@@ -1933,7 +1974,7 @@ class GreyLearningRuntime:
                 native_config,
                 estimator_kind=estimator_kind,
                 candidate_generation=request.candidate_generation,
-                role_generation=request.window.role_generation + 1,
+                role_generation=request.parent_incumbent_generation + 1,
             ),
             candidate_pair.estimator,
             candidate_pair.controller,
@@ -2124,7 +2165,7 @@ class GreyLearningRuntime:
             self._persist_fit_transition(
                 queued,
                 status="queued",
-                model_digest=queued.window.incumbent_digest,
+                model_digest=queued.parent_incumbent_digest,
             )
 
         delivery = None
@@ -2195,7 +2236,7 @@ class GreyLearningRuntime:
             candidate_digest = (
                 grey_config_digest(completed_config)
                 if isinstance(completed_config, GreyBoxMPCConfig)
-                else request.window.incumbent_digest
+                else request.parent_incumbent_digest
             )
             if "fit-error" in delivery_blockers:
                 detail = getattr(outcome, "detail", "fit-error")
@@ -2252,8 +2293,8 @@ class GreyLearningRuntime:
             if (
                 evaluation is not None
                 and durable is not None
-                and durable.phase in {"qualified", "activating"}
-                and durable.last_decision_id != evaluation.decision_id
+                and durable.phase != "evaluating"
+                and (durable.phase == "retired" or durable.last_decision_id != evaluation.decision_id)
             ):
                 evaluation = None
             blockers = () if evaluation is None else tuple(evaluation.blockers)
@@ -2458,70 +2499,8 @@ class GreyLearningRuntime:
             ),
         }
 
-    def adopt_model(
-        self,
-        pair: OwnedMpcPair,
-        *,
-        rmse,
-        samples,
-        band_c,
-        nfev=None,
-        origin: CandidateOrigin = CandidateOrigin.COOK_REFIT,
-        policy: ActivationPolicy = ActivationPolicy.COOK_REFIT,
-    ):
-        """Install a complete fitted owner without relabeling incumbent resources."""
-
-        if (
-            pair is self._active_pair()
-            or pair is self._activation_runtime.rollback_pair
-            or not self._pair_factory.validate(pair)
-        ):
-            raise ValueError("adopted model pair must be a distinct validated owner")
-        adopted_metadata = {
-            "rmse": float(rmse),
-            "samples": int(samples),
-            "band_c": [float(band_c[0]), float(band_c[1])],
-            "nfev": None if nfev is None else int(nfev),
-        }
-        previous = self._active_pair()
-        self._activation_runtime.replace_active_pair(
-            pair,
-            retain_current=True,
-        )
-        state = self._challenger_state
-        if state is None:
-            try:
-                state = read_model_challenger()
-            except ValueError:
-                state = None
-        if state is not None and state.phase != "retired":
-            with self._learning_lock:
-                self._challenger_state = state
-            self._retire_durable_challenger(
-                "activated" if pair.descriptor == state.candidate else "active-authority-changed"
-            )
-        self._sync_configuration()
-        with self._learning_lock:
-            self._checkpoint_preparation = None
-            self._checkpoint_preparation_key = None
-            self._checkpoint_origin = origin
-            self._checkpoint_policy = policy
-            self._checkpoint_rollback_identity = (
-                previous.descriptor.model_digest,
-                previous.descriptor.role_generation,
-            )
-            self._checkpoint_decision_id = None
-            self._checkpoint_activation = ("aborted", False, False)
-            self._checkpoint_failure = None
-            self._model_meta = adopted_metadata
-            self._model_revision = max(
-                self._model_revision + 1,
-                pair.descriptor.role_generation,
-            )
-            self._rotate_learning_role_generation(self._model_revision)
-
     def get_model_snapshot(self):
-        """Return the grey-only v5 checkpoint with one challenger authority reference."""
+        """Return the grey-only v6 checkpoint with one challenger authority reference."""
 
         metadata = (
             {"rmse": None, "samples": 0, "band_c": [0.0, 0.0], "nfev": None}
@@ -2603,11 +2582,6 @@ class GreyLearningRuntime:
             snapshot["identification"] = {
                 "status": ("identified" if self._model_meta is not None else "unidentified"),
             }
-            refit_status, refit_latest = self._checkpoint_cook_refit
-            snapshot["cook_refit"] = {
-                "status": refit_status,
-                "latest": refit_latest,
-            }
             snapshot["identities"] = {
                 "active_digest": active.model_digest,
                 "active_generation": active.role_generation,
@@ -2651,8 +2625,8 @@ class GreyLearningRuntime:
         does not advance past it, permanently -- so this counter has to survive
         the restart, not merely the process. That holds for a checkpoint this
         runtime refuses as much as for one it restores: refusing one means the
-        next cook refits from scratch, and a counter that restarted at zero
-        alongside it could never persist that refit.
+        next fit starts from scratch, and a counter that restarted at zero
+        alongside it could never persist that fit.
         """
         if not isinstance(snapshot, dict):
             return
@@ -2669,21 +2643,23 @@ class GreyLearningRuntime:
         """Rebuild one exact candidate owner solely from durable challenger lineage."""
 
         preparation = state.fit_preparation
-        window_value = preparation.get("window")
         fit_result = preparation.get("fit_result")
         timing_value = preparation.get("target_timing")
         if (
-            not isinstance(window_value, Mapping)
-            or not isinstance(fit_result, Mapping)
+            not isinstance(fit_result, Mapping)
             or not isinstance(timing_value, Mapping)
+            or preparation.get("fit_corpus_digest") != state.fit_corpus.corpus_digest
         ):
             raise TypeError("durable challenger preparation is incomplete")
-        window = FitWindowIdentity(**dict(window_value))
+        lineage = state.fit_lineage
         request = FitRequest(
-            request_id=state.fit_lineage.request_id,
+            request_id=lineage.request_id,
             origin=state.origin,
-            window=window,
-            candidate_generation=state.candidate.candidate_generation,
+            fit_corpus=state.fit_corpus,
+            configuration_digest=state.controller_configuration_digest,
+            parent_incumbent_digest=lineage.parent_incumbent_digest,
+            parent_incumbent_generation=lineage.parent_incumbent_generation,
+            candidate_generation=lineage.candidate_generation,
         )
         candidate_owner = self._pair_factory.restore(state.candidate)
         candidate = GreyFitSuccess(
@@ -2726,16 +2702,15 @@ class GreyLearningRuntime:
     def restore_model(self, snapshot):
         version = snapshot.get("version") if isinstance(snapshot, dict) else None
         if not isinstance(snapshot, dict) or version != self.MODEL_SCHEMA:
-            if version in (3, 4):
-                try:
-                    _snapshot.migrate_grey_learning_snapshot(snapshot)
-                except _snapshot.GreySnapshotInvalid:
-                    pass
-                else:
-                    self._adopt_persisted_revision(snapshot)
+            try:
+                _snapshot.migrate_grey_learning_snapshot(snapshot)
+            except _snapshot.GreySnapshotInvalid:
+                pass
+            else:
+                self._adopt_persisted_revision(snapshot)
             self._logger.warning(
                 f"[mpc] discarding a version {version!r} model snapshot: runtime restore "
-                f"accepts only grey schema {self.MODEL_SCHEMA}; versions 3 and 4 are migration input only."
+                f"accepts only grey schema {self.MODEL_SCHEMA}; versions 4 and 5 are migration input only."
             )
             return False
         try:
@@ -2759,6 +2734,7 @@ class GreyLearningRuntime:
             )
             return False
         recovery_configuration_digest = self.learning_identity().configuration_digest
+        restored_pair: OwnedMpcPair | None = None
         try:
             restored_descriptor = GreyControlPairDescriptor.from_dict(owned["active_pair"])
             active_identity = owned["identities"]
@@ -2767,20 +2743,6 @@ class GreyLearningRuntime:
                 or active_identity["active_generation"] != restored_descriptor.role_generation
             ):
                 raise ValueError("restored active identity does not match its pair descriptor")
-            cook_refit_value = owned["cook_refit"]
-            raw_refit_status = cook_refit_value["status"]
-            if raw_refit_status == "idle":
-                restored_refit_status: Literal["idle", "succeeded", "failed"] = "idle"
-            elif raw_refit_status == "succeeded":
-                restored_refit_status = "succeeded"
-            elif raw_refit_status == "failed":
-                restored_refit_status = "failed"
-            else:
-                raise ValueError("unsupported restored cook-refit status")
-            restored_cook_refit = (
-                restored_refit_status,
-                cook_refit_value["latest"],
-            )
             activation_value = owned["activation"]
             raw_activation_phase = activation_value["phase"]
             if raw_activation_phase == "prepared":
@@ -2801,9 +2763,11 @@ class GreyLearningRuntime:
             restored_pair = self._pair_factory.restore(restored_descriptor)
             restored_parameters = restored_pair.core.snapshot_parameters()
             if any(restored_parameters[key] != params[key] for key in self.MODEL_PARAM_KEYS):
-                restored_pair.close()
                 raise ValueError("restored active pair does not match active model")
+            restored_pair.core.adopt_operating_state(self._active_pair().core.capture_operating_state())
         except Exception as exc:
+            if restored_pair is not None:
+                restored_pair.close()
             self._logger.warning(
                 f"[mpc] a stored model could not be built ({exc}); keeping the model this controller started with."
             )
@@ -2881,7 +2845,6 @@ class GreyLearningRuntime:
         )
         self._clear_prepared_checkpoint_lineage()
         self._checkpoint_decision_id = owned["evidence"]["confidence_decision_id"]
-        self._checkpoint_cook_refit = restored_cook_refit
         self._checkpoint_activation = restored_activation
         self._checkpoint_failure = restored_failure
         if owned["identification"]["status"] != "identified":

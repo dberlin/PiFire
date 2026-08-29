@@ -30,6 +30,7 @@ type PositiveInt = Annotated[int, Field(gt=0, strict=True)]
 type NonBlankString = Annotated[str, StringConstraints(strict=True, strip_whitespace=True, min_length=1)]
 type Digest = Annotated[str, StringConstraints(strict=True, pattern=r"^[0-9a-f]{64}$")]
 _DATACLASS_CONFIG = ConfigDict(extra="forbid", strict=True, validate_default=True)
+_CURRENT_DIGEST_ADAPTER: TypeAdapter[Digest] = TypeAdapter(Digest)
 
 
 class EvidenceKind(StrEnum):
@@ -216,7 +217,7 @@ class FitLifecycleEvidence:
     status: Literal["queued", "running", "succeeded", "failed", "stale"]
     origin: Literal["passive-online", "operator-calibration", "cook-refit"]
     policy: Literal["causal-auto", "passive-auto", "operator-reviewed", "cook-refit"] | None
-    window_id: NonBlankString
+    fit_corpus_digest: NonBlankString
     error: NonBlankString | None = None
     payload_type: Literal["fit_lifecycle"] = "fit_lifecycle"
 
@@ -477,6 +478,24 @@ class ModelEvidenceRecord(BaseModel):
             RefreshDiagnosticsEvidence,
         ):
             raise ValueError("retired refresh diagnostics cannot be current grey evidence")
+        if self.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION and isinstance(
+            self.payload,
+            SchemaInvalidationEvidence,
+        ):
+            raise ValueError("retired schema invalidation cannot be current model evidence")
+        if self.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION and isinstance(
+            self.payload,
+            (FitLifecycleEvidence, CandidateAssessmentEvidence, ActivationLifecycleEvidence),
+        ):
+            if self.payload.origin not in {"passive-online", "operator-calibration"}:
+                raise ValueError("retired lifecycle origin cannot be current model evidence")
+            if self.payload.policy != "causal-auto":
+                raise ValueError("retired lifecycle policy cannot be current model evidence")
+            if isinstance(self.payload, FitLifecycleEvidence):
+                try:
+                    _CURRENT_DIGEST_ADAPTER.validate_python(self.payload.fit_corpus_digest)
+                except ValidationError as exc:
+                    raise ValueError("current fit corpus digest must be lowercase SHA-256") from exc
         if isinstance(self.payload, ForecastOriginEvidence):
             if self.cook_id is None:
                 raise ValueError("forecast evidence requires cook identity")
@@ -502,6 +521,7 @@ class ModelEvidenceRecord(BaseModel):
         return self
 
     def to_db_row(self) -> ModelEvidenceDbRow:
+        self.validate_kind()
         return ModelEvidenceDbRow(
             evidence_id=self.evidence_id,
             session_id=self.session_id,
@@ -523,6 +543,15 @@ class ModelEvidenceRecord(BaseModel):
             payload = _JSON_VALUE_ADAPTER.validate_json(row.payload)
         except ValidationError as exc:
             raise ValueError("model evidence payload column is invalid JSON") from exc
+        if (
+            row.schema_version in {1, 2, 3}
+            and isinstance(payload, dict)
+            and payload.get("payload_type") == "fit_lifecycle"
+            and "window_id" in payload
+            and "fit_corpus_digest" not in payload
+        ):
+            payload = dict(payload)
+            payload["fit_corpus_digest"] = payload.pop("window_id")
         if (
             row.schema_version == 1
             and isinstance(payload, dict)

@@ -560,6 +560,10 @@ def test_v7_history_gains_duty_columns_without_losing_rows(tmp_path):
         conn = datastore.connection()
         assert conn.execute("PRAGMA user_version").fetchone()[0] == datastore.DB_SCHEMA_VERSION
         # Drop back to a v7-shaped history: no duty columns, one durable row.
+        # A real v7 database predates the v10 challenger singleton. Remove the
+        # table created by the current-schema bootstrap before downgrading the
+        # fixture's version marker.
+        conn.execute("DROP TABLE model_challenger_state")
         conn.execute("DROP TABLE history")
         conn.execute("""
             CREATE TABLE history (

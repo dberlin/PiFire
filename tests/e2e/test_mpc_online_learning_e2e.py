@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import logging
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import replace
@@ -67,9 +66,9 @@ from controller.model_learning.contracts import (
     ActivationPolicy,
     CandidateOrigin,
     FitRequest,
-    FitWindowIdentity,
     FrameObservation,
 )
+from controller.model_learning.grey_runtime import GreyLearningProcessOwner
 from controller.model_learning.migration import migrate_mpc_learning_authority
 from controller.model_learning.report import current_learning_report
 from controller.mpc import Controller
@@ -78,11 +77,7 @@ from controller.mpc_factory import MpcPairFactory
 from controller.mpc_model import EstimatorSeed, replay_delay_chain_arrays, simulate_grey_box_intervals
 from controller.mpc_snapshot import migrate_grey_learning_snapshot
 from controller.runtime.control_trace_recorder import RETENTION_PERIOD_MS, ControlTraceRecorder
-from controller.runtime.control_trace_session import (
-    ControlTraceSession,
-    TraceModelAuthority,
-    TraceSessionContext,
-)
+from controller.runtime.control_trace_session import ControlTraceSession
 from controller.runtime.model_fitting import (
     GreyFitSuccess,
     fit_segmented_grey,
@@ -91,18 +86,23 @@ from controller.runtime.model_fitting import (
 from controller.runtime.model_persistence import ModelPersistenceWorker
 from controller.runtime.modes.hold_learning import HoldLearningRuntime
 from controller.runtime.runner import SyncControllerRunner, ThreadedControllerRunner
+from tests.e2e._mpc_online_learning_helpers import (
+    _CYCLE,
+    _FIT_SAMPLES,
+    _FRAME_SECONDS,
+    _LEVEL_DWELL_FRAMES,
+    _LOAD_LEVELS,
+    _MAK_SUPPORT_PARAMETERS,
+    _SETPOINT_C,
+    _TEST_LOGGER,
+    _U_MAX,
+    _mak_grey_corpus_rows,
+    _trace_context,
+)
 
-_FRAME_SECONDS = 20
-_FIT_SAMPLES = 120
-_FIRST_EVALUATION_END = 300
-_SECOND_EVALUATION_END = 301
-_EVALUATION_PUBLICATION_SEQUENCE = 302
+_FIRST_EVALUATION_MIN_SEQUENCE = 300
+_MAX_EVALUATION_PUBLICATION_SEQUENCE = 305
 _REQUIRED_HORIZONS = {3, 15, 45, 90, 180}
-_LOAD_LEVELS = (0.20, 0.55, 0.90)
-_LEVEL_DWELL_FRAMES = 8
-_U_MAX = 0.90
-_SETPOINT_C = 200.0
-_CYCLE = {"u_min": 0.1, "u_max": _U_MAX}
 _OBSOLETE_V6_SCORES = {"incumbent_innovation_c", "challenger_innovation_c"}
 _EXACT_V6_FIXTURE = Path(__file__).with_name("fixtures") / "restored_v6_passive_21_140.json"
 _EXACT_V6_ROWS_SHA256 = "f9bf8eaa632a68e73586abfd93ef42c07d4bac91a824f4660fcc1af8cd59b0a6"
@@ -119,31 +119,7 @@ _SUPPORT_MODEL_PARAMETERS = {
     "sigma": 1.4e-09,
     "theta": 52.241101540886156,
 }
-_MAK_SUPPORT_PARAMETERS = {
-    "C_c": MAKGrillSim.C_C,
-    "K_Q": MAKGrillSim.HEAT_PER_UNIT * _U_MAX,
-    "T_amb": MAKGrillSim.AMBIENT_C,
-    "h_amb": 0.546,
-    "n_delay": 8,
-    "sigma": 1.4e-09,
-    "theta": float(MAKGrillSim.DEADTIME),
-}
 _EXACT_REPLAY_COOK_ID = "mpc-restored-v6-passive-21-140"
-_LOGGER = logging.getLogger(__name__)
-
-
-class _TestLogger:
-    def info(self, message: str) -> None:
-        _LOGGER.info(message)
-
-    def warning(self, message: str) -> None:
-        _LOGGER.warning(message)
-
-    def error(self, message: str) -> None:
-        _LOGGER.error(message)
-
-
-_TEST_LOGGER = _TestLogger()
 
 
 class _FrameBoundaryGate:
@@ -190,14 +166,11 @@ class _FrameBoundaryGate:
             self._condition.notify_all()
 
 
-def _wait_until(
+def _poll_until(
     predicate: Callable[[], Any],
     *,
     timeout_s: float,
-    description: str,
-) -> Any:
-    """Bound asynchronous production workers without using timing sleeps."""
-
+) -> Any | None:
     deadline = time.monotonic() + timeout_s
     condition = Condition()
     with condition:
@@ -207,8 +180,22 @@ def _wait_until(
                 return result
             remaining = deadline - time.monotonic()
             if remaining <= 0.0:
-                pytest.fail(f"timed out waiting for {description}")
+                return None
             condition.wait(timeout=min(0.05, remaining))
+
+
+def _wait_until(
+    predicate: Callable[[], Any],
+    *,
+    timeout_s: float,
+    description: str,
+) -> Any:
+    """Bound asynchronous production workers without using timing sleeps."""
+
+    result = _poll_until(predicate, timeout_s=timeout_s)
+    if result is None:
+        pytest.fail(f"timed out waiting for {description}")
+    return result
 
 
 def _load_for(sequence: int) -> float:
@@ -260,50 +247,6 @@ def _simulated_frame(plant: MAKGrillSim, sequence: int) -> FrameObservation:
         ambient_source=AmbientSource.CONFIGURED,
         ambient_uncertainty=AmbientUncertainty.UNMEASURED,
     )
-
-
-def _mak_grey_corpus_rows() -> list[dict[str, Any]]:
-    pre_roll_count = 21
-    pre_roll_load = (0.2,) * pre_roll_count
-    scored_load = tuple(
-        _LOAD_LEVELS[(index // _LEVEL_DWELL_FRAMES) % len(_LOAD_LEVELS)] for index in range(_FIT_SAMPLES)
-    )
-    delay = replay_delay_chain_arrays(
-        (_FRAME_SECONDS,) * pre_roll_count,
-        pre_roll_load,
-        theta=_MAK_SUPPORT_PARAMETERS["theta"],
-        n_delay=int(_MAK_SUPPORT_PARAMETERS["n_delay"]),
-        initial_load=pre_roll_load[0],
-    )
-    temperature = simulate_grey_box_intervals(
-        (_FRAME_SECONDS,) * _FIT_SAMPLES,
-        scored_load,
-        (_MAK_SUPPORT_PARAMETERS["T_amb"],) * _FIT_SAMPLES,
-        C_c=_MAK_SUPPORT_PARAMETERS["C_c"],
-        h_amb=_MAK_SUPPORT_PARAMETERS["h_amb"],
-        T0=20.0,
-        K_Q=_MAK_SUPPORT_PARAMETERS["K_Q"],
-        sigma=_MAK_SUPPORT_PARAMETERS["sigma"],
-        theta=_MAK_SUPPORT_PARAMETERS["theta"],
-        n_delay=int(_MAK_SUPPORT_PARAMETERS["n_delay"]),
-        initial_delay_states=delay,
-    )
-    rows: list[dict[str, Any]] = []
-    for index, load in enumerate(scored_load):
-        sequence = pre_roll_count + index
-        frame_start_ms = 20_000_000 + sequence * _FRAME_SECONDS * 1_000
-        rows.append(
-            {
-                "frame_start_ms": frame_start_ms,
-                "frame_end_ms": frame_start_ms + _FRAME_SECONDS * 1_000,
-                "temp_c": float(temperature[index]),
-                "ambient_c": _MAK_SUPPORT_PARAMETERS["T_amb"],
-                "observation_sequence": sequence,
-                "delivered_on_seconds": load * _U_MAX * _FRAME_SECONDS,
-                "realized_combustion_load": load,
-            }
-        )
-    return rows
 
 
 def _drive_frame(
@@ -452,7 +395,9 @@ def _seed_passive_corpus(
     source_trace_digest: str = _EXACT_V6_ROWS_SHA256,
     source_kind: str = "restored-v6-replay",
     support_parameters: Mapping[str, float | int] = _SUPPORT_MODEL_PARAMETERS,
+    persist_support_segment: bool = True,
     persist_source_segment: bool = True,
+    support_scored_limit: int | None = None,
 ) -> str:
     scored_frames = tuple(_exact_corpus_frame(row) for row in rows)
     first_scored = scored_frames[0]
@@ -621,9 +566,12 @@ def _seed_passive_corpus(
         )
         for index, load in enumerate(support_scored_load)
     )
+    retained_support_scored = support_scored if support_scored_limit is None else support_scored[:support_scored_limit]
+    if not retained_support_scored:
+        raise ValueError("support_scored_limit must retain at least one observation")
     support_first = support_pre_roll[0]
     support_first_scored = support_scored[0]
-    support_last = support_scored[-1]
+    support_last = retained_support_scored[-1]
     support_segment = replace(
         segment,
         segment_id="deterministic-grey-support-cook",
@@ -647,7 +595,7 @@ def _seed_passive_corpus(
             probe_valid=True,
             probe_source="simulated-grey-support",
         ),
-        scored_hold_frames=support_scored,
+        scored_hold_frames=retained_support_scored,
         generation_audit_ranges=(
             {
                 "start_sequence": support_first.sequence,
@@ -670,7 +618,11 @@ def _seed_passive_corpus(
         },
     )
     assert support_segment.fit_partition_digest == segment.fit_partition_digest
-    retained_segments = (support_segment, segment) if persist_source_segment else (support_segment,)
+    retained_segments = ()
+    if persist_support_segment:
+        retained_segments += (support_segment,)
+    if persist_source_segment:
+        retained_segments += (segment,)
     for value in retained_segments:
         cursor = repository.begin_segment(value)
         finalized = repository.finalize(cursor, TrajectoryBreakReason.STOP)
@@ -778,22 +730,15 @@ def _replay_exact_fit(
 ) -> GreyFitSuccess:
     preparation = trajectory_json_value(challenger.fit_preparation)
     assert isinstance(preparation, dict)
-    window_value = preparation["window"]
     fit_result_value = preparation["fit_result"]
-    assert isinstance(window_value, dict)
     assert isinstance(fit_result_value, dict)
     request = FitRequest(
         request_id=challenger.fit_lineage.request_id,
         origin=challenger.origin,
-        window=FitWindowIdentity(
-            session_id=cast(str, window_value["session_id"]),
-            cook_id=cast(str | None, window_value["cook_id"]),
-            first_observation_sequence=cast(int, window_value["first_observation_sequence"]),
-            last_observation_sequence=cast(int, window_value["last_observation_sequence"]),
-            configuration_digest=cast(str, window_value["configuration_digest"]),
-            incumbent_digest=cast(str, window_value["incumbent_digest"]),
-            role_generation=cast(int, window_value["role_generation"]),
-        ),
+        fit_corpus=challenger.fit_corpus,
+        configuration_digest=challenger.controller_configuration_digest,
+        parent_incumbent_digest=challenger.fit_lineage.parent_incumbent_digest,
+        parent_incumbent_generation=challenger.fit_lineage.parent_incumbent_generation,
         candidate_generation=challenger.candidate.candidate_generation,
     )
 
@@ -1015,36 +960,6 @@ def _seed_v6_state(config: dict[str, Any]) -> str:
     return aborted.transaction_id
 
 
-def _trace_context(
-    snapshot: dict[str, Any],
-    config: dict[str, Any],
-    cook_id: str,
-    *,
-    setpoint_c: float = _SETPOINT_C,
-    ambient_c: float = MAKGrillSim.AMBIENT_C,
-) -> TraceSessionContext:
-    return TraceSessionContext(
-        controller=ControllerType.MPC,
-        controller_config=config,
-        temperature_unit="C",
-        control_period_seconds=float(config["control_period"]),
-        fallback_model=TraceModelAuthority(snapshot, "runner"),
-        runner_snapshot_fallback_safe=True,
-        pulse_slot_seconds=1.0,
-        pulse_frame_seconds=float(_FRAME_SECONDS),
-        fan_authority=False,
-        fan_pwm_capable=False,
-        fan_min_duty=0.0,
-        fan_max_duty=1.0,
-        setpoint=setpoint_c,
-        ambient_temperature=ambient_c,
-        software_version="e2e",
-        build_version="e2e",
-        cook_id=cook_id,
-        runner_generation=0,
-    )
-
-
 def _identity(snapshot: dict[str, Any]) -> tuple[str, int]:
     identities = snapshot["identities"]
     assert isinstance(identities, dict)
@@ -1069,8 +984,9 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
     stale_transaction_id = _seed_v6_state(config) if database_state == "upgraded-v6" else None
     if database_state == "upgraded-v6":
         migration = migrate_mpc_learning_authority(defaults=config)
-        assert migration.snapshot["version"] == 5
+        assert migration.snapshot["version"] == 6
     cook_id = f"mpc-online-learning-{database_state}"
+    resumed_cook_id = f"{cook_id}-resumed"
 
     cumulative_rows = _mak_grey_corpus_rows()
     cumulative_rows_digest = hashlib.sha256(
@@ -1091,6 +1007,8 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
         source_trace_digest=cumulative_rows_digest,
         source_kind="deterministic-mak-simulation",
         support_parameters=_MAK_SUPPORT_PARAMETERS,
+        persist_source_segment=False,
+        support_scored_limit=1,
     )
     model_store = ControllerModelStore()
     persistence = ModelPersistenceWorker(
@@ -1098,6 +1016,7 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
         _TEST_LOGGER,
         trajectory_repository=repository,
     )
+    process_owner = GreyLearningProcessOwner()
     gate = _FrameBoundaryGate()
     core = Controller(
         config,
@@ -1106,6 +1025,7 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
         activation_persistence=persistence,
         trajectory_repository=repository,
         fit_partition_digest=lambda: fit_partition_digest,
+        grey_learning_process=process_owner,
     )
     runner = ThreadedControllerRunner(
         core,
@@ -1135,6 +1055,8 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
     estimator_seeds: list[EstimatorSeed] = []
     challenger_snapshots: dict[int, ModelChallengerState] = {}
     fit_challenger: ModelChallengerState | None = None
+    evaluation_publication_sequence: int | None = None
+    trace_session_ids: dict[str, str] = {}
     try:
         learning.restore_model(timestamp_ms=0)
         learning.reconcile_activation()
@@ -1148,6 +1070,7 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
             timestamp_ms=0,
         )
         assert identity is not None
+        trace_session_ids[cook_id] = identity.session_id
         learning.bind_generation(0)
         runner.set_target(_SETPOINT_C)
         runner.submit(MAKGrillSim.AMBIENT_C)
@@ -1160,7 +1083,7 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
         plant = MAKGrillSim(seed=7)
 
         def candidate_seed(theta: float, n_delay: int) -> EstimatorSeed:
-            loads = tuple(_load_for(sequence) for sequence in range(_EVALUATION_PUBLICATION_SEQUENCE + 1))
+            loads = tuple(_load_for(sequence) for sequence in range(_MAX_EVALUATION_PUBLICATION_SEQUENCE + 1))
             required = 0 if n_delay == 0 else min(180, ceil((3.0 * theta) / _FRAME_SECONDS))
             selected = loads[-required:] if required else ()
             delay_states = replay_delay_chain_arrays(
@@ -1196,7 +1119,7 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
 
         runner.bind_estimator_seed_source(candidate_seed)
         gate.advance()
-        for sequence in range(_FIT_SAMPLES):
+        for sequence in range(_FIT_SAMPLES - 1):
             _drive_frame(
                 plant=plant,
                 sequence=sequence,
@@ -1204,6 +1127,37 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
                 gate=gate,
                 learning=learning,
             )
+        _wait_until(
+            lambda: (
+                state
+                if (state := core.get_learning_diagnostics().state).get("status") == "collecting"
+                and state.get("fit_status") == "idle"
+                and state.get("origin") is None
+                and state.get("failure") is None
+                else None
+            ),
+            timeout_s=30.0,
+            description="the final non-ready corpus fit intent to retire",
+        )
+        completed_partition_digest = _seed_passive_corpus(
+            repository,
+            cumulative_rows,
+            trace_session_id=f"seeded-cumulative-{database_state}",
+            source_name=f"simulated-mak-passive-{database_state}",
+            source_cook_id=f"simulated-mak-passive-{database_state}",
+            source_trace_digest=cumulative_rows_digest,
+            source_kind="deterministic-mak-simulation",
+            support_parameters=_MAK_SUPPORT_PARAMETERS,
+            persist_support_segment=False,
+        )
+        assert completed_partition_digest == fit_partition_digest
+        _drive_frame(
+            plant=plant,
+            sequence=_FIT_SAMPLES - 1,
+            runner=runner,
+            gate=gate,
+            learning=learning,
+        )
 
         _wait_until(
             lambda: (
@@ -1232,7 +1186,23 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
         fit_challenger = created_challenger
         challenger_snapshots[created_challenger.revision] = created_challenger
 
-        for sequence in range(_FIT_SAMPLES, _FIRST_EVALUATION_END + 1):
+        def durable_first_round() -> ModelChallengerState | None:
+            challenger = read_model_challenger()
+            return (
+                challenger
+                if challenger is not None
+                and challenger.challenger_id == created_challenger.challenger_id
+                and challenger.evaluation_round == 1
+                and challenger.consecutive_wins == 1
+                else None
+            )
+
+        first_round_challenger: ModelChallengerState | None = None
+        first_evaluation_sequence: int | None = None
+        for sequence in range(
+            _FIT_SAMPLES,
+            _MAX_EVALUATION_PUBLICATION_SEQUENCE - 1,
+        ):
             _drive_frame(
                 plant=plant,
                 sequence=sequence,
@@ -1240,6 +1210,39 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
                 gate=gate,
                 learning=learning,
             )
+            if sequence < _FIRST_EVALUATION_MIN_SEQUENCE:
+                continue
+            first_round_challenger = _poll_until(durable_first_round, timeout_s=2.0)
+            if first_round_challenger is not None:
+                first_evaluation_sequence = sequence
+                break
+        if first_round_challenger is None or first_evaluation_sequence is None:
+            challenger = read_model_challenger()
+            learning_state = core.get_learning_diagnostics().state
+            pending_origins = cast(tuple[Mapping[str, Any], ...], learning_state.get("pending_origins", ()))
+            challenger_summary = (
+                None
+                if challenger is None
+                else (
+                    challenger.challenger_id,
+                    challenger.phase,
+                    challenger.evaluation_round,
+                    challenger.consecutive_wins,
+                    challenger.retirement_reason,
+                )
+            )
+            pending_origin_sequences = tuple(
+                origin.get("origin_sequence") for origin in pending_origins[:2] + pending_origins[-2:]
+            )
+            pytest.fail(
+                "the first durable challenger round did not complete within the causal frame bound; "
+                f"challenger={challenger_summary!r}; "
+                f"completed_horizons={learning_state.get('completed_horizons')!r}; "
+                f"pending_origin_count={len(pending_origins)}; "
+                f"pending_origin_sequences={pending_origin_sequences!r}; "
+                f"failure={learning_state.get('failure')!r}"
+            )
+        challenger_snapshots[first_round_challenger.revision] = first_round_challenger
 
         first_confidence = _wait_until(
             lambda: next(
@@ -1247,6 +1250,7 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
                     record
                     for record in read_model_evidence(kind=EvidenceKind.CONFIDENCE_DECISION)
                     if isinstance(record.payload, ConfidenceDecisionEvidence)
+                    and record.payload.decision_id == first_round_challenger.last_decision_id
                     and record.payload.blocked
                     and record.payload.reason == "confidence-rejected"
                 ),
@@ -1255,31 +1259,109 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
             timeout_s=30.0,
             description="the first winning causal confidence window",
         )
-        first_round_challenger = cast(
-            ModelChallengerState,
-            _wait_until(
-                lambda: (
-                    challenger
-                    if (challenger := read_model_challenger()) is not None
-                    and challenger.evaluation_round == 1
-                    and challenger.consecutive_wins == 1
-                    else None
-                ),
-                timeout_s=30.0,
-                description="the first durable challenger round",
-            ),
+        learning.reconcile_outcomes(
+            (first_evaluation_sequence + 1) * _FRAME_SECONDS + 0.001,
         )
-        challenger_snapshots[first_round_challenger.revision] = first_round_challenger
+        learning.drain_activation_events()
+        assert runner.stop_and_retain_for_teardown()
+        assert learning.barrier_for_teardown(generation=0)
+        assert learning.schedule_stop_fit(
+            {
+                "controller": {
+                    "config": {
+                        "mpc": {
+                            "enable_identification": True,
+                        },
+                    },
+                },
+            },
+        )
+        learning.finish_teardown(generation=0)
+        _wait_until(
+            lambda: runner._corpus_fit_thread is None,
+            timeout_s=30.0,
+            description="the Stop fit plan to retire without replacing the challenger",
+        )
+        stopped_challenger = read_model_challenger()
+        assert stopped_challenger is not None
+        assert stopped_challenger.challenger_id == first_round_challenger.challenger_id
+        assert stopped_challenger.phase == "evaluating"
+        assert stopped_challenger.evaluation_round == 1
+        assert stopped_challenger.consecutive_wins == 1
+        assert stopped_challenger.retirement_reason is None
 
-        _drive_frame(
-            plant=plant,
-            sequence=_SECOND_EVALUATION_END,
-            runner=runner,
-            gate=gate,
-            learning=learning,
+        owned_learning = process_owner.learning
+        assert owned_learning is not None
+        assert owned_learning.prepared is not None
+        gate = _FrameBoundaryGate()
+        core = Controller(
+            config,
+            "C",
+            dict(_CYCLE),
+            activation_persistence=persistence,
+            trajectory_repository=repository,
+            fit_partition_digest=lambda: fit_partition_digest,
+            grey_learning_process=process_owner,
         )
-        second_confidence = _wait_until(
-            lambda: next(
+        assert process_owner.learning is owned_learning
+        assert owned_learning.prepared is not None
+        runner = ThreadedControllerRunner(
+            core,
+            controller_type=ControllerType.MPC,
+            wait_for_period=gate,
+        )
+        gate.wait_until_blocked()
+        recorder = ControlTraceRecorder(
+            monotonic_clock=lambda: 0,
+            wall_clock=lambda: RETENTION_PERIOD_MS,
+        )
+        trace = ControlTraceSession(recorder, warning=_TEST_LOGGER.warning)
+        learning = HoldLearningRuntime(
+            runner=runner,
+            model_store=model_store,
+            persistence=persistence,
+            trajectory_repository=repository,
+            trace=trace,
+            controller_name="mpc",
+            logger=_TEST_LOGGER,
+            initial_generation=0,
+        )
+        learning.restore_model(
+            timestamp_ms=int((first_evaluation_sequence + 1) * _FRAME_SECONDS * 1_000),
+        )
+        learning.reconcile_activation()
+        gate.advance()
+        resumed_snapshot = runner.get_model_snapshot()
+        assert isinstance(resumed_snapshot, dict)
+        assert process_owner.learning is owned_learning
+        assert owned_learning.prepared is not None
+        assert _identity(resumed_snapshot) == (initial_digest, initial_generation)
+        identity = trace.ensure_open(
+            _trace_context(resumed_snapshot, config, resumed_cook_id),
+            timestamp_ms=int((first_evaluation_sequence + 1) * _FRAME_SECONDS * 1_000),
+        )
+        assert identity is not None
+        trace_session_ids[resumed_cook_id] = identity.session_id
+        learning.bind_generation(0)
+        assert process_owner.learning is owned_learning
+        assert owned_learning.prepared is not None
+        assert owned_learning.resumed_from_previous_cook
+        runner.set_target(_SETPOINT_C)
+        runner.submit(plant.measured())
+        gate.advance()
+        runner.bind_estimator_seed_source(candidate_seed)
+        gate.advance()
+        resumed_challenger = read_model_challenger()
+        assert resumed_challenger is not None
+        assert resumed_challenger.challenger_id == first_round_challenger.challenger_id
+        assert resumed_challenger.phase == "evaluating"
+        assert resumed_challenger.evaluation_round == 1
+        assert resumed_challenger.consecutive_wins == 1
+
+        challenger_snapshots[resumed_challenger.revision] = resumed_challenger
+
+        def accepted_second_confidence():
+            return next(
                 (
                     record
                     for record in read_model_evidence(kind=EvidenceKind.CONFIDENCE_DECISION)
@@ -1288,10 +1370,56 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
                     and record.payload.decision_id != first_confidence.payload.decision_id
                 ),
                 None,
-            ),
-            timeout_s=30.0,
-            description="the second winning causal confidence window",
-        )
+            )
+
+        second_confidence = None
+        second_evaluation_sequence = None
+        for sequence in range(
+            first_evaluation_sequence + 1,
+            first_evaluation_sequence + max(_REQUIRED_HORIZONS) + 2,
+        ):
+            _drive_frame(
+                plant=plant,
+                sequence=sequence,
+                runner=runner,
+                gate=gate,
+                learning=learning,
+            )
+            second_confidence = _poll_until(accepted_second_confidence, timeout_s=0.1)
+            if second_confidence is not None:
+                second_evaluation_sequence = sequence
+                break
+        if second_confidence is None:
+            second_confidence = _poll_until(accepted_second_confidence, timeout_s=5.0)
+            if second_confidence is not None:
+                second_evaluation_sequence = sequence
+        if second_confidence is None or second_evaluation_sequence is None:
+            learning_state = core.get_learning_diagnostics().state
+            pending_origins = cast(tuple[Mapping[str, Any], ...], learning_state.get("pending_origins", ()))
+            durable = read_model_challenger()
+            challenger_summary = (
+                None
+                if durable is None
+                else (
+                    durable.phase,
+                    durable.evaluation_round,
+                    durable.consecutive_wins,
+                    durable.retirement_reason,
+                )
+            )
+            pending_origin_sequences = tuple(
+                item.get("origin_sequence") for item in pending_origins[:2] + pending_origins[-2:]
+            )
+            pytest.fail(
+                "the resumed challenger did not complete its second causal win; "
+                f"challenger={challenger_summary!r}; "
+                f"completed_horizons={learning_state.get('completed_horizons')!r}; "
+                f"pending_origin_count={len(pending_origins)}; "
+                f"pending_origin_sequences={pending_origin_sequences!r}; "
+                f"failure={learning_state.get('failure')!r}; "
+                f"resumed={learning_state.get('resumed_from_previous_cook')!r}"
+            )
+        evaluation_publication_sequence = second_evaluation_sequence + 1
         prepared_state = _wait_until(
             lambda: (
                 state
@@ -1324,7 +1452,7 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
         learning.reconcile_activation()
         _drive_frame(
             plant=plant,
-            sequence=_EVALUATION_PUBLICATION_SEQUENCE,
+            sequence=evaluation_publication_sequence,
             runner=runner,
             gate=gate,
             learning=learning,
@@ -1370,6 +1498,7 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
         learning.finish_teardown(generation=0)
         runner.stop()
         assert persistence.close(timeout=30.0)
+        process_owner.close()
 
     assert initial_snapshot is not None
     assert before_active_boundary is not None
@@ -1391,13 +1520,20 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
     assert _identity(persisted) == _identity(learned_snapshot)
     assert cast(dict[str, Any], persisted["active"])["parameters"] == learned_parameters
 
-    cook_trace = read_control_trace_cook(cook_id)
+    cook_trace = [
+        *read_control_trace_cook(cook_id),
+        *read_control_trace_cook(resumed_cook_id),
+    ]
     observation_records = [
         record
         for record in cook_trace
         if record.event_kind is TraceEventKind.MODEL_OBSERVATION and isinstance(record.payload, ModelObservationPayload)
     ]
-    assert len(observation_records) == _EVALUATION_PUBLICATION_SEQUENCE + 1
+    assert evaluation_publication_sequence is not None
+    observation_sequences = [
+        cast(ModelObservationPayload, record.payload).observation_sequence for record in observation_records
+    ]
+    assert observation_sequences == list(range(evaluation_publication_sequence + 1))
     assert all(record.schema_version == 8 for record in observation_records)
     for record in observation_records:
         payload = cast(ModelObservationPayload, record.payload)
@@ -1421,7 +1557,7 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
         if record.event_kind is TraceEventKind.MODEL_EVALUATION and isinstance(record.payload, ModelEvaluationPayload)
     ]
     wins = [evaluation.consecutive_wins for evaluation in evaluations]
-    assert wins[:2] == [1, 2]
+    assert wins and wins[-1] == 2
     assert all(earlier < later for earlier, later in pairwise(wins))
     assert all(not evaluation.rejection_reasons for evaluation in evaluations)
     assert all(
@@ -1435,7 +1571,10 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
         for evaluation in evaluations
     )
 
-    cook_evidence = read_model_evidence(cook_id=cook_id)
+    cook_evidence = [
+        *read_model_evidence(cook_id=cook_id),
+        *read_model_evidence(cook_id=resumed_cook_id),
+    ]
     fit_records = [record.payload for record in cook_evidence if isinstance(record.payload, FitLifecycleEvidence)]
     assert [record.status for record in fit_records] == ["queued", "succeeded"]
     assert len({record.request_id for record in fit_records}) == 1
@@ -1468,8 +1607,8 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
     expected_lineage_digest = canonical_model_fit_lineage_digest(fit_challenger.fit_lineage)
     for record, payload in zip(progress_records, progress_payloads, strict=True):
         assert record.schema_version == 8
-        assert record.session_id == identity.session_id
-        assert record.cook_id == cook_id
+        assert record.cook_id in trace_session_ids
+        assert record.session_id == trace_session_ids[record.cook_id]
         assert payload.challenger_id == fit_challenger.challenger_id
         assert payload.origin == fit_challenger.origin.value
         assert payload.policy == fit_challenger.policy.value
@@ -1481,7 +1620,7 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
         assert payload.lineage_digest == expected_lineage_digest
         assert payload.result_digest == fit_result_value["result_digest"]
         assert payload.required_horizons == tuple(sorted(_REQUIRED_HORIZONS))
-        assert payload.resumed_from_previous_cook is False
+        assert payload.resumed_from_previous_cook is (record.cook_id == resumed_cook_id)
 
     challenger_rounds = {
         record.evidence_id: cast(ChallengerRoundEvidence, record.payload)
@@ -1517,7 +1656,7 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
     assert len(assessments) >= 2
     assessment_ids = [assessment.decision_id for assessment in assessments]
     evaluation_ids = [evaluation.decision_id for evaluation in evaluations]
-    assert evaluation_ids == assessment_ids[: len(evaluation_ids)]
+    assert evaluation_ids == assessment_ids[-len(evaluation_ids) :]
     assert assessments[0].confidence_accepted is False
     assert assessments[0].rejection_reasons == ("confidence-rejected",)
     assert all(assessment.confidence_accepted for assessment in assessments[1:])
@@ -1728,7 +1867,7 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
     config: dict[str, Any] = dict(DEFAULT_MPC_CONFIG)
     config["enable_online_adaptation"] = True
     migration = migrate_mpc_learning_authority(defaults=config)
-    assert migration.snapshot["version"] == 5
+    assert migration.snapshot["version"] == 6
     assert ControllerModelStore().load_strict("mpc") == migration.snapshot
     first_row = rows[0]
     repository = LearningTrajectoryRepository()
@@ -1808,7 +1947,7 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
                 return None
             return (
                 snapshot
-                if snapshot.get("version") == 5
+                if snapshot.get("version") == 6
                 and identities.get("active_digest") == _EXACT_V6_ACTIVE_DIGEST
                 and snapshot.get("challenger_authority") is None
                 else None
@@ -1823,7 +1962,7 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
             ),
         )
         assert _identity(restored_v6) == (_EXACT_V6_ACTIVE_DIGEST, 0)
-        assert restored_v6["schema"] == "pifire-grey-learning/v5"
+        assert restored_v6["schema"] == "pifire-grey-learning/v6"
         assert {"challenger", "window", "candidate_pair"}.isdisjoint(restored_v6)
         assert read_model_challenger() is None
         trace_identity = trace.ensure_open(
@@ -2003,7 +2142,7 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
     assert all(
         payload.origin == CandidateOrigin.PASSIVE_ONLINE.value
         and payload.policy == ActivationPolicy.CAUSAL_AUTO.value
-        and payload.window_id == f"{trace_identity.session_id}:21:140"
+        and payload.fit_corpus_digest == durable_challenger.fit_corpus.corpus_digest
         for payload in fit_payloads
     )
     assert fit_evidence_records[0].model_digest == _EXACT_V6_ACTIVE_DIGEST
@@ -2022,7 +2161,7 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
     assert read_model_activation() is None
 
     restart_migration = migrate_mpc_learning_authority(defaults=config)
-    assert restart_migration.snapshot["version"] == 5
+    assert restart_migration.snapshot["version"] == 6
     restart_repository = LearningTrajectoryRepository()
     restart_model_store = ControllerModelStore()
     restart_persistence = ModelPersistenceWorker(
@@ -2054,6 +2193,9 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
         restart_runner.set_target(first_row["setpoint_c"])
         restart_learning.restore_model(timestamp_ms=following_rows[-1]["frame_end_ms"] + 1)
         restart_learning.reconcile_activation()
+        restart_status = dict(restart_core.get_learning_diagnostics().state)
+        assert restart_status["resumed_from_previous_cook"] is True
+        assert restart_status["pending_origins"] == ()
         raw_restart_checkpoint = restart_runner.get_model_snapshot()
         assert isinstance(raw_restart_checkpoint, dict)
         restart_checkpoint: dict[str, Any] = raw_restart_checkpoint
@@ -2065,14 +2207,20 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
         assert restart_persistence.close(timeout=30.0)
     assert restart_challenger is not None
 
-    expected_window = {
-        "configuration_digest": _EXACT_PASSIVE_CONFIGURATION_DIGEST,
-        "cook_id": _EXACT_REPLAY_COOK_ID,
-        "first_observation_sequence": 21,
-        "incumbent_digest": _EXACT_V6_ACTIVE_DIGEST,
-        "last_observation_sequence": 140,
-        "role_generation": 0,
-        "session_id": trace_identity.session_id,
+    expected_corpus = {
+        "digest": durable_challenger.fit_corpus.corpus_digest,
+        "revision": durable_challenger.fit_corpus.corpus_revision,
+        "fit_partition_digest": durable_challenger.fit_corpus.fit_partition_digest,
+        "slices": [
+            {
+                "segment_id": corpus_slice.segment_id,
+                "through_ordinal": corpus_slice.through_ordinal,
+                "prefix_digest": corpus_slice.prefix_digest,
+                "pre_roll_count": corpus_slice.pre_roll_count,
+                "scored_count": corpus_slice.scored_count,
+            }
+            for corpus_slice in durable_challenger.fit_corpus.slices
+        ],
     }
     expected_lineage = {
         "origin": CandidateOrigin.PASSIVE_ONLINE.value,
@@ -2087,7 +2235,7 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
         "restart": _snapshot_candidate_lineage(restart_checkpoint, restart_challenger),
     }
     assert lineage_by_surface == {surface: expected_lineage for surface in lineage_by_surface}
-    assert normalized_report["window"] == expected_window
+    assert normalized_report["corpus"] == expected_corpus
     assert durable_challenger.controller_configuration_digest == _EXACT_PASSIVE_CONFIGURATION_DIGEST
     assert restart_challenger.revision == durable_challenger.revision + 1
     assert restart_challenger.evaluation_epoch == durable_challenger.evaluation_epoch + 1
@@ -2098,7 +2246,7 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
     assert restart_challenger.fit_corpus == durable_challenger.fit_corpus
     assert restart_challenger.fit_lineage == durable_challenger.fit_lineage
 
-    assert normalized_report["status"] == "evaluating"
+    assert normalized_report["status"] == "evaluating", normalized_report
     assert normalized_report["mode"] == CandidateOrigin.PASSIVE_ONLINE.value
     assert normalized_report["blockers"] == []
     for checkpoint, challenger, expected_revision in (
@@ -2119,8 +2267,8 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
         ),
     ):
         assert _identity(checkpoint) == (_EXACT_V6_ACTIVE_DIGEST, 0)
-        assert checkpoint["version"] == 5
-        assert checkpoint["schema"] == "pifire-grey-learning/v5"
+        assert checkpoint["version"] == 6
+        assert checkpoint["schema"] == "pifire-grey-learning/v6"
         assert checkpoint["revision"] == expected_revision
         assert checkpoint["activation"] == {
             "pending_persistence": False,

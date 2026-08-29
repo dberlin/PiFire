@@ -93,31 +93,65 @@ def _normalize_durable_challenger_policy(
         return
     try:
         decoded = json.loads(row[0])
-        if not isinstance(decoded, dict) or decoded.get("phase") == "retired":
+        if not isinstance(decoded, dict):
             return
-        origin = CandidateOrigin(decoded.get("origin"))
+        raw_origin = decoded.get("origin")
         stored_policy = decoded.get("policy")
+        already_retired = decoded.get("phase") == "retired"
     except TypeError, ValueError, json.JSONDecodeError:
         return
 
-    current_policy = activation_policy_for_origin(origin)
     historical_policy = {
-        CandidateOrigin.PASSIVE_ONLINE: "passive-auto",
-        CandidateOrigin.OPERATOR_CALIBRATION: "operator-reviewed",
-    }.get(origin)
-    if stored_policy not in {current_policy.value, historical_policy}:
-        return
+        "passive-online": "passive-auto",
+        "operator-calibration": "operator-reviewed",
+    }.get(raw_origin)
+    retired_origin = raw_origin == "cook-refit" and stored_policy == "cook-refit"
+    if retired_origin:
+        origin = CandidateOrigin.PASSIVE_ONLINE
+    else:
+        if historical_policy is None:
+            return
+        try:
+            origin = CandidateOrigin(raw_origin)
+        except TypeError, ValueError:
+            return
+        current_policy = activation_policy_for_origin(origin)
+        if stored_policy not in {current_policy.value, historical_policy}:
+            return
 
-    decoded["policy"] = current_policy.value
+    decoded["origin"] = origin.value
+    decoded["policy"] = activation_policy_for_origin(origin).value
+    lineage = decoded.get("fit_lineage")
+    if retired_origin and isinstance(lineage, dict):
+        lineage = dict(lineage)
+        lineage["trigger_origin"] = origin.value
+        decoded["fit_lineage"] = lineage
+        decoded["phase"] = "retired"
+        decoded["activation_transaction_id"] = None
+        decoded["retirement_reason"] = "retired-origin:cook-refit"
+        decoded["retired_ms"] = decoded.get("updated_ms")
+
+    preparation_changed = False
+    preparation = decoded.get("fit_preparation")
+    corpus = decoded.get("fit_corpus")
+    if isinstance(preparation, dict) and isinstance(corpus, dict) and "window" in preparation:
+        preparation = dict(preparation)
+        preparation.pop("window", None)
+        preparation["fit_corpus_digest"] = corpus.get("corpus_digest")
+        decoded["fit_preparation"] = preparation
+        preparation_changed = True
+
     try:
         normalized = _challenger_state_from_dict(decoded)
     except TypeError, ValueError:
         return
     incomplete_operator = (
-        origin is CandidateOrigin.OPERATOR_CALIBRATION
+        not already_retired
+        and origin is CandidateOrigin.OPERATOR_CALIBRATION
         and _exact_calibration_manifest(decoded.get("calibration_manifest")) is None
     )
-    if stored_policy == current_policy.value and not incomplete_operator:
+    policy_changed = stored_policy != activation_policy_for_origin(origin).value
+    if not retired_origin and not incomplete_operator and not policy_changed and not preparation_changed:
         return
     replacement = replace(
         normalized,
@@ -128,7 +162,7 @@ def _normalize_durable_challenger_policy(
                 "retirement_reason": "calibration-manifest",
                 "retired_ms": normalized.updated_ms,
             }
-            if incomplete_operator
+            if incomplete_operator and not retired_origin
             else {}
         ),
     )
@@ -144,16 +178,16 @@ def _normalize_activation_policy(
     connection: sqlite3.Connection,
     state: ModelActivationState,
 ) -> ModelActivationState:
-    try:
-        origin = CandidateOrigin(state.origin)
-    except TypeError, ValueError:
-        return state
     historical_policy = {
-        CandidateOrigin.PASSIVE_ONLINE: "passive-auto",
-        CandidateOrigin.OPERATOR_CALIBRATION: "operator-reviewed",
-    }.get(origin)
-    if state.policy != historical_policy:
+        "passive-online": "passive-auto",
+        "operator-calibration": "operator-reviewed",
+    }.get(state.origin)
+    if state.origin == "cook-refit" and state.policy == "cook-refit":
+        connection.execute("UPDATE model_activation_state SET origin=NULL, policy=NULL WHERE singleton=1")
+        return replace(state, origin=None, policy=None)
+    if historical_policy is None or state.policy != historical_policy:
         return state
+    origin = CandidateOrigin(state.origin)
     current_policy = activation_policy_for_origin(origin)
     connection.execute(
         "UPDATE model_activation_state SET policy=? WHERE singleton=1",
@@ -173,16 +207,22 @@ def _controller_snapshot_for_migration(snapshot: object) -> object:
             value = dict(value)
             value.pop("calibration_manifest", None)
             normalized[key] = value
-    try:
-        origin = CandidateOrigin(normalized.get("origin"))
-    except TypeError, ValueError:
-        return normalized
     historical_policy = {
-        CandidateOrigin.PASSIVE_ONLINE: "passive-auto",
-        CandidateOrigin.OPERATOR_CALIBRATION: "operator-reviewed",
-    }.get(origin)
-    if normalized.get("policy") == historical_policy:
-        normalized["policy"] = activation_policy_for_origin(origin).value
+        "passive-online": "passive-auto",
+        "operator-calibration": "operator-reviewed",
+    }.get(normalized.get("origin"))
+    if normalized.get("policy") == historical_policy and historical_policy is not None:
+        normalized["policy"] = ActivationPolicy.CAUSAL_AUTO.value
+    elif normalized.get("origin") == "cook-refit" and normalized.get("policy") == "cook-refit":
+        normalized["origin"] = None
+        normalized["policy"] = None
+        normalized["activation"] = {
+            "phase": "aborted",
+            "pending_persistence": False,
+            "pending_swap": False,
+        }
+        if snapshot.get("version") == 5:
+            normalized["challenger_authority"] = None
     return normalized
 
 
@@ -212,7 +252,8 @@ def _migration_authority_snapshot(value, *, current_only):
         return None
     snapshot = value.get("snapshot")
     if current_only and (
-        not isinstance(snapshot, dict) or (snapshot.get("version"), value.get("model_schema")) not in {(4, 4), (5, 5)}
+        not isinstance(snapshot, dict)
+        or (snapshot.get("version"), value.get("model_schema")) not in {(4, 4), (5, 5), (6, 6)}
     ):
         return None
     try:
@@ -260,19 +301,20 @@ def _legacy_v4_challenger_state(
     assert isinstance(cook_refit, dict)
     if activation.get("phase") == "prepared" or cook_refit.get("latest") != "ready-for-review":
         return None
+    raw_origin = snapshot.get("origin")
+    expected_policy = {
+        "passive-online": "passive-auto",
+        "operator-calibration": "operator-reviewed",
+    }.get(raw_origin)
+    if expected_policy is None or snapshot.get("policy") != expected_policy:
+        return None
     try:
         from controller.mpc_factory import MpcPairFactory
 
         incumbent = MpcPairFactory.migrate_legacy_descriptor(GreyControlPairDescriptor.from_dict(active_pair_value))
         candidate = MpcPairFactory.migrate_legacy_descriptor(GreyControlPairDescriptor.from_dict(candidate_pair_value))
-        origin = CandidateOrigin(snapshot.get("origin"))
+        origin = CandidateOrigin(raw_origin)
     except KeyError, TypeError, ValueError:
-        return None
-    if {
-        CandidateOrigin.PASSIVE_ONLINE: "passive-auto",
-        CandidateOrigin.OPERATOR_CALIBRATION: "operator-reviewed",
-        CandidateOrigin.COOK_REFIT: "cook-refit",
-    }[origin] != snapshot.get("policy"):
         return None
     if (
         identities.get("active_digest") != incumbent.model_digest
@@ -402,7 +444,7 @@ def _legacy_v4_challenger_state(
             "accepted": True,
             "candidate_digest": candidate.model_digest,
             "legacy_checkpoint_schema": 4,
-            "window": dict(window),
+            "fit_corpus_digest": corpus.corpus_digest,
             "fit_result": dict(challenger.get("metadata", {})),
             "target_timing": None,
         },
@@ -430,7 +472,7 @@ def migrate_mpc_learning_authority(
     activation_input_key: str | None = None,
     database_path: str | os.PathLike[str] | None = None,
 ) -> GreyLearningMigrationResult:
-    """Atomically converge checkpoint, activation, and challenger authority on grey v5.
+    """Atomically converge checkpoint, activation, and challenger authority on grey v6.
 
     ``activation_input_key`` names the legacy blob key to migrate from, for
     installations still on that layout. Normal startup omits it and migrates
@@ -508,7 +550,7 @@ def migrate_mpc_learning_authority(
                         return None
                     return {
                         "model_kind": "grey-box",
-                        "model_schema": 5,
+                        "model_schema": 6,
                         "snapshot": snapshot,
                         "pair": pair.to_dict(),
                         "digest": pair.model_digest,
@@ -699,7 +741,7 @@ def migrate_mpc_learning_authority(
 
         current = {
             "model_kind": "grey-box",
-            "model_schema": 5,
+            "model_schema": 6,
             "snapshot": selected,
             "source": source,
         }
@@ -772,6 +814,7 @@ def migrate_mpc_learning_authority(
                 role_generation=0,
                 model_digest=current["snapshot"]["identities"]["active_digest"],
                 provenance_digest=None,
+                schema_version=3,
                 payload=SchemaInvalidationEvidence(
                     previous_schema_version=3,
                     reason=reason,

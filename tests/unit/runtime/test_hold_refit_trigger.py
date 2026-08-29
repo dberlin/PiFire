@@ -58,7 +58,7 @@ class _CorpusFitRunner(FakeControllerRunner):
             "identities": {"active_digest": "a" * 64, "rollback_digest": "b" * 64},
         }
 
-    def stop_for_refit(self):
+    def stop_and_retain_for_teardown(self):
         self.events.append("stop")
         self.stop()
 
@@ -142,7 +142,7 @@ def test_stop_corpus_fit_gate_follows_identification_not_online_adaptation(
 
     result = hold.teardown(225.0)
 
-    assert runner.fit_requests == ([CandidateOrigin.COOK_REFIT] if scheduled else [])
+    assert runner.fit_requests == ([CandidateOrigin.PASSIVE_ONLINE] if scheduled else [])
     assert runner.legacy_refits == 0
     assert runner.legacy_finalizations == 0
     assert result is None
@@ -167,7 +167,7 @@ def test_stop_finalizes_and_barriers_before_submit_then_closes_without_adoption(
     hold.teardown(225.0)
 
     assert events == ["stop", "finalize", "barrier", "schedule", "close"]
-    assert runner.fit_requests == [CandidateOrigin.COOK_REFIT]
+    assert runner.fit_requests == [CandidateOrigin.PASSIVE_ONLINE]
     assert runner.get_model_snapshot() == authority
     assert persistence.checkpoints == []
     assert runner.legacy_refits == 0
@@ -381,8 +381,8 @@ def test_sync_runner_delegates_only_the_corpus_fit_request_to_its_core() -> None
     core = _CoreWithCorpusScheduling()
     runner = SyncControllerRunner(core)
 
-    assert runner.schedule_corpus_fit(CandidateOrigin.COOK_REFIT) is True
-    assert core.fit_requests == [CandidateOrigin.COOK_REFIT]
+    assert runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE) is True
+    assert core.fit_requests == [CandidateOrigin.PASSIVE_ONLINE]
     assert runner.get_model_snapshot() == core.snapshot
 
 
@@ -392,8 +392,8 @@ def test_threaded_runner_schedules_after_stop_without_republishing_or_adopting()
     before = runner.get_model_snapshot()
     runner.stop()
 
-    assert runner.schedule_corpus_fit(CandidateOrigin.COOK_REFIT) is True
-    assert core.fit_requests == [CandidateOrigin.COOK_REFIT]
+    assert runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE) is True
+    assert core.fit_requests == [CandidateOrigin.PASSIVE_ONLINE]
     assert runner.get_model_snapshot() == before
 
 

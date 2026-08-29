@@ -8,13 +8,23 @@ import pytest
 import controller.mpc as mpc_module
 import controller.mpc_core as mpc_core_module
 from common.control_trace import ActuationMode, AmbientSource, ModelEvaluationPayload
+from common.learning_trajectory import (
+    FitCorpusIdentity,
+    FitCorpusSlice,
+    canonical_trajectory_digest,
+)
 from common.model_evidence import ForecastOriginEvidence
 from controller.acados import SolverDiagnostics, SolverError
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.base import ControllerLearningDiagnostics, MpcFailureState
-from controller.model_learning.contracts import CandidateOrigin, FitRequest, FrameObservation
+from controller.model_learning.contracts import (
+    CandidateOrigin,
+    FitRequest,
+    FrameObservation,
+)
 from controller.model_learning.evaluation import (
     CompletedForecastOrigin,
+    EvaluationConfig,
     EvaluationDecision,
     ForecastOrigin,
     HorizonScore,
@@ -23,7 +33,9 @@ from controller.runtime.model_fitting import (
     CandidatePair,
     CandidatePreparation,
     FitSubmission,
+    GreyFitJob,
     GreyFitMessage,
+    GreyFitSegmentArrays,
     GreyFitSuccess,
     GreyLearningOrchestrator,
     TargetTimingEvidence,
@@ -51,6 +63,44 @@ CONFIG = {
     "fan_max_pct": 100.0,
     "enable_online_adaptation": False,
 }
+
+
+def _fit_corpus(identity) -> FitCorpusIdentity:
+    corpus_slice = FitCorpusSlice(
+        segment_id=f"{identity.session_id}:{identity.cook_id or 'no-cook'}",
+        through_ordinal=0,
+        prefix_digest=canonical_trajectory_digest(
+            {
+                "session_id": identity.session_id,
+                "cook_id": identity.cook_id,
+                "first_observation_sequence": 0,
+                "last_observation_sequence": 0,
+            }
+        ),
+        pre_roll_count=0,
+        scored_count=1,
+    )
+    payload = {
+        "schema_version": 1,
+        "corpus_revision": 0,
+        "fit_partition_digest": identity.configuration_digest,
+        "slices": [
+            {
+                "segment_id": corpus_slice.segment_id,
+                "through_ordinal": corpus_slice.through_ordinal,
+                "prefix_digest": corpus_slice.prefix_digest,
+                "pre_roll_count": corpus_slice.pre_roll_count,
+                "scored_count": corpus_slice.scored_count,
+            }
+        ],
+    }
+    return FitCorpusIdentity(
+        schema_version=1,
+        corpus_revision=0,
+        fit_partition_digest=identity.configuration_digest,
+        slices=(corpus_slice,),
+        corpus_digest=canonical_trajectory_digest(payload),
+    )
 
 
 class FakeEstimator:
@@ -242,6 +292,44 @@ def test_close_releases_learning_then_exactly_one_complete_pair(monkeypatch):
     assert events == ["learning", "solver", "estimator"]
 
 
+@pytest.mark.parametrize(
+    ("origin", "replace_owned_prepared"),
+    (
+        (CandidateOrigin.PASSIVE_ONLINE, False),
+        (CandidateOrigin.OPERATOR_CALIBRATION, True),
+    ),
+)
+def test_only_operator_fit_requests_may_replace_an_owned_challenger(
+    monkeypatch,
+    origin,
+    replace_owned_prepared,
+):
+    controller, _estimator, _solver = _make(monkeypatch)
+    requests = []
+    tickets = []
+    monkeypatch.setattr(
+        controller._grey_learning_runtime,
+        "request_corpus_fit",
+        lambda actual_origin, *, replace_owned_prepared: (
+            requests.append((actual_origin, replace_owned_prepared)) or True
+        ),
+    )
+    monkeypatch.setattr(
+        controller._grey_learning_runtime,
+        "_request_corpus_fit_ticket",
+        lambda actual_origin, *, replace_owned_prepared: (
+            tickets.append((actual_origin, replace_owned_prepared)) or "fit-ticket"
+        ),
+    )
+
+    assert controller.schedule_corpus_fit(origin)
+    assert controller._schedule_corpus_fit_ticket(origin) == "fit-ticket"
+
+    expected = (origin, replace_owned_prepared)
+    assert requests == [expected]
+    assert tickets == [expected]
+
+
 def _frame(*, sequence=1, operator=False):
     return FrameObservation(
         frame_start_s=float(sequence * 20 - 20),
@@ -397,6 +485,7 @@ def test_task7_evaluation_is_published_through_the_established_runner_payload(mo
         completed_origins=(completed,),
     )
     controller._grey_learning_runtime._learning = SimpleNamespace(
+        evaluation_config=EvaluationConfig(),
         poll_fit_off_path=lambda **_kwargs: None,
         evaluate_ready_off_path=lambda: decision,
         observe_completed_frame=lambda _frame, *, identifiability: SimpleNamespace(
@@ -408,6 +497,19 @@ def test_task7_evaluation_is_published_through_the_established_runner_payload(mo
         passive_history=SimpleNamespace(observations=()),
         register_causal_forecasts=lambda *_args, **_kwargs: (),
         close=lambda: None,
+    )
+    monkeypatch.setattr(
+        controller._grey_learning_runtime,
+        "_persist_durable_evaluation_round",
+        lambda _evaluation, _preparation: SimpleNamespace(
+            phase="evaluating",
+            last_decision_id=decision.decision_id,
+        ),
+    )
+    monkeypatch.setattr(
+        controller._grey_learning_runtime,
+        "_persist_candidate_evaluation",
+        lambda _evaluation, _preparation: None,
     )
 
     _delivery, evaluation = controller.poll_learning_off_path()
@@ -462,7 +564,6 @@ def test_slow_candidate_preparation_does_not_block_live_observation(monkeypatch)
 
 def test_identity_rebind_fences_and_discards_an_inflight_old_generation_candidate(monkeypatch):
     controller, _estimator, _solver = _make(monkeypatch)
-    runtime = controller._grey_learning_runtime
     preparing = threading.Event()
     release = threading.Event()
     rebound = threading.Event()
@@ -477,11 +578,16 @@ def test_identity_rebind_fences_and_discards_an_inflight_old_generation_candidat
     old_pair = CandidatePair(Closable(), Closable())
     new_pair = CandidatePair(Closable(), Closable())
 
+    incumbent_pair = CandidatePair(_estimator, _solver)
+    initial_identity = controller._grey_learning_runtime.learning_identity()
+
     class RacingLearning:
         def __init__(self):
             self.calls = 0
             self.prepared = None
             self.identities = []
+            self.identity = initial_identity
+            self.evaluation_config = EvaluationConfig()
 
         def poll_fit_off_path(self, *, live_identity, **_kwargs):
             self.calls += 1
@@ -489,38 +595,59 @@ def test_identity_rebind_fences_and_discards_an_inflight_old_generation_candidat
             if self.calls == 1:
                 preparing.set()
                 assert release.wait(2.0)
+            request = FitRequest(
+                request_id=f"racing-{self.calls}",
+                origin=CandidateOrigin.PASSIVE_ONLINE,
+                fit_corpus=_fit_corpus(live_identity),
+                configuration_digest=live_identity.configuration_digest,
+                parent_incumbent_digest=live_identity.incumbent_digest,
+                parent_incumbent_generation=live_identity.role_generation,
+                candidate_generation=live_identity.candidate_generation,
+            )
+            candidate = GreyFitSuccess(
+                request=request,
+                config=_solver.config,
+                rmse_c=1.0,
+                max_error_c=1.0,
+                identifiability=1.0,
+                sample_count=1,
+                temperature_band_c=(20.0, 21.0),
+                nfev=1,
+            )
             preparation = CandidatePreparation.accepted_for_test(
-                candidate=GreyFitSuccess(
-                    request=FitRequest(
-                        request_id=f"{self.calls:064d}",
-                        origin=CandidateOrigin.PASSIVE_ONLINE,
-                        window=live_identity.window(0, 119),
-                        candidate_generation=live_identity.candidate_generation,
-                    ),
-                    config=runtime._active_components().controller.config,
-                    rmse_c=1.0,
-                    max_error_c=2.0,
-                    identifiability=1.0,
-                    sample_count=120,
-                    temperature_band_c=(80.0, 120.0),
-                    nfev=4,
-                ),
+                candidate=candidate,
                 candidate_pair=pair,
-                incumbent_pair=CandidatePair(Closable(), Closable()),
-                timing=TargetTimingEvidence("candidate-dry-solve", 3, 1.0, 25.0),
+                incumbent_pair=incumbent_pair,
+                timing=TargetTimingEvidence(
+                    target="pi",
+                    samples=1,
+                    p99_ms=1.0,
+                    limit_ms=5.0,
+                ),
             )
             self.prepared = preparation
-            return SimpleNamespace(preparation=preparation)
+            return GreyLearningDelivery(
+                message=None,
+                stale_reasons=(),
+                preparation=preparation,
+            )
 
         def evaluate_ready_off_path(self):
             return None
 
-        def update_identity(self, identity, **_kwargs):
-            self.identities.append(identity)
+        def _release_prepared(self):
             if self.prepared is not None:
                 self.prepared.candidate_pair.controller.close()
                 self.prepared.candidate_pair.estimator.close()
                 self.prepared = None
+
+        def _reset_prepared_evaluation(self):
+            return None
+
+        def update_identity(self, identity, **_kwargs):
+            self.identities.append(identity)
+            self.identity = identity
+            self._release_prepared()
 
         def close(self):
             return None
@@ -574,9 +701,7 @@ def test_rejected_real_fit_candidate_is_released_and_a_later_fit_can_prepare(mon
         def receive(self, *, timeout_s):
             assert timeout_s == 0.0
             temperatures = tuple(
-                float(value)
-                for segment in self.job.segments
-                for value in segment.scored_temperature_c
+                float(value) for segment in self.job.segments for value in segment.scored_temperature_c
             )
             return GreyFitMessage(
                 request=self.job.request,
@@ -648,32 +773,77 @@ def test_rejected_real_fit_candidate_is_released_and_a_later_fit_can_prepare(mon
             min_identifiability=0.5,
         ),
         worker=ImmediateWorker(),
-        max_observations=200,
     ).start()
     controller._grey_learning_runtime._learning = learning
 
-    def exciting_frame(sequence, temperature):
-        q = (0.15, 0.5, 0.85)[sequence % 3]
-        return replace(
-            _frame(sequence=sequence),
-            temp_c=temperature,
-            requested_q=q,
-            realized_q=q,
-            requested_auger_duty=q,
-            delivered_on_s=q * 20.0,
-            baseline_q=q,
-            allocated_q=q,
-            scheduled_on_s=q * 20.0,
-            realized_auger_duty=q,
+    def fit_job(request_id, first_sequence):
+        count = 12
+        loads = tuple((0.15, 0.5, 0.85)[index % 3] for index in range(count))
+        segment = GreyFitSegmentArrays(
+            segment_id=f"segment-{request_id}",
+            cook_id="cook-controller-fixture",
+            through_ordinal=count - 1,
+            prefix_digest=canonical_trajectory_digest({"request_id": request_id}),
+            fit_partition_digest=identity.configuration_digest,
+            observation_sequences=tuple(range(first_sequence, first_sequence + count)),
+            initial_load=loads[0],
+            pre_roll_duration_s=(),
+            pre_roll_load=(),
+            pre_roll_temperature_c=(),
+            hold_anchor_c=70.0,
+            scored_duration_s=(20.0,) * count,
+            scored_load=loads,
+            scored_ambient_c=(20.0,) * count,
+            scored_temperature_c=tuple(70.0 + index for index in range(count)),
+            calibration_origin=(False,) * count,
+        )
+        corpus_slice = FitCorpusSlice(
+            segment_id=segment.segment_id,
+            through_ordinal=segment.through_ordinal,
+            prefix_digest=segment.prefix_digest,
+            pre_roll_count=0,
+            scored_count=count,
+        )
+        corpus_payload = {
+            "schema_version": 1,
+            "corpus_revision": 1,
+            "fit_partition_digest": identity.configuration_digest,
+            "slices": [
+                {
+                    "segment_id": corpus_slice.segment_id,
+                    "through_ordinal": corpus_slice.through_ordinal,
+                    "prefix_digest": corpus_slice.prefix_digest,
+                    "pre_roll_count": corpus_slice.pre_roll_count,
+                    "scored_count": corpus_slice.scored_count,
+                }
+            ],
+        }
+        corpus = FitCorpusIdentity(
+            schema_version=1,
+            corpus_revision=1,
+            fit_partition_digest=identity.configuration_digest,
+            slices=(corpus_slice,),
+            corpus_digest=canonical_trajectory_digest(corpus_payload),
+        )
+        request = FitRequest(
+            request_id=request_id,
+            origin=CandidateOrigin.PASSIVE_ONLINE,
+            fit_corpus=corpus,
+            configuration_digest=identity.configuration_digest,
+            parent_incumbent_digest=identity.incumbent_digest,
+            parent_incumbent_generation=identity.role_generation,
+            candidate_generation=identity.candidate_generation,
+        )
+        return GreyFitJob(
+            request=request,
+            corpus=corpus,
+            segments=(segment,),
+            config=solver.config,
         )
 
-    submitted = None
-    for sequence in range(1, 10):
-        submitted = learning.observe_completed_frame(
-            exciting_frame(sequence, 69.0 + sequence),
-            identifiability=1.0,
-        )
-    controller._grey_learning_runtime._learning_pending_origin = submitted.request.origin
+    first_job = fit_job("first-corpus-fit", 1)
+    assert learning.submit_corpus_fit(first_job) is FitSubmission.ACCEPTED
+    controller._grey_learning_runtime._learning_pending_origin = first_job.request.origin
     first_delivery, _ = controller.poll_learning_off_path()
     first_candidate = first_delivery.preparation.candidate_pair.controller
     assert first_delivery.preparation.accepted is True
@@ -695,13 +865,9 @@ def test_rejected_real_fit_candidate_is_released_and_a_later_fit_can_prepare(mon
     assert learning.prepared is None
     assert first_candidate.closed is True
 
-    later = None
-    for sequence in range(300, 309):
-        later = learning.observe_completed_frame(
-            exciting_frame(sequence, 70.0 + sequence - 300),
-            identifiability=1.0,
-        )
-    controller._grey_learning_runtime._learning_pending_origin = later.request.origin
+    later_job = fit_job("later-corpus-fit", 300)
+    assert learning.submit_corpus_fit(later_job) is FitSubmission.ACCEPTED
+    controller._grey_learning_runtime._learning_pending_origin = later_job.request.origin
     later_delivery, _ = controller.poll_learning_off_path()
     assert later_delivery.preparation.accepted is True
 
@@ -730,9 +896,41 @@ def test_get_learning_diagnostics_returns_owned_mpc_state(monkeypatch):
 
 def test_get_status_uses_one_learning_capability_snapshot(monkeypatch):
     controller, _estimator, _solver = _make(monkeypatch)
+    learning_payload = {
+        "status": "evaluating",
+        "fit_status": "succeeded",
+        "role_generation": 4,
+        "candidate_generation": 5,
+        "checkpoint_digest": "a" * 64,
+        "candidate_digest": "b" * 64,
+        "origin": CandidateOrigin.PASSIVE_ONLINE.value,
+        "checks": {
+            "identifiability": "passed",
+            "native_build": "passed",
+            "native_dry_solve": "passed",
+            "target_timing": "passed",
+        },
+        "activation_phase": "aborted",
+        "pending_persistence": False,
+        "pending_swap": False,
+        "completed_horizons": [3, 15, 45],
+        "required_horizons": [3, 15, 45, 90, 180],
+        "resumed_from_previous_cook": True,
+        "pending_origins": [
+            {
+                "origin_sequence": 12,
+                "horizon_steps": 90,
+                "role_generation": 4,
+                "candidate_generation": 5,
+                "incumbent_digest": "a" * 64,
+                "candidate_digest": "b" * 64,
+            }
+        ],
+        "failure": None,
+    }
     diagnostics = ControllerLearningDiagnostics(
         schema_version=1,
-        state={"status": "owned", "checks": {"native_build": "pending"}},
+        state=learning_payload,
     )
     calls = 0
 
@@ -746,7 +944,18 @@ def test_get_status_uses_one_learning_capability_snapshot(monkeypatch):
     status = controller.get_status()
 
     assert calls == 1
-    assert status["learning"] == {
-        "status": "owned",
-        "checks": {"native_build": "pending"},
+    assert status["learning"] == learning_payload
+    assert status["activation"] == {
+        "active_kind": "grey-box",
+        "active_digest": controller.active_control_pair.descriptor.model_digest,
+        "decision_id": None,
+        "role_generation": 0,
+        "failed_digest": None,
+        "failed_generation": None,
+        "seed_refresh_status": None,
+        "last_safe_command": 0.0,
+        "fallback_kind": None,
+        "fallback_reason": None,
     }
+    assert type(status["learning"]["role_generation"]) is int
+    assert type(status["activation"]["role_generation"]) is int

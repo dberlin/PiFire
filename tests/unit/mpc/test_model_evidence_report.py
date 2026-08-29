@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
 from types import SimpleNamespace
 
 import pytest
@@ -40,7 +39,6 @@ from controller.model_learning.contracts import (
     CheckStatus,
     FitRequest,
     FitStatus,
-    FitWindowIdentity,
     FrameObservation,
     LearningStatus,
     activation_policy_for_origin,
@@ -54,10 +52,10 @@ from controller.model_learning.report import (
 from controller.mpc import Controller
 from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.runtime.model_fitting import grey_config_digest
-from tests.unit.common.test_model_challenger_store import (
+from tests.unit.common._model_challenger_helpers import (
     _corpus,
 )
-from tests.unit.common.test_model_challenger_store import (
+from tests.unit.common._model_challenger_helpers import (
     _state as _stored_challenger,
 )
 
@@ -73,7 +71,7 @@ def _persist_evaluating_challenger(
     candidate: GreyControlPairDescriptor,
     request: FitRequest,
 ) -> ModelChallengerState:
-    corpus = _corpus(request.request_id)
+    corpus = request.fit_corpus
     policy = activation_policy_for_origin(request.origin)
     state = ModelChallengerState(
         schema_version=1,
@@ -98,11 +96,22 @@ def _persist_evaluating_challenger(
             "request_id": request.request_id,
             "accepted": True,
             "candidate_digest": candidate.model_digest,
+            "required_horizons": list(_REQUIRED_HORIZONS),
             "native_build": "passed",
             "dry_solve": "passed",
-            "window": asdict(request.window),
+            "target_timing": None,
+            "fit_corpus_digest": request.fit_corpus.corpus_digest,
+            "fit_result": {
+                "rmse_c": 1.5,
+                "max_error_c": 2.0,
+                "identifiability": 0.9,
+                "sample_count": 16,
+                "temperature_band_c": [75.0, 125.0],
+                "nfev": 5,
+                "result_digest": "e" * 64,
+            },
         },
-        controller_configuration_digest=request.window.configuration_digest,
+        controller_configuration_digest=request.configuration_digest,
         incumbent=incumbent,
         candidate=candidate,
         calibration_manifest=None,
@@ -137,6 +146,23 @@ def _persist_evaluating_challenger(
     return create_model_challenger(state)
 
 
+def _fit_request(
+    request_id: str,
+    incumbent: GreyControlPairDescriptor,
+    *,
+    configuration_digest: str = "c" * 64,
+) -> FitRequest:
+    return FitRequest(
+        request_id=request_id,
+        origin=CandidateOrigin.OPERATOR_CALIBRATION,
+        fit_corpus=_corpus(request_id),
+        configuration_digest=configuration_digest,
+        parent_incumbent_digest=incumbent.model_digest,
+        parent_incumbent_generation=incumbent.role_generation,
+        candidate_generation=1,
+    )
+
+
 def _evidence(evidence_id: str = "gap-1") -> ModelEvidenceRecord:
     return ModelEvidenceRecord(
         evidence_id=evidence_id,
@@ -147,6 +173,7 @@ def _evidence(evidence_id: str = "gap-1") -> ModelEvidenceRecord:
         role_generation=4,
         model_digest=_CANDIDATE,
         provenance_digest=_INCUMBENT,
+        schema_version=4,
         payload=RecorderGapEvidence(lost_record_count=1, reason="recorder-gap"),
     )
 
@@ -233,76 +260,7 @@ def test_report_status_vocabulary_is_automatic_causal_progress_only() -> None:
         "active",
         "fallback",
         "error",
-        "schema-invalidated",
     }
-
-
-@pytest.mark.parametrize(
-    ("latest", "authorization", "next_cook"),
-    (
-        ("disabled", "blocked", False),
-        ("insufficient", "blocked", False),
-        ("rejected", "blocked", False),
-        ("failed", "blocked", False),
-        ("accepted-next-cook", "blocked", False),
-        ("checkpoint-failure", "blocked", False),
-    ),
-)
-def test_report_projects_every_final_cook_refit_outcome(monkeypatch, latest, authorization, next_cook) -> None:
-    monkeypatch.setattr(report_module, "_validated_checkpoint", lambda checkpoint: checkpoint)
-    payload = build_learning_report(
-        (),
-        activation_state=_activation(phase="aborted"),
-        live_status=_live(),
-        calibration_command_high_water=0,
-        checkpoint={"cook_refit": {"status": "idle", "latest": latest}},
-    ).as_dict()
-
-    assert payload["cook_refit"] == {
-        "status": "idle",
-        "latest": latest,
-        "final_status": latest,
-        "authorization": authorization,
-        "next_cook": next_cook,
-    }
-
-
-def test_report_separates_a_refit_that_never_ran_from_one_that_was_refused(monkeypatch) -> None:
-    """No recorded outcome is not a refusal, and must not be reported as one.
-
-    A cook_refit still at idle with no latest has never had a refit reach it --
-    a fresh install, or a cook whose final checkpoint never persisted. Telling
-    an operator that is "blocked" sends them looking for a block that does not
-    exist, which is exactly what a stale checkpoint on a live grill did.
-    """
-    monkeypatch.setattr(report_module, "_validated_checkpoint", lambda checkpoint: checkpoint)
-    payload = build_learning_report(
-        (),
-        activation_state=_activation(phase="aborted"),
-        live_status=_live(),
-        calibration_command_high_water=0,
-        checkpoint={"cook_refit": {"status": "idle", "latest": None}},
-    ).as_dict()
-
-    assert payload["cook_refit"] == {
-        "status": "idle",
-        "latest": None,
-        "final_status": "idle",
-        "authorization": "not-run",
-        "next_cook": False,
-    }
-
-
-def test_report_rejects_malformed_final_cook_refit(monkeypatch) -> None:
-    monkeypatch.setattr(report_module, "_validated_checkpoint", lambda checkpoint: checkpoint)
-    with pytest.raises(ValueError, match="invalid cook_refit"):
-        build_learning_report(
-            (),
-            activation_state=_activation(phase="aborted"),
-            live_status=_live(),
-            calibration_command_high_water=0,
-            checkpoint={"cook_refit": {"status": "idle", "latest": "activate-now"}},
-        )
 
 
 def test_report_serializes_locked_fit_and_check_statuses_without_linear_model_fields() -> None:
@@ -357,7 +315,7 @@ def test_prior_active_activation_does_not_override_new_evaluating_candidate(
         {
             "incumbent_digest": challenger.incumbent.model_digest,
             "role_generation": challenger.incumbent.role_generation,
-            "policy": "operator-reviewed",
+            "policy": ActivationPolicy.CAUSAL_AUTO.value,
         }
     )
     live = _live(status=LearningStatus.EVALUATING)
@@ -519,9 +477,9 @@ def test_invalid_live_checkpoint_generation_fails_closed_visibly() -> None:
     assert payload["errors"] == ["live-role-generation-mismatch"]
 
 
-def test_inconsistent_live_candidate_origin_fails_closed_visibly() -> None:
+def test_invalid_live_candidate_origin_fails_closed_visibly() -> None:
     live = _live()
-    live["origin"] = CandidateOrigin.COOK_REFIT
+    live["origin"] = "retired-origin"
 
     payload = build_learning_report(
         (),
@@ -531,7 +489,7 @@ def test_inconsistent_live_candidate_origin_fails_closed_visibly() -> None:
     ).as_dict()
 
     assert payload["status"] == "error"
-    assert payload["errors"] == ["live-candidate-origin-mismatch"]
+    assert payload["errors"] == ["candidate-origin-invalid"]
 
 
 def test_current_lifecycle_matches_production_activation_decision_key() -> None:
@@ -544,6 +502,7 @@ def test_current_lifecycle_matches_production_activation_decision_key() -> None:
         role_generation=4,
         model_digest=_CANDIDATE,
         provenance_digest=_INCUMBENT,
+        schema_version=4,
         payload=ActivationLifecycleEvidence(
             decision_id="decision-9",
             phase="active",
@@ -582,6 +541,7 @@ def test_stale_active_lifecycle_cannot_override_a_new_live_challenger() -> None:
         role_generation=3,
         model_digest=stale_digest,
         provenance_digest=_INCUMBENT,
+        schema_version=4,
         payload=ActivationLifecycleEvidence(
             decision_id="decision-old",
             phase="active",
@@ -662,6 +622,7 @@ def test_completed_schema_migration_stops_gating_once_the_ledger_moves_on(ds) ->
         cook_id=None,
         timestamp_ms=0,
         role_generation=0,
+        schema_version=3,
         model_digest=active_digest,
         provenance_digest=None,
         payload=SchemaInvalidationEvidence(previous_schema_version=3, reason="schema-invalidated"),
@@ -679,7 +640,12 @@ def test_completed_schema_migration_stops_gating_once_the_ledger_moves_on(ds) ->
 
     assert payload["errors"] == []
     assert payload["status"] == "active"
-    assert payload["evidence"]["count"] == 2
+    assert payload["evidence"] == {
+        "count": 1,
+        "audit_count": 2,
+        "high_water": [1, "post-migration-gap"],
+        "retired_excluded": 1,
+    }
 
 
 @pytest.mark.parametrize(
@@ -815,7 +781,6 @@ def test_report_v3_projects_exact_causal_progress_and_lineage_for_every_phase(
             "challenger_id": challenger.challenger_id,
             "revision": challenger.revision,
         },
-        "cook_refit": {"status": "idle", "latest": None},
     }
     monkeypatch.setattr(report_module, "_validated_checkpoint", lambda value: value)
 
@@ -830,11 +795,7 @@ def test_report_v3_projects_exact_causal_progress_and_lineage_for_every_phase(
 
     assert payload["schema_version"] == 3
     assert payload["status"] == expected_status
-    candidate = _section(payload, "candidate")
-    assert candidate["policy"] == "causal-auto"
-    assert candidate["challenger_id"] == challenger.challenger_id
-    assert candidate["phase"] == phase
-    assert candidate["lineage"] == {
+    lineage = {
         "request_id": challenger.fit_lineage.request_id,
         "parent_incumbent_digest": challenger.incumbent.model_digest,
         "parent_incumbent_generation": challenger.incumbent.role_generation,
@@ -843,6 +804,29 @@ def test_report_v3_projects_exact_causal_progress_and_lineage_for_every_phase(
         "trigger_origin": challenger.origin.value,
         "result_status": "succeeded",
         "candidate_digest": challenger.candidate.model_digest,
+    }
+    assert payload["candidate"] == {
+        "challenger_id": challenger.challenger_id,
+        "phase": phase,
+        "lineage": lineage,
+        "digest": challenger.candidate.model_digest,
+        "origin": challenger.origin.value,
+        "policy": ActivationPolicy.CAUSAL_AUTO.value,
+        "role_generation": challenger.incumbent.role_generation,
+        "candidate_generation": challenger.candidate.candidate_generation,
+        "parameters": {
+            "C_c": 320.0,
+            "K_Q": 350.0,
+            "T_amb": 20.0,
+            "h_amb": 0.5,
+            "sigma": 1.4e-9,
+            "theta": 65.0,
+            "n_delay": 8,
+        },
+        "parameter_deltas": None,
+        "fit_quality": None,
+        "identifiability": None,
+        "assessment": None,
     }
     assert payload["evaluation"] == {
         "epoch": 3,
@@ -869,10 +853,34 @@ def test_report_v3_projects_exact_causal_progress_and_lineage_for_every_phase(
             }
         ],
     }
-    serialized_values = json.dumps(payload, sort_keys=True)
-    assert "operator-reviewed" not in serialized_values
-    assert "ready-for-review" not in serialized_values
-    assert "operator-review" not in serialized_values
+    assert set(payload) == {
+        "schema_version",
+        "status",
+        "mode",
+        "decision_id",
+        "evidence",
+        "fit",
+        "checks",
+        "evaluation",
+        "corpus",
+        "candidate",
+        "activation",
+        "active_model",
+        "identities",
+        "calibration",
+        "latest_lifecycle",
+        "failure",
+        "gates",
+        "blockers",
+        "errors",
+        "revision",
+    }
+    assert set(_section(payload, "fit")) == {
+        "status",
+        "request_id",
+        "fit_corpus_digest",
+        "error",
+    }
 
 
 def test_production_live_terminal_failure_overlays_prior_active_with_exact_reason(
@@ -926,7 +934,7 @@ def test_missing_and_incompatible_authority_are_explicit_terminal_states() -> No
 
     assert missing["status"] == "error"
     assert missing["errors"] == ["checkpoint-missing"]
-    assert incompatible["status"] == "schema-invalidated"
+    assert incompatible["status"] == "error"
     assert incompatible["errors"] == ["checkpoint-schema-invalid"]
 
 
@@ -934,20 +942,7 @@ def test_real_fit_submission_persists_queued_lifecycle_for_restart_report(ds) ->
     controller = Controller(dict(DEFAULT_MPC_CONFIG), "C", {"u_min": 0.1, "u_max": 0.9})
     controller.bind_learning_identity("session-submit", "cook-submit", 0)
     incumbent = controller.active_control_pair.descriptor
-    request = FitRequest(
-        request_id="request-submit",
-        origin=CandidateOrigin.OPERATOR_CALIBRATION,
-        candidate_generation=1,
-        window=FitWindowIdentity(
-            session_id="session-submit",
-            cook_id="cook-submit",
-            first_observation_sequence=1,
-            last_observation_sequence=7,
-            configuration_digest="c" * 64,
-            incumbent_digest=incumbent.model_digest,
-            role_generation=0,
-        ),
-    )
+    request = _fit_request("request-submit", incumbent)
 
     class _Learning:
         pending_request = None
@@ -1013,6 +1008,8 @@ def test_real_fit_submission_persists_queued_lifecycle_for_restart_report(ds) ->
     trace = read_control_trace_session("session-submit")
 
     assert [payload.status for payload in fits] == ["queued"]
+    assert fits[0].fit_corpus_digest == request.fit_corpus.corpus_digest
+    assert report.as_dict()["fit"]["fit_corpus_digest"] == request.fit_corpus.corpus_digest
     assert [record.event_kind.value for record in trace] == ["fit_lifecycle"]
     assert artifact["report"] == report.as_dict()
 
@@ -1038,20 +1035,7 @@ def test_real_fit_completion_branches_persist_lifecycle_for_restart_report(
     incumbent = controller.active_control_pair.descriptor
     native_config = controller.mpc.config
     candidate_digest = grey_config_digest(native_config)
-    request = FitRequest(
-        request_id=f"request-{case}",
-        origin=CandidateOrigin.OPERATOR_CALIBRATION,
-        candidate_generation=1,
-        window=FitWindowIdentity(
-            session_id=f"session-{case}",
-            cook_id=f"cook-{case}",
-            first_observation_sequence=2,
-            last_observation_sequence=8,
-            configuration_digest="c" * 64,
-            incumbent_digest=incumbent.model_digest,
-            role_generation=0,
-        ),
-    )
+    request = _fit_request(f"request-{case}", incumbent)
     outcome = (
         SimpleNamespace(request=request, detail="native fitter crashed")
         if case == "fit-error"
@@ -1124,19 +1108,10 @@ def test_real_evaluation_blocker_persists_rejection_context_before_retirement(ds
     incumbent = controller.active_control_pair.descriptor
     candidate_config = controller.mpc.config
     candidate_digest = grey_config_digest(candidate_config)
-    request = FitRequest(
-        request_id="blocked-evaluation-request",
-        origin=CandidateOrigin.OPERATOR_CALIBRATION,
-        candidate_generation=1,
-        window=FitWindowIdentity(
-            session_id="session-evaluation-blocker",
-            cook_id="cook-blocked",
-            first_observation_sequence=7,
-            last_observation_sequence=15,
-            role_generation=0,
-            incumbent_digest=incumbent.model_digest,
-            configuration_digest="d" * 64,
-        ),
+    request = _fit_request(
+        "blocked-evaluation-request",
+        incumbent,
+        configuration_digest="d" * 64,
     )
     candidate_descriptor = GreyControlPairDescriptor(
         model_digest=candidate_digest,

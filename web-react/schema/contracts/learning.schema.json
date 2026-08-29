@@ -54,11 +54,7 @@
       "type": "string"
     },
     "ActivationPolicy": {
-      "enum": [
-        "causal-auto",
-        "passive-auto",
-        "cook-refit"
-      ],
+      "const": "causal-auto",
       "type": "string"
     },
     "ActivationReport": {
@@ -411,8 +407,7 @@
     "CandidateOrigin": {
       "enum": [
         "passive-online",
-        "operator-calibration",
-        "cook-refit"
+        "operator-calibration"
       ],
       "type": "string"
     },
@@ -631,70 +626,6 @@
       "title": "CommandResponseData",
       "type": "object"
     },
-    "CookRefitAuthorization": {
-      "enum": [
-        "not-run",
-        "blocked",
-        "next-cook"
-      ],
-      "type": "string"
-    },
-    "CookRefitOutcome": {
-      "enum": [
-        "disabled",
-        "insufficient",
-        "rejected",
-        "failed",
-        "accepted-next-cook",
-        "checkpoint-failure"
-      ],
-      "type": "string"
-    },
-    "CookRefitReport": {
-      "additionalProperties": false,
-      "properties": {
-        "authorization": {
-          "$ref": "#/$defs/CookRefitAuthorization"
-        },
-        "final_status": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/FitStatus"
-            },
-            {
-              "$ref": "#/$defs/CookRefitOutcome"
-            }
-          ],
-          "title": "Final Status"
-        },
-        "latest": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/CookRefitOutcome"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "next_cook": {
-          "title": "Next Cook",
-          "type": "boolean"
-        },
-        "status": {
-          "$ref": "#/$defs/FitStatus"
-        }
-      },
-      "required": [
-        "status",
-        "latest",
-        "final_status",
-        "authorization",
-        "next_cook"
-      ],
-      "title": "CookRefitReport",
-      "type": "object"
-    },
     "CorpusStatusReport": {
       "additionalProperties": false,
       "properties": {
@@ -895,6 +826,18 @@
           ],
           "title": "Error"
         },
+        "fit_corpus_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Fit Corpus Digest"
+        },
         "request_id": {
           "anyOf": [
             {
@@ -908,23 +851,12 @@
         },
         "status": {
           "$ref": "#/$defs/FitStatus"
-        },
-        "window_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Window Id"
         }
       },
       "required": [
         "status",
         "request_id",
-        "window_id",
+        "fit_corpus_digest",
         "error"
       ],
       "title": "FitReport",
@@ -940,64 +872,6 @@
         "stale"
       ],
       "type": "string"
-    },
-    "FitWindowIdentity": {
-      "additionalProperties": false,
-      "properties": {
-        "configuration_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Configuration Digest",
-          "type": "string"
-        },
-        "cook_id": {
-          "anyOf": [
-            {
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Cook Id"
-        },
-        "first_observation_sequence": {
-          "minimum": 0,
-          "title": "First Observation Sequence",
-          "type": "integer"
-        },
-        "incumbent_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Incumbent Digest",
-          "type": "string"
-        },
-        "last_observation_sequence": {
-          "minimum": 0,
-          "title": "Last Observation Sequence",
-          "type": "integer"
-        },
-        "role_generation": {
-          "minimum": 0,
-          "title": "Role Generation",
-          "type": "integer"
-        },
-        "session_id": {
-          "minLength": 1,
-          "title": "Session Id",
-          "type": "string"
-        }
-      },
-      "required": [
-        "session_id",
-        "cook_id",
-        "first_observation_sequence",
-        "last_observation_sequence",
-        "configuration_digest",
-        "incumbent_digest",
-        "role_generation"
-      ],
-      "title": "FitWindowIdentity",
-      "type": "object"
     },
     "FopdtPidSpCheckpoint": {
       "additionalProperties": false,
@@ -1275,9 +1149,6 @@
           "title": "Checks",
           "type": "object"
         },
-        "cook_refit": {
-          "$ref": "#/$defs/CookRefitReport"
-        },
         "corpus": {
           "$ref": "#/$defs/CorpusStatusReport"
         },
@@ -1367,16 +1238,6 @@
         },
         "status": {
           "$ref": "#/$defs/ModelEvidenceStatus"
-        },
-        "window": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/FitWindowIdentity"
-            },
-            {
-              "type": "null"
-            }
-          ]
         }
       },
       "required": [
@@ -1386,8 +1247,6 @@
         "decision_id",
         "evidence",
         "fit",
-        "cook_refit",
-        "window",
         "checks",
         "evaluation",
         "corpus",
@@ -1417,8 +1276,7 @@
         "activating",
         "active",
         "fallback",
-        "error",
-        "schema-invalidated"
+        "error"
       ],
       "type": "string"
     },
@@ -2231,16 +2089,12 @@
     "CandidateReport",
     "CausalEvaluationProgress",
     "CheckStatus",
-    "CookRefitAuthorization",
-    "CookRefitOutcome",
-    "CookRefitReport",
     "CorpusStatusReport",
     "EvidenceGate",
     "EvidenceSummary",
     "FitCorpusSliceReport",
     "FitReport",
     "FitStatus",
-    "FitWindowIdentity",
     "FopdtPidSpCheckpoint",
     "FopdtPidSpPredictor",
     "GreyParameters",

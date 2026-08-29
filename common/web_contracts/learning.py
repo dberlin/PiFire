@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, Literal, TypeAliasType
+from typing import Annotated, Literal
 
 from pydantic import Field, RootModel, field_validator
 
@@ -12,8 +12,8 @@ Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$", strict=True)]
 NonBlankString = Annotated[str, Field(min_length=1, strict=True)]
 type FiniteNumber = int | FiniteFloat
 
-type CandidateOrigin = Literal["passive-online", "operator-calibration", "cook-refit"]
-type ActivationPolicy = Literal["causal-auto", "passive-auto", "cook-refit"]
+type CandidateOrigin = Literal["passive-online", "operator-calibration"]
+type ActivationPolicy = Literal["causal-auto"]
 type ModelEvidenceStatus = Literal[
     "warming",
     "collecting",
@@ -25,26 +25,10 @@ type ModelEvidenceStatus = Literal[
     "active",
     "fallback",
     "error",
-    "schema-invalidated",
 ]
 type FitStatus = Literal["idle", "queued", "running", "succeeded", "failed", "stale"]
 type CheckStatus = Literal["not-run", "pending", "passed", "failed"]
 type ActivationPhase = Literal["prepared", "active", "aborted"]
-type CookRefitOutcome = Literal[
-    "disabled",
-    "insufficient",
-    "rejected",
-    "failed",
-    "accepted-next-cook",
-    "checkpoint-failure",
-]
-CookRefitAuthorization = TypeAliasType(
-    "CookRefitAuthorization",
-    #: "not-run" is the absence of a verdict, not a refusal: no refit has
-    #: reached this checkpoint yet. "blocked" means one ran and authorized
-    #: nothing.
-    Literal["not-run", "blocked", "next-cook"],
-)
 type MpcCalibrationAction = Literal["start", "pause", "resume", "stop", "reset-progress"]
 type AmbientSource = Literal["measured", "manual", "weather", "configured"]
 
@@ -59,26 +43,8 @@ class EvidenceSummary(WireModel):
 class FitReport(WireModel):
     status: FitStatus
     request_id: str | None
-    window_id: str | None
+    fit_corpus_digest: Digest | None
     error: str | None
-
-
-class CookRefitReport(WireModel):
-    status: FitStatus
-    latest: CookRefitOutcome | None
-    final_status: FitStatus | CookRefitOutcome
-    authorization: CookRefitAuthorization
-    next_cook: bool
-
-
-class FitWindowIdentity(WireModel):
-    session_id: NonBlankString
-    cook_id: NonBlankString | None
-    first_observation_sequence: NonNegativeInt
-    last_observation_sequence: NonNegativeInt
-    configuration_digest: Digest
-    incumbent_digest: Digest
-    role_generation: NonNegativeInt
 
 
 class GreyParameters(WireModel):
@@ -237,8 +203,6 @@ class ModelEvidenceReport(WireModel):
     decision_id: str | None
     evidence: EvidenceSummary
     fit: FitReport
-    cook_refit: CookRefitReport
-    window: FitWindowIdentity | None
     checks: dict[str, CheckStatus]
     evaluation: CausalEvaluationProgress | None
     corpus: CorpusStatusReport

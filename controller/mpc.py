@@ -205,7 +205,6 @@ class Controller(ControllerBase):
     def _snapshot_parameters_for_learning(self):
         return copy.deepcopy(self.active_control_pair.core.snapshot_parameters())
 
-
     def _sync_learning_configuration(self) -> None:
         self.cfg = self.active_control_pair.core.config
 
@@ -492,10 +491,16 @@ class Controller(ControllerBase):
         return self._grey_learning_runtime.restore_model(snapshot)
 
     def schedule_corpus_fit(self, origin: CandidateOrigin) -> bool:
-        return self._grey_learning_runtime.request_corpus_fit(origin)
+        return self._grey_learning_runtime.request_corpus_fit(
+            origin,
+            replace_owned_prepared=origin is CandidateOrigin.OPERATOR_CALIBRATION,
+        )
 
     def _schedule_corpus_fit_ticket(self, origin: CandidateOrigin) -> str | None:
-        return self._grey_learning_runtime._request_corpus_fit_ticket(origin)
+        return self._grey_learning_runtime._request_corpus_fit_ticket(
+            origin,
+            replace_owned_prepared=origin is CandidateOrigin.OPERATOR_CALIBRATION,
+        )
 
     def _consume_terminal_corpus_fit_ticket(
         self,
@@ -506,7 +511,6 @@ class Controller(ControllerBase):
             ticket,
             origin,
         )
-
 
     def fail_corpus_fit(
         self,

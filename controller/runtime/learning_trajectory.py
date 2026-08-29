@@ -22,6 +22,7 @@ from common.learning_trajectory import (
     canonical_trajectory_digest,
 )
 from common.persistence.learning_trajectory import SegmentCursor
+from controller.mpc_allocator import normalized_load_from_auger_duty
 from controller.runtime.actuation_delivery import DeliveredActuationIntegral
 
 if TYPE_CHECKING:
@@ -106,12 +107,21 @@ class ModeEntered:
     source_schema_version: int
     source_row_digest: str
     build_provenance: Mapping[str, object]
+    auger_duty_ceiling: float = 1.0
 
     def __post_init__(self) -> None:
         if self.units not in {"C", "F"}:
             raise ValueError("trajectory temperature units must be C or F")
         for name in ("collection_provenance", "configuration_provenance", "build_provenance"):
             object.__setattr__(self, name, _owned_mapping(getattr(self, name)))
+        if (
+            isinstance(self.auger_duty_ceiling, bool)
+            or not isinstance(self.auger_duty_ceiling, (int, float))
+            or not math.isfinite(float(self.auger_duty_ceiling))
+            or self.auger_duty_ceiling <= 0.0
+        ):
+            raise ValueError("trajectory auger duty ceiling must be finite and positive")
+        object.__setattr__(self, "auger_duty_ceiling", float(self.auger_duty_ceiling))
 
 
 @dataclass(frozen=True, slots=True)
@@ -1160,6 +1170,14 @@ class LearningTrajectoryRuntime:
     ) -> LearningTrajectoryFrame:
         duration_seconds = (end_ms - start_ms) / 1_000
         realized = integral.auger_on_seconds / duration_seconds
+        normalized = (
+            normalized_load
+            if normalized_load is not None
+            else normalized_load_from_auger_duty(
+                realized,
+                u_max=(1.0 if self._mode is None else self._mode.auger_duty_ceiling),
+            )
+        )
         fan_mean = integral.fan_duty_integral_seconds / duration_seconds
         return LearningTrajectoryFrame(
             sequence=self._next_sequence,
@@ -1186,7 +1204,7 @@ class LearningTrajectoryRuntime:
             ),
             delivered_auger_on_seconds=float(integral.auger_on_seconds),
             realized_auger_duty=realized,
-            normalized_combustion_load=realized if normalized_load is None else normalized_load,
+            normalized_combustion_load=normalized,
             delivered_fan_on_seconds=float(integral.fan_on_seconds),
             fan_duty_integral_seconds=float(integral.fan_duty_integral_seconds),
             mean_actual_fan_duty=fan_mean,

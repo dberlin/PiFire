@@ -50,6 +50,8 @@ type Digest = Annotated[
 ]
 type JsonValue = str | int | float | bool | None | dict[str, JsonValue] | list[JsonValue]
 
+_CURRENT_DIGEST_ADAPTER: TypeAdapter[Digest] = TypeAdapter(Digest)
+
 
 class ControllerType(StrEnum):
     PID = "pid"
@@ -822,7 +824,7 @@ class GreyFitLifecyclePayload:
     status: Literal["queued", "running", "succeeded", "failed", "stale"]
     origin: Literal["passive-online", "operator-calibration", "cook-refit"]
     policy: Literal["causal-auto", "passive-auto", "operator-reviewed", "cook-refit"] | None
-    window_id: NonBlankString
+    fit_corpus_digest: NonBlankString
     error: NonBlankString | None = None
     payload_type: Literal["fit_lifecycle"] = "fit_lifecycle"
 
@@ -946,8 +948,8 @@ class ChallengerProgressTracePayload:
     challenger_id: NonBlankString
     challenger_revision: NonNegativeInt
     phase: Literal["built", "evaluating", "qualified", "activating", "retired"]
-    origin: Literal["passive-online", "operator-calibration", "cook-refit"]
-    policy: Literal["causal-auto", "cook-refit"]
+    origin: Literal["passive-online", "operator-calibration"]
+    policy: Literal["causal-auto"]
     incumbent_digest: Digest
     incumbent_generation: NonNegativeInt
     candidate_digest: Digest
@@ -967,9 +969,8 @@ class ChallengerProgressTracePayload:
 
     @model_validator(mode="after")
     def validate_progress(self) -> ChallengerProgressTracePayload:
-        expected_policy = "cook-refit" if self.origin == "cook-refit" else "causal-auto"
-        if self.policy != expected_policy:
-            raise ValueError("challenger origin-policy mismatch")
+        if self.policy != "causal-auto":
+            raise ValueError("challenger policy must remain causal-auto")
         if self.consecutive_wins > self.required_wins:
             raise ValueError("challenger wins cannot exceed required wins")
         if not self.required_horizons:
@@ -1093,6 +1094,25 @@ class ControlTraceRecord(BaseModel):
             ),
         ):
             raise ValueError(f"trace schema version {self.schema_version} cannot contain segmented learning evidence")
+        if self.schema_version == TRACE_SCHEMA_VERSION and isinstance(
+            self.payload,
+            (GreyFitLifecyclePayload, GreyCandidateAssessmentPayload, GreyActivationLifecyclePayload),
+        ):
+            if self.payload.origin not in {"passive-online", "operator-calibration"}:
+                raise ValueError("retired lifecycle origin cannot be current control trace")
+            if self.payload.policy != "causal-auto":
+                raise ValueError("retired lifecycle policy cannot be current control trace")
+            if isinstance(self.payload, GreyFitLifecyclePayload):
+                try:
+                    _CURRENT_DIGEST_ADAPTER.validate_python(self.payload.fit_corpus_digest)
+                except ValidationError as exc:
+                    raise ValueError("current fit corpus digest must be lowercase SHA-256") from exc
+        if (
+            self.schema_version == TRACE_SCHEMA_VERSION
+            and isinstance(self.payload, ModelEventPayload)
+            and self.payload.event is ModelEventType.SCHEMA_INVALIDATED
+        ):
+            raise ValueError("retired schema invalidation cannot be current control trace")
         if (
             self.schema_version < 6
             and isinstance(self.payload, (PidUpdatePayload, PidSpUpdatePayload, MpcUpdatePayload))
@@ -1149,6 +1169,7 @@ class ControlTraceRecord(BaseModel):
 
     def to_db_row(self) -> ControlTraceDbRow:
         """Serialize one validated record into the exact SQLite table columns."""
+        self.validate_payload_match()
         return ControlTraceDbRow(
             ts_ms=self.ts_ms,
             session_id=self.session_id,
@@ -1203,6 +1224,15 @@ class ControlTraceRecord(BaseModel):
             decoded_payload: object = _JSON_VALUE_ADAPTER.validate_json(payload_json)
         except ValidationError as exc:
             raise ValueError("control trace payload column is invalid JSON") from exc
+        if (
+            schema_version in {5, 6, 7}
+            and isinstance(decoded_payload, dict)
+            and decoded_payload.get("payload_type") == "fit_lifecycle"
+            and "window_id" in decoded_payload
+            and "fit_corpus_digest" not in decoded_payload
+        ):
+            decoded_payload = dict(decoded_payload)
+            decoded_payload["fit_corpus_digest"] = decoded_payload.pop("window_id")
         if (
             schema_version == 6
             and event_kind == TraceEventKind.MODEL_OBSERVATION.value

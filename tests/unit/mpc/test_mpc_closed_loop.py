@@ -25,7 +25,7 @@ def _run(seed=0, minutes=90, setpoint=SETPOINT):
         out = c.update(plant.measured())
         ratio = float(np.clip(out["cycle_ratio"], 0.0, CYCLE["u_max"]))
         fan = out["fan"]["duty"] if out["fan"]["duty"] is not None else 100.0
-        on = int(round(ratio * TS))
+        on = round(ratio * TS)
         for s in range(int(TS)):
             plant.step(auger_on=(s < on), fan_frac=fan / 100.0)
             ts.append(w * TS + s)
@@ -58,7 +58,7 @@ def _run_transition(*, restore: bool) -> tuple[np.ndarray, np.ndarray]:
             output = controller.update(plant.measured())
             ratio = float(np.clip(output["cycle_ratio"], 0.0, CYCLE["u_max"]))
             fan = output["fan"]["duty"] if output["fan"]["duty"] is not None else 100.0
-            on_seconds = int(round(ratio * TS))
+            on_seconds = round(ratio * TS)
             for second in range(int(TS)):
                 plant.step(
                     auger_on=second < on_seconds,
@@ -83,7 +83,7 @@ def _run_transition(*, restore: bool) -> tuple[np.ndarray, np.ndarray]:
     return np.array(temperatures), np.array(commands)
 
 
-def test_mid_cook_snapshot_restore_preserves_immediate_control_continuity():
+def test_mid_cook_snapshot_restore_preserves_immediate_control_continuity(ds):
     baseline_temperatures, baseline_commands = _run_transition(restore=False)
     restored_temperatures, restored_commands = _run_transition(restore=True)
     comparison = slice(24, 29)

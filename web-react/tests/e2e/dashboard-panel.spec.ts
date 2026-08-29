@@ -42,13 +42,12 @@ function evidenceReport(
   digest: string,
   decisionId: string,
   options: {
-    origin?: "passive-online" | "operator-calibration" | "cook-refit";
-    policy?: "causal-auto" | "passive-auto" | "cook-refit";
+    origin?: "passive-online" | "operator-calibration";
     roleGeneration?: number;
   } = {},
 ): ModelEvidenceReport {
   const origin = options.origin ?? "passive-online";
-  const policy = options.policy ?? "causal-auto";
+  const policy = "causal-auto" as const;
   const roleGeneration = options.roleGeneration ?? 4;
   const complete = !["warming", "collecting", "fitting"].includes(status);
   const activationPhase =
@@ -61,7 +60,7 @@ function evidenceReport(
         : "evaluating";
   const activeDigest = "c".repeat(64);
   const corpusDigest = "e".repeat(64);
-  const requiredHorizons = [3, 15, 45, 90, 180];
+  const requiredHorizons: (3 | 15 | 45 | 90 | 180)[] = [3, 15, 45, 90, 180];
   const qualified = ["qualified", "activating", "active"].includes(status);
   return {
     schema_version: 3,
@@ -82,27 +81,9 @@ function evidenceReport(
             ? "idle"
             : "succeeded",
       request_id: status === "warming" || status === "collecting" ? null : "fit-e2e-5",
-      window_id: status === "warming" || status === "collecting" ? null : "window-e2e-5",
+      fit_corpus_digest: status === "warming" || status === "collecting" ? null : corpusDigest,
       error: null,
     },
-    cook_refit: {
-      status: "idle",
-      latest: null,
-      final_status: "idle",
-      authorization: "not-run",
-      next_cook: false,
-    },
-    window: complete
-      ? {
-          session_id: "session-e2e",
-          cook_id: "cook-e2e",
-          first_observation_sequence: 1,
-          last_observation_sequence: 120,
-          configuration_digest: "d".repeat(64),
-          incumbent_digest: activeDigest,
-          role_generation: roleGeneration,
-        }
-      : null,
     checks: complete
       ? {
           identifiability: "passed",
@@ -111,16 +92,16 @@ function evidenceReport(
           target_timing: "passed",
         }
       : {},
-    candidate: {
-      challenger_id: "challenger-e2e-5",
-      phase: challengerPhase,
-      digest,
-      origin,
-      policy,
-      role_generation: roleGeneration,
-      candidate_generation: 5,
-      parameters: complete
-        ? {
+    candidate: complete
+      ? {
+          challenger_id: "challenger-e2e-5",
+          phase: challengerPhase,
+          digest,
+          origin,
+          policy,
+          role_generation: roleGeneration,
+          candidate_generation: 5,
+          parameters: {
             C_c: 4475,
             h_amb: 18.5,
             T_amb: 20,
@@ -128,13 +109,11 @@ function evidenceReport(
             n_delay: 8,
             K_Q: 0.076,
             sigma: 0,
-          }
-        : null,
-      parameter_deltas: null,
-      fit_quality: complete ? 0.5 : null,
-      identifiability: null,
-      assessment: complete
-        ? {
+          },
+          parameter_deltas: null,
+          fit_quality: 0.5,
+          identifiability: null,
+          assessment: {
             decision_id: decisionId,
             origin,
             policy,
@@ -146,41 +125,43 @@ function evidenceReport(
             confidence_accepted: true,
             rejection_reasons: [],
             payload_type: "candidate_assessment",
-          }
-        : null,
-      lineage: {
-        request_id: "fit-e2e-5",
-        parent_incumbent_digest: activeDigest,
-        parent_incumbent_generation: roleGeneration,
-        candidate_generation: 5,
-        fit_corpus_digest: corpusDigest,
-        trigger_origin: origin,
-        result_status: "succeeded",
-        candidate_digest: digest,
-      },
-    },
-    evaluation: {
-      epoch: status === "interrupted" ? 2 : 1,
-      round: qualified ? 2 : complete ? 1 : 0,
-      completed_horizons: qualified ? requiredHorizons : complete ? [3, 15] : [],
-      required_horizons: requiredHorizons,
-      wins: qualified ? 2 : complete ? 1 : 0,
-      required_wins: 2,
-      resumed_from_previous_cook: status === "interrupted",
-      pending_origins:
-        status === "evaluating"
-          ? [
-              {
-                origin_sequence: 121,
-                horizon_steps: 45,
-                role_generation: roleGeneration,
-                candidate_generation: 5,
-                incumbent_digest: activeDigest,
-                candidate_digest: digest,
-              },
-            ]
-          : [],
-    },
+          },
+          lineage: {
+            request_id: "fit-e2e-5",
+            parent_incumbent_digest: activeDigest,
+            parent_incumbent_generation: roleGeneration,
+            candidate_generation: 5,
+            fit_corpus_digest: corpusDigest,
+            trigger_origin: origin,
+            result_status: "succeeded",
+            candidate_digest: digest,
+          },
+        }
+      : null,
+    evaluation: complete
+      ? {
+          epoch: status === "interrupted" ? 2 : 1,
+          round: qualified ? 2 : 1,
+          completed_horizons: qualified ? requiredHorizons : [3, 15],
+          required_horizons: requiredHorizons,
+          wins: qualified ? 2 : 1,
+          required_wins: 2,
+          resumed_from_previous_cook: status === "interrupted",
+          pending_origins:
+            status === "evaluating"
+              ? [
+                  {
+                    origin_sequence: 121,
+                    horizon_steps: 45,
+                    role_generation: roleGeneration,
+                    candidate_generation: 5,
+                    incumbent_digest: activeDigest,
+                    candidate_digest: digest,
+                  },
+                ]
+              : [],
+        }
+      : null,
     corpus: {
       digest: corpusDigest,
       revision: 7,
@@ -630,7 +611,7 @@ test("one report trigger stays after Hopper and the full panel is reachable at b
     expect(dialogBox!.y).toBeGreaterThanOrEqual(0);
     expect(dialogBox!.y + dialogBox!.height).toBeLessThanOrEqual(viewport.height);
 
-    const finalSection = dialog.getByRole("heading", { name: "Cook refit" });
+    const finalSection = dialog.getByRole("heading", { name: "Model ownership" });
     await finalSection.scrollIntoViewIfNeeded();
     await expect(finalSection).toBeVisible();
     await dialog.getByRole("button", { name: "Close MPC model learning" }).click();
@@ -844,7 +825,6 @@ test("passive automatic transitions never expose reviewed activation controls", 
   ] as const) {
     report = evidenceReport(status, EXACT_DIGEST, EXACT_DECISION, {
       origin: "passive-online",
-      policy: "causal-auto",
       roleGeneration: 20,
     });
     await page.reload();
@@ -868,7 +848,6 @@ test("automatic calibration exposes causal progress and rolls back only to expli
 }) => {
   let report = evidenceReport("interrupted", EXACT_DIGEST, EXACT_DECISION, {
     origin: "operator-calibration",
-    policy: "causal-auto",
     roleGeneration: 4,
   });
   let activationRequests = 0;
@@ -891,7 +870,6 @@ test("automatic calibration exposes causal progress and rolls back only to expli
     expect(route.request().postDataJSON()).toEqual({ reason: "active-solve-failed" });
     const fallback = evidenceReport("fallback", EXACT_DIGEST, EXACT_DECISION, {
       origin: "operator-calibration",
-      policy: "causal-auto",
       roleGeneration: 6,
     });
     report = {
@@ -929,7 +907,6 @@ test("automatic calibration exposes causal progress and rolls back only to expli
 
   report = evidenceReport("qualified", EXACT_DIGEST, EXACT_DECISION, {
     origin: "operator-calibration",
-    policy: "causal-auto",
     roleGeneration: 4,
   });
   await page.reload();
@@ -943,13 +920,11 @@ test("automatic calibration exposes causal progress and rolls back only to expli
   await expect(dialog.getByLabel("Type the exact candidate digest")).toHaveCount(0);
   await expect(dialog.getByLabel("Type the exact confidence decision ID")).toHaveCount(0);
   await expect(dialog.getByRole("button", { name: "Activate exact model" })).toHaveCount(0);
-  await expect(dialog).not.toContainText("operator-reviewed");
   await dialog.getByRole("button", { name: "Close MPC model learning" }).click();
   expect(activationRequests).toBe(0);
 
   report = evidenceReport("active", EXACT_DIGEST, EXACT_DECISION, {
     origin: "operator-calibration",
-    policy: "causal-auto",
     roleGeneration: 5,
   });
   await page.reload();
@@ -964,23 +939,11 @@ test("automatic calibration exposes causal progress and rolls back only to expli
   expect(activationRequests).toBe(0);
 });
 
-test("cook-refit, native rejection, structured failure, and schema invalidation remain backend-authored", async ({
-  page,
-}) => {
-  let report: ModelEvidenceReport = {
-    ...evidenceReport("evaluating", EXACT_DIGEST, EXACT_DECISION, {
-      origin: "cook-refit",
-      policy: "cook-refit",
-      roleGeneration: 30,
-    }),
-    cook_refit: {
-      status: "idle",
-      latest: "disabled",
-      final_status: "disabled",
-      authorization: "blocked",
-      next_cook: false,
-    },
-  };
+test("native rejection and structured failure remain backend-authored", async ({ page }) => {
+  let report = evidenceReport("evaluating", EXACT_DIGEST, EXACT_DECISION, {
+    origin: "operator-calibration",
+    roleGeneration: 30,
+  });
   await page.route("**/api/settings", (route) =>
     route.fulfill({
       json: {
@@ -995,28 +958,7 @@ test("cook-refit, native rejection, structured failure, and schema invalidation 
 
   await page.reload();
   await page.getByRole("button", { name: "MPC learning: evaluating" }).click();
-  let cookRefit = page.getByRole("heading", { name: "Cook refit" }).locator("..");
-  await expect(cookRefit).toContainText("Final outcome: disabled");
-  await expect(cookRefit).toContainText("Authorization: blocked");
-  await expect(cookRefit).toContainText("Next cook: no");
   await expect(page.getByRole("button", { name: "Activate exact model" })).toHaveCount(0);
-
-  report = {
-    ...report,
-    cook_refit: {
-      status: "succeeded",
-      latest: "accepted-next-cook",
-      final_status: "accepted-next-cook",
-      authorization: "next-cook",
-      next_cook: true,
-    },
-  };
-  await page.reload();
-  await page.getByRole("button", { name: "MPC learning: evaluating" }).click();
-  cookRefit = page.getByRole("heading", { name: "Cook refit" }).locator("..");
-  await expect(cookRefit).toContainText("Final outcome: accepted-next-cook");
-  await expect(cookRefit).toContainText("Authorization: next-cook");
-  await expect(cookRefit).toContainText("Next cook: yes");
 
   report = {
     ...report,
@@ -1028,9 +970,9 @@ test("cook-refit, native rejection, structured failure, and schema invalidation 
       terminal: true,
     },
     candidate: {
-      ...report.candidate,
+      ...report.candidate!,
       assessment: {
-        ...report.candidate.assessment!,
+        ...report.candidate!.assessment!,
         native_build: "failed",
         confidence_accepted: false,
         rejection_reasons: ["native-build"],
@@ -1042,14 +984,4 @@ test("cook-refit, native rejection, structured failure, and schema invalidation 
   await expect(page.getByRole("alert")).toContainText("native-build-failed");
   await expect(page.getByRole("alert")).toContainText("candidate handle could not load ABI v2");
   await expect(page.getByText("Native build: failed")).toBeVisible();
-
-  report = {
-    ...report,
-    status: "schema-invalidated",
-    errors: ["checkpoint-schema-invalid"],
-    failure: null,
-  };
-  await page.reload();
-  await page.getByRole("button", { name: "MPC learning: schema invalidated" }).click();
-  await expect(page.getByRole("alert")).toContainText("checkpoint-schema-invalid");
 });

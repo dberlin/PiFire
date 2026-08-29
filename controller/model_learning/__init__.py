@@ -7,7 +7,6 @@ from .contracts import (
     FitRequest,
     FitResult,
     FitStatus,
-    FitWindowIdentity,
     FrameObservation,
     LearningStatus,
 )
@@ -19,7 +18,6 @@ __all__ = (
     "FitRequest",
     "FitResult",
     "FitStatus",
-    "FitWindowIdentity",
     "FrameObservation",
     "LearningStatus",
 )

@@ -1307,7 +1307,7 @@ def _prepared_activation() -> PreparedActivationRecord:
         incumbent=incumbent,
         candidate=candidate,
         origin=CandidateOrigin.PASSIVE_ONLINE,
-        policy=ActivationPolicy.PASSIVE_AUTO,
+        policy=ActivationPolicy.CAUSAL_AUTO,
         decision_id="decision-grey-4",
     )
 
@@ -1442,8 +1442,8 @@ def test_activation_confidence_appends_preceding_assessment_in_one_durable_fifo_
         provenance_digest="a" * 64,
         payload=CandidateAssessmentEvidence(
             decision_id="decision-activation",
-            origin="passive-online",
-            policy="passive-auto",
+            origin=CandidateOrigin.PASSIVE_ONLINE.value,
+            policy=ActivationPolicy.CAUSAL_AUTO.value,
             fit_accepted=True,
             identifiability_accepted=True,
             native_build="passed",
@@ -1567,6 +1567,13 @@ def test_durable_phase_store_rechecks_confidence_then_cas_prepared_to_active(tmp
     assert stored_prepared.incumbent_pair == prepared.incumbent
     assert stored_prepared.candidate_pair == prepared.candidate
     assert stored_prepared.rollback_pair == prepared.rollback
+    assert stored_prepared.origin == CandidateOrigin.PASSIVE_ONLINE.value
+    assert stored_prepared.policy == ActivationPolicy.CAUSAL_AUTO.value
+    assert stored_prepared.evidence_decision_id == prepared.decision_id
+    assert stored_prepared.controller_configuration_digest == prepared.candidate.ownership_digest
+    assert stored_prepared.role_generation == prepared.incumbent.role_generation
+    assert stored_prepared.candidate_generation == prepared.candidate.candidate_generation
+    assert stored_prepared.candidate_digest == prepared.candidate.model_digest
 
     active = prepared.transition(ActivationPhase.ACTIVE)
     commit_model_activation_phase(
@@ -1579,6 +1586,13 @@ def test_durable_phase_store_rechecks_confidence_then_cas_prepared_to_active(tmp
     assert stored_active.phase == "active"
     assert stored_active.active_pair == prepared.candidate
     assert stored_active.rollback_pair == prepared.incumbent
+    assert stored_active.origin == CandidateOrigin.PASSIVE_ONLINE.value
+    assert stored_active.policy == ActivationPolicy.CAUSAL_AUTO.value
+    assert stored_active.evidence_decision_id == prepared.decision_id
+    assert stored_active.controller_configuration_digest == prepared.candidate.ownership_digest
+    assert stored_active.role_generation == prepared.candidate.role_generation
+    assert stored_active.candidate_generation == prepared.candidate.candidate_generation
+    assert stored_active.candidate_digest == prepared.candidate.model_digest
     with pytest.raises(ValueError, match="activation-state-changed"):
         commit_model_activation_phase(
             active,
@@ -1609,7 +1623,7 @@ def test_active_pair_can_become_the_exact_incumbent_of_one_new_prepared_transact
         incumbent=first.candidate,
         candidate=next_candidate,
         origin=CandidateOrigin.PASSIVE_ONLINE,
-        policy=ActivationPolicy.PASSIVE_AUTO,
+        policy=ActivationPolicy.CAUSAL_AUTO,
         decision_id="decision-grey-5",
     )
     append_model_evidence(
@@ -1646,7 +1660,7 @@ def test_aborted_authority_can_prepare_one_new_exact_incumbent_transaction(tmp_p
         incumbent=first.incumbent,
         candidate=next_candidate,
         origin=CandidateOrigin.PASSIVE_ONLINE,
-        policy=ActivationPolicy.PASSIVE_AUTO,
+        policy=ActivationPolicy.CAUSAL_AUTO,
         decision_id="decision-after-abort",
     )
     append_model_evidence(
@@ -1683,7 +1697,7 @@ def test_aborted_authority_rejects_new_prepared_with_different_incumbent(tmp_pat
         incumbent=first.candidate,
         candidate=next_candidate,
         origin=CandidateOrigin.PASSIVE_ONLINE,
-        policy=ActivationPolicy.PASSIVE_AUTO,
+        policy=ActivationPolicy.CAUSAL_AUTO,
         decision_id="decision-after-abort-wrong-owner",
     )
     append_model_evidence(
@@ -1791,24 +1805,54 @@ def test_real_sqlite_restart_converges_at_every_durable_phase_boundary(
     prepared = _prepared_activation()
     append_model_evidence((_confidence_for(prepared),), database_path=database_path)
     commit_model_activation_phase(prepared, expected_phase=None, database_path=database_path)
+    durable_record = prepared
     if durable_phase is ActivationPhase.ACTIVE:
+        durable_record = prepared.transition(ActivationPhase.ACTIVE)
         commit_model_activation_phase(
-            prepared.transition(ActivationPhase.ACTIVE),
+            durable_record,
             expected_phase=ActivationPhase.PREPARED,
             database_path=database_path,
         )
     elif durable_phase is ActivationPhase.ABORTED:
+        durable_record = prepared.transition(
+            ActivationPhase.ABORTED,
+            reason="swap-compensated",
+        )
         commit_model_activation_phase(
-            prepared.transition(
-                ActivationPhase.ABORTED,
-                reason="swap-compensated",
-            ),
+            durable_record,
             expected_phase=ActivationPhase.PREPARED,
             database_path=database_path,
         )
 
     restarted_state = read_model_activation(database_path=database_path)
     assert restarted_state is not None
+    assert restarted_state.phase == durable_phase.value
+    assert restarted_state.transaction_id == prepared.transaction_id
+    assert restarted_state.incumbent_pair == prepared.incumbent
+    assert restarted_state.candidate_pair == prepared.candidate
+    assert restarted_state.rollback_pair == prepared.rollback
+    assert restarted_state.active_pair == (
+        prepared.candidate if durable_phase is ActivationPhase.ACTIVE else prepared.incumbent
+    )
+    assert (
+        json.loads(restarted_state.active_snapshot_json)
+        == (prepared.candidate if durable_phase is ActivationPhase.ACTIVE else prepared.incumbent).to_dict()[
+            "configuration"
+        ]
+    )
+    assert json.loads(restarted_state.rollback_snapshot_json) == prepared.incumbent.to_dict()["configuration"]
+    assert restarted_state.origin == CandidateOrigin.PASSIVE_ONLINE.value
+    assert restarted_state.policy == ActivationPolicy.CAUSAL_AUTO.value
+    assert restarted_state.evidence_decision_id == prepared.decision_id
+    assert restarted_state.controller_configuration_digest == prepared.candidate.ownership_digest
+    assert restarted_state.role_generation == (
+        prepared.candidate.role_generation
+        if durable_phase is ActivationPhase.ACTIVE
+        else prepared.incumbent.role_generation
+    )
+    assert restarted_state.candidate_generation == prepared.candidate.candidate_generation
+    assert restarted_state.candidate_digest == prepared.candidate.model_digest
+    assert restarted_state.reason == durable_record.reason
 
     class _DurableReceipt:
         accepted = True
@@ -1834,6 +1878,29 @@ def test_real_sqlite_restart_converges_at_every_durable_phase_boundary(
 
     assert recovery.phase is expected_phase
     assert recovery.restore == getattr(prepared, expected_restore)
+    assert recovery.rollback == prepared.rollback
+    assert recovery.record.origin is CandidateOrigin.PASSIVE_ONLINE
+    assert recovery.record.policy is ActivationPolicy.CAUSAL_AUTO
+    assert recovery.record.decision_id == prepared.decision_id
+    assert recovery.source_candidate_digest == prepared.candidate.model_digest
+    assert recovery.record.phase is expected_phase
     converged = read_model_activation(database_path=database_path)
     assert converged is not None
     assert converged.phase == expected_phase.value
+    assert converged.transaction_id == prepared.transaction_id
+    assert converged.incumbent_pair == prepared.incumbent
+    assert converged.candidate_pair == prepared.candidate
+    assert converged.rollback_pair == prepared.rollback
+    assert converged.active_pair == getattr(prepared, expected_restore)
+    assert json.loads(converged.active_snapshot_json) == getattr(prepared, expected_restore).to_dict()["configuration"]
+    assert json.loads(converged.rollback_snapshot_json) == prepared.incumbent.to_dict()["configuration"]
+    assert converged.origin == CandidateOrigin.PASSIVE_ONLINE.value
+    assert converged.policy == ActivationPolicy.CAUSAL_AUTO.value
+    assert converged.evidence_decision_id == prepared.decision_id
+    assert converged.controller_configuration_digest == prepared.candidate.ownership_digest
+    assert converged.role_generation == getattr(prepared, expected_restore).role_generation
+    assert converged.candidate_generation == prepared.candidate.candidate_generation
+    assert converged.candidate_digest == prepared.candidate.model_digest
+    assert converged.reason == (
+        "interrupted-activation" if durable_phase is ActivationPhase.PREPARED else durable_record.reason
+    )
