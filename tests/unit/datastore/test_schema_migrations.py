@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import multiprocessing as mp
+import os
 import sqlite3
+import stat
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -65,6 +68,28 @@ def _seed_committed_v11_database(path: Path) -> None:
         connection.close()
 
 
+def _hold_migrated_database_open(path: str, ready, release, reports) -> None:
+    previous_umask = os.umask(0o002)
+    try:
+        datastore._reset_for_tests(path)
+        connection = datastore.connection()
+        connection.execute(
+            "INSERT INTO kv(key, value) VALUES(?, ?)",
+            ("permission-probe", '{"ok":true}'),
+        )
+        reports.put(
+            (
+                connection.execute("PRAGMA user_version").fetchone()[0],
+                connection.execute("PRAGMA journal_mode").fetchone()[0],
+            )
+        )
+        ready.set()
+        assert release.wait(timeout=30)
+    finally:
+        datastore._reset_for_tests(None)
+        os.umask(previous_umask)
+
+
 @pytest.fixture
 def v10_connection(tmp_path: Path) -> Iterator[sqlite3.Connection]:
     path = tmp_path / "committed-v10.db"
@@ -94,6 +119,75 @@ def _audit_rows(connection: sqlite3.Connection) -> list[tuple[str, str, str]]:
 def test_current_schema_version_is_centralized_at_v11() -> None:
     assert datastore.DB_SCHEMA_VERSION == schema_migrations.CURRENT_SCHEMA_VERSION == 11
     assert schema_migrations.LEGACY_SCHEMA_VERSION == 10
+
+
+def test_real_configured_connection_preserves_policy_identity_and_usability(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "fresh-configured.db"
+    datastore._reset_for_tests(str(path))
+    try:
+        connection = datastore.connection()
+
+        assert connection.execute("PRAGMA user_version").fetchone() == (11,)
+        assert connection.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+        assert connection.execute("PRAGMA synchronous").fetchone() == (1,)
+        assert connection.execute("PRAGMA busy_timeout").fetchone() == (5000,)
+        assert connection.execute("PRAGMA foreign_keys").fetchone() == (1,)
+        assert connection.execute("PRAGMA recursive_triggers").fetchone() == (0,)
+        assert connection.isolation_level is None
+        assert datastore.connection() is connection
+        assert connection.execute("SELECT 1").fetchone() == (1,)
+    finally:
+        datastore._reset_for_tests(None)
+
+
+def test_v10_migration_preserves_database_and_live_sidecar_ownership(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "committed-v10-permissions.db"
+    _seed_committed_v10_database(path)
+    path.chmod(0o664)
+    before_metadata = path.stat()
+    before = (
+        before_metadata.st_uid,
+        before_metadata.st_gid,
+        stat.S_IMODE(before_metadata.st_mode),
+    )
+
+    context = mp.get_context("spawn")
+    ready = context.Event()
+    release = context.Event()
+    reports = context.Queue()
+    process = context.Process(
+        target=_hold_migrated_database_open,
+        args=(str(path), ready, release, reports),
+    )
+    process.start()
+    try:
+        assert ready.wait(timeout=30), "migration child did not become ready"
+        assert reports.get(timeout=30) == (11, "wal")
+
+        after_metadata = path.stat()
+        assert (
+            after_metadata.st_uid,
+            after_metadata.st_gid,
+            stat.S_IMODE(after_metadata.st_mode),
+        ) == before
+        for suffix in ("-wal", "-shm"):
+            sidecar = Path(f"{path}{suffix}")
+            assert sidecar.exists()
+            metadata = sidecar.stat()
+            assert (metadata.st_uid, metadata.st_gid) == before[0:2]
+            assert stat.S_IMODE(metadata.st_mode) & 0o020
+    finally:
+        release.set()
+        process.join(timeout=30)
+        if process.is_alive():
+            process.terminate()
+            process.join(timeout=10)
+        assert not process.is_alive(), "migration child did not exit"
+        assert process.exitcode == 0
 
 
 def test_migration_discovery_occurs_after_pifire_begin_immediate(
