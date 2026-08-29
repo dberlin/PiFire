@@ -551,14 +551,16 @@ def _status(
         return LearningStatus.COLLECTING
     if not isinstance(assessment, CandidateAssessmentEvidence):
         return LearningStatus.FITTING
-    if "calibration-completeness" in blockers or "identifiability" in blockers:
-        return LearningStatus.INSUFFICIENT_EXCITATION
-    return LearningStatus.READY_FOR_REVIEW if not blockers else LearningStatus.EVALUATING
+    return LearningStatus.QUALIFIED if not blockers else LearningStatus.EVALUATING
 
 
 def _authoritative_status(state: Mapping[object, object]) -> LearningStatus | None:
     value = _text(state.get("status"))
     if value in {
+        LearningStatus.WARMING.value,
+        LearningStatus.EVALUATING.value,
+        LearningStatus.INTERRUPTED.value,
+        LearningStatus.QUALIFIED.value,
         LearningStatus.ACTIVATING.value,
         LearningStatus.ACTIVE.value,
         LearningStatus.FALLBACK.value,

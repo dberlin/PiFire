@@ -1751,7 +1751,7 @@ def test_promotion_and_rollback_preserve_the_compatible_fit_corpus(ds, tmp_path)
 @pytest.mark.parametrize(
     ("preparation", "policy", "message"),
     (
-        (SimpleNamespace(), ActivationPolicy.OPERATOR_REVIEWED, "causal-auto"),
+        (SimpleNamespace(), ActivationPolicy.PASSIVE_AUTO, "causal-auto"),
         (
             SimpleNamespace(),
             ActivationPolicy.CAUSAL_AUTO,

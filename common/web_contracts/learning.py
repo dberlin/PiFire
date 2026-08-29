@@ -13,13 +13,14 @@ NonBlankString = Annotated[str, Field(min_length=1, strict=True)]
 type FiniteNumber = int | FiniteFloat
 
 type CandidateOrigin = Literal["passive-online", "operator-calibration", "cook-refit"]
-type ActivationPolicy = Literal["causal-auto", "passive-auto", "operator-reviewed", "cook-refit"]
+type ActivationPolicy = Literal["causal-auto", "passive-auto", "cook-refit"]
 type ModelEvidenceStatus = Literal[
+    "warming",
     "collecting",
-    "insufficient-excitation",
     "fitting",
     "evaluating",
-    "ready-for-review",
+    "interrupted",
+    "qualified",
     "activating",
     "active",
     "fallback",
@@ -34,7 +35,6 @@ type CookRefitOutcome = Literal[
     "insufficient",
     "rejected",
     "failed",
-    "ready-for-review",
     "accepted-next-cook",
     "checkpoint-failure",
 ]
@@ -43,7 +43,7 @@ CookRefitAuthorization = TypeAliasType(
     #: "not-run" is the absence of a verdict, not a refusal: no refit has
     #: reached this checkpoint yet. "blocked" means one ran and authorized
     #: nothing.
-    Literal["not-run", "blocked", "operator-review", "next-cook"],
+    Literal["not-run", "blocked", "next-cook"],
 )
 type MpcCalibrationAction = Literal["start", "pause", "resume", "stop", "reset-progress"]
 type AmbientSource = Literal["measured", "manual", "weather", "configured"]
@@ -105,12 +105,61 @@ class CandidateAssessment(WireModel):
     payload_type: Literal["candidate_assessment"]
 
 
-class CandidateReport(WireModel):
+class ModelFitLineageReport(WireModel):
+    request_id: NonBlankString
+    parent_incumbent_digest: Digest
+    parent_incumbent_generation: NonNegativeInt
+    candidate_generation: NonNegativeInt
+    fit_corpus_digest: Digest
+    trigger_origin: CandidateOrigin
+    result_status: Literal["succeeded"]
+    candidate_digest: Digest
+
+
+class FitCorpusSliceReport(WireModel):
+    segment_id: NonBlankString
+    through_ordinal: NonNegativeInt
+    prefix_digest: Digest
+    pre_roll_count: NonNegativeInt
+    scored_count: NonNegativeInt
+
+
+class CorpusStatusReport(WireModel):
     digest: Digest | None
-    origin: CandidateOrigin | None
-    policy: ActivationPolicy | None
-    role_generation: NonNegativeInt | None
-    candidate_generation: NonNegativeInt | None
+    revision: NonNegativeInt | None
+    fit_partition_digest: Digest | None
+    slices: list[FitCorpusSliceReport]
+
+
+class PendingForecastOriginReport(WireModel):
+    origin_sequence: NonNegativeInt
+    horizon_steps: Literal[3, 15, 45, 90, 180]
+    role_generation: NonNegativeInt
+    candidate_generation: NonNegativeInt
+    incumbent_digest: Digest
+    candidate_digest: Digest
+
+
+class CausalEvaluationProgress(WireModel):
+    epoch: NonNegativeInt
+    round: NonNegativeInt
+    completed_horizons: list[Literal[3, 15, 45, 90, 180]]
+    required_horizons: list[Literal[3, 15, 45, 90, 180]]
+    wins: NonNegativeInt
+    required_wins: NonNegativeInt
+    resumed_from_previous_cook: bool
+    pending_origins: list[PendingForecastOriginReport]
+
+
+class CandidateReport(WireModel):
+    challenger_id: NonBlankString
+    phase: Literal["built", "evaluating", "qualified", "activating"]
+    lineage: ModelFitLineageReport
+    digest: Digest
+    origin: CandidateOrigin
+    policy: ActivationPolicy
+    role_generation: NonNegativeInt
+    candidate_generation: NonNegativeInt
     parameters: GreyParameters | None
     parameter_deltas: dict[str, FiniteFloat | None] | None
     fit_quality: FiniteFloat | None
@@ -182,7 +231,7 @@ class EvidenceGate(WireModel):
 
 
 class ModelEvidenceReport(WireModel):
-    schema_version: Literal[2]
+    schema_version: Literal[3]
     status: ModelEvidenceStatus
     mode: CandidateOrigin | None
     decision_id: str | None
@@ -191,7 +240,9 @@ class ModelEvidenceReport(WireModel):
     cook_refit: CookRefitReport
     window: FitWindowIdentity | None
     checks: dict[str, CheckStatus]
-    candidate: CandidateReport
+    evaluation: CausalEvaluationProgress | None
+    corpus: CorpusStatusReport
+    candidate: CandidateReport | None
     activation: ActivationReport
     active_model: ActiveModelReport
     identities: ModelIdentities
@@ -202,38 +253,6 @@ class ModelEvidenceReport(WireModel):
     blockers: list[str]
     errors: list[str]
     revision: Digest
-
-
-class ModelActivationRequest(WireModel):
-    candidate_digest: Digest
-    decision_id: NonBlankString
-
-
-class ModelActivationAccepted(WireModel):
-    accepted: Literal[True]
-    phase: Literal["prepared"]
-    transaction_id: Digest
-    decision_id: NonBlankString
-    candidate_digest: Digest
-    role_generation: NonNegativeInt
-
-
-class ModelActionRejected(WireModel):
-    accepted: Literal[False]
-    active_kind: Literal["grey-box"]
-    error: Literal["model-activation-rejected"]
-    detail: str
-
-
-class ModelActivationAcknowledgement(
-    RootModel[
-        Annotated[
-            ModelActivationAccepted | ModelActionRejected,
-            Field(discriminator="accepted"),
-        ]
-    ]
-):
-    pass
 
 
 class ModelRollbackRequest(WireModel):
@@ -256,10 +275,17 @@ class ModelRollbackAccepted(WireModel):
     rollback_digest: Digest
 
 
+class ModelRollbackRejected(WireModel):
+    accepted: Literal[False]
+    active_kind: Literal["grey-box"]
+    error: Literal["model-rollback-rejected"]
+    detail: str
+
+
 class ModelRollbackAcknowledgement(
     RootModel[
         Annotated[
-            ModelRollbackAccepted | ModelActionRejected,
+            ModelRollbackAccepted | ModelRollbackRejected,
             Field(discriminator="accepted"),
         ]
     ]

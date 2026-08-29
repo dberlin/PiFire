@@ -11,8 +11,6 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Generic, Protocol, TypeVar
 
-from common.web_contracts.learning import ModelActivationRequest
-
 from .contracts import ActivationPolicy, CandidateOrigin, activation_policy_for_origin
 
 if TYPE_CHECKING:
@@ -22,7 +20,6 @@ if TYPE_CHECKING:
 _PairT = TypeVar("_PairT", bound="OwnedMpcPair")
 _LEGACY_POLICY_BY_ORIGIN = {
     CandidateOrigin.PASSIVE_ONLINE: ActivationPolicy.PASSIVE_AUTO,
-    CandidateOrigin.OPERATOR_CALIBRATION: ActivationPolicy.OPERATOR_REVIEWED,
 }
 _ESTIMATOR_CONSTRUCTION_FIELDS = frozenset({"control_period", "est_q_temp", "est_q_dist", "est_r_meas"})
 
@@ -85,6 +82,18 @@ class ActivationPhase(StrEnum):
     PREPARED = "prepared"
     ACTIVE = "active"
     ABORTED = "aborted"
+
+
+@dataclass(frozen=True, slots=True)
+class ActivationRequest:
+    """Strict internal authorization for an automatic activation transaction."""
+
+    candidate_digest: str
+    decision_id: str
+
+    def __post_init__(self) -> None:
+        _digest(self.candidate_digest, "candidate_digest")
+        _nonblank(self.decision_id, "decision_id")
 
 
 @dataclass(frozen=True, slots=True)
@@ -331,14 +340,14 @@ class ActivationManager(Generic[_PairT]):
 
     def prepare(
         self,
-        request: ModelActivationRequest,
+        request: ActivationRequest,
         candidate: GreyControlPairDescriptor,
         *,
         origin: CandidateOrigin,
         policy: ActivationPolicy,
     ) -> ActivationDecision[_PairT]:
-        if not isinstance(request, ModelActivationRequest):
-            raise TypeError("request must be a ModelActivationRequest")
+        if not isinstance(request, ActivationRequest):
+            raise TypeError("request must be an ActivationRequest")
         if not isinstance(candidate, GreyControlPairDescriptor):
             raise TypeError("candidate must be a GreyControlPairDescriptor")
         if not isinstance(origin, CandidateOrigin) or not isinstance(policy, ActivationPolicy):

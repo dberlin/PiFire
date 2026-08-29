@@ -96,16 +96,16 @@ def _normalize_durable_challenger_policy(
         if not isinstance(decoded, dict) or decoded.get("phase") == "retired":
             return
         origin = CandidateOrigin(decoded.get("origin"))
-        stored_policy = ActivationPolicy(decoded.get("policy"))
+        stored_policy = decoded.get("policy")
     except TypeError, ValueError, json.JSONDecodeError:
         return
 
     current_policy = activation_policy_for_origin(origin)
     historical_policy = {
-        CandidateOrigin.PASSIVE_ONLINE: ActivationPolicy.PASSIVE_AUTO,
-        CandidateOrigin.OPERATOR_CALIBRATION: ActivationPolicy.OPERATOR_REVIEWED,
+        CandidateOrigin.PASSIVE_ONLINE: "passive-auto",
+        CandidateOrigin.OPERATOR_CALIBRATION: "operator-reviewed",
     }.get(origin)
-    if stored_policy not in {current_policy, historical_policy}:
+    if stored_policy not in {current_policy.value, historical_policy}:
         return
 
     decoded["policy"] = current_policy.value
@@ -117,7 +117,7 @@ def _normalize_durable_challenger_policy(
         origin is CandidateOrigin.OPERATOR_CALIBRATION
         and _exact_calibration_manifest(decoded.get("calibration_manifest")) is None
     )
-    if stored_policy is current_policy and not incomplete_operator:
+    if stored_policy == current_policy.value and not incomplete_operator:
         return
     replacement = replace(
         normalized,
@@ -146,14 +146,13 @@ def _normalize_activation_policy(
 ) -> ModelActivationState:
     try:
         origin = CandidateOrigin(state.origin)
-        stored_policy = ActivationPolicy(state.policy)
     except TypeError, ValueError:
         return state
     historical_policy = {
-        CandidateOrigin.PASSIVE_ONLINE: ActivationPolicy.PASSIVE_AUTO,
-        CandidateOrigin.OPERATOR_CALIBRATION: ActivationPolicy.OPERATOR_REVIEWED,
+        CandidateOrigin.PASSIVE_ONLINE: "passive-auto",
+        CandidateOrigin.OPERATOR_CALIBRATION: "operator-reviewed",
     }.get(origin)
-    if stored_policy is not historical_policy:
+    if state.policy != historical_policy:
         return state
     current_policy = activation_policy_for_origin(origin)
     connection.execute(
@@ -176,14 +175,13 @@ def _controller_snapshot_for_migration(snapshot: object) -> object:
             normalized[key] = value
     try:
         origin = CandidateOrigin(normalized.get("origin"))
-        stored_policy = ActivationPolicy(normalized.get("policy"))
     except TypeError, ValueError:
         return normalized
     historical_policy = {
-        CandidateOrigin.PASSIVE_ONLINE: ActivationPolicy.PASSIVE_AUTO,
-        CandidateOrigin.OPERATOR_CALIBRATION: ActivationPolicy.OPERATOR_REVIEWED,
+        CandidateOrigin.PASSIVE_ONLINE: "passive-auto",
+        CandidateOrigin.OPERATOR_CALIBRATION: "operator-reviewed",
     }.get(origin)
-    if stored_policy is historical_policy:
+    if normalized.get("policy") == historical_policy:
         normalized["policy"] = activation_policy_for_origin(origin).value
     return normalized
 
@@ -268,14 +266,13 @@ def _legacy_v4_challenger_state(
         incumbent = MpcPairFactory.migrate_legacy_descriptor(GreyControlPairDescriptor.from_dict(active_pair_value))
         candidate = MpcPairFactory.migrate_legacy_descriptor(GreyControlPairDescriptor.from_dict(candidate_pair_value))
         origin = CandidateOrigin(snapshot.get("origin"))
-        policy = ActivationPolicy(snapshot.get("policy"))
     except KeyError, TypeError, ValueError:
         return None
     if {
-        CandidateOrigin.PASSIVE_ONLINE: ActivationPolicy.PASSIVE_AUTO,
-        CandidateOrigin.OPERATOR_CALIBRATION: ActivationPolicy.OPERATOR_REVIEWED,
-        CandidateOrigin.COOK_REFIT: ActivationPolicy.COOK_REFIT,
-    }[origin] is not policy:
+        CandidateOrigin.PASSIVE_ONLINE: "passive-auto",
+        CandidateOrigin.OPERATOR_CALIBRATION: "operator-reviewed",
+        CandidateOrigin.COOK_REFIT: "cook-refit",
+    }[origin] != snapshot.get("policy"):
         return None
     if (
         identities.get("active_digest") != incumbent.model_digest

@@ -41,10 +41,6 @@ from controller.model_learning.contracts import (
 )
 
 _CHALLENGER_PHASES = frozenset({"built", "evaluating", "qualified", "activating", "retired"})
-_LEGACY_POLICY_BY_ORIGIN = {
-    CandidateOrigin.PASSIVE_ONLINE: ActivationPolicy.PASSIVE_AUTO,
-    CandidateOrigin.OPERATOR_CALIBRATION: ActivationPolicy.OPERATOR_REVIEWED,
-}
 
 
 class ModelChallengerConflictError(RuntimeError):
@@ -137,9 +133,7 @@ class ModelChallengerState:
             raise TypeError("challenger origin must be a CandidateOrigin")
         if not isinstance(self.policy, ActivationPolicy):
             raise TypeError("challenger policy must be an ActivationPolicy")
-        current_policy = activation_policy_for_origin(self.origin)
-        historical_policy = _LEGACY_POLICY_BY_ORIGIN.get(self.origin)
-        if self.policy is not current_policy and (self.phase != "retired" or self.policy is not historical_policy):
+        if self.policy is not activation_policy_for_origin(self.origin):
             raise ValueError("challenger origin-policy mismatch")
         if not isinstance(self.fit_corpus, FitCorpusIdentity):
             raise TypeError("challenger fit corpus must be a FitCorpusIdentity")
@@ -300,6 +294,12 @@ def _mapping(value: object, name: str) -> dict[str, object]:
     return value
 
 
+def _policy_from_stored(value: object, origin: CandidateOrigin) -> ActivationPolicy:
+    if value == "operator-reviewed" and origin is CandidateOrigin.OPERATOR_CALIBRATION:
+        return ActivationPolicy.CAUSAL_AUTO
+    return ActivationPolicy(value)
+
+
 def _corpus_from_dict(value: object) -> FitCorpusIdentity:
     data = _mapping(value, "fit corpus")
     slices = data.get("slices")
@@ -331,13 +331,14 @@ def _lineage_from_dict(value: object) -> ModelFitLineage:
 
 def _state_from_dict(value: object) -> ModelChallengerState:
     data = _mapping(value, "challenger state")
+    origin = CandidateOrigin(data.get("origin"))
     return ModelChallengerState(
         schema_version=data.get("schema_version"),
         challenger_id=data.get("challenger_id"),
         revision=data.get("revision"),
         phase=data.get("phase"),
-        origin=CandidateOrigin(data.get("origin")),
-        policy=ActivationPolicy(data.get("policy")),
+        origin=origin,
+        policy=_policy_from_stored(data.get("policy"), origin),
         fit_corpus=_corpus_from_dict(data.get("fit_corpus")),
         fit_lineage=_lineage_from_dict(data.get("fit_lineage")),
         fit_preparation=_mapping(data.get("fit_preparation"), "fit preparation"),

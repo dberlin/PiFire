@@ -69,23 +69,24 @@ def _winning_window(*, generation: int = 9) -> tuple[CompletedForecastOrigin, ..
     )
 
 
-def test_locked_model_learning_vocabularies_are_serialized_once() -> None:
+def test_current_model_learning_vocabularies_expose_only_causal_progress() -> None:
     assert {value.value for value in CandidateOrigin} == {
         "passive-online",
         "operator-calibration",
         "cook-refit",
     }
     assert {value.value for value in ActivationPolicy} == {
+        "causal-auto",
         "passive-auto",
-        "operator-reviewed",
         "cook-refit",
     }
     assert {value.value for value in LearningStatus} == {
+        "warming",
         "collecting",
-        "insufficient-excitation",
         "fitting",
         "evaluating",
-        "ready-for-review",
+        "interrupted",
+        "qualified",
         "activating",
         "active",
         "fallback",

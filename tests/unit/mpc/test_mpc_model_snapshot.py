@@ -449,6 +449,10 @@ def test_status_exposes_live_learning_state_separately_from_durable_activation_i
         "activation_phase": "aborted",
         "pending_persistence": False,
         "pending_swap": False,
+        "completed_horizons": [],
+        "required_horizons": [3, 15, 45, 90, 180],
+        "resumed_from_previous_cook": False,
+        "pending_origins": [],
         "failure": None,
     }
     assert len(status["learning"]["checkpoint_digest"]) == 64

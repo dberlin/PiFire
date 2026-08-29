@@ -266,7 +266,7 @@ def test_state_is_strict_frozen_and_owns_nested_json() -> None:
         ({"revision": True}, "revision"),
         ({"phase": "unknown"}, "phase"),
         ({"origin": "passive-online"}, "origin"),
-        ({"policy": ActivationPolicy.OPERATOR_REVIEWED}, "origin-policy"),
+        ({"policy": ActivationPolicy.PASSIVE_AUTO}, "origin-policy"),
         ({"controller_configuration_digest": "bad"}, "configuration"),
         ({"evaluation_round": 1}, "decision"),
         ({"consecutive_wins": 3}, "wins"),

@@ -1994,6 +1994,7 @@ class GreyLearningOrchestrator:
         self._consecutive_wins = 0
         self._evaluation_epoch = 0
         self._last_evaluation: Any | None = None
+        self._resumed_from_previous_cook = False
         self._handoff: CandidateHandoff | None = None
         self._started = False
         self._ownership_transferred = False
@@ -2014,6 +2015,22 @@ class GreyLearningOrchestrator:
     @property
     def evaluation_epoch(self) -> int:
         return self._evaluation_epoch
+
+    @property
+    def resumed_from_previous_cook(self) -> bool:
+        return self._resumed_from_previous_cook
+
+    @property
+    def completed_horizons(self) -> tuple[int, ...]:
+        if self._evaluator is None:
+            return ()
+        completed = self._evaluator.completed_origins[self._evaluation_cursor :]
+        present = {origin.horizon_steps for origin in completed}
+        return tuple(horizon for horizon in self.evaluation_config.required_horizons if horizon in present)
+
+    @property
+    def pending_origins(self) -> tuple[Any, ...]:
+        return () if self._evaluator is None else self._evaluator.pending_origins
 
     @property
     def handoff(self) -> CandidateHandoff | None:
@@ -2061,6 +2078,7 @@ class GreyLearningOrchestrator:
         self._evaluation_epoch = 0
         self._last_evaluation = None
         self._handoff = None
+        self._resumed_from_previous_cook = False
 
     def submit_superseding_corpus_fit(
         self,
@@ -2127,6 +2145,7 @@ class GreyLearningOrchestrator:
         self._evaluation_epoch = 0
         self._last_evaluation = None
         self._handoff = None
+        self._resumed_from_previous_cook = False
 
     def rebind_process(
         self,
@@ -2160,6 +2179,8 @@ class GreyLearningOrchestrator:
             self.controller_factory = controller_factory
         if timing_probe is not None:
             self.timing_probe = timing_probe
+        if compatible and self._prepared is not None and self._prepared.accepted:
+            self._resumed_from_previous_cook = True
 
     @staticmethod
     def _frame_rejection(frame: Any, role_generation: int) -> str | None:
@@ -2295,6 +2316,7 @@ class GreyLearningOrchestrator:
             self._evaluation_cursor = 0
             self._evaluation_epoch = 0
             self._consecutive_wins = 0
+            self._resumed_from_previous_cook = False
         return GreyLearningDelivery(message, (), prepared)
 
     def restore_persisted_challenger(
@@ -2333,6 +2355,7 @@ class GreyLearningOrchestrator:
         self._last_evaluation = None
         self._handoff = None
         self._ownership_transferred = False
+        self._resumed_from_previous_cook = True
 
     def register_causal_forecasts(
         self,

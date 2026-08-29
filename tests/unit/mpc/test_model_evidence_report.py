@@ -14,6 +14,7 @@ from common.control_trace import (
 from common.controller_model_state import ControllerModelStore
 from common.learning_trajectory import ModelFitLineage
 from common.model_evidence import (
+    ActivationLifecycleEvidence,
     CandidateAssessmentEvidence,
     EvidenceKind,
     ModelEvidenceRecord,
@@ -220,17 +221,14 @@ def _section(payload: dict[str, object], name: str) -> dict[str, object]:
     return value
 
 
-@pytest.mark.parametrize("status", tuple(LearningStatus))
-def test_report_emits_only_the_locked_status_vocabulary(status: LearningStatus) -> None:
-    payload = _payload(status=status)
-
-    assert payload["status"] == status.value
-    assert payload["status"] in {
+def test_report_status_vocabulary_is_automatic_causal_progress_only() -> None:
+    assert {status.value for status in LearningStatus} == {
+        "warming",
         "collecting",
-        "insufficient-excitation",
         "fitting",
         "evaluating",
-        "ready-for-review",
+        "interrupted",
+        "qualified",
         "activating",
         "active",
         "fallback",
@@ -246,7 +244,6 @@ def test_report_emits_only_the_locked_status_vocabulary(status: LearningStatus) 
         ("insufficient", "blocked", False),
         ("rejected", "blocked", False),
         ("failed", "blocked", False),
-        ("ready-for-review", "operator-review", False),
         ("accepted-next-cook", "blocked", False),
         ("checkpoint-failure", "blocked", False),
     ),
@@ -318,18 +315,15 @@ def test_report_serializes_locked_fit_and_check_statuses_without_linear_model_fi
 
     fit = _section(payload, "fit")
     checks = _section(payload, "checks")
-    candidate = _section(payload, "candidate")
     assert fit["status"] == "running"
     assert checks["native-build"] == "passed"
-    assert candidate["origin"] == "operator-calibration"
-    assert candidate["role_generation"] == 4
-    assert candidate["candidate_generation"] == 9
-    assert "pole_magnitude" not in candidate
-    assert "covariance" not in candidate
-    assert "state_alignment" not in candidate
+    assert payload["candidate"] is None
+    identities = _section(payload, "identities")
+    assert identities["candidate_digest"] == _CANDIDATE
+    assert identities["candidate_generation"] == 9
 
 
-def test_report_projects_durable_candidate_policy_before_assessment() -> None:
+def test_report_projects_activation_policy_without_fabricating_a_challenger() -> None:
     activation = _activation(phase="aborted")
     activation["origin"] = CandidateOrigin.PASSIVE_ONLINE.value
     activation["policy"] = ActivationPolicy.CAUSAL_AUTO.value
@@ -343,9 +337,10 @@ def test_report_projects_durable_candidate_policy_before_assessment() -> None:
         calibration_command_high_water=0,
     ).as_dict()
 
-    candidate = _section(payload, "candidate")
-    assert candidate["origin"] == CandidateOrigin.PASSIVE_ONLINE.value
-    assert candidate["policy"] == ActivationPolicy.CAUSAL_AUTO.value
+    assert payload["candidate"] is None
+    activation_report = _section(payload, "activation")
+    assert activation_report["origin"] == CandidateOrigin.PASSIVE_ONLINE.value
+    assert activation_report["policy"] == ActivationPolicy.CAUSAL_AUTO.value
 
 
 def test_prior_active_activation_does_not_override_new_evaluating_candidate(
@@ -362,7 +357,7 @@ def test_prior_active_activation_does_not_override_new_evaluating_candidate(
         {
             "incumbent_digest": challenger.incumbent.model_digest,
             "role_generation": challenger.incumbent.role_generation,
-            "policy": ActivationPolicy.OPERATOR_REVIEWED.value,
+            "policy": "operator-reviewed",
         }
     )
     live = _live(status=LearningStatus.EVALUATING)
@@ -539,6 +534,80 @@ def test_inconsistent_live_candidate_origin_fails_closed_visibly() -> None:
     assert payload["errors"] == ["live-candidate-origin-mismatch"]
 
 
+def test_current_lifecycle_matches_production_activation_decision_key() -> None:
+    current_lifecycle = ModelEvidenceRecord(
+        evidence_id="current-active",
+        kind=EvidenceKind.ACTIVATION_LIFECYCLE,
+        session_id="session-current",
+        cook_id="cook-current",
+        timestamp_ms=2,
+        role_generation=4,
+        model_digest=_CANDIDATE,
+        provenance_digest=_INCUMBENT,
+        payload=ActivationLifecycleEvidence(
+            decision_id="decision-9",
+            phase="active",
+            origin=CandidateOrigin.OPERATOR_CALIBRATION.value,
+            policy=ActivationPolicy.CAUSAL_AUTO.value,
+        ),
+    )
+    activation = _activation(phase="active")
+    activation["evidence_decision_id"] = activation.pop("decision_id")
+
+    payload = build_learning_report(
+        (current_lifecycle,),
+        activation_state=activation,
+        live_status=_live(status=LearningStatus.ACTIVE),
+        calibration_command_high_water=7,
+    ).as_dict()
+
+    assert payload["latest_lifecycle"] == {
+        "decision_id": "decision-9",
+        "phase": "active",
+        "origin": "operator-calibration",
+        "policy": "causal-auto",
+        "reason": None,
+        "payload_type": "activation_lifecycle",
+    }
+
+
+def test_stale_active_lifecycle_cannot_override_a_new_live_challenger() -> None:
+    stale_digest = "c" * 64
+    stale_lifecycle = ModelEvidenceRecord(
+        evidence_id="stale-active",
+        kind=EvidenceKind.ACTIVATION_LIFECYCLE,
+        session_id="session-old",
+        cook_id="cook-old",
+        timestamp_ms=2,
+        role_generation=3,
+        model_digest=stale_digest,
+        provenance_digest=_INCUMBENT,
+        payload=ActivationLifecycleEvidence(
+            decision_id="decision-old",
+            phase="active",
+            origin=CandidateOrigin.PASSIVE_ONLINE.value,
+            policy=ActivationPolicy.CAUSAL_AUTO.value,
+        ),
+    )
+    stale_activation = {
+        **_activation(phase="active"),
+        "candidate_digest": stale_digest,
+        "role_generation": 3,
+        "candidate_generation": 8,
+        "decision_id": "decision-old",
+    }
+
+    payload = build_learning_report(
+        (stale_lifecycle,),
+        activation_state=stale_activation,
+        live_status=_live(status=LearningStatus.EVALUATING),
+        calibration_command_high_water=7,
+    ).as_dict()
+
+    assert payload["status"] == "evaluating"
+    assert payload["latest_lifecycle"] is None
+
+
 def test_retired_evidence_is_counted_only_as_audit_history() -> None:
     current = _evidence("current-gap")
     retired = _evidence("retired-gap").model_copy(update={"schema_version": 2})
@@ -631,7 +700,8 @@ def test_live_transient_phases_overlay_without_changing_durable_identity(live, e
 
     assert payload["status"] == expected
     assert _section(payload, "active_model")["digest"] == _INCUMBENT
-    assert _section(payload, "candidate")["digest"] == _CANDIDATE
+    assert payload["candidate"] is None
+    assert _section(payload, "identities")["candidate_digest"] == _CANDIDATE
 
 
 def test_live_terminal_failure_overrides_stale_active_lifecycle() -> None:
@@ -654,40 +724,155 @@ def test_live_terminal_failure_overrides_stale_active_lifecycle() -> None:
     assert payload["failure"] == live["failure"]
 
 
-def test_manual_policy_comes_from_matching_current_candidate_assessment() -> None:
-    assessment = ModelEvidenceRecord(
-        evidence_id="assessment-reviewed",
-        kind=EvidenceKind.CANDIDATE_ASSESSMENT,
-        session_id="session-a",
-        cook_id="cook-a",
-        timestamp_ms=3,
-        role_generation=4,
-        model_digest=_CANDIDATE,
-        provenance_digest=_INCUMBENT,
-        payload=CandidateAssessmentEvidence(
-            decision_id="decision-1",
-            origin="operator-calibration",
-            policy="operator-reviewed",
-            fit_accepted=True,
-            identifiability_accepted=True,
-            native_build="passed",
-            native_dry_solve="passed",
-            target_timing="passed",
-            confidence_accepted=True,
-        ),
+@pytest.mark.parametrize(
+    (
+        "expected_status",
+        "round_number",
+        "wins",
+        "completed_horizons",
+        "resumed",
+        "pending_count",
+    ),
+    (
+        ("warming", 0, 1, (), True, 0),
+        ("collecting", 0, 0, (), False, 0),
+        ("evaluating", 1, 1, (3, 15), False, 1),
+        ("interrupted", 1, 1, (), True, 0),
+        ("qualified", 2, 2, _REQUIRED_HORIZONS, False, 0),
+        ("activating", 2, 2, _REQUIRED_HORIZONS, False, 0),
+        ("active", 2, 2, _REQUIRED_HORIZONS, False, 0),
+    ),
+)
+def test_report_v3_projects_exact_causal_progress_and_lineage_for_every_phase(
+    monkeypatch,
+    expected_status,
+    round_number,
+    wins,
+    completed_horizons,
+    resumed,
+    pending_count,
+) -> None:
+    phase = (
+        "activating"
+        if expected_status == "activating"
+        else "qualified"
+        if expected_status in {"qualified", "active"}
+        else "evaluating"
     )
-    live = _live(status=LearningStatus.EVALUATING)
-    live["origin"] = CandidateOrigin.OPERATOR_CALIBRATION
+    challenger = _stored_challenger(
+        phase=phase,
+        evaluation_epoch=3,
+        evaluation_round=round_number,
+        consecutive_wins=wins,
+        last_decision_id=(None if round_number == 0 else f"decision-3-{round_number}"),
+        last_evidence_id=(None if round_number == 0 else f"round-3-{round_number}"),
+        activation_transaction_id=("transaction-3" if phase == "activating" else None),
+    )
+    pending_origin = {
+        "origin_sequence": 81,
+        "horizon_steps": 45,
+        "role_generation": challenger.incumbent.role_generation,
+        "candidate_generation": challenger.candidate.candidate_generation,
+        "incumbent_digest": challenger.incumbent.model_digest,
+        "candidate_digest": challenger.candidate.model_digest,
+    }
+    live = {
+        "status": expected_status,
+        "fit_status": "succeeded",
+        "origin": challenger.origin.value,
+        "role_generation": challenger.incumbent.role_generation,
+        "candidate_generation": challenger.candidate.candidate_generation,
+        "candidate_digest": challenger.candidate.model_digest,
+        "checkpoint_digest": challenger.incumbent.model_digest,
+        "checks": {},
+        "activation_phase": (
+            "active" if expected_status == "active" else "prepared" if expected_status == "activating" else "aborted"
+        ),
+        "pending_persistence": False,
+        "pending_swap": expected_status == "activating",
+        "completed_horizons": completed_horizons,
+        "required_horizons": _REQUIRED_HORIZONS,
+        "resumed_from_previous_cook": resumed,
+        "pending_origins": ([pending_origin] if pending_count else []),
+    }
+    activation = {
+        "phase": live["activation_phase"],
+        "incumbent_digest": challenger.incumbent.model_digest,
+        "candidate_digest": challenger.candidate.model_digest,
+        "role_generation": challenger.incumbent.role_generation,
+        "candidate_generation": challenger.candidate.candidate_generation,
+        "origin": challenger.origin.value,
+        "policy": ActivationPolicy.CAUSAL_AUTO.value,
+    }
+    checkpoint = {
+        "identities": {
+            "active_digest": challenger.incumbent.model_digest,
+            "active_generation": challenger.incumbent.role_generation,
+            "rollback_digest": None,
+            "rollback_generation": None,
+        },
+        "challenger_authority": {
+            "challenger_id": challenger.challenger_id,
+            "revision": challenger.revision,
+        },
+        "cook_refit": {"status": "idle", "latest": None},
+    }
+    monkeypatch.setattr(report_module, "_validated_checkpoint", lambda value: value)
 
     payload = build_learning_report(
-        (assessment,),
-        activation_state={**_activation(phase="aborted"), "policy": None},
+        (),
+        activation_state=activation,
         live_status=live,
-        calibration_command_high_water=7,
+        checkpoint=checkpoint,
+        challenger_state=challenger,
+        calibration_command_high_water=11,
     ).as_dict()
 
-    assert payload["status"] == "ready-for-review"
-    assert payload["candidate"]["policy"] == "operator-reviewed"
+    assert payload["schema_version"] == 3
+    assert payload["status"] == expected_status
+    candidate = _section(payload, "candidate")
+    assert candidate["policy"] == "causal-auto"
+    assert candidate["challenger_id"] == challenger.challenger_id
+    assert candidate["phase"] == phase
+    assert candidate["lineage"] == {
+        "request_id": challenger.fit_lineage.request_id,
+        "parent_incumbent_digest": challenger.incumbent.model_digest,
+        "parent_incumbent_generation": challenger.incumbent.role_generation,
+        "candidate_generation": challenger.candidate.candidate_generation,
+        "fit_corpus_digest": challenger.fit_corpus.corpus_digest,
+        "trigger_origin": challenger.origin.value,
+        "result_status": "succeeded",
+        "candidate_digest": challenger.candidate.model_digest,
+    }
+    assert payload["evaluation"] == {
+        "epoch": 3,
+        "round": round_number,
+        "completed_horizons": list(completed_horizons),
+        "required_horizons": list(_REQUIRED_HORIZONS),
+        "wins": wins,
+        "required_wins": 2,
+        "resumed_from_previous_cook": resumed,
+        "pending_origins": ([pending_origin] if pending_count else []),
+    }
+    corpus_slice = challenger.fit_corpus.slices[0]
+    assert payload["corpus"] == {
+        "digest": challenger.fit_corpus.corpus_digest,
+        "revision": 7,
+        "fit_partition_digest": challenger.fit_corpus.fit_partition_digest,
+        "slices": [
+            {
+                "segment_id": corpus_slice.segment_id,
+                "through_ordinal": 2,
+                "prefix_digest": corpus_slice.prefix_digest,
+                "pre_roll_count": 1,
+                "scored_count": 2,
+            }
+        ],
+    }
+    serialized_values = json.dumps(payload, sort_keys=True)
+    assert "operator-reviewed" not in serialized_values
+    assert "ready-for-review" not in serialized_values
+    assert "operator-review" not in serialized_values
 
 
 def test_production_live_terminal_failure_overlays_prior_active_with_exact_reason(
@@ -1052,5 +1237,9 @@ def test_real_evaluation_blocker_persists_rejection_context_before_retirement(ds
     assert confidence[0].payload.blocked is True
     assert confidence[0].payload.reason == "confidence-window"
     assert {record.event_kind.value for record in trace} >= {"candidate_assessment"}
-    assert report.as_dict()["candidate"]["assessment"]["rejection_reasons"] == ["confidence-window"]
+    assert report.as_dict()["candidate"] is None
+    assert any(
+        row["kind"] == "candidate_assessment" and row["payload"]["rejection_reasons"] == ["confidence-window"]
+        for row in artifact["records"]
+    )
     assert artifact["report"] == report.as_dict()

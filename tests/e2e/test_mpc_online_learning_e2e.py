@@ -887,7 +887,7 @@ def _seed_v6_state(config: dict[str, Any]) -> str:
     snapshot["candidate_pair"] = candidate.to_dict()
     snapshot["evidence"]["confidence_decision_id"] = None
     snapshot["origin"] = CandidateOrigin.OPERATOR_CALIBRATION.value
-    snapshot["policy"] = ActivationPolicy.OPERATOR_REVIEWED.value
+    snapshot["policy"] = "operator-reviewed"
     snapshot["identities"]["candidate_digest"] = candidate.model_digest
     snapshot["identities"]["candidate_generation"] = candidate.candidate_generation
     snapshot["activation"] = {
@@ -919,7 +919,7 @@ def _seed_v6_state(config: dict[str, Any]) -> str:
                 json.dumps(candidate.to_dict(), sort_keys=True, separators=(",", ":")),
                 json.dumps(active.to_dict(), sort_keys=True, separators=(",", ":")),
                 CandidateOrigin.OPERATOR_CALIBRATION.value,
-                ActivationPolicy.OPERATOR_REVIEWED.value,
+                "operator-reviewed",
                 candidate.candidate_generation,
                 candidate.model_digest,
                 aborted.reason,

@@ -168,7 +168,7 @@ def test_operator_qualification_fails_closed_on_incomplete_manifest(
 def test_distinct_role_and_candidate_generations_select_evidence_using_canonical_origin() -> None:
     report = _report(_qualifying())
 
-    assert report.status is LearningStatus.READY_FOR_REVIEW
+    assert report.status is LearningStatus.QUALIFIED
     assert report.active_kind == "grey-box"
     assert report.generation == 9
     assert report.blockers == ()
@@ -190,7 +190,7 @@ def test_operator_calibration_requires_all_completed_probe_stages() -> None:
 
     assert incomplete.blockers == ("calibration-completeness",)
     assert complete.blockers == ()
-    assert complete.status is LearningStatus.READY_FOR_REVIEW
+    assert complete.status is LearningStatus.QUALIFIED
 
 
 @pytest.mark.parametrize("status", (LearningStatus.ACTIVATING, LearningStatus.ERROR))
@@ -217,7 +217,7 @@ def test_destructive_evidence_gap_fails_closed_without_changing_the_grey_owner()
     report = _report(_qualifying() + (gap,))
 
     assert report.active_kind == "grey-box"
-    assert report.status is not LearningStatus.READY_FOR_REVIEW
+    assert report.status is not LearningStatus.QUALIFIED
     assert report.blockers == ("recorder-gap",)
 
 

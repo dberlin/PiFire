@@ -7,11 +7,9 @@ import pytest
 
 from common.cook_diagnostics import ControllerLearningReport
 from common.web_contracts.learning import (
-    ModelActionRejected,
-    ModelActivationAccepted,
-    ModelActivationRequest,
     ModelEvidenceReport,
     ModelRollbackAccepted,
+    ModelRollbackRejected,
     ModelRollbackRequest,
     MpcCalibrationCommand,
 )
@@ -253,23 +251,7 @@ def test_model_evidence_report_contract_preserves_the_real_canonical_projection(
     assert validated.model_dump(mode="json", exclude_unset=True) == payload
 
 
-def test_model_evidence_action_contracts_preserve_exact_request_and_response_members():
-    digest = "a" * 64
-    request = ModelActivationRequest(candidate_digest=digest, decision_id="decision-1")
-    accepted = ModelActivationAccepted(
-        accepted=True,
-        phase="prepared",
-        transaction_id="b" * 64,
-        decision_id="decision-1",
-        candidate_digest=digest,
-        role_generation=3,
-    )
-    rejected = ModelActionRejected(
-        accepted=False,
-        active_kind="grey-box",
-        error="model-activation-rejected",
-        detail="stale-confidence-decision",
-    )
+def test_model_evidence_action_contracts_preserve_exact_rollback_and_calibration_members():
     rollback_request = ModelRollbackRequest(reason="operator observed instability")
     rollback = ModelRollbackAccepted(
         accepted=True,
@@ -278,6 +260,12 @@ def test_model_evidence_action_contracts_preserve_exact_request_and_response_mem
         reason="operator observed instability",
         role_generation=4,
         rollback_digest="c" * 64,
+    )
+    rejected = ModelRollbackRejected(
+        accepted=False,
+        active_kind="grey-box",
+        error="model-rollback-rejected",
+        detail="activation-state-changed",
     )
     calibration = MpcCalibrationCommand(
         action="start",
@@ -288,23 +276,11 @@ def test_model_evidence_action_contracts_preserve_exact_request_and_response_mem
         pellets_confirmed=True,
     )
 
-    assert request.model_dump(mode="json") == {
-        "candidate_digest": digest,
-        "decision_id": "decision-1",
-    }
-    assert accepted.model_dump(mode="json") == {
-        "accepted": True,
-        "phase": "prepared",
-        "transaction_id": "b" * 64,
-        "decision_id": "decision-1",
-        "candidate_digest": digest,
-        "role_generation": 3,
-    }
     assert rejected.model_dump(mode="json") == {
         "accepted": False,
         "active_kind": "grey-box",
-        "error": "model-activation-rejected",
-        "detail": "stale-confidence-decision",
+        "error": "model-rollback-rejected",
+        "detail": "activation-state-changed",
     }
     assert rollback_request.model_dump(mode="json") == {
         "reason": "operator observed instability",

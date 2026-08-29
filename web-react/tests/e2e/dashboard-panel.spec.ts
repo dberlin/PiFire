@@ -43,19 +43,28 @@ function evidenceReport(
   decisionId: string,
   options: {
     origin?: "passive-online" | "operator-calibration" | "cook-refit";
-    policy?: "passive-auto" | "operator-reviewed" | "cook-refit";
+    policy?: "causal-auto" | "passive-auto" | "cook-refit";
     roleGeneration?: number;
   } = {},
 ): ModelEvidenceReport {
   const origin = options.origin ?? "passive-online";
-  const policy = options.policy ?? "passive-auto";
+  const policy = options.policy ?? "causal-auto";
   const roleGeneration = options.roleGeneration ?? 4;
-  const complete = !["collecting", "insufficient-excitation", "fitting"].includes(status);
+  const complete = !["warming", "collecting", "fitting"].includes(status);
   const activationPhase =
     status === "active" ? "active" : status === "activating" ? "prepared" : "aborted";
+  const challengerPhase =
+    status === "activating"
+      ? "activating"
+      : ["qualified", "active"].includes(status)
+        ? "qualified"
+        : "evaluating";
   const activeDigest = "c".repeat(64);
+  const corpusDigest = "e".repeat(64);
+  const requiredHorizons = [3, 15, 45, 90, 180];
+  const qualified = ["qualified", "activating", "active"].includes(status);
   return {
-    schema_version: 2,
+    schema_version: 3,
     status,
     mode: origin,
     decision_id: decisionId,
@@ -69,18 +78,18 @@ function evidenceReport(
       status:
         status === "fitting"
           ? "running"
-          : status === "collecting" || status === "insufficient-excitation"
+          : status === "warming" || status === "collecting"
             ? "idle"
             : "succeeded",
-      request_id: status === "collecting" ? null : "fit-e2e-5",
-      window_id: status === "collecting" ? null : "window-e2e-5",
+      request_id: status === "warming" || status === "collecting" ? null : "fit-e2e-5",
+      window_id: status === "warming" || status === "collecting" ? null : "window-e2e-5",
       error: null,
     },
     cook_refit: {
       status: "idle",
       latest: null,
       final_status: "idle",
-      authorization: "blocked",
+      authorization: "not-run",
       next_cook: false,
     },
     window: complete
@@ -103,6 +112,8 @@ function evidenceReport(
         }
       : {},
     candidate: {
+      challenger_id: "challenger-e2e-5",
+      phase: challengerPhase,
       digest,
       origin,
       policy,
@@ -137,6 +148,52 @@ function evidenceReport(
             payload_type: "candidate_assessment",
           }
         : null,
+      lineage: {
+        request_id: "fit-e2e-5",
+        parent_incumbent_digest: activeDigest,
+        parent_incumbent_generation: roleGeneration,
+        candidate_generation: 5,
+        fit_corpus_digest: corpusDigest,
+        trigger_origin: origin,
+        result_status: "succeeded",
+        candidate_digest: digest,
+      },
+    },
+    evaluation: {
+      epoch: status === "interrupted" ? 2 : 1,
+      round: qualified ? 2 : complete ? 1 : 0,
+      completed_horizons: qualified ? requiredHorizons : complete ? [3, 15] : [],
+      required_horizons: requiredHorizons,
+      wins: qualified ? 2 : complete ? 1 : 0,
+      required_wins: 2,
+      resumed_from_previous_cook: status === "interrupted",
+      pending_origins:
+        status === "evaluating"
+          ? [
+              {
+                origin_sequence: 121,
+                horizon_steps: 45,
+                role_generation: roleGeneration,
+                candidate_generation: 5,
+                incumbent_digest: activeDigest,
+                candidate_digest: digest,
+              },
+            ]
+          : [],
+    },
+    corpus: {
+      digest: corpusDigest,
+      revision: 7,
+      fit_partition_digest: "f".repeat(64),
+      slices: [
+        {
+          segment_id: "segment-e2e-5",
+          through_ordinal: 120,
+          prefix_digest: "a".repeat(64),
+          pre_roll_count: 20,
+          scored_count: 101,
+        },
+      ],
     },
     activation: {
       phase: activationPhase,
@@ -565,7 +622,7 @@ test("one report trigger stays after Hopper and the full panel is reachable at b
     const dialog = page.getByRole("dialog", { name: "MPC model learning" });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText("Role generation: 44", { exact: true })).toBeVisible();
-    await expect(dialog.getByText("Candidate generation: 5")).toBeVisible();
+    await expect(dialog.getByText("Candidate generation: 5", { exact: true })).toBeVisible();
     const dialogBox = await dialog.boundingBox();
     expect(dialogBox).not.toBeNull();
     expect(dialogBox!.x).toBeGreaterThanOrEqual(0);
@@ -776,16 +833,18 @@ test("passive automatic transitions never expose reviewed activation controls", 
   await page.route("**/api/model-evidence/report", (route) => route.fulfill({ json: report }));
 
   for (const [status, label] of [
+    ["warming", "Warming"],
     ["collecting", "Collecting"],
     ["fitting", "Fitting"],
     ["evaluating", "Evaluating"],
-    ["ready-for-review", "Ready for review"],
+    ["interrupted", "Interrupted"],
+    ["qualified", "Qualified"],
     ["activating", "Activating"],
     ["active", "Active"],
   ] as const) {
     report = evidenceReport(status, EXACT_DIGEST, EXACT_DECISION, {
       origin: "passive-online",
-      policy: "passive-auto",
+      policy: "causal-auto",
       roleGeneration: 20,
     });
     await page.reload();
@@ -804,15 +863,15 @@ test("passive automatic transitions never expose reviewed activation controls", 
   }
 });
 
-test("reviewed calibration activates exact digest and decision, then rolls back only to explicit owner", async ({
+test("automatic calibration exposes causal progress and rolls back only to explicit owner", async ({
   page,
 }) => {
-  let report = evidenceReport("ready-for-review", EXACT_DIGEST, EXACT_DECISION, {
+  let report = evidenceReport("interrupted", EXACT_DIGEST, EXACT_DECISION, {
     origin: "operator-calibration",
-    policy: "operator-reviewed",
+    policy: "causal-auto",
     roleGeneration: 4,
   });
-  const activationBodies: unknown[] = [];
+  let activationRequests = 0;
   await page.route("**/api/settings", (route) =>
     route.fulfill({
       json: {
@@ -825,29 +884,14 @@ test("reviewed calibration activates exact digest and decision, then rolls back 
   );
   await page.route("**/api/model-evidence/report", (route) => route.fulfill({ json: report }));
   await page.route("**/api/model-evidence/activate", async (route) => {
-    const body = route.request().postDataJSON();
-    activationBodies.push(body);
-    report = evidenceReport("activating", EXACT_DIGEST, EXACT_DECISION, {
-      origin: "operator-calibration",
-      policy: "operator-reviewed",
-      roleGeneration: 4,
-    });
-    await route.fulfill({
-      json: {
-        accepted: true,
-        phase: "prepared",
-        transaction_id: "transaction-e2e-5",
-        decision_id: EXACT_DECISION,
-        candidate_digest: EXACT_DIGEST,
-        role_generation: 4,
-      },
-    });
+    activationRequests += 1;
+    await route.fulfill({ status: 404 });
   });
   await page.route("**/api/model-evidence/rollback", async (route) => {
     expect(route.request().postDataJSON()).toEqual({ reason: "active-solve-failed" });
     const fallback = evidenceReport("fallback", EXACT_DIGEST, EXACT_DECISION, {
       origin: "operator-calibration",
-      policy: "operator-reviewed",
+      policy: "causal-auto",
       roleGeneration: 6,
     });
     report = {
@@ -871,22 +915,41 @@ test("reviewed calibration activates exact digest and decision, then rolls back 
   });
 
   await page.reload();
-  const trigger = page.getByRole("button", { name: "MPC learning: ready for review" });
+  let trigger = page.getByRole("button", { name: "MPC learning: interrupted" });
   await trigger.scrollIntoViewIfNeeded();
   await trigger.click();
-  await page.getByLabel("Type the exact candidate digest").fill(EXACT_DIGEST);
-  await page.getByLabel("Type the exact confidence decision ID").fill(EXACT_DECISION);
-  await page.getByRole("button", { name: "Activate exact model" }).click();
-  await expect(page.getByText("Activating", { exact: true })).toBeVisible();
-  await expect(page.getByText("Durable phase: prepared")).toBeVisible();
-  await expect(page.getByText("Frame-boundary swap pending: yes")).toBeVisible();
-  expect(activationBodies).toEqual([
-    { candidate_digest: EXACT_DIGEST, decision_id: EXACT_DECISION },
-  ]);
+  let dialog = page.getByRole("dialog", { name: "MPC model learning" });
+  await expect(dialog).toContainText("Evaluation epoch: 2");
+  await expect(dialog).toContainText("Evaluation round: 1");
+  await expect(dialog).toContainText("Completed horizons: 3, 15");
+  await expect(dialog).toContainText("Wins: 1 / 2");
+  await expect(dialog).toContainText("Resumed from previous cook: yes");
+  await expect(dialog).toContainText("Pending origins: none");
+  await dialog.getByRole("button", { name: "Close MPC model learning" }).click();
+
+  report = evidenceReport("qualified", EXACT_DIGEST, EXACT_DECISION, {
+    origin: "operator-calibration",
+    policy: "causal-auto",
+    roleGeneration: 4,
+  });
+  await page.reload();
+  trigger = page.getByRole("button", { name: "MPC learning: qualified" });
+  await trigger.scrollIntoViewIfNeeded();
+  await trigger.click();
+  dialog = page.getByRole("dialog", { name: "MPC model learning" });
+  await expect(dialog).toContainText("Wins: 2 / 2");
+  await expect(dialog).toContainText("challenger-e2e-5");
+  await expect(dialog).toContainText("segment-e2e-5");
+  await expect(dialog.getByLabel("Type the exact candidate digest")).toHaveCount(0);
+  await expect(dialog.getByLabel("Type the exact confidence decision ID")).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: "Activate exact model" })).toHaveCount(0);
+  await expect(dialog).not.toContainText("operator-reviewed");
+  await dialog.getByRole("button", { name: "Close MPC model learning" }).click();
+  expect(activationRequests).toBe(0);
 
   report = evidenceReport("active", EXACT_DIGEST, EXACT_DECISION, {
     origin: "operator-calibration",
-    policy: "operator-reviewed",
+    policy: "causal-auto",
     roleGeneration: 5,
   });
   await page.reload();
@@ -898,6 +961,7 @@ test("reviewed calibration activates exact digest and decision, then rolls back 
   await page.getByRole("button", { name: "Roll back to explicit owner" }).click();
   await expect(page.getByText("Fallback", { exact: true })).toBeVisible();
   await expect(page.getByText("Reason: active-solve-failed")).toBeVisible();
+  expect(activationRequests).toBe(0);
 });
 
 test("cook-refit, native rejection, structured failure, and schema invalidation remain backend-authored", async ({

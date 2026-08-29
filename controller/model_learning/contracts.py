@@ -55,7 +55,6 @@ class CandidateOrigin(StrEnum):
 class ActivationPolicy(StrEnum):
     CAUSAL_AUTO = "causal-auto"
     PASSIVE_AUTO = "passive-auto"
-    OPERATOR_REVIEWED = "operator-reviewed"
     COOK_REFIT = "cook-refit"
 
 
@@ -71,11 +70,12 @@ def activation_policy_for_origin(origin: CandidateOrigin) -> ActivationPolicy:
 
 
 class LearningStatus(StrEnum):
+    WARMING = "warming"
     COLLECTING = "collecting"
-    INSUFFICIENT_EXCITATION = "insufficient-excitation"
     FITTING = "fitting"
     EVALUATING = "evaluating"
-    READY_FOR_REVIEW = "ready-for-review"
+    INTERRUPTED = "interrupted"
+    QUALIFIED = "qualified"
     ACTIVATING = "activating"
     ACTIVE = "active"
     FALLBACK = "fallback"

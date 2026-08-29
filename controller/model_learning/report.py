@@ -25,10 +25,17 @@ from common.model_evidence import (
 from common.persistence.protocols import JsonValue
 from common.web_contracts.learning import ModelEvidenceReport
 
-from .contracts import ActivationPolicy, CandidateOrigin, CheckStatus, FitStatus, LearningStatus
+from .contracts import (
+    ActivationPolicy,
+    CandidateOrigin,
+    CheckStatus,
+    FitStatus,
+    LearningStatus,
+    activation_policy_for_origin,
+)
 
-REPORT_SCHEMA_VERSION = 2
-ARTIFACT_SCHEMA = "pifire-grey-learning-report/v2"
+REPORT_SCHEMA_VERSION = 3
+ARTIFACT_SCHEMA = "pifire-grey-learning-report/v3"
 _REPORT_CACHE_MAX_ENTRIES = 8
 _REPORT_CACHE: OrderedDict[str, LearningReport] = OrderedDict()
 _REPORT_CACHE_LOCK = threading.Lock()
@@ -179,6 +186,8 @@ def _challenger_projection(value: object) -> dict[str, object]:
         "n_delay",
         configuration.get("delay_states"),
     )
+    corpus = value.fit_corpus
+    lineage = value.fit_lineage
     return {
         "challenger_id": value.challenger_id,
         "revision": value.revision,
@@ -192,6 +201,35 @@ def _challenger_projection(value: object) -> dict[str, object]:
         "role_generation": value.incumbent.role_generation,
         "decision_id": value.last_decision_id,
         "window": window,
+        "evaluation_epoch": value.evaluation_epoch,
+        "evaluation_round": value.evaluation_round,
+        "consecutive_wins": value.consecutive_wins,
+        "required_wins": value.required_wins,
+        "corpus": {
+            "digest": corpus.corpus_digest,
+            "revision": corpus.corpus_revision,
+            "fit_partition_digest": corpus.fit_partition_digest,
+            "slices": [
+                {
+                    "segment_id": item.segment_id,
+                    "through_ordinal": item.through_ordinal,
+                    "prefix_digest": item.prefix_digest,
+                    "pre_roll_count": item.pre_roll_count,
+                    "scored_count": item.scored_count,
+                }
+                for item in corpus.slices
+            ],
+        },
+        "lineage": {
+            "request_id": lineage.request_id,
+            "parent_incumbent_digest": lineage.parent_incumbent_digest,
+            "parent_incumbent_generation": lineage.parent_incumbent_generation,
+            "candidate_generation": lineage.candidate_generation,
+            "fit_corpus_digest": lineage.fit_corpus_digest,
+            "trigger_origin": lineage.trigger_origin,
+            "result_status": lineage.result_status,
+            "candidate_digest": lineage.candidate_digest,
+        },
     }
 
 
@@ -301,12 +339,9 @@ def build_learning_report(
         not isinstance(cook_refit_latest, str) or cook_refit_latest not in _LEGACY_COOK_REFIT_OUTCOMES
     ):
         raise ValueError("invalid cook_refit latest")
-    if cook_refit_latest is None:
-        cook_refit_authorization = "not-run"
-    elif cook_refit_latest == "ready-for-review":
-        cook_refit_authorization = "operator-review"
-    else:
-        cook_refit_authorization = "blocked"
+    if cook_refit_latest == "ready-for-review":
+        cook_refit_latest = "rejected"
+    cook_refit_authorization = "not-run" if cook_refit_latest is None else "blocked"
 
     identities = checkpoint_map.get("identities")
     identities = identities if isinstance(identities, Mapping) else {}
@@ -325,6 +360,14 @@ def build_learning_report(
         activation_candidate_identity == identity for identity in current_candidate_identities
     )
     activation_authority = activation if not current_candidate_identities or activation_matches_candidate else {}
+    activation_projection = dict(activation_authority)
+    activation_policy = activation_projection.get("policy")
+    activation_origin = activation_projection.get("origin")
+    if activation_policy in {"operator-reviewed", "passive-auto"}:
+        try:
+            activation_projection["policy"] = activation_policy_for_origin(CandidateOrigin(activation_origin)).value
+        except TypeError, ValueError:
+            activation_projection.pop("policy", None)
     phase = activation_authority.get(
         "phase",
         live.get("activation_phase", "aborted"),
@@ -433,7 +476,25 @@ def build_learning_report(
     fit_payload = _latest_payload(current_records, FitLifecycleEvidence)
     assessment_record = _latest(current_records, CandidateAssessmentEvidence)
     assessment = None if assessment_record is None else cast(CandidateAssessmentEvidence, assessment_record.payload)
-    lifecycle = _latest_payload(current_records, ActivationLifecycleEvidence)
+    lifecycle_record = _latest(current_records, ActivationLifecycleEvidence)
+    if lifecycle_record is not None:
+        lifecycle_identity_matches = (
+            isinstance(candidate_digest, str)
+            and isinstance(role_generation, int)
+            and not isinstance(role_generation, bool)
+            and lifecycle_record.model_digest == candidate_digest
+            and lifecycle_record.role_generation == role_generation
+        )
+        activation_decision_id = activation_authority.get(
+            "evidence_decision_id",
+            activation_authority.get("decision_id"),
+        )
+        lifecycle_decision_matches = (
+            not activation_authority or lifecycle_record.payload.decision_id == activation_decision_id
+        )
+        if not lifecycle_identity_matches or not lifecycle_decision_matches:
+            lifecycle_record = None
+    lifecycle = None if lifecycle_record is None else cast(ActivationLifecycleEvidence, lifecycle_record.payload)
     failure = _latest_payload(current_records, LearningFailureEvidence)
     confidence = _latest_payload(current_records, ConfidenceDecisionEvidence)
     invalidation = _latest(current_records, SchemaInvalidationEvidence)
@@ -446,6 +507,14 @@ def build_learning_report(
     pending_swap = bool(live.get("pending_swap", False)) or phase == "prepared"
     if fit_status in (FitStatus.QUEUED.value, FitStatus.RUNNING.value):
         status = LearningStatus.FITTING.value
+    challenger_phase = challenger.get("phase")
+    if challenger_phase == "qualified" and status not in {
+        LearningStatus.ACTIVATING.value,
+        LearningStatus.ACTIVE.value,
+    }:
+        status = LearningStatus.QUALIFIED.value
+    elif challenger_phase == "activating":
+        status = LearningStatus.ACTIVATING.value
     if pending_persistence or pending_swap:
         status = LearningStatus.ACTIVATING.value
     if lifecycle is not None and lifecycle.phase in ("active", "aborted") and not pending_swap:
@@ -474,9 +543,9 @@ def build_learning_report(
 
     candidate_parameters = challenger.get("candidate_parameters")
     candidate_metadata: Mapping[str, object] = {}
-    rejection_reasons = [] if assessment is None else list(assessment.rejection_reasons)
-    assessment_policy = None
-    if assessment is not None:
+    rejection_reasons = [] if assessment is None or not challenger else list(assessment.rejection_reasons)
+    assessment_projection = None
+    if assessment is not None and challenger:
         if (
             candidate_digest is not None
             and assessment_record is not None
@@ -485,28 +554,12 @@ def build_learning_report(
             errors.append("assessment-candidate-digest-mismatch")
         elif origin is not None and assessment.origin != origin:
             errors.append("assessment-candidate-origin-mismatch")
-        elif challenger and assessment.policy != candidate_policy:
-            errors.append("assessment-candidate-policy-mismatch")
         else:
-            assessment_policy = assessment.policy
-            if not challenger:
-                candidate_policy = assessment_policy
+            assessment_projection = _json_value(assessment)
+            if isinstance(assessment_projection, dict):
+                assessment_projection["policy"] = candidate_policy
     if errors and not schema_invalidated:
         status = LearningStatus.ERROR.value
-    if (
-        assessment_policy == ActivationPolicy.OPERATOR_REVIEWED.value
-        and assessment is not None
-        and not assessment.rejection_reasons
-        and status
-        in {
-            LearningStatus.COLLECTING.value,
-            LearningStatus.EVALUATING.value,
-        }
-        and not errors
-        and not schema_invalidated
-        and candidate_digest is not None
-    ):
-        status = LearningStatus.READY_FOR_REVIEW.value
     blockers = list(dict.fromkeys([*rejection_reasons, *errors]))
     decision_id = challenger.get("decision_id")
     if not isinstance(decision_id, str):
@@ -518,6 +571,59 @@ def build_learning_report(
         decision_id = assessment.decision_id
     if not isinstance(decision_id, str) and confidence is not None:
         decision_id = confidence.decision_id
+
+    corpus_projection = challenger.get(
+        "corpus",
+        {
+            "digest": None,
+            "revision": None,
+            "fit_partition_digest": None,
+            "slices": [],
+        },
+    )
+    evaluation_projection = None
+    candidate_projection = None
+    if challenger:
+        required_horizons = live.get("required_horizons", (3, 15, 45, 90, 180))
+        completed_horizons = live.get("completed_horizons", ())
+        pending_origins = live.get("pending_origins", ())
+        evaluation_projection = {
+            "epoch": challenger["evaluation_epoch"],
+            "round": challenger["evaluation_round"],
+            "completed_horizons": completed_horizons,
+            "required_horizons": required_horizons,
+            "wins": challenger["consecutive_wins"],
+            "required_wins": challenger["required_wins"],
+            "resumed_from_previous_cook": bool(live.get("resumed_from_previous_cook", False)),
+            "pending_origins": pending_origins,
+        }
+        candidate_projection = {
+            "challenger_id": challenger["challenger_id"],
+            "phase": challenger["phase"],
+            "lineage": challenger["lineage"],
+            "digest": challenger["candidate_digest"],
+            "origin": challenger["origin"],
+            "policy": challenger["policy"],
+            "role_generation": challenger["role_generation"],
+            "candidate_generation": challenger["candidate_generation"],
+            "parameters": candidate_parameters,
+            "parameter_deltas": live.get("parameter_deltas"),
+            "fit_quality": candidate_metadata.get("rmse"),
+            "identifiability": live.get("identifiability"),
+            "assessment": assessment_projection,
+        }
+
+    lifecycle_projection = None if lifecycle is None else _json_value(lifecycle)
+    if isinstance(lifecycle_projection, dict) and lifecycle_projection.get("policy") in {
+        "operator-reviewed",
+        "passive-auto",
+    }:
+        try:
+            lifecycle_projection["policy"] = activation_policy_for_origin(
+                CandidateOrigin(lifecycle_projection.get("origin"))
+            ).value
+        except TypeError, ValueError:
+            lifecycle_projection = None
 
     payload: dict[str, object] = {
         "schema_version": REPORT_SCHEMA_VERSION,
@@ -547,20 +653,11 @@ def build_learning_report(
         },
         "window": challenger.get("window"),
         "checks": checks,
-        "candidate": {
-            "digest": candidate_digest,
-            "origin": origin,
-            "policy": candidate_policy,
-            "role_generation": role_generation,
-            "candidate_generation": candidate_generation,
-            "parameters": candidate_parameters,
-            "parameter_deltas": live.get("parameter_deltas"),
-            "fit_quality": candidate_metadata.get("rmse"),
-            "identifiability": live.get("identifiability"),
-            "assessment": None if assessment is None else _json_value(assessment),
-        },
+        "evaluation": evaluation_projection,
+        "corpus": corpus_projection,
+        "candidate": candidate_projection,
         "activation": {
-            **activation_authority,
+            **activation_projection,
             "phase": phase,
             "reason": None if lifecycle is None else lifecycle.reason,
             "pending_persistence": pending_persistence,
@@ -584,7 +681,7 @@ def build_learning_report(
             "revision": command_high_water,
             "command_high_water": command_high_water,
         },
-        "latest_lifecycle": None if lifecycle is None else _json_value(lifecycle),
+        "latest_lifecycle": lifecycle_projection,
         "failure": (
             _json_value(live_failure) if live_failure is not None else None if failure is None else _json_value(failure)
         ),

@@ -192,7 +192,7 @@ def _ready_review_v4():
     }
     snapshot["evidence"]["confidence_decision_id"] = "legacy-ready-decision"
     snapshot["origin"] = CandidateOrigin.OPERATOR_CALIBRATION.value
-    snapshot["policy"] = ActivationPolicy.OPERATOR_REVIEWED.value
+    snapshot["policy"] = "operator-reviewed"
     snapshot["cook_refit"] = {
         "status": "succeeded",
         "latest": "ready-for-review",
@@ -792,21 +792,21 @@ def test_rejected_rollback_pointer_update_rolls_back_controller_and_singleton(ds
 @pytest.mark.parametrize(
     ("origin", "policy"),
     (
-        (CandidateOrigin.PASSIVE_ONLINE, ActivationPolicy.PASSIVE_AUTO),
+        (CandidateOrigin.PASSIVE_ONLINE, "passive-auto"),
         (
             CandidateOrigin.OPERATOR_CALIBRATION,
-            ActivationPolicy.OPERATOR_REVIEWED,
+            "operator-reviewed",
         ),
     ),
 )
 def test_controller_only_v5_legacy_policy_canonicalizes_without_reactivation(
     ds,
     origin: CandidateOrigin,
-    policy: ActivationPolicy,
+    policy: str,
 ) -> None:
     checkpoint = migrate_grey_learning_snapshot(_v4())
     checkpoint["origin"] = origin.value
-    checkpoint["policy"] = policy.value
+    checkpoint["policy"] = policy
     checkpoint["activation"] = {
         "phase": "active",
         "pending_persistence": False,

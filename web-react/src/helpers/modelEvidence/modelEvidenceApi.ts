@@ -1,6 +1,4 @@
 import type {
-  ModelActivationAcknowledgement,
-  ModelActivationRequest,
   ModelEvidenceReport,
   ModelRollbackAcknowledgement,
   ModelRollbackRequest,
@@ -22,13 +20,14 @@ const endpoint = (baseUrl: string, path: string) => `${baseUrl}/api/${path}`;
 type UnknownRecord = Record<string, unknown>;
 
 const ORIGINS = ["passive-online", "operator-calibration", "cook-refit"] as const;
-const POLICIES = ["causal-auto", "passive-auto", "operator-reviewed", "cook-refit"] as const;
+const POLICIES = ["causal-auto", "passive-auto", "cook-refit"] as const;
 const REPORT_STATUSES = [
+  "warming",
   "collecting",
-  "insufficient-excitation",
   "fitting",
   "evaluating",
-  "ready-for-review",
+  "interrupted",
+  "qualified",
   "activating",
   "active",
   "fallback",
@@ -38,16 +37,16 @@ const REPORT_STATUSES = [
 const FIT_STATUSES = ["idle", "queued", "running", "succeeded", "failed", "stale"] as const;
 const CHECK_STATUSES = ["not-run", "pending", "passed", "failed"] as const;
 const ACTIVATION_PHASES = ["prepared", "active", "aborted"] as const;
+const CANDIDATE_PHASES = ["built", "evaluating", "qualified", "activating"] as const;
 const COOK_REFIT_OUTCOMES = [
   "disabled",
   "insufficient",
   "rejected",
   "failed",
-  "ready-for-review",
   "accepted-next-cook",
   "checkpoint-failure",
 ] as const;
-const COOK_REFIT_AUTHORIZATIONS = ["not-run", "blocked", "operator-review", "next-cook"] as const;
+const COOK_REFIT_AUTHORIZATIONS = ["not-run", "blocked", "next-cook"] as const;
 
 function invalidReport(detail: string): never {
   throw new Error(`Invalid model evidence report: ${detail}`);
@@ -134,6 +133,13 @@ function stringArray(value: unknown, path: string) {
   if (!Array.isArray(value)) return invalidReport(`${path} must be an array`);
   value.forEach((item, index) => {
     stringValue(item, `${path}[${index}]`);
+  });
+}
+
+function nonNegativeIntegerArray(value: unknown, path: string) {
+  if (!Array.isArray(value)) return invalidReport(`${path} must be an array`);
+  value.forEach((item, index) => {
+    nonNegativeInteger(item, `${path}[${index}]`);
   });
 }
 
@@ -252,10 +258,13 @@ function validateAssessment(value: unknown) {
 }
 
 function validateCandidate(value: unknown) {
+  if (value === null) return;
   const source = record(value, "candidate");
   exactKeys(
     source,
     [
+      "challenger_id",
+      "phase",
       "digest",
       "origin",
       "policy",
@@ -266,16 +275,17 @@ function validateCandidate(value: unknown) {
       "fit_quality",
       "identifiability",
       "assessment",
+      "lineage",
     ],
     "candidate",
   );
-  nullable(source.digest, (item) => digest(item, "candidate.digest"));
-  nullable(source.origin, (item) => oneOf(item, ORIGINS, "candidate.origin"));
-  nullable(source.policy, (item) => oneOf(item, POLICIES, "candidate.policy"));
-  nullable(source.role_generation, (item) => nonNegativeInteger(item, "candidate.role_generation"));
-  nullable(source.candidate_generation, (item) =>
-    nonNegativeInteger(item, "candidate.candidate_generation"),
-  );
+  nonBlankString(source.challenger_id, "candidate.challenger_id");
+  oneOf(source.phase, CANDIDATE_PHASES, "candidate.phase");
+  digest(source.digest, "candidate.digest");
+  oneOf(source.origin, ORIGINS, "candidate.origin");
+  oneOf(source.policy, POLICIES, "candidate.policy");
+  nonNegativeInteger(source.role_generation, "candidate.role_generation");
+  nonNegativeInteger(source.candidate_generation, "candidate.candidate_generation");
   nullable(source.parameters, validateParameters);
   if (source.parameter_deltas !== null) {
     const deltas = record(source.parameter_deltas, "candidate.parameter_deltas");
@@ -286,6 +296,109 @@ function validateCandidate(value: unknown) {
   nullable(source.fit_quality, (item) => finiteNumber(item, "candidate.fit_quality"));
   nullable(source.identifiability, (item) => finiteNumber(item, "candidate.identifiability"));
   validateAssessment(source.assessment);
+
+  const lineage = record(source.lineage, "candidate.lineage");
+  exactKeys(
+    lineage,
+    [
+      "request_id",
+      "parent_incumbent_digest",
+      "parent_incumbent_generation",
+      "candidate_generation",
+      "fit_corpus_digest",
+      "trigger_origin",
+      "result_status",
+      "candidate_digest",
+    ],
+    "candidate.lineage",
+  );
+  nonBlankString(lineage.request_id, "candidate.lineage.request_id");
+  digest(lineage.parent_incumbent_digest, "candidate.lineage.parent_incumbent_digest");
+  nonNegativeInteger(
+    lineage.parent_incumbent_generation,
+    "candidate.lineage.parent_incumbent_generation",
+  );
+  nonNegativeInteger(lineage.candidate_generation, "candidate.lineage.candidate_generation");
+  digest(lineage.fit_corpus_digest, "candidate.lineage.fit_corpus_digest");
+  oneOf(lineage.trigger_origin, ORIGINS, "candidate.lineage.trigger_origin");
+  if (lineage.result_status !== "succeeded") {
+    invalidReport("candidate.lineage.result_status has an invalid value");
+  }
+  digest(lineage.candidate_digest, "candidate.lineage.candidate_digest");
+}
+
+function validateEvaluation(value: unknown) {
+  if (value === null) return;
+  const source = record(value, "evaluation");
+  exactKeys(
+    source,
+    [
+      "epoch",
+      "round",
+      "completed_horizons",
+      "required_horizons",
+      "wins",
+      "required_wins",
+      "resumed_from_previous_cook",
+      "pending_origins",
+    ],
+    "evaluation",
+  );
+  nonNegativeInteger(source.epoch, "evaluation.epoch");
+  nonNegativeInteger(source.round, "evaluation.round");
+  nonNegativeIntegerArray(source.completed_horizons, "evaluation.completed_horizons");
+  nonNegativeIntegerArray(source.required_horizons, "evaluation.required_horizons");
+  nonNegativeInteger(source.wins, "evaluation.wins");
+  nonNegativeInteger(source.required_wins, "evaluation.required_wins");
+  booleanValue(source.resumed_from_previous_cook, "evaluation.resumed_from_previous_cook");
+  if (!Array.isArray(source.pending_origins)) {
+    invalidReport("evaluation.pending_origins must be an array");
+  }
+  source.pending_origins.forEach((value, index) => {
+    const path = `evaluation.pending_origins[${index}]`;
+    const pending = record(value, path);
+    exactKeys(
+      pending,
+      [
+        "origin_sequence",
+        "horizon_steps",
+        "role_generation",
+        "candidate_generation",
+        "incumbent_digest",
+        "candidate_digest",
+      ],
+      path,
+    );
+    nonNegativeInteger(pending.origin_sequence, `${path}.origin_sequence`);
+    nonNegativeInteger(pending.horizon_steps, `${path}.horizon_steps`);
+    nonNegativeInteger(pending.role_generation, `${path}.role_generation`);
+    nonNegativeInteger(pending.candidate_generation, `${path}.candidate_generation`);
+    digest(pending.incumbent_digest, `${path}.incumbent_digest`);
+    digest(pending.candidate_digest, `${path}.candidate_digest`);
+  });
+}
+
+function validateCorpus(value: unknown) {
+  const source = record(value, "corpus");
+  exactKeys(source, ["digest", "revision", "fit_partition_digest", "slices"], "corpus");
+  nullable(source.digest, (item) => digest(item, "corpus.digest"));
+  nullable(source.revision, (item) => nonNegativeInteger(item, "corpus.revision"));
+  nullable(source.fit_partition_digest, (item) => digest(item, "corpus.fit_partition_digest"));
+  if (!Array.isArray(source.slices)) invalidReport("corpus.slices must be an array");
+  source.slices.forEach((value, index) => {
+    const path = `corpus.slices[${index}]`;
+    const slice = record(value, path);
+    exactKeys(
+      slice,
+      ["segment_id", "through_ordinal", "prefix_digest", "pre_roll_count", "scored_count"],
+      path,
+    );
+    nonBlankString(slice.segment_id, `${path}.segment_id`);
+    nonNegativeInteger(slice.through_ordinal, `${path}.through_ordinal`);
+    digest(slice.prefix_digest, `${path}.prefix_digest`);
+    nonNegativeInteger(slice.pre_roll_count, `${path}.pre_roll_count`);
+    nonNegativeInteger(slice.scored_count, `${path}.scored_count`);
+  });
 }
 
 function validateActivation(value: unknown) {
@@ -426,6 +539,8 @@ function parseModelEvidenceReport(value: unknown): ModelEvidenceReport {
       "window",
       "checks",
       "candidate",
+      "evaluation",
+      "corpus",
       "activation",
       "active_model",
       "identities",
@@ -439,7 +554,7 @@ function parseModelEvidenceReport(value: unknown): ModelEvidenceReport {
     ],
     "report",
   );
-  if (source.schema_version !== 2) invalidReport("schema_version must equal 2");
+  if (source.schema_version !== 3) invalidReport("schema_version must equal 3");
   oneOf(source.status, REPORT_STATUSES, "status");
   nullable(source.mode, (item) => oneOf(item, ORIGINS, "mode"));
   nullable(source.decision_id, (item) => stringValue(item, "decision_id"));
@@ -452,6 +567,8 @@ function parseModelEvidenceReport(value: unknown): ModelEvidenceReport {
     oneOf(status, CHECK_STATUSES, `checks.${name}`);
   }
   validateCandidate(source.candidate);
+  validateEvaluation(source.evaluation);
+  validateCorpus(source.corpus);
   validateActivation(source.activation);
   const activeModel = record(source.active_model, "active_model");
   exactKeys(activeModel, ["digest", "role_generation"], "active_model");
@@ -601,14 +718,6 @@ async function postModelAction<
       data: null,
     };
   }
-}
-
-/** Activate only the exact candidate digest and confidence decision the operator reviewed. */
-export function activateModel(
-  request: ModelActivationRequest,
-  baseUrl = DEFAULT_BASE_URL,
-): Promise<ModelEvidenceResult<ModelActivationAcknowledgement>> {
-  return postModelAction("model-evidence/activate", request, baseUrl);
 }
 
 /** Roll back only when the unified report names an explicit rollback owner. */

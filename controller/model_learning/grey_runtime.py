@@ -55,12 +55,12 @@ from common.persistence.model_challenger import (
     retire_model_challenger,
 )
 from common.persistence.model_evidence import read_model_evidence
-from common.web_contracts.learning import ModelActivationRequest
 from controller import mpc_snapshot as _snapshot
 from controller.acados import GreyBoxMPCConfig
 from controller.grey_box import GreyBoxPredictionAdapter
 from controller.model_learning.activation import (
     ActivationManager,
+    ActivationRequest,
     GreyControlPairDescriptor,
     PreparedActivationRecord,
 )
@@ -346,7 +346,6 @@ class GreyLearningRuntime:
             False,
         )
         self._checkpoint_failure: tuple[str, str] | None = None
-        self._reviewed_checkpoint_decision_ids: set[str] = set()
         self._learning_eligible_updates = 0
         self._learning_rejected_updates = 0
         self._model_revision = 0
@@ -1926,7 +1925,7 @@ class GreyLearningRuntime:
                 raise RuntimeError("activation-confidence-not-durable")
             self._activation_runtime.mark_confidence_persisted(decision_id)
         decision = manager.prepare(
-            ModelActivationRequest(
+            ActivationRequest(
                 candidate_digest=candidate_descriptor.model_digest,
                 decision_id=decision_id,
             ),
@@ -2204,15 +2203,32 @@ class GreyLearningRuntime:
 
     def _learning_live_status(self):
         learning = self._learning
+        durable = self._challenger_state
+        if durable is not None and durable.phase == "retired":
+            durable = None
         fit_status = FitStatus.IDLE
         status = LearningStatus.COLLECTING
         origin = self._learning_pending_origin
         candidate_digest = None
         candidate_generation = None
         checks = {}
+        required_horizons = tuple(
+            getattr(
+                getattr(learning, "evaluation_config", None),
+                "required_horizons",
+                (3, 15, 45, 90, 180),
+            )
+        )
+        completed_horizons = tuple(getattr(learning, "completed_horizons", ()))
+        resumed_from_previous_cook = bool(getattr(learning, "resumed_from_previous_cook", False))
+        pending_origins = tuple(getattr(learning, "pending_origins", ()))
         inert_record = self._activation_runtime.inert_record
         active_record = self._activation_runtime.active_record
         terminated_reason = self._activation_runtime.terminated_reason
+        if durable is not None:
+            origin = durable.origin
+            candidate_digest = durable.candidate.model_digest
+            candidate_generation = durable.candidate.candidate_generation
         if terminated_reason is not None:
             status = LearningStatus.ERROR
         elif self._corpus_fit_failure is not None:
@@ -2220,8 +2236,15 @@ class GreyLearningRuntime:
             fit_status = FitStatus.FAILED
         elif active_record is not None:
             status = LearningStatus.ACTIVE
-        elif inert_record is not None or self._activation_runtime.activation_pending:
+        elif (
+            inert_record is not None
+            or self._activation_runtime.activation_pending
+            or durable is not None
+            and durable.phase == "activating"
+        ):
             status = LearningStatus.ACTIVATING
+        elif durable is not None and durable.phase == "qualified":
+            status = LearningStatus.QUALIFIED
         elif learning is not None:
             request = learning.pending_request
             prepared = learning.prepared
@@ -2236,7 +2259,16 @@ class GreyLearningRuntime:
                 status = LearningStatus.FITTING
             elif prepared is not None:
                 fit_status = FitStatus.SUCCEEDED
-                status = LearningStatus.EVALUATING
+                status = (
+                    LearningStatus.INTERRUPTED
+                    if resumed_from_previous_cook
+                    and self._learning_cook_id is None
+                    and not completed_horizons
+                    and not pending_origins
+                    else LearningStatus.WARMING
+                    if resumed_from_previous_cook and not completed_horizons and not pending_origins
+                    else LearningStatus.EVALUATING
+                )
                 candidate_digest = prepared.candidate_digest
                 candidate_generation = prepared.candidate.request.candidate_generation
                 origin = prepared.candidate.request.origin
@@ -2251,6 +2283,16 @@ class GreyLearningRuntime:
                 }
             if handoff is not None:
                 status = handoff.status
+        elif durable is not None and durable.phase == "evaluating":
+            status = LearningStatus.INTERRUPTED
+            resumed_from_previous_cook = True
+        if status in {
+            LearningStatus.QUALIFIED,
+            LearningStatus.ACTIVATING,
+            LearningStatus.ACTIVE,
+        }:
+            completed_horizons = required_horizons
+
         active_descriptor = self._active_pair().descriptor
         candidate_descriptor = inert_record.candidate if inert_record is not None else None
         return {
@@ -2275,6 +2317,20 @@ class GreyLearningRuntime:
             ),
             "pending_persistence": self._activation_runtime.activation_pending,
             "pending_swap": inert_record is not None,
+            "completed_horizons": completed_horizons,
+            "required_horizons": required_horizons,
+            "resumed_from_previous_cook": resumed_from_previous_cook,
+            "pending_origins": [
+                {
+                    "origin_sequence": item.origin_sequence,
+                    "horizon_steps": item.horizon_steps,
+                    "role_generation": item.role_generation,
+                    "candidate_generation": item.candidate_generation,
+                    "incumbent_digest": item.incumbent_digest,
+                    "candidate_digest": item.challenger_digest,
+                }
+                for item in pending_origins
+            ],
             "failure": (
                 {
                     "code": "activation-terminal",

@@ -3,7 +3,6 @@ import type { Units } from "@pifire/core/settings/settingsTypes";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  activateModel,
   fetchModelEvidenceReport,
   rollbackModel,
   setMpcCalibration,
@@ -96,19 +95,9 @@ function ActiveMpcLearningView({
   const [emptyGrill, setEmptyGrill] = useState(false);
   const [pellets, setPellets] = useState(false);
   const [pendingActions, setPendingActions] = useState<Set<MpcCalibrationAction>>(new Set());
-  const [candidateDigestConfirmation, setCandidateDigestConfirmation] = useState("");
-  const [decisionIdConfirmation, setDecisionIdConfirmation] = useState("");
-  const [activationPending, setActivationPending] = useState(false);
   const [rollbackReason, setRollbackReason] = useState("");
   const [rollbackPending, setRollbackPending] = useState(false);
   const nextCalibrationRevision = useRef(0);
-  const confirmationIdentity = useRef<{
-    candidateDigest: string | null;
-    decisionId: string | null;
-  }>({
-    candidateDigest: null,
-    decisionId: null,
-  });
 
   const {
     data: cachedReport,
@@ -160,27 +149,6 @@ function ActiveMpcLearningView({
       .then(() => queryClient.invalidateQueries({ queryKey, exact: true }));
   }, [modelLearningRevision, queryClient, queryKey]);
 
-  useEffect(() => {
-    const candidateDigest = report?.candidate.digest ?? null;
-    const decisionId = report?.decision_id ?? null;
-    const previous = confirmationIdentity.current;
-    if (previous.candidateDigest === candidateDigest && previous.decisionId === decisionId) return;
-    confirmationIdentity.current = { candidateDigest, decisionId };
-    setCandidateDigestConfirmation("");
-    setDecisionIdConfirmation("");
-  }, [report?.candidate.digest, report?.decision_id]);
-
-  const activationReady =
-    report?.status === "ready-for-review" &&
-    report.mode === "operator-calibration" &&
-    report.candidate.origin === "operator-calibration" &&
-    report.candidate.policy === "operator-reviewed" &&
-    report.candidate.digest !== null &&
-    report.decision_id !== null;
-  const activationConfirmed =
-    activationReady &&
-    candidateDigestConfirmation === report.candidate.digest &&
-    decisionIdConfirmation === report.decision_id;
   const rollbackAvailable =
     report?.activation.phase === "active" &&
     report.identities.rollback_digest !== null &&
@@ -214,28 +182,6 @@ function ActiveMpcLearningView({
     });
   };
 
-  const runActivation = async () => {
-    if (!activationConfirmed || activationPending || report === undefined) return;
-    setActivationPending(true);
-    setActionError(null);
-    const result = await activateModel(
-      {
-        candidate_digest: report.candidate.digest!,
-        decision_id: report.decision_id!,
-      },
-      apiBase,
-    );
-    if (!result.ok || result.data?.accepted === false) {
-      const detail = result.data && "detail" in result.data ? result.data.detail : null;
-      setActionError(detail || result.message || "Model activation was not accepted");
-    } else {
-      setCandidateDigestConfirmation("");
-      setDecisionIdConfirmation("");
-    }
-    await refreshReport();
-    setActivationPending(false);
-  };
-
   const runRollback = async () => {
     const reason = rollbackReason.trim();
     if (reason === "" || rollbackPending || !rollbackAvailable) return;
@@ -258,12 +204,11 @@ function ActiveMpcLearningView({
       : isPending && report === undefined
         ? "loading"
         : (report?.status ?? "unavailable");
-  const assessment = report?.candidate.assessment ?? null;
-  const parameterEntries = report?.candidate.parameters
-    ? Object.entries(report.candidate.parameters)
-    : [];
-  const deltaEntries = report?.candidate.parameter_deltas
-    ? Object.entries(report.candidate.parameter_deltas)
+  const candidate = report?.candidate ?? null;
+  const assessment = candidate?.assessment ?? null;
+  const parameterEntries = candidate?.parameters ? Object.entries(candidate.parameters) : [];
+  const deltaEntries = candidate?.parameter_deltas
+    ? Object.entries(candidate.parameter_deltas)
     : [];
 
   return (
@@ -363,11 +308,13 @@ function ActiveMpcLearningView({
               <h3 className="font-bold">Current authority</h3>
               <div className="mt-2 grid gap-2 text-sm">
                 <p>Mode: {report.mode ?? "none"}</p>
-                <p>Role generation: {report.candidate.role_generation ?? "none"}</p>
-                <p>Candidate generation: {report.candidate.candidate_generation ?? "none"}</p>
-                <p>Candidate policy: {report.candidate.policy ?? "none"}</p>
+                <p>Challenger: {candidate?.challenger_id ?? "none"}</p>
+                <p>Candidate phase: {candidate?.phase ?? "none"}</p>
+                <p>Role generation: {candidate?.role_generation ?? "none"}</p>
+                <p>Candidate generation: {candidate?.candidate_generation ?? "none"}</p>
+                <p>Candidate policy: {candidate?.policy ?? "none"}</p>
                 <p className="break-all font-mono text-xs">
-                  Candidate digest: {report.candidate.digest ?? "none"}
+                  Candidate digest: {candidate?.digest ?? "none"}
                 </p>
                 <p className="break-all font-mono text-xs">
                   Decision: {report.decision_id ?? "none"}
@@ -385,6 +332,122 @@ function ActiveMpcLearningView({
                 <p>Retired schema entries excluded: {report.evidence.retired_excluded}</p>
                 <p>High-water: {report.evidence.high_water?.join(" / ") ?? "none"}</p>
               </div>
+            </section>
+          </div>
+          <section className={LEARNING_SECTION_CLASS}>
+            <h3 className="font-bold">Causal evaluation progress</h3>
+            {report.evaluation === null ? (
+              <p className="mt-2 text-sm text-probe-label">
+                No causal evaluation progress is currently reported.
+              </p>
+            ) : (
+              <>
+                <div className="mt-2 grid gap-1 text-sm md:grid-cols-2">
+                  <p>Evaluation epoch: {report.evaluation.epoch}</p>
+                  <p>Evaluation round: {report.evaluation.round}</p>
+                  <p>
+                    Completed horizons: {report.evaluation.completed_horizons.join(", ") || "none"}
+                  </p>
+                  <p>
+                    Required horizons: {report.evaluation.required_horizons.join(", ") || "none"}
+                  </p>
+                  <p>
+                    Wins: {report.evaluation.wins} / {report.evaluation.required_wins}
+                  </p>
+                  <p>
+                    Resumed from previous cook:{" "}
+                    {yesNo(report.evaluation.resumed_from_previous_cook)}
+                  </p>
+                </div>
+                {report.evaluation.pending_origins.length === 0 ? (
+                  <p className="mt-3 text-sm text-probe-label">Pending origins: none</p>
+                ) : (
+                  <div className="mt-3">
+                    <p className="text-sm font-semibold">Pending origins</p>
+                    <ul className="mt-2 grid gap-2 text-sm">
+                      {report.evaluation.pending_origins.map((origin) => (
+                        <li
+                          className="grid gap-1 border-t border-card-border pt-2 md:grid-cols-2"
+                          key={`${origin.origin_sequence}-${origin.horizon_steps}-${origin.candidate_generation}`}
+                        >
+                          <span>Origin sequence: {origin.origin_sequence}</span>
+                          <span>Horizon: {origin.horizon_steps}</span>
+                          <span>Origin role generation: {origin.role_generation}</span>
+                          <span>Origin candidate generation: {origin.candidate_generation}</span>
+                          <span className="break-all font-mono text-xs">
+                            Incumbent: {origin.incumbent_digest}
+                          </span>
+                          <span className="break-all font-mono text-xs">
+                            Candidate: {origin.candidate_digest}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </>
+            )}
+          </section>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <section className={LEARNING_SECTION_CLASS}>
+              <h3 className="font-bold">Candidate lineage</h3>
+              {candidate === null ? (
+                <p className="mt-2 text-sm text-probe-label">No challenger is currently active.</p>
+              ) : (
+                <div className="mt-2 grid gap-1 text-sm">
+                  <p>Challenger: {candidate.challenger_id}</p>
+                  <p>Phase: {candidate.phase}</p>
+                  <p>
+                    Parent incumbent generation: {candidate.lineage.parent_incumbent_generation}
+                  </p>
+                  <p>Lineage candidate generation: {candidate.lineage.candidate_generation}</p>
+                  <p>Trigger origin: {candidate.lineage.trigger_origin}</p>
+                  <p>Fit result: {candidate.lineage.result_status}</p>
+                  <p>Fit request: {candidate.lineage.request_id}</p>
+                  <p className="break-all font-mono text-xs">
+                    Parent incumbent: {candidate.lineage.parent_incumbent_digest}
+                  </p>
+                  <p className="break-all font-mono text-xs">
+                    Fit corpus: {candidate.lineage.fit_corpus_digest}
+                  </p>
+                  <p className="break-all font-mono text-xs">
+                    Candidate: {candidate.lineage.candidate_digest}
+                  </p>
+                </div>
+              )}
+            </section>
+            <section className={LEARNING_SECTION_CLASS}>
+              <h3 className="font-bold">Exact corpus identity</h3>
+              <div className="mt-2 grid gap-1 text-sm">
+                <p>Corpus revision: {report.corpus.revision ?? "none"}</p>
+                <p className="break-all font-mono text-xs">
+                  Corpus digest: {report.corpus.digest ?? "none"}
+                </p>
+                <p className="break-all font-mono text-xs">
+                  Fit partition: {report.corpus.fit_partition_digest ?? "none"}
+                </p>
+              </div>
+              {report.corpus.slices.length === 0 ? (
+                <p className="mt-3 text-sm text-probe-label">Corpus slices: none</p>
+              ) : (
+                <dl className="mt-3 grid gap-3 text-sm">
+                  {report.corpus.slices.map((slice) => (
+                    <div
+                      className="grid gap-1 border-t border-card-border pt-2"
+                      key={slice.segment_id}
+                    >
+                      <dt className="font-semibold">{slice.segment_id}</dt>
+                      <dd>Through ordinal: {slice.through_ordinal}</dd>
+                      <dd className="break-all font-mono text-xs">
+                        Prefix digest: {slice.prefix_digest}
+                      </dd>
+                      <dd>Pre-roll: {slice.pre_roll_count}</dd>
+                      <dd>Scored: {slice.scored_count}</dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
             </section>
           </div>
 
@@ -450,8 +513,8 @@ function ActiveMpcLearningView({
                 </table>
               </div>
             )}
-            <p className="mt-2 text-sm">Fit quality: {shown(report.candidate.fit_quality)}</p>
-            <p className="text-sm">Identifiability: {shown(report.candidate.identifiability)}</p>
+            <p className="mt-2 text-sm">Fit quality: {shown(candidate?.fit_quality)}</p>
+            <p className="text-sm">Identifiability: {shown(candidate?.identifiability)}</p>
           </section>
 
           <div className="grid gap-4 md:grid-cols-2">
@@ -533,59 +596,6 @@ function ActiveMpcLearningView({
               </p>
             </div>
           </section>
-
-          {activationReady && (
-            <section className="min-w-0 rounded-card border border-ok bg-inset p-4">
-              <h3 className="font-bold">Activate reviewed model</h3>
-              <p className="mt-2 text-sm">
-                Confirm the exact candidate digest and confidence decision serialized by this
-                report.
-              </p>
-              <dl className="mt-3 grid gap-2 text-sm">
-                <div>
-                  <dt className="font-semibold">Candidate digest</dt>
-                  <dd className="break-all text-probe-label">{report.candidate.digest}</dd>
-                </div>
-                <div>
-                  <dt className="font-semibold">Confidence decision ID</dt>
-                  <dd className="break-all text-probe-label">{report.decision_id}</dd>
-                </div>
-              </dl>
-              <div className="mt-3 grid gap-3 md:grid-cols-2">
-                <label className="grid gap-1 text-sm" htmlFor="mpc-activation-digest">
-                  Type the exact candidate digest
-                  <input
-                    id="mpc-activation-digest"
-                    className={`min-w-0 rounded-lg border border-card-border bg-card px-3 py-2 font-mono text-xs text-text ${FOCUS_RING}`}
-                    autoComplete="off"
-                    spellCheck={false}
-                    value={candidateDigestConfirmation}
-                    onChange={(event) => setCandidateDigestConfirmation(event.target.value)}
-                  />
-                </label>
-                <label className="grid gap-1 text-sm" htmlFor="mpc-activation-decision">
-                  Type the exact confidence decision ID
-                  <input
-                    id="mpc-activation-decision"
-                    className={`min-w-0 rounded-lg border border-card-border bg-card px-3 py-2 font-mono text-xs text-text ${FOCUS_RING}`}
-                    autoComplete="off"
-                    spellCheck={false}
-                    value={decisionIdConfirmation}
-                    onChange={(event) => setDecisionIdConfirmation(event.target.value)}
-                  />
-                </label>
-              </div>
-              <button
-                className={`pf-modal-btn accent mt-3 ${FOCUS_RING}`}
-                type="button"
-                disabled={!activationConfirmed || activationPending}
-                aria-busy={activationPending || undefined}
-                onClick={() => void runActivation()}
-              >
-                {activationPending ? "Activating exact model…" : "Activate exact model"}
-              </button>
-            </section>
-          )}
 
           <section className={LEARNING_SECTION_CLASS}>
             <h3 className="font-bold">Model ownership</h3>

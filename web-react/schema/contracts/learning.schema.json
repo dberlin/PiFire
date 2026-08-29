@@ -57,7 +57,6 @@
       "enum": [
         "causal-auto",
         "passive-auto",
-        "operator-reviewed",
         "cook-refit"
       ],
       "type": "string"
@@ -431,28 +430,19 @@
           ]
         },
         "candidate_generation": {
-          "anyOf": [
-            {
-              "minimum": 0,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Candidate Generation"
+          "minimum": 0,
+          "title": "Candidate Generation",
+          "type": "integer"
+        },
+        "challenger_id": {
+          "minLength": 1,
+          "title": "Challenger Id",
+          "type": "string"
         },
         "digest": {
-          "anyOf": [
-            {
-              "pattern": "^[0-9a-f]{64}$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Digest"
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Digest",
+          "type": "string"
         },
         "fit_quality": {
           "anyOf": [
@@ -476,15 +466,11 @@
           ],
           "title": "Identifiability"
         },
+        "lineage": {
+          "$ref": "#/$defs/ModelFitLineageReport"
+        },
         "origin": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/CandidateOrigin"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "$ref": "#/$defs/CandidateOrigin"
         },
         "parameter_deltas": {
           "anyOf": [
@@ -517,30 +503,29 @@
             }
           ]
         },
+        "phase": {
+          "enum": [
+            "built",
+            "evaluating",
+            "qualified",
+            "activating"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
         "policy": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ActivationPolicy"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "$ref": "#/$defs/ActivationPolicy"
         },
         "role_generation": {
-          "anyOf": [
-            {
-              "minimum": 0,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Role Generation"
+          "minimum": 0,
+          "title": "Role Generation",
+          "type": "integer"
         }
       },
       "required": [
+        "challenger_id",
+        "phase",
+        "lineage",
         "digest",
         "origin",
         "policy",
@@ -553,6 +538,82 @@
         "assessment"
       ],
       "title": "CandidateReport",
+      "type": "object"
+    },
+    "CausalEvaluationProgress": {
+      "additionalProperties": false,
+      "properties": {
+        "completed_horizons": {
+          "items": {
+            "enum": [
+              3,
+              15,
+              45,
+              90,
+              180
+            ],
+            "type": "integer"
+          },
+          "title": "Completed Horizons",
+          "type": "array"
+        },
+        "epoch": {
+          "minimum": 0,
+          "title": "Epoch",
+          "type": "integer"
+        },
+        "pending_origins": {
+          "items": {
+            "$ref": "#/$defs/PendingForecastOriginReport"
+          },
+          "title": "Pending Origins",
+          "type": "array"
+        },
+        "required_horizons": {
+          "items": {
+            "enum": [
+              3,
+              15,
+              45,
+              90,
+              180
+            ],
+            "type": "integer"
+          },
+          "title": "Required Horizons",
+          "type": "array"
+        },
+        "required_wins": {
+          "minimum": 0,
+          "title": "Required Wins",
+          "type": "integer"
+        },
+        "resumed_from_previous_cook": {
+          "title": "Resumed From Previous Cook",
+          "type": "boolean"
+        },
+        "round": {
+          "minimum": 0,
+          "title": "Round",
+          "type": "integer"
+        },
+        "wins": {
+          "minimum": 0,
+          "title": "Wins",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "epoch",
+        "round",
+        "completed_horizons",
+        "required_horizons",
+        "wins",
+        "required_wins",
+        "resumed_from_previous_cook",
+        "pending_origins"
+      ],
+      "title": "CausalEvaluationProgress",
       "type": "object"
     },
     "CheckStatus": {
@@ -574,7 +635,6 @@
       "enum": [
         "not-run",
         "blocked",
-        "operator-review",
         "next-cook"
       ],
       "type": "string"
@@ -585,7 +645,6 @@
         "insufficient",
         "rejected",
         "failed",
-        "ready-for-review",
         "accepted-next-cook",
         "checkpoint-failure"
       ],
@@ -634,6 +693,62 @@
         "next_cook"
       ],
       "title": "CookRefitReport",
+      "type": "object"
+    },
+    "CorpusStatusReport": {
+      "additionalProperties": false,
+      "properties": {
+        "digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Digest"
+        },
+        "fit_partition_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Fit Partition Digest"
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Revision"
+        },
+        "slices": {
+          "items": {
+            "$ref": "#/$defs/FitCorpusSliceReport"
+          },
+          "title": "Slices",
+          "type": "array"
+        }
+      },
+      "required": [
+        "digest",
+        "revision",
+        "fit_partition_digest",
+        "slices"
+      ],
+      "title": "CorpusStatusReport",
       "type": "object"
     },
     "EvidenceGate": {
@@ -726,6 +841,45 @@
           "type": "number"
         }
       ]
+    },
+    "FitCorpusSliceReport": {
+      "additionalProperties": false,
+      "properties": {
+        "pre_roll_count": {
+          "minimum": 0,
+          "title": "Pre Roll Count",
+          "type": "integer"
+        },
+        "prefix_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Prefix Digest",
+          "type": "string"
+        },
+        "scored_count": {
+          "minimum": 0,
+          "title": "Scored Count",
+          "type": "integer"
+        },
+        "segment_id": {
+          "minLength": 1,
+          "title": "Segment Id",
+          "type": "string"
+        },
+        "through_ordinal": {
+          "minimum": 0,
+          "title": "Through Ordinal",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "segment_id",
+        "through_ordinal",
+        "prefix_digest",
+        "pre_roll_count",
+        "scored_count"
+      ],
+      "title": "FitCorpusSliceReport",
+      "type": "object"
     },
     "FitReport": {
       "additionalProperties": false,
@@ -1085,122 +1239,6 @@
       "title": "LearningFailure",
       "type": "object"
     },
-    "ModelActionRejected": {
-      "additionalProperties": false,
-      "properties": {
-        "accepted": {
-          "const": false,
-          "title": "Accepted",
-          "type": "boolean"
-        },
-        "active_kind": {
-          "const": "grey-box",
-          "title": "Active Kind",
-          "type": "string"
-        },
-        "detail": {
-          "title": "Detail",
-          "type": "string"
-        },
-        "error": {
-          "const": "model-activation-rejected",
-          "title": "Error",
-          "type": "string"
-        }
-      },
-      "required": [
-        "accepted",
-        "active_kind",
-        "error",
-        "detail"
-      ],
-      "title": "ModelActionRejected",
-      "type": "object"
-    },
-    "ModelActivationAccepted": {
-      "additionalProperties": false,
-      "properties": {
-        "accepted": {
-          "const": true,
-          "title": "Accepted",
-          "type": "boolean"
-        },
-        "candidate_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Candidate Digest",
-          "type": "string"
-        },
-        "decision_id": {
-          "minLength": 1,
-          "title": "Decision Id",
-          "type": "string"
-        },
-        "phase": {
-          "const": "prepared",
-          "title": "Phase",
-          "type": "string"
-        },
-        "role_generation": {
-          "minimum": 0,
-          "title": "Role Generation",
-          "type": "integer"
-        },
-        "transaction_id": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Transaction Id",
-          "type": "string"
-        }
-      },
-      "required": [
-        "accepted",
-        "phase",
-        "transaction_id",
-        "decision_id",
-        "candidate_digest",
-        "role_generation"
-      ],
-      "title": "ModelActivationAccepted",
-      "type": "object"
-    },
-    "ModelActivationAcknowledgement": {
-      "discriminator": {
-        "mapping": {
-          "False": "#/$defs/ModelActionRejected",
-          "True": "#/$defs/ModelActivationAccepted"
-        },
-        "propertyName": "accepted"
-      },
-      "oneOf": [
-        {
-          "$ref": "#/$defs/ModelActivationAccepted"
-        },
-        {
-          "$ref": "#/$defs/ModelActionRejected"
-        }
-      ],
-      "title": "ModelActivationAcknowledgement"
-    },
-    "ModelActivationRequest": {
-      "additionalProperties": false,
-      "properties": {
-        "candidate_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Candidate Digest",
-          "type": "string"
-        },
-        "decision_id": {
-          "minLength": 1,
-          "title": "Decision Id",
-          "type": "string"
-        }
-      },
-      "required": [
-        "candidate_digest",
-        "decision_id"
-      ],
-      "title": "ModelActivationRequest",
-      "type": "object"
-    },
     "ModelEvidenceReport": {
       "additionalProperties": false,
       "properties": {
@@ -1221,7 +1259,14 @@
           "$ref": "#/$defs/CalibrationReport"
         },
         "candidate": {
-          "$ref": "#/$defs/CandidateReport"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CandidateReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "checks": {
           "additionalProperties": {
@@ -1232,6 +1277,9 @@
         },
         "cook_refit": {
           "$ref": "#/$defs/CookRefitReport"
+        },
+        "corpus": {
+          "$ref": "#/$defs/CorpusStatusReport"
         },
         "decision_id": {
           "anyOf": [
@@ -1250,6 +1298,16 @@
           },
           "title": "Errors",
           "type": "array"
+        },
+        "evaluation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CausalEvaluationProgress"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "evidence": {
           "$ref": "#/$defs/EvidenceSummary"
@@ -1303,7 +1361,7 @@
           "type": "string"
         },
         "schema_version": {
-          "const": 2,
+          "const": 3,
           "title": "Schema Version",
           "type": "integer"
         },
@@ -1331,6 +1389,8 @@
         "cook_refit",
         "window",
         "checks",
+        "evaluation",
+        "corpus",
         "candidate",
         "activation",
         "active_model",
@@ -1348,11 +1408,12 @@
     },
     "ModelEvidenceStatus": {
       "enum": [
+        "warming",
         "collecting",
-        "insufficient-excitation",
         "fitting",
         "evaluating",
-        "ready-for-review",
+        "interrupted",
+        "qualified",
         "activating",
         "active",
         "fallback",
@@ -1360,6 +1421,61 @@
         "schema-invalidated"
       ],
       "type": "string"
+    },
+    "ModelFitLineageReport": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Candidate Digest",
+          "type": "string"
+        },
+        "candidate_generation": {
+          "minimum": 0,
+          "title": "Candidate Generation",
+          "type": "integer"
+        },
+        "fit_corpus_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Fit Corpus Digest",
+          "type": "string"
+        },
+        "parent_incumbent_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Parent Incumbent Digest",
+          "type": "string"
+        },
+        "parent_incumbent_generation": {
+          "minimum": 0,
+          "title": "Parent Incumbent Generation",
+          "type": "integer"
+        },
+        "request_id": {
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "result_status": {
+          "const": "succeeded",
+          "title": "Result Status",
+          "type": "string"
+        },
+        "trigger_origin": {
+          "$ref": "#/$defs/CandidateOrigin"
+        }
+      },
+      "required": [
+        "request_id",
+        "parent_incumbent_digest",
+        "parent_incumbent_generation",
+        "candidate_generation",
+        "fit_corpus_digest",
+        "trigger_origin",
+        "result_status",
+        "candidate_digest"
+      ],
+      "title": "ModelFitLineageReport",
+      "type": "object"
     },
     "ModelIdentities": {
       "additionalProperties": false,
@@ -1496,7 +1612,7 @@
     "ModelRollbackAcknowledgement": {
       "discriminator": {
         "mapping": {
-          "False": "#/$defs/ModelActionRejected",
+          "False": "#/$defs/ModelRollbackRejected",
           "True": "#/$defs/ModelRollbackAccepted"
         },
         "propertyName": "accepted"
@@ -1506,10 +1622,42 @@
           "$ref": "#/$defs/ModelRollbackAccepted"
         },
         {
-          "$ref": "#/$defs/ModelActionRejected"
+          "$ref": "#/$defs/ModelRollbackRejected"
         }
       ],
       "title": "ModelRollbackAcknowledgement"
+    },
+    "ModelRollbackRejected": {
+      "additionalProperties": false,
+      "properties": {
+        "accepted": {
+          "const": false,
+          "title": "Accepted",
+          "type": "boolean"
+        },
+        "active_kind": {
+          "const": "grey-box",
+          "title": "Active Kind",
+          "type": "string"
+        },
+        "detail": {
+          "title": "Detail",
+          "type": "string"
+        },
+        "error": {
+          "const": "model-rollback-rejected",
+          "title": "Error",
+          "type": "string"
+        }
+      },
+      "required": [
+        "accepted",
+        "active_kind",
+        "error",
+        "detail"
+      ],
+      "title": "ModelRollbackRejected",
+      "type": "object"
     },
     "ModelRollbackRequest": {
       "additionalProperties": false,
@@ -1623,6 +1771,57 @@
         "mpc_calibration"
       ],
       "title": "MpcCalibrationCommandResponseData",
+      "type": "object"
+    },
+    "PendingForecastOriginReport": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Candidate Digest",
+          "type": "string"
+        },
+        "candidate_generation": {
+          "minimum": 0,
+          "title": "Candidate Generation",
+          "type": "integer"
+        },
+        "horizon_steps": {
+          "enum": [
+            3,
+            15,
+            45,
+            90,
+            180
+          ],
+          "title": "Horizon Steps",
+          "type": "integer"
+        },
+        "incumbent_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Incumbent Digest",
+          "type": "string"
+        },
+        "origin_sequence": {
+          "minimum": 0,
+          "title": "Origin Sequence",
+          "type": "integer"
+        },
+        "role_generation": {
+          "minimum": 0,
+          "title": "Role Generation",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "origin_sequence",
+        "horizon_steps",
+        "role_generation",
+        "candidate_generation",
+        "incumbent_digest",
+        "candidate_digest"
+      ],
+      "title": "PendingForecastOriginReport",
       "type": "object"
     },
     "PidSpCheckpointModel": {
@@ -2030,12 +2229,15 @@
     "CandidateAssessment",
     "CandidateOrigin",
     "CandidateReport",
+    "CausalEvaluationProgress",
     "CheckStatus",
     "CookRefitAuthorization",
     "CookRefitOutcome",
     "CookRefitReport",
+    "CorpusStatusReport",
     "EvidenceGate",
     "EvidenceSummary",
+    "FitCorpusSliceReport",
     "FitReport",
     "FitStatus",
     "FitWindowIdentity",
@@ -2045,20 +2247,19 @@
     "IpdtPidSpCheckpoint",
     "IpdtPidSpPredictor",
     "LearningFailure",
-    "ModelActionRejected",
-    "ModelActivationAccepted",
-    "ModelActivationAcknowledgement",
-    "ModelActivationRequest",
     "ModelEvidenceReport",
     "ModelEvidenceStatus",
+    "ModelFitLineageReport",
     "ModelIdentities",
     "ModelRollbackAccepted",
     "ModelRollbackAcknowledgement",
+    "ModelRollbackRejected",
     "ModelRollbackRequest",
     "MpcCalibrationAction",
     "MpcCalibrationCommand",
     "MpcCalibrationCommandResponse",
     "MpcCalibrationCommandResponseData",
+    "PendingForecastOriginReport",
     "PidSpCheckpointModel",
     "PidSpConfirmationProgress",
     "PidSpGateValue",

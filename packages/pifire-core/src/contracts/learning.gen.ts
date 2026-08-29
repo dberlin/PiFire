@@ -17,7 +17,7 @@ export type ActivationPhase = "prepared" | "active" | "aborted";
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "ActivationPolicy".
  */
-export type ActivationPolicy = "causal-auto" | "passive-auto" | "operator-reviewed" | "cook-refit";
+export type ActivationPolicy = "causal-auto" | "passive-auto" | "cook-refit";
 type Reason = string | null;
 type ActiveSnapshotJson = string | null;
 type CandidateDigest = string | null;
@@ -55,10 +55,18 @@ type IdentifiabilityAccepted = boolean;
 export type CheckStatus = "not-run" | "pending" | "passed" | "failed";
 type PayloadType1 = "candidate_assessment";
 type RejectionReasons = string[];
-type CandidateGeneration1 = number | null;
-type Digest1 = string | null;
+type CandidateGeneration1 = number;
+type ChallengerId = string;
+type Digest1 = string;
 type FitQuality = number | null;
 type Identifiability = number | null;
+type CandidateDigest1 = string;
+type CandidateGeneration2 = number;
+type FitCorpusDigest = string;
+type ParentIncumbentDigest = string;
+type ParentIncumbentGeneration = number;
+type RequestId = string;
+type ResultStatus = "succeeded";
 type ParameterDeltas = {
   [k: string]: (number | null) | undefined;
 } | null;
@@ -69,12 +77,27 @@ type HAmb = number;
 type NDelay = 8;
 type Sigma = number;
 type Theta = number;
-type RoleGeneration2 = number | null;
+type Phase = "built" | "evaluating" | "qualified" | "activating";
+type RoleGeneration2 = number;
+type CompletedHorizons = (3 | 15 | 45 | 90 | 180)[];
+type Epoch = number;
+type CandidateDigest2 = string;
+type CandidateGeneration3 = number;
+type HorizonSteps = 3 | 15 | 45 | 90 | 180;
+type IncumbentDigest1 = string;
+type OriginSequence = number;
+type RoleGeneration3 = number;
+type PendingOrigins = PendingForecastOriginReport[];
+type RequiredHorizons = (3 | 15 | 45 | 90 | 180)[];
+type RequiredWins = number;
+type ResumedFromPreviousCook = boolean;
+type Round = number;
+type Wins = number;
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "CookRefitAuthorization".
  */
-export type CookRefitAuthorization = "not-run" | "blocked" | "operator-review" | "next-cook";
+export type CookRefitAuthorization = "not-run" | "blocked" | "next-cook";
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "CookRefitOutcome".
@@ -84,7 +107,6 @@ export type CookRefitOutcome =
   | "insufficient"
   | "rejected"
   | "failed"
-  | "ready-for-review"
   | "accepted-next-cook"
   | "checkpoint-failure";
 type FinalStatus = FitStatus | CookRefitOutcome;
@@ -94,6 +116,15 @@ type FinalStatus = FitStatus | CookRefitOutcome;
  */
 export type FitStatus = "idle" | "queued" | "running" | "succeeded" | "failed" | "stale";
 type NextCook = boolean;
+type Digest2 = string | null;
+type FitPartitionDigest = string | null;
+type Revision1 = number | null;
+type PreRollCount = number;
+type PrefixDigest = string;
+type ScoredCount = number;
+type SegmentId = string;
+type ThroughOrdinal = number;
+type Slices = FitCorpusSliceReport[];
 type Name = string;
 type Passed = boolean;
 type Reason2 = string | null;
@@ -107,19 +138,19 @@ type RetiredExcluded = number;
  */
 type FiniteNumber = number;
 type Error = string | null;
-type RequestId = string | null;
+type RequestId1 = string | null;
 type WindowId = string | null;
 type ConfigurationDigest = string;
 type CookId = string | null;
 type FirstObservationSequence = number;
-type IncumbentDigest1 = string;
+type IncumbentDigest2 = string;
 type LastObservationSequence = number;
-type RoleGeneration3 = number;
+type RoleGeneration4 = number;
 type SessionId = string;
 type K = number;
 type Form = "fopdt";
 type IdentifiedAtF = number | null;
-type Revision1 = number;
+type Revision2 = number;
 type Tau = number;
 type Theta1 = number;
 type K1 = number;
@@ -130,7 +161,7 @@ type KI = number;
 type C0 = number;
 type Form2 = "ipdt";
 type IdentifiedAtF1 = number | null;
-type Revision2 = number;
+type Revision3 = number;
 type Theta3 = number;
 type KI1 = number;
 type C01 = number;
@@ -140,53 +171,37 @@ type Code = string;
 type Detail = string;
 type PayloadType2 = "learning_failure" | null;
 type Terminal = boolean;
-type Accepted = false;
-type ActiveKind = "grey-box";
-type Detail1 = string;
-type Error1 = "model-activation-rejected";
-type Accepted1 = true;
-type CandidateDigest1 = string;
-type DecisionId3 = string;
-type Phase = "prepared";
-type RoleGeneration4 = number;
-type TransactionId1 = string;
-/**
- * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
- * via the `definition` "ModelActivationAcknowledgement".
- */
-export type ModelActivationAcknowledgement = ModelActivationAccepted | ModelActionRejected;
-type CandidateDigest2 = string;
-type DecisionId4 = string;
 type Blockers = string[];
-type DecisionId5 = string | null;
+type DecisionId3 = string | null;
 type Errors = string[];
 type Gates = EvidenceGate[];
 type ActiveDigest = string | null;
 type ActiveGeneration = number | null;
 type CandidateDigest3 = string | null;
-type CandidateGeneration2 = number | null;
+type CandidateGeneration4 = number | null;
 type RollbackDigest = string | null;
 type RollbackGeneration = number | null;
-type Revision3 = string;
-type SchemaVersion = 2;
+type Revision4 = string;
+type SchemaVersion = 3;
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "ModelEvidenceStatus".
  */
 export type ModelEvidenceStatus =
+  | "warming"
   | "collecting"
-  | "insufficient-excitation"
   | "fitting"
   | "evaluating"
-  | "ready-for-review"
+  | "interrupted"
+  | "qualified"
   | "activating"
   | "active"
   | "fallback"
   | "error"
   | "schema-invalidated";
-type Accepted2 = true;
-type ActiveKind1 = "grey-box";
-type DecisionId6 = string;
+type Accepted = true;
+type ActiveKind = "grey-box";
+type DecisionId4 = string;
 type Reason3 = string;
 type RoleGeneration5 = number;
 type RollbackDigest1 = string;
@@ -194,7 +209,11 @@ type RollbackDigest1 = string;
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "ModelRollbackAcknowledgement".
  */
-export type ModelRollbackAcknowledgement = ModelRollbackAccepted | ModelActionRejected;
+export type ModelRollbackAcknowledgement = ModelRollbackAccepted | ModelRollbackRejected;
+type Accepted1 = false;
+type ActiveKind1 = "grey-box";
+type Detail1 = string;
+type Error1 = "model-rollback-rejected";
 type Reason4 = string;
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
@@ -204,7 +223,7 @@ export type MpcCalibrationAction = "start" | "pause" | "resume" | "stop" | "rese
 type AmbientC = number;
 type EmptyGrillConfirmed = boolean;
 type PelletsConfirmed = boolean;
-type Revision4 = number;
+type Revision5 = number;
 type Data = MpcCalibrationCommandResponseData | CommandResponseData | null;
 type Message = string;
 type Result = "OK" | "ERROR";
@@ -243,7 +262,7 @@ type Disabled = boolean;
 export type PidSpPredictorModel = FopdtPidSpPredictor | IpdtPidSpPredictor;
 type ResidualStreak = number;
 type Truncated = number;
-type Revision5 = string;
+type Revision6 = string;
 type SchemaVersion1 = 1;
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
@@ -338,14 +357,31 @@ export interface CandidateAssessment {
 export interface CandidateReport {
   assessment: CandidateAssessment | null;
   candidate_generation: CandidateGeneration1;
+  challenger_id: ChallengerId;
   digest: Digest1;
   fit_quality: FitQuality;
   identifiability: Identifiability;
-  origin: CandidateOrigin | null;
+  lineage: ModelFitLineageReport;
+  origin: CandidateOrigin;
   parameter_deltas: ParameterDeltas;
   parameters: GreyParameters | null;
-  policy: ActivationPolicy | null;
+  phase: Phase;
+  policy: ActivationPolicy;
   role_generation: RoleGeneration2;
+}
+/**
+ * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
+ * via the `definition` "ModelFitLineageReport".
+ */
+export interface ModelFitLineageReport {
+  candidate_digest: CandidateDigest1;
+  candidate_generation: CandidateGeneration2;
+  fit_corpus_digest: FitCorpusDigest;
+  parent_incumbent_digest: ParentIncumbentDigest;
+  parent_incumbent_generation: ParentIncumbentGeneration;
+  request_id: RequestId;
+  result_status: ResultStatus;
+  trigger_origin: CandidateOrigin;
 }
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
@@ -362,6 +398,32 @@ export interface GreyParameters {
 }
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
+ * via the `definition` "CausalEvaluationProgress".
+ */
+export interface CausalEvaluationProgress {
+  completed_horizons: CompletedHorizons;
+  epoch: Epoch;
+  pending_origins: PendingOrigins;
+  required_horizons: RequiredHorizons;
+  required_wins: RequiredWins;
+  resumed_from_previous_cook: ResumedFromPreviousCook;
+  round: Round;
+  wins: Wins;
+}
+/**
+ * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
+ * via the `definition` "PendingForecastOriginReport".
+ */
+export interface PendingForecastOriginReport {
+  candidate_digest: CandidateDigest2;
+  candidate_generation: CandidateGeneration3;
+  horizon_steps: HorizonSteps;
+  incumbent_digest: IncumbentDigest1;
+  origin_sequence: OriginSequence;
+  role_generation: RoleGeneration3;
+}
+/**
+ * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "CommandResponseData".
  */
 interface CommandResponseData {}
@@ -375,6 +437,27 @@ export interface CookRefitReport {
   latest: CookRefitOutcome | null;
   next_cook: NextCook;
   status: FitStatus;
+}
+/**
+ * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
+ * via the `definition` "CorpusStatusReport".
+ */
+export interface CorpusStatusReport {
+  digest: Digest2;
+  fit_partition_digest: FitPartitionDigest;
+  revision: Revision1;
+  slices: Slices;
+}
+/**
+ * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
+ * via the `definition` "FitCorpusSliceReport".
+ */
+export interface FitCorpusSliceReport {
+  pre_roll_count: PreRollCount;
+  prefix_digest: PrefixDigest;
+  scored_count: ScoredCount;
+  segment_id: SegmentId;
+  through_ordinal: ThroughOrdinal;
 }
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
@@ -401,7 +484,7 @@ export interface EvidenceSummary {
  */
 export interface FitReport {
   error: Error;
-  request_id: RequestId;
+  request_id: RequestId1;
   status: FitStatus;
   window_id: WindowId;
 }
@@ -413,9 +496,9 @@ export interface FitWindowIdentity {
   configuration_digest: ConfigurationDigest;
   cook_id: CookId;
   first_observation_sequence: FirstObservationSequence;
-  incumbent_digest: IncumbentDigest1;
+  incumbent_digest: IncumbentDigest2;
   last_observation_sequence: LastObservationSequence;
-  role_generation: RoleGeneration3;
+  role_generation: RoleGeneration4;
   session_id: SessionId;
 }
 /**
@@ -426,7 +509,7 @@ export interface FopdtPidSpCheckpoint {
   K: K;
   form: Form;
   identified_at_f?: IdentifiedAtF;
-  revision: Revision1;
+  revision: Revision2;
   tau: Tau;
   theta: Theta1;
 }
@@ -449,7 +532,7 @@ export interface IpdtPidSpCheckpoint {
   c0: C0;
   form: Form2;
   identified_at_f?: IdentifiedAtF1;
-  revision: Revision2;
+  revision: Revision3;
   theta: Theta3;
 }
 /**
@@ -474,36 +557,6 @@ export interface LearningFailure {
 }
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
- * via the `definition` "ModelActionRejected".
- */
-export interface ModelActionRejected {
-  accepted: Accepted;
-  active_kind: ActiveKind;
-  detail: Detail1;
-  error: Error1;
-}
-/**
- * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
- * via the `definition` "ModelActivationAccepted".
- */
-export interface ModelActivationAccepted {
-  accepted: Accepted1;
-  candidate_digest: CandidateDigest1;
-  decision_id: DecisionId3;
-  phase: Phase;
-  role_generation: RoleGeneration4;
-  transaction_id: TransactionId1;
-}
-/**
- * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
- * via the `definition` "ModelActivationRequest".
- */
-export interface ModelActivationRequest {
-  candidate_digest: CandidateDigest2;
-  decision_id: DecisionId4;
-}
-/**
- * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "ModelEvidenceReport".
  */
 export interface ModelEvidenceReport {
@@ -511,11 +564,13 @@ export interface ModelEvidenceReport {
   active_model: ActiveModelReport;
   blockers: Blockers;
   calibration: CalibrationReport;
-  candidate: CandidateReport;
+  candidate: CandidateReport | null;
   checks: Checks;
   cook_refit: CookRefitReport;
-  decision_id: DecisionId5;
+  corpus: CorpusStatusReport;
+  decision_id: DecisionId3;
   errors: Errors;
+  evaluation: CausalEvaluationProgress | null;
   evidence: EvidenceSummary;
   failure: LearningFailure | null;
   fit: FitReport;
@@ -523,7 +578,7 @@ export interface ModelEvidenceReport {
   identities: ModelIdentities;
   latest_lifecycle: ActivationLifecycle | null;
   mode: CandidateOrigin | null;
-  revision: Revision3;
+  revision: Revision4;
   schema_version: SchemaVersion;
   status: ModelEvidenceStatus;
   window: FitWindowIdentity | null;
@@ -539,7 +594,7 @@ export interface ModelIdentities {
   active_digest: ActiveDigest;
   active_generation: ActiveGeneration;
   candidate_digest: CandidateDigest3;
-  candidate_generation: CandidateGeneration2;
+  candidate_generation: CandidateGeneration4;
   rollback_digest: RollbackDigest;
   rollback_generation: RollbackGeneration;
 }
@@ -548,12 +603,22 @@ export interface ModelIdentities {
  * via the `definition` "ModelRollbackAccepted".
  */
 export interface ModelRollbackAccepted {
-  accepted: Accepted2;
-  active_kind: ActiveKind1;
-  decision_id: DecisionId6;
+  accepted: Accepted;
+  active_kind: ActiveKind;
+  decision_id: DecisionId4;
   reason: Reason3;
   role_generation: RoleGeneration5;
   rollback_digest: RollbackDigest1;
+}
+/**
+ * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
+ * via the `definition` "ModelRollbackRejected".
+ */
+export interface ModelRollbackRejected {
+  accepted: Accepted1;
+  active_kind: ActiveKind1;
+  detail: Detail1;
+  error: Error1;
 }
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
@@ -572,7 +637,7 @@ export interface MpcCalibrationCommand {
   ambient_source: AmbientSource;
   empty_grill_confirmed: EmptyGrillConfirmed;
   pellets_confirmed: PelletsConfirmed;
-  revision: Revision4;
+  revision: Revision5;
 }
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
@@ -650,7 +715,7 @@ export interface PidSpLearningReport {
   identifier: PidSpIdentifierReport | null;
   live: Live;
   predictor: PidSpPredictorReport | null;
-  revision: Revision5;
+  revision: Revision6;
   schema_version: SchemaVersion1;
   status: PidSpLearningStatus;
 }

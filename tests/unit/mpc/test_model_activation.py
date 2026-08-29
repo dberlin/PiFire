@@ -28,13 +28,13 @@ from common.persistence.model_challenger import (
     prepare_model_challenger_activation,
 )
 from common.persistence.model_evidence import ModelActivationState, read_model_activation
-from common.web_contracts.learning import ModelActivationRequest
 from controller.acados import GreyBoxMPCConfig
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.model_learning.activation import (
     ActivationDecision,
     ActivationManager,
     ActivationPhase,
+    ActivationRequest,
     GreyControlPairDescriptor,
     PreparedActivationRecord,
     canonical_snapshot_digest,
@@ -245,8 +245,8 @@ def _manager(
     return manager, candidate_descriptor, incumbent, candidate, calls, records, durable_receipt
 
 
-def _request(descriptor: GreyControlPairDescriptor) -> ModelActivationRequest:
-    return ModelActivationRequest(
+def _request(descriptor: GreyControlPairDescriptor) -> ActivationRequest:
+    return ActivationRequest(
         candidate_digest=descriptor.model_digest,
         decision_id="decision-9",
     )
@@ -378,7 +378,7 @@ def test_prepare_requires_exact_digest_decision_and_causal_policy() -> None:
     manager, descriptor, _incumbent, candidate, calls, *_ = _manager()
 
     wrong_digest = manager.prepare(
-        ModelActivationRequest(candidate_digest="f" * 64, decision_id="decision-9"),
+        ActivationRequest(candidate_digest="f" * 64, decision_id="decision-9"),
         descriptor,
         origin=CandidateOrigin.OPERATOR_CALIBRATION,
         policy=ActivationPolicy.CAUSAL_AUTO,

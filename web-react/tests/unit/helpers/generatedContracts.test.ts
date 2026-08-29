@@ -55,6 +55,27 @@ function generatedArtifacts(): Array<{ schema: string; typescript: string }> {
   }));
 }
 
+function generatedContractExports(filename: string): Set<string> {
+  const program = ts.createProgram([filename], {
+    module: ts.ModuleKind.ESNext,
+    moduleResolution: ts.ModuleResolutionKind.Bundler,
+    noEmit: true,
+    skipLibCheck: true,
+    target: ts.ScriptTarget.ESNext,
+  });
+  const source = program.getSourceFile(filename);
+  if (source === undefined) throw new Error(`Generated contract is absent: ${filename}`);
+  const moduleSymbol = program.getTypeChecker().getSymbolAtLocation(source);
+  if (moduleSymbol === undefined)
+    throw new Error(`Generated contract is not a module: ${filename}`);
+  return new Set(
+    program
+      .getTypeChecker()
+      .getExportsOfModule(moduleSymbol)
+      .map(({ name }) => name),
+  );
+}
+
 function memberNames(members: ts.NodeArray<ts.TypeElement>): Set<string> {
   const names = new Set<string>();
   for (const member of members) {
@@ -262,6 +283,18 @@ describe("generated web contract ownership", () => {
       .map(([name, paths]) => `${name}: ${paths.join(", ")}`)
       .sort();
     expect(duplicates).toEqual([]);
+  });
+
+  it("does not export the retired manual MPC activation wire contracts", () => {
+    const learning = generatedArtifacts().find(({ schema }) =>
+      schema.endsWith("learning.schema.json"),
+    );
+    if (learning === undefined) throw new Error("Learning contract is absent from the manifest");
+
+    const exports = generatedContractExports(learning.typescript);
+    expect(exports.has("ModelActivationRequest")).toBe(false);
+    expect(exports.has("ModelActivationAccepted")).toBe(false);
+    expect(exports.has("ModelActivationAcknowledgement")).toBe(false);
   });
 
   it("keeps migrated helpers free of Python-owned interface and type declarations", () => {
