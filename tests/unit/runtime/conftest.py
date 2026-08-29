@@ -6,7 +6,7 @@ import pytest
 import controller.runtime.runner as controller_runtime_runner
 from controller.mpc_model import EstimatorSeed
 from controller.runtime.modes.hold import HoldMode
-from controller.runtime.runner import ControllerUpdateResult
+from controller.runtime.runner import ControllerRunner, ControllerUpdateResult
 from controller.runtime.state import WorkCycleState
 from tests.characterization.fixtures import base_control, base_pellet_db, base_settings
 from tests.characterization.harness import make_ctx
@@ -24,6 +24,9 @@ def _off():
 class _ExactSeedSource:
     def __init__(self) -> None:
         self.trace_session_id = None
+
+    def estimator_seed_anchor(self) -> tuple[int, float] | None:
+        return None
 
     def seed_for(
         self,
@@ -58,6 +61,9 @@ class _ExactSeedSource:
         self.trace_session_id = session_id
         return True
 
+    def mark_trace_unavailable(self, reason: str) -> None:
+        del reason
+
     def intervention(self, boundary) -> None:
         del boundary
 
@@ -91,6 +97,26 @@ def hold_cycle(monkeypatch):
         ctx, _grill, _notifier = make_ctx(settings, control_data, base_pellet_db(), FakeProbes().script([225] * 200))
         if controller == "mpc":
             ctx.learning_trajectory = _ExactSeedSource()
+        if not hasattr(runner, "estimator_seed_requirements"):
+            monkeypatch.setattr(
+                runner,
+                "estimator_seed_requirements",
+                ControllerRunner.estimator_seed_requirements.__get__(
+                    runner,
+                    type(runner),
+                ),
+                raising=False,
+            )
+        if not hasattr(runner, "bind_estimator_seed_source"):
+            monkeypatch.setattr(
+                runner,
+                "bind_estimator_seed_source",
+                ControllerRunner.bind_estimator_seed_source.__get__(
+                    runner,
+                    type(runner),
+                ),
+                raising=False,
+            )
         monkeypatch.setattr(controller_runtime_runner, "build_runner", lambda *a, **k: (runner, "Active"))
         mode = HoldMode(ctx, WorkCycleState())
         mode.settings = settings

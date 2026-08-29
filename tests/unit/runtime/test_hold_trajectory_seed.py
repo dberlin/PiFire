@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import FrozenInstanceError, dataclass
 from hashlib import sha256
 from math import ceil
+from types import SimpleNamespace
 from typing import Any, Literal, cast
 
 import numpy as np
@@ -59,11 +60,7 @@ class _Journal:
         exact: bool = True,
     ) -> None:
         duration_s = (end_ms - start_ms) / 1_000
-        certainty = (
-            FrameDeliveryCertainty.EXACT
-            if exact
-            else FrameDeliveryCertainty.UNKNOWN
-        )
+        certainty = FrameDeliveryCertainty.EXACT if exact else FrameDeliveryCertainty.UNKNOWN
         self._integrals[(start_ms, end_ms)] = DeliveredActuationIntegral(
             monotonic_start_ms=start_ms,
             monotonic_end_ms=end_ms,
@@ -102,16 +99,10 @@ class _Persistence:
         self.revision += 1
         segment = batch.begin_segment or batch.next_segment
         if segment is not None:
-            next_ordinal = len(segment.pre_roll_frames) + len(
-                segment.scored_hold_frames
-            )
+            next_ordinal = len(segment.pre_roll_frames) + len(segment.scored_hold_frames)
             segment_id = segment.segment_id
         elif batch.cursor is not None:
-            next_ordinal = (
-                batch.cursor.next_ordinal
-                + len(batch.pre_roll)
-                + len(batch.scored)
-            )
+            next_ordinal = batch.cursor.next_ordinal + len(batch.pre_roll) + len(batch.scored)
             segment_id = batch.cursor.segment_id
         else:
             next_ordinal = 0
@@ -212,12 +203,9 @@ def _record_smoke(
     runtime, journal = _runtime()
     runtime.mode_entered(_entered("Smoke", units=units, identity=identity))
     observed_temperatures = temperatures or tuple(
-        (212.0 + index if units == "F" else 100.0 + index)
-        for index in range(len(loads))
+        (212.0 + index if units == "F" else 100.0 + index) for index in range(len(loads))
     )
-    for index, (load, temperature) in enumerate(
-        zip(loads, observed_temperatures, strict=True)
-    ):
+    for index, (load, temperature) in enumerate(zip(loads, observed_temperatures, strict=True)):
         start_ms = index * _FRAME_MS
         end_ms = start_ms + _FRAME_MS
         journal.set_load(
@@ -226,9 +214,7 @@ def _record_smoke(
             load,
             exact=index != uncertain_index,
         )
-        runtime.observe_temperature(
-            _sample(end_ms, temperature, units=units)
-        )
+        runtime.observe_temperature(_sample(end_ms, temperature, units=units))
     return runtime, len(loads) * _FRAME_MS
 
 
@@ -249,13 +235,9 @@ def _transition_to_hold(
             wall_ms=_WALL_OFFSET_MS + at_ms,
         )
     )
-    runtime.mode_entered(
-        _entered("Hold", at_ms=at_ms, units=units, identity=identity)
-    )
+    runtime.mode_entered(_entered("Hold", at_ms=at_ms, units=units, identity=identity))
     anchor_ms = at_ms + 25
-    runtime.observe_temperature(
-        _sample(anchor_ms, anchor_temperature, units=units)
-    )
+    runtime.observe_temperature(_sample(anchor_ms, anchor_temperature, units=units))
     canonical = (
         (anchor_temperature - 32.0) * 5.0 / 9.0
         if measured_temperature_c is None and units == "F"
@@ -398,8 +380,6 @@ def test_partial_tail_counts_only_its_duration_toward_exact_seed() -> None:
     assert seed.status == "short"
     assert seed.required_frame_count == 9
     assert seed.pre_roll_frame_count == 8
-
-
 
 
 def test_maximum_theta_partial_tail_promotes_after_one_full_hold_frame() -> None:
@@ -657,6 +637,32 @@ class _SeedSource:
         )
         return self.seed
 
+    def bind_trace_session(
+        self,
+        session_id,
+        cook_id,
+        publish_segment,
+        *,
+        failure_handler=None,
+    ) -> bool:
+        del session_id, cook_id, publish_segment, failure_handler
+        return True
+
+    def mark_trace_unavailable(self, reason: str) -> None:
+        self.events.append(f"trajectory:unavailable:{reason}")
+
+    def observe_hold_frame(
+        self,
+        observation,
+        *,
+        replay_only: bool = False,
+    ) -> None:
+        del observation, replay_only
+
+    def barrier(self, timeout: float = 2.0) -> bool:
+        del timeout
+        return True
+
 
 class _OrderedSeedRunner(FakeControllerRunner):
     def __init__(self, events: list[str], *, period: float = 1.0) -> None:
@@ -690,6 +696,16 @@ class _OrderedSeedRunner(FakeControllerRunner):
         super().set_output(applied)
 
 
+class _PidToMpcRunner(_OrderedSeedRunner):
+    def __init__(self, events: list[str]) -> None:
+        super().__init__(events)
+        self._controller_type = ControllerType.PID
+
+    def reconfigure(self, settings, control, logger=None):
+        self._controller_type = ControllerType.MPC
+        return super().reconfigure(settings, control, logger=logger)
+
+
 def _ordered_runner_result() -> ControllerUpdateResult:
     return ControllerUpdateResult(
         cycle_ratio=0.25,
@@ -707,6 +723,39 @@ def _assert_order(events: list[str], expected: tuple[str, ...]) -> None:
     assert all(item in events for item in expected), events
     positions = tuple(events.index(item) for item in expected)
     assert positions == tuple(sorted(positions)), events
+
+
+def test_hold_rejects_an_incomplete_mpc_seed_source(hold_cycle) -> None:
+    runner = _OrderedSeedRunner([]).script([_ordered_runner_result()])
+    hold = hold_cycle(runner, controller="mpc")
+    hold.setup()
+    hold.ctx.learning_trajectory = SimpleNamespace(
+        seed_for=lambda **_kwargs: _seed(),
+    )
+
+    try:
+        with pytest.raises(
+            TypeError,
+            match="learning trajectory is missing the estimator seed capability",
+        ):
+            hold.on_tick(10.0, 110.0, hold.grill.get_output_status())
+    finally:
+        hold.teardown(110.0)
+
+
+def test_hold_accepts_none_mpc_seed_source_as_cold_start(hold_cycle) -> None:
+    runner = _OrderedSeedRunner([]).script([_ordered_runner_result()])
+    hold = hold_cycle(runner, controller="mpc")
+    hold.setup()
+    hold.ctx.learning_trajectory = None
+
+    try:
+        hold.on_tick(10.0, 110.0, hold.grill.get_output_status())
+
+        assert len(runner.seeds) == 1
+        assert runner.seeds[0].status == "absent"
+    finally:
+        hold.teardown(110.0)
 
 
 def test_sync_runner_forwards_seed_before_target_and_first_solve() -> None:
@@ -761,23 +810,102 @@ def test_hold_seeds_before_first_submit_solve_or_controller_output(
             ),
         )
         assert runner.seeds == [seed_source.seed]
-        assert seed_source.calls[0]["measured_temp_c"] == pytest.approx(
-            (110.0 - 32.0) * 5.0 / 9.0
-        )
-        assert seed_source.calls[0]["theta"] == pytest.approx(
-            DEFAULT_MPC_CONFIG["theta"]
-        )
+        assert seed_source.calls[0]["measured_temp_c"] == pytest.approx((110.0 - 32.0) * 5.0 / 9.0)
+        assert seed_source.calls[0]["theta"] == pytest.approx(DEFAULT_MPC_CONFIG["theta"])
         assert seed_source.calls[0]["n_delay"] == DEFAULT_MPC_CONFIG["n_delay"]
         assert seed_source.calls[0]["at_ms"] == 9_000
     finally:
         hold.teardown(110.0)
 
 
+def test_controller_update_adoption_reuses_valid_trajectory_for_reseed(
+    hold_cycle,
+) -> None:
+    events: list[str] = []
+    runner = _OrderedSeedRunner(events).script([_ordered_runner_result()])
+    measured_c = (110.0 - 32.0) * 5.0 / 9.0
+    initial_seed = _seed(
+        label="initial-controller-generation",
+        chamber_temperature_c=measured_c,
+    )
+    replacement_seed = _seed(
+        label="replacement-controller-generation",
+        chamber_temperature_c=measured_c,
+    )
+    seed_source = _SeedSource(events, initial_seed)
+    hold = hold_cycle(runner, controller="mpc")
+    hold.ctx.learning_trajectory = seed_source
+
+    try:
+        hold.setup()
+        hold.on_tick(10.0, 110.0, hold.grill.get_output_status())
+        assert runner.seeds == [initial_seed]
+
+        seed_source.seed = replacement_seed
+        hold.control["controller_update"] = True
+        hold.on_tick(20.0, 110.0, hold.grill.get_output_status())
+
+        assert runner.seeds == [initial_seed, replacement_seed]
+        assert len(seed_source.calls) == 2
+        assert hold._estimator_seed_status == "exact"
+    finally:
+        hold.teardown(110.0)
+
+
+def test_pid_to_mpc_controller_update_uses_valid_trajectory_seed(
+    hold_cycle,
+) -> None:
+    events: list[str] = []
+    runner = _PidToMpcRunner(events).script([_ordered_runner_result()])
+    seed = _seed(
+        label="pid-to-mpc-controller-generation",
+        chamber_temperature_c=(110.0 - 32.0) * 5.0 / 9.0,
+    )
+    seed_source = _SeedSource(events, seed)
+    hold = hold_cycle(runner, controller="pid")
+    hold.ctx.learning_trajectory = seed_source
+
+    try:
+        hold.setup()
+        hold.on_tick(10.0, 110.0, hold.grill.get_output_status())
+        assert runner.seeds == []
+
+        hold.ctx.store._settings["controller"]["selected"] = "mpc"
+        hold.control["controller_update"] = True
+        hold.on_tick(20.0, 110.0, hold.grill.get_output_status())
+
+        assert runner.seeds == [seed]
+        assert len(seed_source.calls) == 1
+        assert hold._estimator_seed_status == "exact"
+    finally:
+        hold.teardown(110.0)
+
+
+def test_pid_to_mpc_controller_update_rejects_incomplete_trajectory_before_trace(
+    hold_cycle,
+) -> None:
+    runner = _PidToMpcRunner([]).script([_ordered_runner_result()])
+    hold = hold_cycle(runner, controller="pid")
+    hold.setup()
+    hold.ctx.learning_trajectory = SimpleNamespace(
+        seed_for=lambda **_kwargs: _seed(),
+    )
+    hold.ctx.store._settings["controller"]["selected"] = "mpc"
+    hold.control["controller_update"] = True
+
+    try:
+        with pytest.raises(
+            TypeError,
+            match="learning trajectory is missing the estimator seed capability",
+        ):
+            hold.on_tick(20.0, 110.0, hold.grill.get_output_status())
+    finally:
+        hold.teardown(110.0)
+
+
 def test_first_seeded_tick_bypasses_normal_controller_cadence(hold_cycle) -> None:
     events: list[str] = []
-    runner = _OrderedSeedRunner(events, period=10.0).script(
-        [_ordered_runner_result()]
-    )
+    runner = _OrderedSeedRunner(events, period=10.0).script([_ordered_runner_result()])
     seed_source = _SeedSource(
         events,
         _seed(chamber_temperature_c=(110.0 - 32.0) * 5.0 / 9.0),
@@ -796,7 +924,6 @@ def test_first_seeded_tick_bypasses_normal_controller_cadence(hold_cycle) -> Non
         hold.teardown(110.0)
 
 
-
 def test_first_solve_remains_pending_until_runner_has_completed_result(
     hold_cycle,
 ) -> None:
@@ -810,11 +937,7 @@ def test_first_solve_remains_pending_until_runner_has_completed_result(
         def latest(self) -> ControllerUpdateResult | None:
             self.events.append("runner:solve")
             self.latest_calls += 1
-            return (
-                None
-                if self.latest_calls == 1
-                else _ordered_runner_result()
-            )
+            return None if self.latest_calls == 1 else _ordered_runner_result()
 
     runner = DelayedResultRunner()
     seed_source = _SeedSource(
@@ -925,8 +1048,6 @@ def test_celsius_and_fahrenheit_hold_anchors_seed_the_same_physical_state() -> N
     )
 
     assert fahrenheit.delay_states == celsius.delay_states
-    assert fahrenheit.chamber_temperature_c == pytest.approx(
-        celsius.chamber_temperature_c
-    )
+    assert fahrenheit.chamber_temperature_c == pytest.approx(celsius.chamber_temperature_c)
     assert fahrenheit.disturbance == pytest.approx(celsius.disturbance)
     assert fahrenheit.status == celsius.status == "exact"

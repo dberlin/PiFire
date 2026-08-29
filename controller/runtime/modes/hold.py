@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 from enum import IntEnum
 from hashlib import sha256
 from math import ceil, isfinite
-from typing import Literal, cast
+from typing import TYPE_CHECKING, Literal, Protocol, cast, runtime_checkable
 
 import controller.runtime.runner as _runner_mod
 from common.control_trace import (
@@ -64,6 +64,22 @@ from controller.runtime.modes.hold_learning import (
     HoldLearningRuntime,
     parse_model_lifecycle_payload,
 )
+
+if TYPE_CHECKING:
+    from controller.mpc_model import EstimatorSeed
+
+
+@runtime_checkable
+class _EstimatorSeedSource(Protocol):
+    def estimator_seed_anchor(self) -> tuple[int, float] | None: ...
+
+    def seed_for(
+        self,
+        theta: float,
+        n_delay: int,
+        at_ms: int,
+        measured_temp_c: float,
+    ) -> "EstimatorSeed": ...  # noqa: UP037
 
 
 @dataclass(frozen=True, slots=True)
@@ -517,14 +533,12 @@ class HoldMode(ControlMode):
         self,
         identity: TraceSessionIdentity | None,
     ) -> bool:
-        trajectory = getattr(self.ctx, "learning_trajectory", None)
+        trajectory = self.ctx.learning_trajectory
         if trajectory is None or self._controller_name != ControllerType.MPC.value:
             return True
         trace = self._control_trace
         if identity is None or trace is None:
-            mark_unavailable = getattr(trajectory, "mark_trace_unavailable", None)
-            if callable(mark_unavailable):
-                mark_unavailable("control-trace-session-unavailable")
+            trajectory.mark_trace_unavailable("control-trace-session-unavailable")
             if self._hold_learning is not None:
                 self._hold_learning.mark_evidence_unavailable()
             return False
@@ -547,9 +561,7 @@ class HoldMode(ControlMode):
             self._trace_warning(f"Learning trajectory trace binding failed: {error}")
             bound = False
         if not bound:
-            mark_unavailable = getattr(trajectory, "mark_trace_unavailable", None)
-            if callable(mark_unavailable):
-                mark_unavailable("control-trace-session-binding-failed")
+            trajectory.mark_trace_unavailable("control-trace-session-binding-failed")
             if self._hold_learning is not None:
                 self._hold_learning.mark_evidence_unavailable()
         return bound
@@ -877,7 +889,7 @@ class HoldMode(ControlMode):
             controller_name=self._controller_name,
             logger=self.ctx.event_log,
             initial_generation=self._runner_configuration_revision,
-            learning_trajectory=getattr(self.ctx, "learning_trajectory", None),
+            learning_trajectory=self.ctx.learning_trajectory,
         )
         if not learning_evidence_available:
             self._hold_learning.mark_evidence_unavailable()
@@ -958,7 +970,7 @@ class HoldMode(ControlMode):
         self,
         runner: _runner_mod.ControllerRunner,
     ) -> tuple[float, int]:
-        requirements = getattr(runner, "estimator_seed_requirements", lambda: None)()
+        requirements = runner.estimator_seed_requirements()
         if (
             isinstance(requirements, tuple)
             and len(requirements) == 2
@@ -1012,7 +1024,11 @@ class HoldMode(ControlMode):
                 candidate_generation = active_candidate
         return role_generation, candidate_generation
 
-    def _seed_runner_before_first_solve(self, context: _HoldTickContext) -> None:
+    def _seed_runner_before_first_solve(
+        self,
+        context: _HoldTickContext,
+        source: _EstimatorSeedSource | None,
+    ) -> None:
         if self._estimator_seeded or self._runner is None:
             return
         if self._controller_name != ControllerType.MPC.value:
@@ -1036,23 +1052,20 @@ class HoldMode(ControlMode):
             self._estimator_seeded = True
             self._trace_warning(f"Trajectory estimator seed unavailable: {error}")
             return
-        source = getattr(self.ctx, "learning_trajectory", None)
         seed_error: Exception | None = None
-        if source is not None and callable(getattr(source, "seed_for", None)):
+        if source is not None:
 
             def source_anchor() -> tuple[int, float]:
-                anchor_reader = getattr(source, "estimator_seed_anchor", None)
-                if callable(anchor_reader):
-                    recorded = anchor_reader()
-                    if (
-                        isinstance(recorded, tuple)
-                        and len(recorded) == 2
-                        and isinstance(recorded[0], int)
-                        and not isinstance(recorded[0], bool)
-                        and isinstance(recorded[1], (int, float))
-                        and isfinite(float(recorded[1]))
-                    ):
-                        return recorded[0], float(recorded[1])
+                recorded = source.estimator_seed_anchor()
+                if (
+                    isinstance(recorded, tuple)
+                    and len(recorded) == 2
+                    and isinstance(recorded[0], int)
+                    and not isinstance(recorded[0], bool)
+                    and isinstance(recorded[1], (int, float))
+                    and isfinite(float(recorded[1]))
+                ):
+                    return recorded[0], float(recorded[1])
                 return int(context.now * 1_000), measured_c
 
             def candidate_seed(
@@ -1067,16 +1080,10 @@ class HoldMode(ControlMode):
                     measured_temp_c=candidate_temperature_c,
                 )
 
-            bind_seed_source = getattr(
-                runner,
-                "bind_estimator_seed_source",
-                None,
-            )
-            if callable(bind_seed_source):
-                try:
-                    bind_seed_source(candidate_seed)
-                except Exception as error:
-                    self._trace_warning(f"Candidate trajectory seed source unavailable: {error}")
+            try:
+                runner.bind_estimator_seed_source(candidate_seed)
+            except Exception as error:
+                self._trace_warning(f"Candidate trajectory seed source unavailable: {error}")
             try:
                 anchor_ms, anchor_temperature_c = source_anchor()
                 seed = source.seed_for(
@@ -1171,14 +1178,9 @@ class HoldMode(ControlMode):
         if not recorded:
             if learning is not None:
                 learning.mark_evidence_unavailable()
-            trajectory = getattr(self.ctx, "learning_trajectory", None)
-            mark_unavailable = getattr(
-                trajectory,
-                "mark_trace_unavailable",
-                None,
-            )
-            if callable(mark_unavailable):
-                mark_unavailable("estimator-seed-trace-publication-failed")
+            trajectory = self.ctx.learning_trajectory
+            if trajectory is not None:
+                trajectory.mark_trace_unavailable("estimator-seed-trace-publication-failed")
 
     def _adopt_runner_configuration(self, now, current_output_status):
         """Adopt one actually installed runner generation exactly once."""
@@ -1666,12 +1668,21 @@ class HoldMode(ControlMode):
         current_output_status: Mapping[str, bool | int | float],
     ) -> None:
         self._last_tick_s = now
+        seed_source: _EstimatorSeedSource | None = None
+        if self._runner is not None:
+            trajectory = self.ctx.learning_trajectory
+            if trajectory is not None and not isinstance(
+                trajectory,
+                _EstimatorSeedSource,
+            ):
+                raise TypeError("learning trajectory is missing the estimator seed capability")
+            seed_source = trajectory
         context = self._adopt_tick_configuration_and_session(
             now,
             ptemp,
             current_output_status,
         )
-        self._seed_runner_before_first_solve(context)
+        self._seed_runner_before_first_solve(context, seed_source)
         if self._controller_name == ControllerType.MPC.value and not self._estimator_seeded:
             return
         context = self._release_expired_manual_auger(context)
