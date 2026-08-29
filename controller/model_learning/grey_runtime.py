@@ -2306,9 +2306,7 @@ class GreyLearningRuntime:
                 )
                 self._persist_candidate_evaluation(evaluation, preparation)
             if blockers:
-                retire = getattr(learning, "retire_evaluated_candidate", None)
-                if callable(retire):
-                    retire(evaluation)
+                learning.retire_evaluated_candidate(evaluation)
         evaluation_duration_ms = (self._monotonic() - evaluation_started) * 1_000
         payload = (
             None

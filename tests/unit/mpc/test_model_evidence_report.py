@@ -1102,7 +1102,11 @@ def test_real_fit_completion_branches_persist_lifecycle_for_restart_report(
     assert artifact["report"] == report.as_dict()
 
 
-def test_real_evaluation_blocker_persists_rejection_context_before_retirement(ds) -> None:
+@pytest.mark.parametrize("retirement_hook", ["present", "missing"])
+def test_real_evaluation_blocker_persists_rejection_context_before_retirement(
+    ds,
+    retirement_hook: str,
+) -> None:
     controller = Controller(dict(DEFAULT_MPC_CONFIG), "C", {"u_min": 0.1, "u_max": 0.9})
     controller.bind_learning_identity("session-evaluation-blocker", "cook-blocked", 0)
     incumbent = controller.active_control_pair.descriptor
@@ -1179,10 +1183,24 @@ def test_real_evaluation_blocker_persists_rejection_context_before_retirement(ds
             return None
 
     learning = _Learning()
+    if retirement_hook == "missing":
+        delattr(_Learning, "retire_evaluated_candidate")
     checkpoint = controller.get_model_snapshot()
     assert ControllerModelStore().save("mpc", checkpoint) is True
     controller._grey_learning_runtime._learning = learning
     controller._grey_learning_runtime._grey_evaluation_payload = lambda *_args, **_kwargs: SimpleNamespace()
+    if retirement_hook == "missing":
+        try:
+            with pytest.raises(
+                AttributeError,
+                match="retire_evaluated_candidate",
+            ):
+                controller.poll_learning_off_path(
+                    live_origin=CandidateOrigin.OPERATOR_CALIBRATION,
+                )
+        finally:
+            controller.close()
+        return
     controller.poll_learning_off_path(
         live_origin=CandidateOrigin.OPERATOR_CALIBRATION,
     )
