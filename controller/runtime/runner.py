@@ -97,6 +97,132 @@ class _ActivationCore(Protocol):
     def terminate_mpc_activation(self, reason: str) -> None: ...
 
 
+@runtime_checkable
+class _MpcLearningCore(Protocol):
+    def estimator_seed_requirements(self) -> tuple[float, int]: ...
+
+    def bind_estimator_seed_source(
+        self,
+        source: Callable[[float, int], object] | None,
+    ) -> None: ...
+
+    def bind_learning_identity(
+        self,
+        session_id: str,
+        cook_id: str | None,
+        role_generation: int,
+    ) -> None: ...
+
+    def observe_frame(self, observation: FrameObservation) -> object: ...
+
+    def observation_failure(
+        self,
+        observation: FrameObservation,
+        error: BaseException,
+    ) -> object: ...
+
+    def poll_learning_off_path(
+        self,
+        *,
+        live_origin: CandidateOrigin | None = None,
+    ) -> object: ...
+
+    def schedule_corpus_fit(self, origin: CandidateOrigin) -> bool: ...
+
+    def _schedule_corpus_fit_ticket(
+        self,
+        origin: CandidateOrigin,
+    ) -> str | None: ...
+
+    def _consume_terminal_corpus_fit_ticket(
+        self,
+        ticket: str,
+        origin: CandidateOrigin,
+    ) -> bool: ...
+
+    def fail_corpus_fit(
+        self,
+        ticket: str,
+        error: BaseException | str,
+    ) -> None: ...
+
+    def get_learning_diagnostics(self) -> ControllerLearningDiagnostics: ...
+
+
+class _ControllerCoreCompatibilityAdapter:
+    """Own legacy optional projections while delegating required operations."""
+
+    __slots__ = ("_core",)
+
+    def __init__(self, core) -> None:
+        self._core = core
+
+    def __getattr__(self, name):
+        return getattr(self._core, name)
+
+    def capture_status(self) -> ControllerStatusCapture:
+        capture_status = getattr(self._core, "capture_status", None)
+        if callable(capture_status):
+            captured = capture_status()
+            if not isinstance(captured, ControllerStatusCapture):
+                raise TypeError("controller capture_status() must return ControllerStatusCapture")
+            return captured
+        learning = getattr(
+            self._core,
+            "get_learning_diagnostics",
+            lambda: None,
+        )()
+        if learning is not None and not isinstance(
+            learning,
+            ControllerLearningDiagnostics,
+        ):
+            raise TypeError("controller learning diagnostics must be ControllerLearningDiagnostics or None")
+        return ControllerStatusCapture(
+            status=self.get_status(),
+            learning=learning,
+        )
+
+    def get_status(self):
+        return getattr(self._core, "get_status", lambda: None)()
+
+    def trace_diagnostics(self) -> ControllerTraceDiagnostics | None:
+        return getattr(self._core, "trace_diagnostics", lambda: None)()
+
+    def trace_allocation(self) -> AllocationResult | None:
+        return getattr(self._core, "trace_allocation", lambda: None)()
+
+    def trace_baseline_allocation(self) -> AllocationResult | None:
+        return getattr(
+            self._core,
+            "trace_baseline_allocation",
+            lambda: None,
+        )()
+
+    def trace_calibration(self) -> CalibrationDecision | None:
+        return getattr(self._core, "trace_calibration", lambda: None)()
+
+    def register_calibration_result(self, result) -> None:
+        register = getattr(self._core, "register_calibration_result", None)
+        if callable(register):
+            register(result)
+
+    def close(self) -> None:
+        close = getattr(self._core, "close", None)
+        if callable(close):
+            close()
+
+
+def _adapt_controller_core(core) -> _ControllerCoreCompatibilityAdapter:
+    if isinstance(core, _ControllerCoreCompatibilityAdapter):
+        return core
+    return _ControllerCoreCompatibilityAdapter(core)
+
+
+def _activation_core_for(core) -> _ActivationCore | None:
+    delegated = core._core if isinstance(core, _ControllerCoreCompatibilityAdapter) else core
+    return delegated if isinstance(delegated, _ActivationCore) else None
+
+
 @dataclass(frozen=True, slots=True)
 class ObservationOutcomeEnvelope:
     """One runner-owned learner result for the exact observation the core saw."""
@@ -475,26 +601,18 @@ def _with_result_quality(result: ControllerUpdateResult) -> ControllerUpdateResu
 
 
 def _capture_completed_result(core, temp, revision, *, monotonic_clock, wall_clock):
+    core = _adapt_controller_core(core)
     solve_start = monotonic_clock()
     raw = core.update(temp)
     solve_end = monotonic_clock()
-    capture_status = getattr(core, "capture_status", None)
-    if callable(capture_status):
-        captured = capture_status()
-        if not isinstance(captured, ControllerStatusCapture):
-            raise TypeError("controller capture_status() must return ControllerStatusCapture")
-        learning = captured.learning
-        status = captured.status
-    else:
-        learning = getattr(core, "get_learning_diagnostics", lambda: None)()
-        if learning is not None and not isinstance(learning, ControllerLearningDiagnostics):
-            raise TypeError("controller learning diagnostics must be ControllerLearningDiagnostics or None")
-        status = getattr(core, "get_status", lambda: None)()
+    captured = core.capture_status()
+    learning = captured.learning
+    status = captured.status
     cycle_ratio, fan = normalize_controller_output(raw)
-    diagnostics = getattr(core, "trace_diagnostics", lambda: None)()
-    allocation = getattr(core, "trace_allocation", lambda: None)()
-    baseline_allocation = getattr(core, "trace_baseline_allocation", lambda: None)()
-    calibration = getattr(core, "trace_calibration", lambda: None)()
+    diagnostics = core.trace_diagnostics()
+    allocation = core.trace_allocation()
+    baseline_allocation = core.trace_baseline_allocation()
+    calibration = core.trace_calibration()
     result = ControllerUpdateResult(
         cycle_ratio=cycle_ratio,
         fan=fan,
@@ -511,9 +629,7 @@ def _capture_completed_result(core, temp, revision, *, monotonic_clock, wall_clo
         solve_duration_seconds=solve_end - solve_start,
         completed_wall_time=wall_clock(),
     )
-    register = getattr(core, "register_calibration_result", None)
-    if callable(register):
-        register(result)
+    core.register_calibration_result(result)
     return result
 
 
@@ -639,7 +755,7 @@ class SyncControllerRunner(ControllerRunner):
         from controller.runtime.observation_buffer import ObservationOutcomeBuffer
 
         self._core = core
-        self._activation_core = core if isinstance(core, _ActivationCore) else None
+        self._activation_core = _activation_core_for(core)
         self._temp = None
         self._revision = 0
         self._latest_result = None
@@ -753,7 +869,7 @@ class SyncControllerRunner(ControllerRunner):
         if status == "Active":
             retired = self._core
             self._core = core
-            self._activation_core = core if isinstance(core, _ActivationCore) else None
+            self._activation_core = _activation_core_for(core)
             self._controller_type = _controller_type_for(_selected_controller(settings))
             self._configuration_revision += 1
             self._quality.control_period = _control_period_seconds(core.get_control_period())
@@ -899,9 +1015,7 @@ def _safe_initial_status(core):
 
 
 def _close_core(core) -> None:
-    close = getattr(core, "close", None)
-    if callable(close):
-        close()
+    _adapt_controller_core(core).close()
 
 
 class ThreadedControllerRunner(ControllerRunner):
@@ -926,7 +1040,7 @@ class ThreadedControllerRunner(ControllerRunner):
         from controller.runtime.observation_buffer import ObservationOutcomeBuffer
 
         self._core = core
-        self._activation_core = core if isinstance(core, _ActivationCore) else None
+        self._activation_core = _activation_core_for(core)
         self._lock = threading.Lock()
         self._temp = None
         self._output = ControllerUpdateResult(
@@ -1358,7 +1472,7 @@ class ThreadedControllerRunner(ControllerRunner):
                     self._pending_controller_type = None
                     retired_core = self._core
                     self._core = new_core
-                    self._activation_core = new_core if isinstance(new_core, _ActivationCore) else None
+                    self._activation_core = _activation_core_for(new_core)
                     self._control_period = new_core.get_control_period()
                     self._commands_fan = new_core.commands_fan()
                     self._actuation_mode = _actuation_mode_for(new_core)
@@ -2016,7 +2130,21 @@ def _build_core(
         if logger is not None:
             logger.exception(f"Error occurred building the [{controller_type}] controller. Trace dump: ")
         return None, "Inactive"
-    return core, "Active"
+    if controller_type == "mpc" and not isinstance(core, _MpcLearningCore):
+        try:
+            _close_core(core)
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "Could not close an MPC controller missing required learning capability"
+            )
+        if logger is not None:
+            logger.exception(
+                "Error occurred building the [mpc] controller: "
+                "missing required MPC learning capability [_MpcLearningCore]. "
+                "Trace dump: "
+            )
+        return None, "Inactive"
+    return _adapt_controller_core(core), "Active"
 
 
 def _wrap(

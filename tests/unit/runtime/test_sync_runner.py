@@ -2,9 +2,11 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+import controller.runtime.runner as runner_module
 from common.control_trace import ActuationMode, ResultStaleState
 from common.model_evidence import SessionSummaryEvidence
 from controller.applied_output import AppliedOutput, OutputSource
@@ -349,6 +351,58 @@ def test_build_core_logs_on_load_failure_when_logger_given():
     assert core is None
     assert status == "Inactive"
     assert len(logger.exceptions) == 1
+
+
+def test_non_mpc_local_core_keeps_neutral_optional_projections(monkeypatch) -> None:
+    class LocalCore:
+        def __init__(self, config, units, cycle_data, *, logger=None):
+            del config, units, cycle_data, logger
+            self.target = None
+
+        def set_target(self, value):
+            self.target = value
+
+        def update(self, _temperature):
+            return 0.25
+
+        def wants_async(self):
+            return False
+
+        def commands_fan(self):
+            return False
+
+        def actuation_mode(self):
+            return ActuationMode.FRAMED_PULSE
+
+        def get_control_period(self):
+            return None
+
+    monkeypatch.setattr(
+        runner_module.importlib,
+        "import_module",
+        lambda _name: SimpleNamespace(Controller=LocalCore),
+    )
+    settings = {
+        "controller": {"selected": "local", "config": {"local": {}}},
+        "globals": {"units": "C"},
+        "cycle_data": {},
+    }
+
+    core, status = _build_core(settings, {"primary_setpoint": 100})
+    result = _capture_completed_result(
+        core,
+        90.0,
+        1,
+        monotonic_clock=iter((1.0, 1.1)).__next__,
+        wall_clock=lambda: 2.0,
+    )
+
+    assert status == "Active"
+    assert result.diagnostics is None
+    assert result.learning is None
+    assert result.allocation is None
+    assert result.baseline_allocation is None
+    assert result.calibration is None
 
 
 def test_build_core_never_returns_active_when_set_target_raises():

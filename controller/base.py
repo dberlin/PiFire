@@ -18,7 +18,7 @@ import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import TYPE_CHECKING, TypeAlias, cast
+from typing import TYPE_CHECKING, cast
 
 from common.control_trace import ActuationMode, ControllerBranch, MpcFailureState, ResultStaleState
 from common.persistence.protocols import JsonValue
@@ -26,6 +26,7 @@ from controller.mpc_allocator import AllocationResult
 from controller.runtime.context import EVENT_LOG_NAME
 
 if TYPE_CHECKING:
+    from controller.model_learning.calibration import CalibrationDecision
     from controller.model_promotion import FeasibilityReport
 
 
@@ -147,7 +148,7 @@ class MpcTraceDiagnostics:
     model_lifecycle: Mapping[str, object] | None = None
 
 
-ControllerTraceDiagnostics: TypeAlias = PidTraceDiagnostics | PidSpTraceDiagnostics | MpcTraceDiagnostics
+type ControllerTraceDiagnostics = PidTraceDiagnostics | PidSpTraceDiagnostics | MpcTraceDiagnostics
 
 """
 Class Definition
@@ -256,6 +257,18 @@ class ControllerBase:
     def trace_allocation(self) -> AllocationResult | None:
         """Immutable allocation corresponding to the most recent MPC update."""
         return None
+
+    def trace_baseline_allocation(self) -> AllocationResult | None:
+        """Immutable baseline allocation corresponding to the latest update."""
+        return None
+
+    def trace_calibration(self) -> CalibrationDecision | None:
+        """Immutable calibration decision corresponding to the latest update."""
+        return None
+
+    def register_calibration_result(self, result) -> None:
+        """Receive the completed result carrying the calibration projection."""
+        del result
 
     def get_model_snapshot(self):
         """A JSON-encodable record of learned plant parameters, or None.
