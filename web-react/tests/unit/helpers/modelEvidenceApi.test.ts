@@ -108,4 +108,26 @@ describe("fetchModelEvidenceReport", () => {
     expect(result.ok).toBe(true);
     expect(result.data).toEqual(VALID_REPORT);
   });
+
+  it("accepts the unified causal-auto policy", async () => {
+    const report = {
+      ...VALID_REPORT,
+      candidate: {
+        ...VALID_REPORT.candidate,
+        origin: "passive-online",
+        policy: "causal-auto",
+      },
+    };
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify(report), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    const result = await fetchModelEvidenceReport();
+
+    expect(result.ok).toBe(true);
+    expect(result.data).toEqual(report);
+  });
 });

@@ -215,7 +215,7 @@ class FitLifecycleEvidence:
     request_id: NonBlankString
     status: Literal["queued", "running", "succeeded", "failed", "stale"]
     origin: Literal["passive-online", "operator-calibration", "cook-refit"]
-    policy: Literal["passive-auto", "operator-reviewed", "cook-refit"] | None
+    policy: Literal["causal-auto", "passive-auto", "operator-reviewed", "cook-refit"] | None
     window_id: NonBlankString
     error: NonBlankString | None = None
     payload_type: Literal["fit_lifecycle"] = "fit_lifecycle"
@@ -231,7 +231,7 @@ class FitLifecycleEvidence:
 class CandidateAssessmentEvidence:
     decision_id: NonBlankString
     origin: Literal["passive-online", "operator-calibration", "cook-refit"]
-    policy: Literal["passive-auto", "operator-reviewed", "cook-refit"]
+    policy: Literal["causal-auto", "passive-auto", "operator-reviewed", "cook-refit"]
     fit_accepted: bool
     identifiability_accepted: bool
     native_build: Literal["not-run", "pending", "passed", "failed"]
@@ -261,7 +261,7 @@ class ActivationLifecycleEvidence:
     decision_id: NonBlankString
     phase: Literal["prepared", "active", "aborted"]
     origin: Literal["passive-online", "operator-calibration", "cook-refit"]
-    policy: Literal["passive-auto", "operator-reviewed", "cook-refit"]
+    policy: Literal["causal-auto", "passive-auto", "operator-reviewed", "cook-refit"]
     reason: NonBlankString | None = None
     payload_type: Literal["activation_lifecycle"] = "activation_lifecycle"
 

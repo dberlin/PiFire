@@ -19,12 +19,61 @@ from common.model_evidence import (
     RecorderGapEvidence,
     TimingDistributionEvidence,
 )
+from common.persistence.model_challenger import ModelChallengerState
 
 from .contracts import CandidateOrigin, LearningStatus
 
 _REQUIRED_HORIZONS = (3, 15, 45, 90, 180)
 _RMSE_LIMITS = {3: 2.8, 15: 2.8, 45: 2.8, 90: 5.0, 180: 5.0}
-_REQUIRED_STAGES = frozenset(("low", "middle", "high", "coast"))
+_REQUIRED_STAGE_ORDER = ("low", "middle", "high", "coast")
+_REQUIRED_STAGES = frozenset(_REQUIRED_STAGE_ORDER)
+
+
+@dataclass(frozen=True, slots=True)
+class QualificationDecision:
+    """Pure durable challenger qualification result."""
+
+    accepted: bool
+    blockers: tuple[str, ...]
+
+
+def qualification_gates(state: ModelChallengerState) -> QualificationDecision:
+    """Apply the shared durable wins gate and operator-only manifest gate."""
+    if not isinstance(state, ModelChallengerState):
+        raise TypeError("state must be a ModelChallengerState")
+
+    blockers: list[str] = []
+    if state.consecutive_wins < state.required_wins:
+        blockers.append("consecutive-wins")
+    if state.origin is CandidateOrigin.OPERATOR_CALIBRATION and not _complete_calibration_manifest(
+        state.calibration_manifest
+    ):
+        blockers.append("calibration-manifest")
+    return QualificationDecision(not blockers, tuple(blockers))
+
+
+def _complete_calibration_manifest(manifest: Mapping[str, object] | None) -> bool:
+    if manifest is None:
+        return False
+    command_revision = manifest.get("command_revision")
+    session_id = manifest.get("session_id")
+    completed_stages = manifest.get("completed_stages")
+    stage_evidence_ids = manifest.get("stage_evidence_ids")
+    return (
+        isinstance(command_revision, int)
+        and not isinstance(command_revision, bool)
+        and command_revision > 0
+        and isinstance(session_id, str)
+        and bool(session_id.strip())
+        and isinstance(completed_stages, Sequence)
+        and not isinstance(completed_stages, (str, bytes))
+        and tuple(completed_stages) == _REQUIRED_STAGE_ORDER
+        and isinstance(stage_evidence_ids, Sequence)
+        and not isinstance(stage_evidence_ids, (str, bytes))
+        and len(stage_evidence_ids) == len(_REQUIRED_STAGE_ORDER)
+        and all(isinstance(value, str) and bool(value.strip()) for value in stage_evidence_ids)
+        and len(set(stage_evidence_ids)) == len(_REQUIRED_STAGE_ORDER)
+    )
 
 
 @dataclass(frozen=True, slots=True)

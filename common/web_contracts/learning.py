@@ -13,7 +13,7 @@ NonBlankString = Annotated[str, Field(min_length=1, strict=True)]
 type FiniteNumber = int | FiniteFloat
 
 type CandidateOrigin = Literal["passive-online", "operator-calibration", "cook-refit"]
-type ActivationPolicy = Literal["passive-auto", "operator-reviewed", "cook-refit"]
+type ActivationPolicy = Literal["causal-auto", "passive-auto", "operator-reviewed", "cook-refit"]
 type ModelEvidenceStatus = Literal[
     "collecting",
     "insufficient-excitation",

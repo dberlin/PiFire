@@ -126,7 +126,7 @@ def _state(
     revision: int = 0,
     phase: str = "built",
     origin: CandidateOrigin = CandidateOrigin.PASSIVE_ONLINE,
-    policy: ActivationPolicy = ActivationPolicy.PASSIVE_AUTO,
+    policy: ActivationPolicy = ActivationPolicy.CAUSAL_AUTO,
     corpus: FitCorpusIdentity | None = None,
     incumbent: GreyControlPairDescriptor | None = None,
     candidate: GreyControlPairDescriptor | None = None,
@@ -237,7 +237,7 @@ def test_state_is_strict_frozen_and_owns_nested_json() -> None:
     manifest = _manifest()
     state = _state(
         origin=CandidateOrigin.OPERATOR_CALIBRATION,
-        policy=ActivationPolicy.OPERATOR_REVIEWED,
+        policy=ActivationPolicy.CAUSAL_AUTO,
         fit_preparation=preparation,
         calibration_manifest=manifest,
     )

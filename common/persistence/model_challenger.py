@@ -34,13 +34,16 @@ from controller.model_learning.activation import (
     GreyControlPairDescriptor,
     PreparedActivationRecord,
 )
-from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
+from controller.model_learning.contracts import (
+    ActivationPolicy,
+    CandidateOrigin,
+    activation_policy_for_origin,
+)
 
 _CHALLENGER_PHASES = frozenset({"built", "evaluating", "qualified", "activating", "retired"})
-_POLICY_BY_ORIGIN = {
+_LEGACY_POLICY_BY_ORIGIN = {
     CandidateOrigin.PASSIVE_ONLINE: ActivationPolicy.PASSIVE_AUTO,
     CandidateOrigin.OPERATOR_CALIBRATION: ActivationPolicy.OPERATOR_REVIEWED,
-    CandidateOrigin.COOK_REFIT: ActivationPolicy.COOK_REFIT,
 }
 
 
@@ -134,7 +137,9 @@ class ModelChallengerState:
             raise TypeError("challenger origin must be a CandidateOrigin")
         if not isinstance(self.policy, ActivationPolicy):
             raise TypeError("challenger policy must be an ActivationPolicy")
-        if _POLICY_BY_ORIGIN[self.origin] is not self.policy:
+        current_policy = activation_policy_for_origin(self.origin)
+        historical_policy = _LEGACY_POLICY_BY_ORIGIN.get(self.origin)
+        if self.policy is not current_policy and (self.phase != "retired" or self.policy is not historical_policy):
             raise ValueError("challenger origin-policy mismatch")
         if not isinstance(self.fit_corpus, FitCorpusIdentity):
             raise TypeError("challenger fit corpus must be a FitCorpusIdentity")

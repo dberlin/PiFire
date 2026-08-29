@@ -1765,7 +1765,11 @@ def handoff_candidate(
     install: Callable[[Any], Any],
 ) -> CandidateHandoff:
     """Prepare persistence handoff only; this pipeline never installs or swaps a pair."""
-    from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin, LearningStatus
+    from controller.model_learning.contracts import (
+        CandidateOrigin,
+        LearningStatus,
+        activation_policy_for_origin,
+    )
 
     if not isinstance(prepared, CandidatePreparation):
         raise TypeError("prepared must be a CandidatePreparation")
@@ -1796,11 +1800,7 @@ def handoff_candidate(
     origin = request.origin
     if origin is CandidateOrigin.COOK_REFIT:
         raise ValueError("cook-refit handoff is not owned by this pipeline")
-    policy = (
-        ActivationPolicy.OPERATOR_REVIEWED
-        if origin is CandidateOrigin.OPERATOR_CALIBRATION
-        else ActivationPolicy.PASSIVE_AUTO
-    )
+    policy = activation_policy_for_origin(origin)
     if origin is CandidateOrigin.PASSIVE_ONLINE and not online_enabled:
         blockers.append("online-disabled")
     if blockers:
@@ -1812,9 +1812,7 @@ def handoff_candidate(
             blockers=tuple(blockers),
         )
     prepared_id = prepare(prepared, policy)
-    status = (
-        LearningStatus.READY_FOR_REVIEW if policy is ActivationPolicy.OPERATOR_REVIEWED else LearningStatus.ACTIVATING
-    )
+    status = LearningStatus.ACTIVATING
     return CandidateHandoff(
         status=status,
         policy=policy,

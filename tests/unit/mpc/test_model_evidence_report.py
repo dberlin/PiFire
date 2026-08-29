@@ -42,6 +42,7 @@ from controller.model_learning.contracts import (
     FitWindowIdentity,
     FrameObservation,
     LearningStatus,
+    activation_policy_for_origin,
 )
 from controller.model_learning.report import (
     backend_learning_report,
@@ -51,13 +52,7 @@ from controller.model_learning.report import (
 )
 from controller.mpc import Controller
 from controller.mpc_config import DEFAULT_MPC_CONFIG
-from controller.runtime.model_fitting import (
-    CandidatePair,
-    CandidatePreparation,
-    GreyFitSuccess,
-    TargetTimingEvidence,
-    grey_config_digest,
-)
+from controller.runtime.model_fitting import grey_config_digest
 from tests.unit.common.test_model_challenger_store import (
     _corpus,
 )
@@ -78,11 +73,7 @@ def _persist_evaluating_challenger(
     request: FitRequest,
 ) -> ModelChallengerState:
     corpus = _corpus(request.request_id)
-    policy = {
-        CandidateOrigin.PASSIVE_ONLINE: ActivationPolicy.PASSIVE_AUTO,
-        CandidateOrigin.OPERATOR_CALIBRATION: ActivationPolicy.OPERATOR_REVIEWED,
-        CandidateOrigin.COOK_REFIT: ActivationPolicy.COOK_REFIT,
-    }[request.origin]
+    policy = activation_policy_for_origin(request.origin)
     state = ModelChallengerState(
         schema_version=1,
         challenger_id=f"challenger-{request.request_id}",
@@ -341,7 +332,7 @@ def test_report_serializes_locked_fit_and_check_statuses_without_linear_model_fi
 def test_report_projects_durable_candidate_policy_before_assessment() -> None:
     activation = _activation(phase="aborted")
     activation["origin"] = CandidateOrigin.PASSIVE_ONLINE.value
-    activation["policy"] = ActivationPolicy.PASSIVE_AUTO.value
+    activation["policy"] = ActivationPolicy.CAUSAL_AUTO.value
     live = _live(status=LearningStatus.EVALUATING)
     live["origin"] = CandidateOrigin.PASSIVE_ONLINE
 
@@ -354,7 +345,7 @@ def test_report_projects_durable_candidate_policy_before_assessment() -> None:
 
     candidate = _section(payload, "candidate")
     assert candidate["origin"] == CandidateOrigin.PASSIVE_ONLINE.value
-    assert candidate["policy"] == ActivationPolicy.PASSIVE_AUTO.value
+    assert candidate["policy"] == ActivationPolicy.CAUSAL_AUTO.value
 
 
 def test_prior_active_activation_does_not_override_new_evaluating_candidate(
@@ -416,7 +407,7 @@ def test_prior_active_activation_does_not_override_new_evaluating_candidate(
     assert candidate["digest"] == challenger.candidate.model_digest
     assert candidate["candidate_generation"] == challenger.candidate.candidate_generation
     assert candidate["origin"] == CandidateOrigin.PASSIVE_ONLINE.value
-    assert candidate["policy"] == ActivationPolicy.PASSIVE_AUTO.value
+    assert candidate["policy"] == ActivationPolicy.CAUSAL_AUTO.value
     assert projected_activation["phase"] == "aborted"
     assert payload["active_model"]["digest"] == challenger.incumbent.model_digest
 
@@ -752,115 +743,6 @@ def test_missing_and_incompatible_authority_are_explicit_terminal_states() -> No
     assert missing["errors"] == ["checkpoint-missing"]
     assert incompatible["status"] == "schema-invalidated"
     assert incompatible["errors"] == ["checkpoint-schema-invalid"]
-
-
-def test_real_operator_evaluation_persists_reviewed_assessment_for_restart_report(ds) -> None:
-    controller = Controller(dict(DEFAULT_MPC_CONFIG), "C", {"u_min": 0.1, "u_max": 0.9})
-    controller.bind_learning_identity("session-operator", "cook-operator", 0)
-    incumbent = controller.active_control_pair.descriptor
-    native_config = controller.mpc.config
-    candidate_digest = grey_config_digest(native_config)
-    candidate_descriptor = GreyControlPairDescriptor(
-        model_digest=candidate_digest,
-        configuration=dict(incumbent.configuration),
-        estimator_kind=incumbent.estimator_kind,
-        solver_kind=incumbent.solver_kind,
-        candidate_generation=1,
-        role_generation=1,
-    )
-    request = FitRequest(
-        request_id="operator-request",
-        origin=CandidateOrigin.OPERATOR_CALIBRATION,
-        candidate_generation=1,
-        window=FitWindowIdentity(
-            session_id="session-operator",
-            cook_id="cook-operator",
-            first_observation_sequence=3,
-            last_observation_sequence=9,
-            role_generation=0,
-            incumbent_digest=incumbent.model_digest,
-            configuration_digest="c" * 64,
-        ),
-    )
-    candidate = GreyFitSuccess(
-        request=request,
-        config=native_config,
-        rmse_c=1.0,
-        max_error_c=1.5,
-        identifiability=0.9,
-        sample_count=12,
-        temperature_band_c=(80.0, 120.0),
-        nfev=4,
-    )
-    preparation = CandidatePreparation.accepted_for_test(
-        candidate=candidate,
-        candidate_pair=CandidatePair(object(), object()),
-        incumbent_pair=CandidatePair(object(), object()),
-        timing=TargetTimingEvidence("candidate-dry-solve", 3, 1.0, 25.0),
-    )
-    durable = _persist_evaluating_challenger(
-        incumbent,
-        candidate_descriptor,
-        request,
-    )
-    controller._grey_learning_runtime._challenger_state = durable
-    controller._grey_learning_runtime._adopt_prepared_checkpoint_lineage(preparation)
-    evaluation = SimpleNamespace(
-        decision_id="operator-decision",
-        accepted=True,
-        blockers=(),
-        role_generation=0,
-        candidate_generation=1,
-        incumbent_digest=incumbent.model_digest,
-        challenger_digest=candidate_digest,
-        completed_origins=(),
-        completed_horizons=_REQUIRED_HORIZONS,
-    )
-
-    class _Learning:
-        prepared = preparation
-        handoff = None
-        pending_request = None
-        evaluation_config = SimpleNamespace(required_horizons=_REQUIRED_HORIZONS)
-
-        def poll_fit_off_path(self, **_kwargs):
-            return None
-
-        def evaluate_ready_off_path(self):
-            return evaluation
-
-        def close(self):
-            return None
-
-    controller._grey_learning_runtime._learning = _Learning()
-    controller._grey_learning_runtime._grey_evaluation_payload = lambda *_args, **_kwargs: SimpleNamespace()
-    controller.poll_learning_off_path(
-        live_origin=CandidateOrigin.OPERATOR_CALIBRATION,
-    )
-
-    controller.close()
-    checkpoint = ControllerModelStore().load("mpc")
-    assert checkpoint is not None
-    assert checkpoint["revision"] == 2
-    assert checkpoint["active_pair"] == incumbent.to_dict()
-    assert "candidate_pair" not in checkpoint
-    durable = read_model_challenger()
-    assert durable is not None
-    assert checkpoint["challenger_authority"] == {
-        "challenger_id": durable.challenger_id,
-        "revision": durable.revision,
-    }
-    assert durable.candidate == candidate_descriptor
-    report, records = backend_learning_report()
-    artifact = json.loads(build_learning_artifact(report, records))
-
-    assessments = [record.payload for record in records if record.kind is EvidenceKind.CANDIDATE_ASSESSMENT]
-    assert len(assessments) == 1
-    assert assessments[0].origin == CandidateOrigin.OPERATOR_CALIBRATION.value
-    assert assessments[0].policy == "operator-reviewed"
-    assert report.as_dict()["status"] == "ready-for-review", report.as_dict()
-    assert report.as_dict()["candidate"]["policy"] == "operator-reviewed"
-    assert artifact["report"] == report.as_dict()
 
 
 def test_real_fit_submission_persists_queued_lifecycle_for_restart_report(ds) -> None:

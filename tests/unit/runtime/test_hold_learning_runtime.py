@@ -231,7 +231,6 @@ class _Runner:
     def get_model_snapshot(self) -> object:
         return None
 
-
     def finish_teardown(self) -> None:
         return None
 
@@ -746,9 +745,7 @@ def test_eligible_reconciled_hold_observation_enters_trajectory_exactly_once() -
     }
 
     runtime.submit_completed_observation((0, 20_000), observation)
-    runner.drains.append(
-        _drain(ObservationOutcomeEnvelope(1, 0, observation, eligible))
-    )
+    runner.drains.append(_drain(ObservationOutcomeEnvelope(1, 0, observation, eligible)))
     runtime.reconcile_outcomes(22.0)
     runtime.reconcile_outcomes(23.0)
 
@@ -1817,13 +1814,21 @@ def test_reconcile_activation_treats_absent_durable_state_as_noop(
     assert logger.warnings == []
 
 
-def test_reconcile_activation_restores_each_prepared_active_and_aborted_identity_once(
+@pytest.mark.parametrize(
+    "origin",
+    (
+        CandidateOrigin.PASSIVE_ONLINE,
+        CandidateOrigin.OPERATOR_CALIBRATION,
+    ),
+)
+def test_reconcile_activation_restores_both_causal_origins_in_each_durable_phase_once(
     monkeypatch,
+    origin: CandidateOrigin,
 ) -> None:
     from controller.runtime.modes import hold_learning as learning_module
 
     states = [
-        _pair_phase_state(phase)[0]
+        _pair_phase_state(phase, origin=origin)[0]
         for phase in (
             ActivationPhase.PREPARED,
             ActivationPhase.ACTIVE,
@@ -2026,9 +2031,7 @@ def test_finish_teardown_marks_barrier_failure_and_still_finishes_resources(
     runner = _LifecycleRunner()
     persistence = _Persistence(
         barrier_result=failure != "refusal",
-        barrier_error=(
-            TimeoutError("barrier timed out") if failure == "timeout" else None
-        ),
+        barrier_error=(TimeoutError("barrier timed out") if failure == "timeout" else None),
     )
     runtime, _runner, _store, _trace_session, recorder, _logger = _lifecycle_runtime(
         runner=runner, persistence=persistence

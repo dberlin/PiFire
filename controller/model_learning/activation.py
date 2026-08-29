@@ -13,17 +13,16 @@ from typing import TYPE_CHECKING, Generic, Protocol, TypeVar
 
 from common.web_contracts.learning import ModelActivationRequest
 
-from .contracts import ActivationPolicy, CandidateOrigin
+from .contracts import ActivationPolicy, CandidateOrigin, activation_policy_for_origin
 
 if TYPE_CHECKING:
     from controller.mpc_factory import OwnedMpcPair
 
 
 _PairT = TypeVar("_PairT", bound="OwnedMpcPair")
-_POLICY_BY_ORIGIN = {
+_LEGACY_POLICY_BY_ORIGIN = {
     CandidateOrigin.PASSIVE_ONLINE: ActivationPolicy.PASSIVE_AUTO,
     CandidateOrigin.OPERATOR_CALIBRATION: ActivationPolicy.OPERATOR_REVIEWED,
-    CandidateOrigin.COOK_REFIT: ActivationPolicy.COOK_REFIT,
 }
 _ESTIMATOR_CONSTRUCTION_FIELDS = frozenset({"control_period", "est_q_temp", "est_q_dist", "est_r_meas"})
 
@@ -196,7 +195,11 @@ class PreparedActivationRecord:
             raise ValueError("prepared rollback owner must be the exact incumbent pair")
         if not isinstance(self.origin, CandidateOrigin) or not isinstance(self.policy, ActivationPolicy):
             raise TypeError("activation origin and policy must be typed")
-        if _POLICY_BY_ORIGIN[self.origin] is not self.policy:
+        current_policy = activation_policy_for_origin(self.origin)
+        historical_policy = _LEGACY_POLICY_BY_ORIGIN.get(self.origin)
+        if self.policy is not current_policy and (
+            self.phase is ActivationPhase.PREPARED or self.policy is not historical_policy
+        ):
             raise ValueError("origin-policy-mismatch")
         _nonblank(self.decision_id, "decision_id")
         if self.phase is ActivationPhase.ABORTED:
@@ -342,7 +345,7 @@ class ActivationManager(Generic[_PairT]):
             raise TypeError("origin and policy must be typed")
         if request.candidate_digest != candidate.model_digest:
             return self._reject("candidate-digest-changed")
-        if _POLICY_BY_ORIGIN[origin] is not policy:
+        if activation_policy_for_origin(origin) is not policy:
             return self._reject("origin-policy-mismatch")
         if self._prepared is not None:
             record = self._prepared.record

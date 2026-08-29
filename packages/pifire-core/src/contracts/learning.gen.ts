@@ -17,7 +17,7 @@ export type ActivationPhase = "prepared" | "active" | "aborted";
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "ActivationPolicy".
  */
-export type ActivationPolicy = "passive-auto" | "operator-reviewed" | "cook-refit";
+export type ActivationPolicy = "causal-auto" | "passive-auto" | "operator-reviewed" | "cook-refit";
 type Reason = string | null;
 type ActiveSnapshotJson = string | null;
 type CandidateDigest = string | null;

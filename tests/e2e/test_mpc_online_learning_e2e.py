@@ -856,7 +856,7 @@ def _seed_v6_state(config: dict[str, Any]) -> str:
         incumbent=active,
         candidate=candidate,
         origin=CandidateOrigin.OPERATOR_CALIBRATION,
-        policy=ActivationPolicy.OPERATOR_REVIEWED,
+        policy=ActivationPolicy.CAUSAL_AUTO,
         decision_id=decision_id,
     )
     aborted = prepared.transition(ActivationPhase.ABORTED, reason="legacy-interrupted-activation")
@@ -1335,7 +1335,7 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
     ]
     assert {record.phase for record in lifecycle} == {"prepared", "active"}
     assert all(record.origin == CandidateOrigin.PASSIVE_ONLINE.value for record in lifecycle)
-    assert all(record.policy == ActivationPolicy.PASSIVE_AUTO.value for record in lifecycle)
+    assert all(record.policy == ActivationPolicy.CAUSAL_AUTO.value for record in lifecycle)
 
     if database_state == "upgraded-v6":
         legacy = read_control_trace_session("legacy-v6-session")
@@ -1684,7 +1684,7 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
             ),
         )
         assert durable_challenger.origin is CandidateOrigin.PASSIVE_ONLINE
-        assert durable_challenger.policy is ActivationPolicy.PASSIVE_AUTO
+        assert durable_challenger.policy is ActivationPolicy.CAUSAL_AUTO
         assert durable_challenger.evaluation_epoch == 0
         assert durable_challenger.evaluation_round == 0
         assert durable_challenger.consecutive_wins == 0
@@ -1768,7 +1768,7 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
     assert len({payload.request_id for payload in fit_payloads}) == 1
     assert all(
         payload.origin == CandidateOrigin.PASSIVE_ONLINE.value
-        and payload.policy == ActivationPolicy.PASSIVE_AUTO.value
+        and payload.policy == ActivationPolicy.CAUSAL_AUTO.value
         and payload.window_id == f"{trace_identity.session_id}:21:140"
         for payload in fit_payloads
     )
@@ -1842,7 +1842,7 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
     }
     expected_lineage = {
         "origin": CandidateOrigin.PASSIVE_ONLINE.value,
-        "policy": ActivationPolicy.PASSIVE_AUTO.value,
+        "policy": ActivationPolicy.CAUSAL_AUTO.value,
         "candidate_digest": _EXACT_PASSIVE_CANDIDATE_DIGEST,
         "candidate_generation": 1,
     }

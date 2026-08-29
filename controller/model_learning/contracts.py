@@ -53,9 +53,21 @@ class CandidateOrigin(StrEnum):
 
 
 class ActivationPolicy(StrEnum):
+    CAUSAL_AUTO = "causal-auto"
     PASSIVE_AUTO = "passive-auto"
     OPERATOR_REVIEWED = "operator-reviewed"
     COOK_REFIT = "cook-refit"
+
+
+def activation_policy_for_origin(origin: CandidateOrigin) -> ActivationPolicy:
+    """Return the only policy admitted for a newly created challenger."""
+    if not isinstance(origin, CandidateOrigin):
+        raise TypeError("origin must be a CandidateOrigin")
+    return {
+        CandidateOrigin.PASSIVE_ONLINE: ActivationPolicy.CAUSAL_AUTO,
+        CandidateOrigin.OPERATOR_CALIBRATION: ActivationPolicy.CAUSAL_AUTO,
+        CandidateOrigin.COOK_REFIT: ActivationPolicy.COOK_REFIT,
+    }[origin]
 
 
 class LearningStatus(StrEnum):

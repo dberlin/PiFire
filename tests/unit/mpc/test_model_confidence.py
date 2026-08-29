@@ -9,8 +9,22 @@ from common.model_evidence import (
     ModelEvidenceRecord,
     RecorderGapEvidence,
 )
-from controller.model_learning.confidence import ConfidenceConfig, evaluate_confidence
-from controller.model_learning.contracts import CandidateOrigin, LearningStatus
+from controller.model_learning.confidence import (
+    ConfidenceConfig,
+    evaluate_confidence,
+    qualification_gates,
+)
+from controller.model_learning.contracts import (
+    ActivationPolicy,
+    CandidateOrigin,
+    LearningStatus,
+)
+from tests.unit.common.test_model_challenger_store import (
+    _manifest,
+)
+from tests.unit.common.test_model_challenger_store import (
+    _state as _challenger_state,
+)
 from tests.unit.mpc._confidence_helpers import _qualifying, _rebuild, _record, _state
 
 
@@ -26,6 +40,129 @@ def _report(
         target_timing=None,
         config=ConfidenceConfig(bootstrap_seed=7),
     )
+
+
+def _durably_winning_challenger(
+    origin: CandidateOrigin,
+    *,
+    calibration_manifest: dict[str, object] | None,
+    wins: int = 2,
+):
+    return _challenger_state(
+        phase="evaluating",
+        origin=origin,
+        policy=ActivationPolicy.CAUSAL_AUTO,
+        calibration_manifest=calibration_manifest,
+        evaluation_epoch=3,
+        evaluation_round=wins,
+        consecutive_wins=wins,
+        last_decision_id=f"decision-3-{wins}" if wins else None,
+        last_evidence_id=f"challenger-round-3-{wins}" if wins else None,
+    )
+
+
+@pytest.mark.parametrize(
+    "origin",
+    (
+        CandidateOrigin.PASSIVE_ONLINE,
+        CandidateOrigin.OPERATOR_CALIBRATION,
+    ),
+)
+def test_causal_auto_origins_share_durable_qualification_gates(
+    origin: CandidateOrigin,
+) -> None:
+    state = _durably_winning_challenger(
+        origin,
+        calibration_manifest=(_manifest() if origin is CandidateOrigin.OPERATOR_CALIBRATION else None),
+    )
+
+    decision = qualification_gates(state)
+
+    assert state.policy is ActivationPolicy.CAUSAL_AUTO
+    assert decision.accepted
+    assert decision.blockers == ()
+
+
+def test_operator_manifest_does_not_relax_the_shared_two_win_gate() -> None:
+    passive = qualification_gates(
+        _durably_winning_challenger(
+            CandidateOrigin.PASSIVE_ONLINE,
+            calibration_manifest=None,
+            wins=1,
+        )
+    )
+    operator = qualification_gates(
+        _durably_winning_challenger(
+            CandidateOrigin.OPERATOR_CALIBRATION,
+            calibration_manifest=_manifest(),
+            wins=1,
+        )
+    )
+
+    assert not passive.accepted
+    assert not operator.accepted
+    assert operator.blockers == passive.blockers
+
+
+@pytest.mark.parametrize(
+    "manifest",
+    (
+        pytest.param(None, id="missing"),
+        pytest.param(
+            {
+                "command_revision": 11,
+                "session_id": "session-calibration",
+                "completed_stages": ["low", "middle", "high"],
+                "stage_evidence_ids": [
+                    "calibration-low",
+                    "calibration-middle",
+                    "calibration-high",
+                ],
+            },
+            id="partial",
+        ),
+        pytest.param(
+            {
+                "command_revision": 11,
+                "session_id": "session-calibration",
+                "completed_stages": ["low", "high", "middle", "coast"],
+                "stage_evidence_ids": [
+                    "calibration-low",
+                    "calibration-high",
+                    "calibration-middle",
+                    "calibration-coast",
+                ],
+            },
+            id="reordered",
+        ),
+        pytest.param(
+            {
+                "command_revision": 11,
+                "session_id": "session-calibration",
+                "completed_stages": ["low", "middle", "high", "coast"],
+                "stage_evidence_ids": [
+                    "calibration-low",
+                    "calibration-middle",
+                    "calibration-high",
+                    "calibration-high",
+                ],
+            },
+            id="duplicate-stage-evidence",
+        ),
+    ),
+)
+def test_operator_qualification_fails_closed_on_incomplete_manifest(
+    manifest: dict[str, object] | None,
+) -> None:
+    decision = qualification_gates(
+        _durably_winning_challenger(
+            CandidateOrigin.OPERATOR_CALIBRATION,
+            calibration_manifest=manifest,
+        )
+    )
+
+    assert not decision.accepted
+    assert decision.blockers == ("calibration-manifest",)
 
 
 def test_distinct_role_and_candidate_generations_select_evidence_using_canonical_origin() -> None:

@@ -55,6 +55,7 @@
     },
     "ActivationPolicy": {
       "enum": [
+        "causal-auto",
         "passive-auto",
         "operator-reviewed",
         "cook-refit"

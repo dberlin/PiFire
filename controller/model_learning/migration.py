@@ -28,6 +28,9 @@ from common.persistence.model_challenger import (
     _read_in_transaction as _read_challenger_in_transaction,
 )
 from common.persistence.model_challenger import (
+    _state_from_dict as _challenger_state_from_dict,
+)
+from common.persistence.model_challenger import (
     _write_state as _write_challenger_state,
 )
 from common.persistence.model_evidence import (
@@ -36,7 +39,153 @@ from common.persistence.model_evidence import (
     _model_evidence_connection,
 )
 from controller.model_learning.activation import GreyControlPairDescriptor
-from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
+from controller.model_learning.contracts import (
+    ActivationPolicy,
+    CandidateOrigin,
+    activation_policy_for_origin,
+)
+
+
+def _exact_calibration_manifest(
+    value: object,
+    *,
+    session_id: str | None = None,
+) -> dict[str, object] | None:
+    if not isinstance(value, dict) or set(value) != {
+        "command_revision",
+        "session_id",
+        "completed_stages",
+        "stage_evidence_ids",
+    }:
+        return None
+    command_revision = value.get("command_revision")
+    manifest_session = value.get("session_id")
+    completed_stages = value.get("completed_stages")
+    evidence_ids = value.get("stage_evidence_ids")
+    if (
+        not isinstance(command_revision, int)
+        or isinstance(command_revision, bool)
+        or command_revision <= 0
+        or not isinstance(manifest_session, str)
+        or not manifest_session.strip()
+        or (session_id is not None and manifest_session != session_id)
+        or not isinstance(completed_stages, (list, tuple))
+        or tuple(completed_stages) != ("low", "middle", "high", "coast")
+        or not isinstance(evidence_ids, (list, tuple))
+        or len(evidence_ids) != 4
+        or len(set(evidence_ids)) != 4
+        or not all(isinstance(item, str) and item.strip() for item in evidence_ids)
+    ):
+        return None
+    return {
+        "command_revision": command_revision,
+        "session_id": manifest_session,
+        "completed_stages": list(completed_stages),
+        "stage_evidence_ids": list(evidence_ids),
+    }
+
+
+def _normalize_durable_challenger_policy(
+    connection: sqlite3.Connection,
+) -> None:
+    row = connection.execute("SELECT state_json FROM model_challenger_state WHERE singleton=1").fetchone()
+    if row is None:
+        return
+    try:
+        decoded = json.loads(row[0])
+        if not isinstance(decoded, dict) or decoded.get("phase") == "retired":
+            return
+        origin = CandidateOrigin(decoded.get("origin"))
+        stored_policy = ActivationPolicy(decoded.get("policy"))
+    except TypeError, ValueError, json.JSONDecodeError:
+        return
+
+    current_policy = activation_policy_for_origin(origin)
+    historical_policy = {
+        CandidateOrigin.PASSIVE_ONLINE: ActivationPolicy.PASSIVE_AUTO,
+        CandidateOrigin.OPERATOR_CALIBRATION: ActivationPolicy.OPERATOR_REVIEWED,
+    }.get(origin)
+    if stored_policy not in {current_policy, historical_policy}:
+        return
+
+    decoded["policy"] = current_policy.value
+    try:
+        normalized = _challenger_state_from_dict(decoded)
+    except TypeError, ValueError:
+        return
+    incomplete_operator = (
+        origin is CandidateOrigin.OPERATOR_CALIBRATION
+        and _exact_calibration_manifest(decoded.get("calibration_manifest")) is None
+    )
+    if stored_policy is current_policy and not incomplete_operator:
+        return
+    replacement = replace(
+        normalized,
+        revision=normalized.revision + 1,
+        **(
+            {
+                "phase": "retired",
+                "retirement_reason": "calibration-manifest",
+                "retired_ms": normalized.updated_ms,
+            }
+            if incomplete_operator
+            else {}
+        ),
+    )
+    _write_challenger_state(
+        connection,
+        replacement,
+        insert=False,
+        expected_revision=normalized.revision,
+    )
+
+
+def _normalize_activation_policy(
+    connection: sqlite3.Connection,
+    state: ModelActivationState,
+) -> ModelActivationState:
+    try:
+        origin = CandidateOrigin(state.origin)
+        stored_policy = ActivationPolicy(state.policy)
+    except TypeError, ValueError:
+        return state
+    historical_policy = {
+        CandidateOrigin.PASSIVE_ONLINE: ActivationPolicy.PASSIVE_AUTO,
+        CandidateOrigin.OPERATOR_CALIBRATION: ActivationPolicy.OPERATOR_REVIEWED,
+    }.get(origin)
+    if stored_policy is not historical_policy:
+        return state
+    current_policy = activation_policy_for_origin(origin)
+    connection.execute(
+        "UPDATE model_activation_state SET policy=? WHERE singleton=1",
+        (current_policy.value,),
+    )
+    return replace(state, policy=current_policy.value)
+
+
+def _controller_snapshot_for_migration(snapshot: object) -> object:
+    if not isinstance(snapshot, dict) or snapshot.get("version") not in {4, 5}:
+        return snapshot
+    normalized = dict(snapshot)
+    normalized.pop("calibration_manifest", None)
+    for key in ("challenger", "evidence"):
+        value = normalized.get(key)
+        if isinstance(value, dict) and "calibration_manifest" in value:
+            value = dict(value)
+            value.pop("calibration_manifest", None)
+            normalized[key] = value
+    try:
+        origin = CandidateOrigin(normalized.get("origin"))
+        stored_policy = ActivationPolicy(normalized.get("policy"))
+    except TypeError, ValueError:
+        return normalized
+    historical_policy = {
+        CandidateOrigin.PASSIVE_ONLINE: ActivationPolicy.PASSIVE_AUTO,
+        CandidateOrigin.OPERATOR_CALIBRATION: ActivationPolicy.OPERATOR_REVIEWED,
+    }.get(origin)
+    if stored_policy is historical_policy:
+        normalized["policy"] = activation_policy_for_origin(origin).value
+    return normalized
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,6 +323,21 @@ def _legacy_v4_challenger_state(
         or last_sequence < first_sequence
     ):
         return None
+    calibration_manifest = None
+    if origin is CandidateOrigin.OPERATOR_CALIBRATION:
+        raw_manifest = challenger.get(
+            "calibration_manifest",
+            evidence.get(
+                "calibration_manifest",
+                snapshot.get("calibration_manifest"),
+            ),
+        )
+        calibration_manifest = _exact_calibration_manifest(
+            raw_manifest,
+            session_id=session_id,
+        )
+        if calibration_manifest is None:
+            return None
     scored_count = last_sequence - first_sequence + 1
     prefix_digest = canonical_trajectory_digest(window)
     corpus_slice = FitCorpusSlice(
@@ -233,7 +397,7 @@ def _legacy_v4_challenger_state(
         revision=0,
         phase="evaluating",
         origin=origin,
-        policy=policy,
+        policy=activation_policy_for_origin(origin),
         fit_corpus=corpus,
         fit_lineage=lineage,
         fit_preparation={
@@ -248,7 +412,7 @@ def _legacy_v4_challenger_state(
         controller_configuration_digest=configuration_digest,
         incumbent=incumbent,
         candidate=candidate,
-        calibration_manifest=None,
+        calibration_manifest=calibration_manifest,
         evaluation_epoch=0,
         evaluation_round=0,
         consecutive_wins=0,
@@ -306,6 +470,7 @@ def migrate_mpc_learning_authority(
             row = _activation_state_row(conn)
             if row is not None:
                 state = ModelActivationState(*row)
+                state = _normalize_activation_policy(conn, state)
 
                 def pair_authority(pair, fallback_json):
                     if pair is None:
@@ -373,7 +538,7 @@ def migrate_mpc_learning_authority(
                     invalidated = True
         if selected is None and controller_snapshot is not None:
             try:
-                selected = migrate_grey_learning_snapshot(controller_snapshot)
+                selected = migrate_grey_learning_snapshot(_controller_snapshot_for_migration(controller_snapshot))
                 source = "controller"
             except GreySnapshotInvalid:
                 invalidated = True
@@ -403,24 +568,24 @@ def migrate_mpc_learning_authority(
                     "rollback_digest": None,
                     "rollback_generation": None,
                 }
-                if source == "active" and activation_input_key is None and state is not None:
-                    selected["evidence"]["confidence_decision_id"] = state.evidence_decision_id
-                    selected["origin"] = state.origin
-                    selected["policy"] = state.policy
-                    selected["activation"] = {
-                        "phase": ("aborted" if state.phase == "prepared" else state.phase),
-                        "pending_persistence": False,
-                        "pending_swap": False,
-                    }
-                else:
-                    selected["evidence"]["confidence_decision_id"] = None
-                    selected["origin"] = None
-                    selected["policy"] = None
-                    selected["activation"] = {
-                        "phase": "aborted",
-                        "pending_persistence": False,
-                        "pending_swap": False,
-                    }
+            if source == "active" and activation_input_key is None and state is not None:
+                selected["evidence"]["confidence_decision_id"] = state.evidence_decision_id
+                selected["origin"] = state.origin
+                selected["policy"] = state.policy
+                selected["activation"] = {
+                    "phase": ("aborted" if state.phase == "prepared" else state.phase),
+                    "pending_persistence": False,
+                    "pending_swap": False,
+                }
+            else:
+                selected["evidence"]["confidence_decision_id"] = None
+                selected["origin"] = None
+                selected["policy"] = None
+                selected["activation"] = {
+                    "phase": "aborted",
+                    "pending_persistence": False,
+                    "pending_swap": False,
+                }
 
         raw_activation = controller_snapshot.get("activation") if isinstance(controller_snapshot, dict) else None
         legacy_prepared = isinstance(raw_activation, dict) and raw_activation.get("phase") == "prepared"
@@ -443,6 +608,7 @@ def migrate_mpc_learning_authority(
         challenger_row_exists = (
             conn.execute("SELECT 1 FROM model_challenger_state WHERE singleton=1").fetchone() is not None
         )
+        _normalize_durable_challenger_policy(conn)
         durable_challenger = None
         try:
             durable_challenger = _read_challenger_in_transaction(conn)

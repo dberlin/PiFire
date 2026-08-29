@@ -123,7 +123,7 @@ def _seed_qualified_challenger(
         revision=0,
         phase="qualified",
         origin=CandidateOrigin.PASSIVE_ONLINE,
-        policy=ActivationPolicy.PASSIVE_AUTO,
+        policy=ActivationPolicy.CAUSAL_AUTO,
         fit_corpus=corpus,
         fit_lineage=ModelFitLineage(
             request_id=request_id,
@@ -293,7 +293,7 @@ def test_prepare_builds_validates_dry_solves_then_drains_durable_prepared_receip
         _request(descriptor),
         descriptor,
         origin=CandidateOrigin.OPERATOR_CALIBRATION,
-        policy=ActivationPolicy.OPERATOR_REVIEWED,
+        policy=ActivationPolicy.CAUSAL_AUTO,
     )
 
     assert isinstance(decision, ActivationDecision)
@@ -318,7 +318,7 @@ def test_queue_acceptance_without_durable_receipt_never_prepares_or_transfers_ow
         _request(descriptor),
         descriptor,
         origin=CandidateOrigin.OPERATOR_CALIBRATION,
-        policy=ActivationPolicy.OPERATOR_REVIEWED,
+        policy=ActivationPolicy.CAUSAL_AUTO,
     )
 
     assert not decision.accepted
@@ -347,7 +347,7 @@ def test_every_candidate_validation_failure_closes_the_complete_candidate_pair(c
         _request(descriptor),
         descriptor,
         origin=CandidateOrigin.OPERATOR_CALIBRATION,
-        policy=ActivationPolicy.OPERATOR_REVIEWED,
+        policy=ActivationPolicy.CAUSAL_AUTO,
     )
 
     assert not decision.accepted
@@ -363,8 +363,8 @@ def test_every_candidate_validation_failure_closes_the_complete_candidate_pair(c
 @pytest.mark.parametrize(
     ("origin", "policy"),
     [
-        (CandidateOrigin.PASSIVE_ONLINE, ActivationPolicy.PASSIVE_AUTO),
-        (CandidateOrigin.OPERATOR_CALIBRATION, ActivationPolicy.OPERATOR_REVIEWED),
+        (CandidateOrigin.PASSIVE_ONLINE, ActivationPolicy.CAUSAL_AUTO),
+        (CandidateOrigin.OPERATOR_CALIBRATION, ActivationPolicy.CAUSAL_AUTO),
         (CandidateOrigin.COOK_REFIT, ActivationPolicy.COOK_REFIT),
     ],
 )
@@ -374,14 +374,14 @@ def test_origin_policy_is_exact(origin: CandidateOrigin, policy: ActivationPolic
     assert decision.accepted
 
 
-def test_manual_request_requires_exact_digest_decision_and_operator_reviewed_policy() -> None:
+def test_prepare_requires_exact_digest_decision_and_causal_policy() -> None:
     manager, descriptor, _incumbent, candidate, calls, *_ = _manager()
 
     wrong_digest = manager.prepare(
         ModelActivationRequest(candidate_digest="f" * 64, decision_id="decision-9"),
         descriptor,
         origin=CandidateOrigin.OPERATOR_CALIBRATION,
-        policy=ActivationPolicy.OPERATOR_REVIEWED,
+        policy=ActivationPolicy.CAUSAL_AUTO,
     )
     wrong_policy = manager.prepare(
         _request(descriptor),
@@ -402,7 +402,7 @@ def test_phase_transitions_preserve_exact_pair_owners_and_abort_reason() -> None
         _request(descriptor),
         descriptor,
         origin=CandidateOrigin.PASSIVE_ONLINE,
-        policy=ActivationPolicy.PASSIVE_AUTO,
+        policy=ActivationPolicy.CAUSAL_AUTO,
     ).record
     assert prepared is not None
 
@@ -454,7 +454,7 @@ def test_startup_aborts_prepared_before_restoring_only_the_incumbent() -> None:
         _request(descriptor),
         descriptor,
         origin=CandidateOrigin.PASSIVE_ONLINE,
-        policy=ActivationPolicy.PASSIVE_AUTO,
+        policy=ActivationPolicy.CAUSAL_AUTO,
     ).record
     assert prepared is not None
     writes: list[PreparedActivationRecord] = []
@@ -484,7 +484,7 @@ def test_startup_restores_candidate_only_from_active_and_never_replays_a_swap() 
         _request(descriptor),
         descriptor,
         origin=CandidateOrigin.PASSIVE_ONLINE,
-        policy=ActivationPolicy.PASSIVE_AUTO,
+        policy=ActivationPolicy.CAUSAL_AUTO,
     ).record
     assert prepared is not None
     writes = []
@@ -519,7 +519,7 @@ def test_startup_refuses_ambiguous_prepared_compensation_without_a_durable_abort
         _request(descriptor),
         descriptor,
         origin=CandidateOrigin.PASSIVE_ONLINE,
-        policy=ActivationPolicy.PASSIVE_AUTO,
+        policy=ActivationPolicy.CAUSAL_AUTO,
     ).record
     assert prepared is not None
 
@@ -597,7 +597,7 @@ def _bare_mpc_pair_owner(
         incumbent=incumbent_descriptor,
         candidate=candidate_descriptor,
         origin=CandidateOrigin.PASSIVE_ONLINE,
-        policy=ActivationPolicy.PASSIVE_AUTO,
+        policy=ActivationPolicy.CAUSAL_AUTO,
         decision_id="decision-runtime",
     )
     incumbent.authorize_output()
@@ -718,7 +718,7 @@ def test_automatic_preparation_drains_confidence_receipt_before_prepared_phase(d
     )
     core._grey_learning_runtime.prepare_automatic_activation(
         preparation,
-        ActivationPolicy.PASSIVE_AUTO,
+        ActivationPolicy.CAUSAL_AUTO,
         evaluation,
     )
 
@@ -816,7 +816,7 @@ def test_hold_and_learning_share_one_injected_activation_persistence_fifo(ds) ->
     core.submit_activation_confidence(hold_confidence)
     core._grey_learning_runtime.prepare_automatic_activation(
         preparation,
-        ActivationPolicy.PASSIVE_AUTO,
+        ActivationPolicy.CAUSAL_AUTO,
         evaluation,
     )
 
@@ -883,7 +883,7 @@ def test_successive_activation_closes_displaced_rollback_before_retaining_curren
         incumbent=first.descriptor,
         candidate=second.descriptor,
         origin=CandidateOrigin.PASSIVE_ONLINE,
-        policy=ActivationPolicy.PASSIVE_AUTO,
+        policy=ActivationPolicy.CAUSAL_AUTO,
         decision_id="decision-runtime-second",
     )
 
@@ -995,7 +995,7 @@ def test_first_native_solve_failure_after_activation_restores_exact_pair_and_rec
         incumbent=incumbent.descriptor,
         candidate=candidate_descriptor,
         origin=CandidateOrigin.PASSIVE_ONLINE,
-        policy=ActivationPolicy.PASSIVE_AUTO,
+        policy=ActivationPolicy.CAUSAL_AUTO,
         decision_id="decision-native-failure",
     )
     qualified = _seed_qualified_challenger(

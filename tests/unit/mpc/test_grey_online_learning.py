@@ -134,9 +134,7 @@ def _persistent_fit_job(tmp_path, *, origin, config):
         candidate_generation=9,
     )
     scored_sequences = tuple(
-        frame.sequence
-        for corpus_segment in snapshot.segments
-        for frame in corpus_segment.scored_hold_frames
+        frame.sequence for corpus_segment in snapshot.segments for frame in corpus_segment.scored_hold_frames
     )
     request = _request(
         origin=origin,
@@ -284,11 +282,7 @@ class _ImmediateFitWorker:
 
     def receive(self, *, timeout_s):
         assert timeout_s == 0.0
-        temperatures = tuple(
-            float(value)
-            for segment in self.job.segments
-            for value in segment.scored_temperature_c
-        )
+        temperatures = tuple(float(value) for segment in self.job.segments for value in segment.scored_temperature_c)
         return SimpleNamespace(
             outcome=GreyFitSuccess(
                 request=self.job.request,
@@ -376,9 +370,7 @@ def test_superseding_submission_failure_preserves_prepared_candidate_and_evaluat
     tmp_path,
     worker_disposition,
 ) -> None:
-    orchestrator, worker, _, prepared, replacement_job = (
-        _prepared_supersession_harness(tmp_path)
-    )
+    orchestrator, worker, _, prepared, replacement_job = _prepared_supersession_harness(tmp_path)
     evaluator = orchestrator._evaluator
     persisted = []
     worker.next_submission = worker_disposition
@@ -408,9 +400,7 @@ def test_superseding_submission_failure_preserves_prepared_candidate_and_evaluat
 def test_superseding_persistence_failure_preserves_candidate_and_stales_accepted_fit(
     tmp_path,
 ) -> None:
-    orchestrator, _, identity, prepared, replacement_job = (
-        _prepared_supersession_harness(tmp_path)
-    )
+    orchestrator, _, identity, prepared, replacement_job = _prepared_supersession_harness(tmp_path)
     evaluator = orchestrator._evaluator
 
     def reject_persistence() -> None:
@@ -430,9 +420,7 @@ def test_superseding_persistence_failure_preserves_candidate_and_stales_accepted
         live_identity=identity,
         live_origin=CandidateOrigin.COOK_REFIT,
     )
-    assert delivery.stale_reasons == (
-        "candidate-supersession-persistence-failed",
-    )
+    assert delivery.stale_reasons == ("candidate-supersession-persistence-failed",)
     assert delivery.preparation is None
     assert orchestrator.pending_request is None
     assert orchestrator.prepared is prepared
@@ -628,15 +616,23 @@ def test_close_releases_an_untransferred_prepared_candidate_pair(tmp_path) -> No
     assert candidate_controller.closed is True
 
 
-def test_orchestrator_carries_prepared_candidate_through_causal_evaluation_and_handoff_without_install(
+@pytest.mark.parametrize(
+    "origin",
+    (
+        CandidateOrigin.PASSIVE_ONLINE,
+        CandidateOrigin.OPERATOR_CALIBRATION,
+    ),
+)
+def test_orchestrator_carries_both_origins_through_causal_evaluation_and_handoff_without_install(
     tmp_path,
+    origin: CandidateOrigin,
 ) -> None:
     worker = _ImmediateFitWorker()
     incumbent = object()
     config = GreyBoxMPCConfig(horizon_steps=12)
     identity, job = _persistent_fit_job(
         tmp_path,
-        origin=CandidateOrigin.PASSIVE_ONLINE,
+        origin=origin,
         config=config,
     )
     orchestrator = GreyLearningOrchestrator(
@@ -659,7 +655,7 @@ def test_orchestrator_carries_prepared_candidate_through_causal_evaluation_and_h
     assert orchestrator.submit_corpus_fit(job) is FitSubmission.ACCEPTED
     delivery = orchestrator.poll_fit_off_path(
         live_identity=identity,
-        live_origin=CandidateOrigin.PASSIVE_ONLINE,
+        live_origin=origin,
     )
     assert delivery.preparation.accepted
 
@@ -704,7 +700,7 @@ def test_orchestrator_carries_prepared_candidate_through_causal_evaluation_and_h
         online_enabled=True,
         prepare=lambda exact, policy: handed.append((exact, policy)) or "prepared-id",
     )
-    assert handed == [(delivery.preparation, ActivationPolicy.PASSIVE_AUTO)]
+    assert handed == [(delivery.preparation, ActivationPolicy.CAUSAL_AUTO)]
     assert outcome.active_pair is incumbent
     assert outcome.prepared_id == "prepared-id"
     repeated = orchestrator.handoff_if_ready(
@@ -820,27 +816,72 @@ def _accepted_evaluation(prepared):
     )
 
 
-def test_passive_candidate_hands_the_exact_prepared_pair_forward_without_installing_or_transferring_ownership() -> None:
-    candidate = _fit()
-    pair = object()
+@pytest.mark.parametrize(
+    ("origin", "online_enabled", "expected_status", "expected_blockers"),
+    (
+        pytest.param(
+            CandidateOrigin.PASSIVE_ONLINE,
+            True,
+            LearningStatus.ACTIVATING,
+            (),
+            id="passive-enabled",
+        ),
+        pytest.param(
+            CandidateOrigin.OPERATOR_CALIBRATION,
+            True,
+            LearningStatus.ACTIVATING,
+            (),
+            id="operator-enabled",
+        ),
+        pytest.param(
+            CandidateOrigin.OPERATOR_CALIBRATION,
+            False,
+            LearningStatus.ACTIVATING,
+            (),
+            id="operator-explicit-with-passive-disabled",
+        ),
+        pytest.param(
+            CandidateOrigin.PASSIVE_ONLINE,
+            False,
+            LearningStatus.EVALUATING,
+            ("online-disabled",),
+            id="passive-disabled",
+        ),
+    ),
+)
+def test_causal_auto_handoff_is_shared_and_passive_disable_blocks_only_passive_admission(
+    origin: CandidateOrigin,
+    online_enabled: bool,
+    expected_status: LearningStatus,
+    expected_blockers: tuple[str, ...],
+) -> None:
     prepared = CandidatePreparation.accepted_for_test(
-        candidate=candidate, candidate_pair=pair, incumbent_pair=object(), timing=_timing()
+        candidate=_fit(origin),
+        candidate_pair=object(),
+        incumbent_pair=object(),
+        timing=_timing(),
     )
-    installed = []
     handed = []
     outcome = handoff_candidate(
         prepared,
         evaluation=_accepted_evaluation(prepared),
         confidence_accepted=True,
-        online_enabled=True,
+        online_enabled=online_enabled,
         prepare=lambda exact, policy: handed.append((exact, policy)) or "prepared-id",
-        install=lambda _pair: installed.append(_pair),
+        install=lambda _pair: pytest.fail("the fit pipeline must never install a candidate"),
     )
-    assert handed == [(prepared, ActivationPolicy.PASSIVE_AUTO)]
-    assert installed == []
-    assert outcome.status is LearningStatus.ACTIVATING
-    assert outcome.prepared_id == "prepared-id"
+
+    assert outcome.status is expected_status
+    assert outcome.blockers == expected_blockers
     assert outcome.active_pair is prepared.incumbent_pair
+    if expected_blockers:
+        assert handed == []
+        assert outcome.policy is None
+        assert outcome.prepared_id is None
+    else:
+        assert handed == [(prepared, ActivationPolicy.CAUSAL_AUTO)]
+        assert outcome.policy is ActivationPolicy.CAUSAL_AUTO
+        assert outcome.prepared_id == "prepared-id"
 
 
 @pytest.mark.parametrize(
@@ -870,23 +911,4 @@ def test_handoff_rechecks_exact_evaluation_model_digests(digest_field, wrong_dig
     )
     assert handed == []
     assert outcome.blockers == (blocker,)
-    assert outcome.active_pair is prepared.incumbent_pair
-
-
-def test_operator_calibration_always_stops_ready_for_review_even_when_passive_auto_is_enabled() -> None:
-    candidate = _fit(CandidateOrigin.OPERATOR_CALIBRATION)
-    prepared = CandidatePreparation.accepted_for_test(
-        candidate=candidate, candidate_pair=object(), incumbent_pair=object(), timing=_timing()
-    )
-    handed = []
-    outcome = handoff_candidate(
-        prepared,
-        evaluation=_accepted_evaluation(prepared),
-        confidence_accepted=True,
-        online_enabled=True,
-        prepare=lambda exact, policy: handed.append((exact, policy)),
-        install=lambda _pair: pytest.fail("the fit pipeline must never install a candidate"),
-    )
-    assert handed == [(prepared, ActivationPolicy.OPERATOR_REVIEWED)]
-    assert outcome.status is LearningStatus.READY_FOR_REVIEW
     assert outcome.active_pair is prepared.incumbent_pair

@@ -51,7 +51,11 @@ def _current_pair_descriptor(
     )
 
 
-def _pair_phase_state(phase: ActivationPhase = ActivationPhase.PREPARED):
+def _pair_phase_state(
+    phase: ActivationPhase = ActivationPhase.PREPARED,
+    *,
+    origin: CandidateOrigin = CandidateOrigin.OPERATOR_CALIBRATION,
+):
     incumbent = _current_pair_descriptor(
         50.0,
         candidate_generation=3,
@@ -66,8 +70,8 @@ def _pair_phase_state(phase: ActivationPhase = ActivationPhase.PREPARED):
         timestamp_ms=1_000,
         incumbent=incumbent,
         candidate=candidate,
-        origin=CandidateOrigin.OPERATOR_CALIBRATION,
-        policy=ActivationPolicy.OPERATOR_REVIEWED,
+        origin=origin,
+        policy=ActivationPolicy.CAUSAL_AUTO,
         decision_id="decision-grey-hold",
     )
     record = (

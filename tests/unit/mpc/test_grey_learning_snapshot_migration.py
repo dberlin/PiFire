@@ -167,6 +167,17 @@ def _ready_review_v4():
             "band_c": [80.0, 220.0],
             "nfev": 9,
         },
+        "calibration_manifest": {
+            "command_revision": 11,
+            "session_id": "legacy-session",
+            "completed_stages": ["low", "middle", "high", "coast"],
+            "stage_evidence_ids": [
+                "legacy-calibration-low",
+                "legacy-calibration-middle",
+                "legacy-calibration-high",
+                "legacy-calibration-coast",
+            ],
+        },
     }
     snapshot["active_pair"] = legacy_active.to_dict()
     snapshot["candidate_pair"] = legacy_candidate.to_dict()
@@ -607,8 +618,11 @@ def test_legacy_singleton_snapshot_is_selected_when_no_pair_identity_exists(ds):
             INSERT INTO model_activation_state(
                 singleton, active_snapshot_json, rollback_snapshot_json,
                 evidence_decision_id, controller_configuration_digest,
-                role_generation, phase
-            ) VALUES(1, ?, ?, 'legacy-decision', ?, 9, 'active')
+                role_generation, phase, origin, policy
+            ) VALUES(
+                1, ?, ?, 'legacy-decision', ?, 9, 'active',
+                'operator-calibration', 'operator-reviewed'
+            )
             """,
             (
                 json.dumps(active, indent=2),
@@ -623,17 +637,21 @@ def test_legacy_singleton_snapshot_is_selected_when_no_pair_identity_exists(ds):
 
     assert result.source == "active"
     assert result.reason is None
-    assert result.snapshot == normalized_active
+    assert result.snapshot["active"] == normalized_active["active"]
     assert state is not None
     assert state.active_pair is None
     assert state.evidence_decision_id == "legacy-decision"
+    assert state.origin == CandidateOrigin.OPERATOR_CALIBRATION.value
+    assert state.policy == ActivationPolicy.CAUSAL_AUTO.value
+    assert result.snapshot["origin"] == CandidateOrigin.OPERATOR_CALIBRATION.value
+    assert result.snapshot["policy"] == ActivationPolicy.CAUSAL_AUTO.value
     assert state.active_snapshot_json == json.dumps(
-        normalized_active,
+        result.snapshot,
         sort_keys=True,
         separators=(",", ":"),
         allow_nan=False,
     )
-    assert _stored_controller() == normalized_active
+    assert _stored_controller() == result.snapshot
 
 
 def test_invalid_active_pair_configuration_yields_to_valid_rollback_pair(ds):
@@ -771,6 +789,44 @@ def test_rejected_rollback_pointer_update_rolls_back_controller_and_singleton(ds
     assert read_model_evidence() == original_evidence
 
 
+@pytest.mark.parametrize(
+    ("origin", "policy"),
+    (
+        (CandidateOrigin.PASSIVE_ONLINE, ActivationPolicy.PASSIVE_AUTO),
+        (
+            CandidateOrigin.OPERATOR_CALIBRATION,
+            ActivationPolicy.OPERATOR_REVIEWED,
+        ),
+    ),
+)
+def test_controller_only_v5_legacy_policy_canonicalizes_without_reactivation(
+    ds,
+    origin: CandidateOrigin,
+    policy: ActivationPolicy,
+) -> None:
+    checkpoint = migrate_grey_learning_snapshot(_v4())
+    checkpoint["origin"] = origin.value
+    checkpoint["policy"] = policy.value
+    checkpoint["activation"] = {
+        "phase": "active",
+        "pending_persistence": False,
+        "pending_swap": False,
+    }
+    _seed_controller(checkpoint)
+
+    result = migrate_mpc_learning_authority(defaults=PARAMS)
+
+    assert result.source == "controller"
+    assert result.snapshot["origin"] == origin.value
+    assert result.snapshot["policy"] == ActivationPolicy.CAUSAL_AUTO.value
+    assert result.snapshot["activation"] == {
+        "phase": "active",
+        "pending_persistence": False,
+        "pending_swap": False,
+    }
+    assert read_model_activation() is None
+
+
 def test_valid_legacy_v4_ready_review_imports_one_evaluating_challenger(ds):
     legacy, active, candidate = _ready_review_v4()
     _seed_controller(legacy)
@@ -781,7 +837,7 @@ def test_valid_legacy_v4_ready_review_imports_one_evaluating_challenger(ds):
     assert challenger is not None
     assert challenger.phase == "evaluating"
     assert challenger.origin is CandidateOrigin.OPERATOR_CALIBRATION
-    assert challenger.policy is ActivationPolicy.OPERATOR_REVIEWED
+    assert challenger.policy is ActivationPolicy.CAUSAL_AUTO
     assert challenger.incumbent == active
     assert challenger.candidate == candidate
     assert challenger.controller_configuration_digest == legacy["window"]["configuration_digest"]
@@ -792,6 +848,19 @@ def test_valid_legacy_v4_ready_review_imports_one_evaluating_challenger(ds):
     assert challenger.consecutive_wins == 0
     assert challenger.last_decision_id is None
     assert challenger.last_evidence_id is None
+    assert challenger.calibration_manifest == {
+        "command_revision": 11,
+        "session_id": "legacy-session",
+        "completed_stages": ("low", "middle", "high", "coast"),
+        "stage_evidence_ids": (
+            "legacy-calibration-low",
+            "legacy-calibration-middle",
+            "legacy-calibration-high",
+            "legacy-calibration-coast",
+        ),
+    }
+    assert result.snapshot["origin"] == CandidateOrigin.OPERATOR_CALIBRATION.value
+    assert result.snapshot["policy"] == ActivationPolicy.CAUSAL_AUTO.value
     assert result.snapshot["challenger_authority"] == {
         "challenger_id": challenger.challenger_id,
         "revision": challenger.revision,

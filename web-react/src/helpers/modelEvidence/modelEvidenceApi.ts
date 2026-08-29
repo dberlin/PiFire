@@ -22,7 +22,7 @@ const endpoint = (baseUrl: string, path: string) => `${baseUrl}/api/${path}`;
 type UnknownRecord = Record<string, unknown>;
 
 const ORIGINS = ["passive-online", "operator-calibration", "cook-refit"] as const;
-const POLICIES = ["passive-auto", "operator-reviewed", "cook-refit"] as const;
+const POLICIES = ["causal-auto", "passive-auto", "operator-reviewed", "cook-refit"] as const;
 const REPORT_STATUSES = [
   "collecting",
   "insufficient-excitation",

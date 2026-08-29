@@ -17,6 +17,7 @@ from common.persistence.model_challenger import (
 )
 from common.persistence.model_evidence import read_model_activation
 from controller.model_learning.activation import ActivationPhase, PreparedActivationRecord
+from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
 from tests.unit.common.test_model_challenger_store import (
     _corpus,
     _descriptor,
@@ -55,11 +56,24 @@ def _recover_exact(
     return recover_model_challenger(**arguments)  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize(
+    "origin",
+    (
+        CandidateOrigin.PASSIVE_ONLINE,
+        CandidateOrigin.OPERATOR_CALIBRATION,
+    ),
+)
 @pytest.mark.parametrize("wins", [0, 1])
-def test_exact_restart_retains_only_completed_wins_and_starts_a_new_epoch(database_path: Path, wins: int) -> None:
+def test_exact_restart_retains_only_completed_wins_and_starts_a_new_epoch(
+    database_path: Path,
+    wins: int,
+    origin: CandidateOrigin,
+) -> None:
     durable = _state(
         phase="evaluating",
-        calibration_manifest=_manifest(),
+        origin=origin,
+        policy=ActivationPolicy.CAUSAL_AUTO,
+        calibration_manifest=(_manifest() if origin is CandidateOrigin.OPERATOR_CALIBRATION else None),
         evaluation_epoch=3,
         evaluation_round=wins,
         consecutive_wins=wins,
