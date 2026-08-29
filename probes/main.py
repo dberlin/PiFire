@@ -204,8 +204,7 @@ class ProbesMain:
             device_health = device.get_thermocouple_health()
             hardware_health.update(device_health)
             hardware_by_device[device_name] = dict(device_health)
-            get_samples = getattr(device, "get_thermocouple_samples", None)
-            samples = get_samples() if get_samples is not None else {}
+            samples = device.get_thermocouple_samples()
             for port, sample in samples.items():
                 if not isinstance(sample, ThermocoupleJunctionSample):
                     continue
