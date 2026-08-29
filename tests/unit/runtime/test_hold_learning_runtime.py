@@ -507,6 +507,7 @@ def _runtime(
     runner: _Runner | None = None,
     persistence: _Persistence | None = None,
     logger: _LifecycleLogger | None = None,
+    learning_trajectory=None,
 ):
     trace, recorder = _trace(opened=opened)
     actual_runner = _Runner() if runner is None else runner
@@ -519,6 +520,7 @@ def _runtime(
         controller_name="mpc",
         logger=_LifecycleLogger() if logger is None else logger,
         initial_generation=actual_runner.generation,
+        learning_trajectory=learning_trajectory,
     )
     return runtime, actual_runner, actual_persistence, trace, recorder
 
@@ -715,12 +717,91 @@ def test_sub_millisecond_frame_leaves_the_control_loop_running() -> None:
     ]
 
 
+class _ReplayTrajectory:
+    def __init__(self) -> None:
+        self.replays: list[tuple[FrameObservation, bool]] = []
+        self.anchor: tuple[int, float] | None = None
+
+    def observe_hold_frame(
+        self,
+        observation: FrameObservation,
+        *,
+        replay_only: bool = False,
+    ) -> None:
+        self.replays.append((observation, replay_only))
+        self.anchor = (
+            round(observation.frame_end_s * 1_000),
+            observation.temp_c,
+        )
+
+    def estimator_seed_anchor(self) -> tuple[int, float] | None:
+        return self.anchor
+
+    def barrier(self, timeout: float = 2.0) -> bool:
+        del timeout
+        return True
+
+
+class _ReplayWithoutAnchor:
+    def observe_hold_frame(
+        self,
+        observation: FrameObservation,
+        *,
+        replay_only: bool = False,
+    ) -> None:
+        del observation, replay_only
+
+    def barrier(self, timeout: float = 2.0) -> bool:
+        del timeout
+        return True
+
+
+def test_seed_warmup_requires_the_complete_trajectory_observer() -> None:
+    runtime, *_ = _runtime(learning_trajectory=_ReplayWithoutAnchor())
+    runtime.set_seed_warmup_remaining(1)
+
+    with pytest.raises(AttributeError, match="estimator_seed_anchor"):
+        runtime.submit_completed_observation((0, 20_000), _observation())
+
+
+def test_seed_warmup_replays_exactly_before_decrementing() -> None:
+    trajectory = _ReplayTrajectory()
+    runtime, runner, *_ = _runtime(learning_trajectory=trajectory)
+    observation = _observation(frame_start_s=0.0, frame_end_s=20.0)
+    runtime.set_seed_warmup_remaining(1)
+
+    runtime.submit_completed_observation((0, 20_000), observation)
+
+    assert trajectory.replays == [(observation, True)]
+    assert trajectory.estimator_seed_anchor() == (
+        round(observation.frame_end_s * 1_000),
+        observation.temp_c,
+    )
+    assert runtime.seed_warmup_remaining == 0
+    assert runner.submissions == []
+
+
 class _TrajectoryObserver:
     def __init__(self) -> None:
         self.observations: list[FrameObservation] = []
+        self.anchor: tuple[int, float] | None = None
 
-    def observe_hold_frame(self, observation: FrameObservation) -> None:
+    def observe_hold_frame(
+        self,
+        observation: FrameObservation,
+        *,
+        replay_only: bool = False,
+    ) -> None:
+        del replay_only
         self.observations.append(observation)
+        self.anchor = (round(observation.frame_end_s * 1_000), observation.temp_c)
+
+    def estimator_seed_anchor(self) -> tuple[int, float] | None:
+        return self.anchor
+
+    def barrier(self, timeout: float = 2.0) -> bool:
+        del timeout
+        return True
 
 
 def test_eligible_reconciled_hold_observation_enters_trajectory_exactly_once() -> None:

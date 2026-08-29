@@ -150,7 +150,15 @@ def parse_model_lifecycle_payload(
 
 
 class _LearningTrajectoryObserver(Protocol):
-    def observe_hold_frame(self, observation: FrameObservation) -> None: ...
+    def observe_hold_frame(
+        self,
+        observation: FrameObservation,
+        *,
+        replay_only: bool = False,
+    ) -> None: ...
+
+    def estimator_seed_anchor(self) -> tuple[int, float] | None: ...
+
     def barrier(self, timeout: float = 2.0) -> bool: ...
 
 
@@ -734,16 +742,10 @@ class HoldLearningRuntime:
         """Submit one completed frame while retaining its exact immutable identity."""
         if self._seed_warmup_remaining > 0:
             trajectory = self._learning_trajectory
-            replay = None if trajectory is None else getattr(trajectory, "observe_hold_frame", None)
             replayed_exactly = False
-            if callable(replay):
-                replay(observation, replay_only=True)
-                anchor_reader = getattr(
-                    trajectory,
-                    "estimator_seed_anchor",
-                    None,
-                )
-                anchor = anchor_reader() if callable(anchor_reader) else None
+            if trajectory is not None:
+                trajectory.observe_hold_frame(observation, replay_only=True)
+                anchor = trajectory.estimator_seed_anchor()
                 replayed_exactly = isinstance(anchor, tuple) and anchor[0] == round(observation.frame_end_s * 1_000)
             if replayed_exactly and observation.probe_valid and observation.continuous:
                 self._seed_warmup_remaining -= 1
