@@ -1,12 +1,14 @@
 """Hold schedules persistent-corpus fits without owning synchronous fitting."""
 
 import threading
+from collections.abc import Callable
 from types import SimpleNamespace
 
 import pytest
 
 from common.control_trace import ActuationMode
 from controller.applied_output import AppliedOutput, OutputSource
+from controller.base import ControllerLearningDiagnostics
 from controller.model_learning.calibration import (
     CalibrationDecision,
     CalibrationEvent,
@@ -361,14 +363,130 @@ class _CoreWithoutRefit:
         return None
 
 
-class _CoreWithCorpusScheduling(_CoreWithoutRefit):
+class _MpcLearningCoreMixin:
+    """Complete MPC-learning contract for fixtures that model production MPC."""
+
     def __init__(self):
-        self.fit_requests = []
+        super().__init__()
+        self.seed_requirement_calls = 0
+        self.learning_diagnostics_calls = 0
+        self.seed_source_bindings = []
+        self.learning_identity_bindings = []
+        self.observations = []
+        self.observation_failures = []
+        self.fit_schedules = []
+        self.fit_ticket_schedules = []
+        self.fit_polls = []
+        self.consumed_fit_tickets = []
+        self.fit_failures = []
+
+    def estimator_seed_requirements(self) -> tuple[float, int]:
+        self.seed_requirement_calls += 1
+        return 60.0, 8
+
+    def bind_estimator_seed_source(
+        self,
+        source: Callable[[float, int], object] | None,
+    ) -> None:
+        self.seed_source_bindings.append(source)
+
+    def bind_learning_identity(
+        self,
+        session_id: str,
+        cook_id: str | None,
+        role_generation: int,
+    ) -> None:
+        self.learning_identity_bindings.append(
+            (session_id, cook_id, role_generation),
+        )
+
+    def observe_frame(self, observation: FrameObservation) -> object:
+        self.observations.append(observation)
+        return {
+            "role_generation": observation.role_generation,
+            "eligible": False,
+        }
+
+    def observation_failure(
+        self,
+        observation: FrameObservation,
+        error: BaseException,
+    ) -> object:
+        self.observation_failures.append((observation, error))
+        return {
+            "role_generation": observation.role_generation,
+            "eligible": False,
+            "rejection_reasons": ("learner-exception",),
+        }
+
+    def poll_learning_off_path(
+        self,
+        *,
+        live_origin: CandidateOrigin | None = None,
+    ) -> object:
+        self.fit_polls.append((threading.get_ident(), live_origin))
+        return None
+
+    def schedule_corpus_fit(self, origin: CandidateOrigin) -> bool:
+        self.fit_schedules.append(origin)
+        return False
+
+    def _schedule_corpus_fit_ticket(
+        self,
+        origin: CandidateOrigin,
+    ) -> str | None:
+        self.fit_ticket_schedules.append(origin)
+        return None
+
+    def _consume_terminal_corpus_fit_ticket(
+        self,
+        ticket: str,
+        origin: CandidateOrigin,
+    ) -> bool:
+        self.consumed_fit_tickets.append((ticket, origin))
+        return True
+
+    def fail_corpus_fit(
+        self,
+        ticket: str,
+        error: BaseException | str,
+    ) -> None:
+        self.fit_failures.append((ticket, error))
+
+    def get_learning_diagnostics(self) -> ControllerLearningDiagnostics:
+        self.learning_diagnostics_calls += 1
+        return ControllerLearningDiagnostics(
+            schema_version=1,
+            state={},
+        )
+
+
+class _CoreWithCorpusScheduling(_MpcLearningCoreMixin, _CoreWithoutRefit):
+    def __init__(self):
+        super().__init__()
+        self._fit_requests = []
+        self.fit_request_recorded = threading.Event()
         self.snapshot = {"version": 4, "revision": 3}
 
-    def schedule_corpus_fit(self, origin):
-        self.fit_requests.append(origin)
+    @property
+    def fit_requests(self):
+        self.fit_request_recorded.wait(1.0)
+        return self._fit_requests
+
+    def schedule_corpus_fit(self, origin: CandidateOrigin) -> bool:
+        self.fit_schedules.append(origin)
+        self._fit_requests.append(origin)
+        self.fit_request_recorded.set()
         return True
+
+    def _schedule_corpus_fit_ticket(
+        self,
+        origin: CandidateOrigin,
+    ) -> str | None:
+        self.fit_ticket_schedules.append(origin)
+        self._fit_requests.append(origin)
+        self.fit_request_recorded.set()
+        return "fit-ticket"
 
     def get_model_snapshot(self):
         return self.snapshot
@@ -472,8 +590,9 @@ class _CloseHandle:
         pass
 
 
-class _ActivationOrderingCore(_CoreWithoutRefit):
+class _ActivationOrderingCore(_MpcLearningCoreMixin, _CoreWithoutRefit):
     def __init__(self):
+        super().__init__()
         self.events = []
         self.installed = threading.Event()
         self.activation_terminated = False
@@ -486,7 +605,8 @@ class _ActivationOrderingCore(_CoreWithoutRefit):
     def set_output(self, _applied):
         self.events.append("feedback")
 
-    def observe_frame(self, observation):
+    def observe_frame(self, observation: FrameObservation) -> object:
+        self.observations.append(observation)
         self.events.append(("observation", observation.role_generation))
         return {"role_generation": observation.role_generation, "eligible": True}
 

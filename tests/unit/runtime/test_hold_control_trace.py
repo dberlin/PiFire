@@ -2,6 +2,7 @@
 
 import queue
 import threading
+from collections.abc import Callable
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -28,9 +29,15 @@ from common.controller_model_state import CheckpointSaveOutcome
 from common.model_evidence import ForecastOriginEvidence, ModelEvidenceRecord, RecorderGapEvidence
 from common.persistence.control_trace import read_control_trace_session
 from controller.applied_output import AppliedOutput, FrameFeedbackDisposition, OutputSource
-from controller.base import MpcFailureState, MpcTraceDiagnostics, PidSpTraceDiagnostics, PidTraceDiagnostics
+from controller.base import (
+    ControllerLearningDiagnostics,
+    MpcFailureState,
+    MpcTraceDiagnostics,
+    PidSpTraceDiagnostics,
+    PidTraceDiagnostics,
+)
 from controller.control_trace_replay import ReplayIssueCode, validate_records
-from controller.model_learning.contracts import FrameObservation
+from controller.model_learning.contracts import CandidateOrigin, FrameObservation
 from controller.mpc import Controller
 from controller.mpc_allocator import allocate
 from controller.runtime.control_trace_recorder import ControlTraceRecorder
@@ -1637,6 +1644,37 @@ def test_threaded_stop_timeout_rotates_reserved_generation_gaps_and_fences_late_
         def __init__(self):
             self.observation_started = threading.Event()
             self.release_observation = threading.Event()
+            self.seed_requirement_calls = 0
+            self.learning_diagnostics_calls = 0
+            self.seed_source_bindings = []
+            self.learning_identity_bindings = []
+            self.observations = []
+            self.observation_failures = []
+            self.fit_schedules = []
+            self.fit_ticket_schedules = []
+            self.fit_polls = []
+            self.consumed_fit_tickets = []
+            self.fit_failures = []
+
+        def estimator_seed_requirements(self) -> tuple[float, int]:
+            self.seed_requirement_calls += 1
+            return 60.0, 8
+
+        def bind_estimator_seed_source(
+            self,
+            source: Callable[[float, int], object] | None,
+        ) -> None:
+            self.seed_source_bindings.append(source)
+
+        def bind_learning_identity(
+            self,
+            session_id: str,
+            cook_id: str | None,
+            role_generation: int,
+        ) -> None:
+            self.learning_identity_bindings.append(
+                (session_id, cook_id, role_generation),
+            )
 
         def get_control_period(self):
             return 1.0
@@ -1668,10 +1706,64 @@ def test_threaded_stop_timeout_rotates_reserved_generation_gaps_and_fences_late_
         def update(self, _temperature):
             return {"cycle_ratio": 0.0, "fan": None}
 
-        def observe_frame(self, observation):
+        def observe_frame(self, observation: FrameObservation) -> object:
+            self.observations.append(observation)
             self.observation_started.set()
             self.release_observation.wait()
-            return _model_observation_outcome(frame_end_ms=int(observation.frame_end_s * 1_000))
+            return _model_observation_outcome(
+                frame_end_ms=int(observation.frame_end_s * 1_000),
+            )
+
+        def observation_failure(
+            self,
+            observation: FrameObservation,
+            error: BaseException,
+        ) -> object:
+            self.observation_failures.append((observation, error))
+            return _model_observation_outcome(
+                frame_end_ms=int(observation.frame_end_s * 1_000),
+            )
+
+        def poll_learning_off_path(
+            self,
+            *,
+            live_origin: CandidateOrigin | None = None,
+        ) -> object:
+            self.fit_polls.append((threading.get_ident(), live_origin))
+            return None
+
+        def schedule_corpus_fit(self, origin: CandidateOrigin) -> bool:
+            self.fit_schedules.append(origin)
+            return False
+
+        def _schedule_corpus_fit_ticket(
+            self,
+            origin: CandidateOrigin,
+        ) -> str | None:
+            self.fit_ticket_schedules.append(origin)
+            return None
+
+        def _consume_terminal_corpus_fit_ticket(
+            self,
+            ticket: str,
+            origin: CandidateOrigin,
+        ) -> bool:
+            self.consumed_fit_tickets.append((ticket, origin))
+            return False
+
+        def fail_corpus_fit(
+            self,
+            ticket: str,
+            error: BaseException | str,
+        ) -> None:
+            self.fit_failures.append((ticket, error))
+
+        def get_learning_diagnostics(self) -> ControllerLearningDiagnostics:
+            self.learning_diagnostics_calls += 1
+            return ControllerLearningDiagnostics(
+                schema_version=1,
+                state={},
+            )
 
     class _EvidenceWorker:
         evidence_blocked = False
