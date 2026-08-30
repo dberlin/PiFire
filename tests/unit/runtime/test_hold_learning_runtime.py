@@ -57,6 +57,7 @@ from controller.runtime.runner import (
     ObservationOutcomeEnvelope,
     ObservationSubmission,
     ObservationTerminalDrop,
+    build_runner,
 )
 from controller.runtime.state import ControllerState
 from grillplat.actuator_capabilities import AugerTiming
@@ -529,6 +530,46 @@ def _runtime(
     return runtime, actual_runner, actual_persistence, trace, recorder
 
 
+def _production_pid_sp_runtime():
+    settings = {
+        "controller": {
+            "selected": "pid_sp",
+            "config": {
+                "pid_sp": {
+                    "PB": 60.0,
+                    "Ti": 180.0,
+                    "Td": 45.0,
+                    "stable_window": 12,
+                    "center_factor": 0.001,
+                }
+            },
+        },
+        "globals": {"units": "F"},
+        "cycle_data": {"u_min": 0.1, "u_max": 0.9},
+    }
+    runner, status = build_runner(settings, {"primary_setpoint": 225.0})
+    assert status == "Active"
+    assert runner is not None
+    recorder = _Recorder()
+    trace = ControlTraceSession(recorder, warning=lambda _message: None)
+    identity = trace.ensure_open(
+        replace(_trace_context(), controller=ControllerType.PID_SP),
+        timestamp_ms=0,
+    )
+    assert identity is not None
+    runtime = HoldLearningRuntime(
+        runner=runner,
+        model_store=None,
+        persistence=_Persistence(),
+        trace=trace,
+        controller_name="pid_sp",
+        logger=_LifecycleLogger(),
+        initial_generation=runner.configuration_revision(),
+    )
+    runtime.bind_generation(runner.configuration_revision())
+    return runtime, recorder
+
+
 def _lifecycle_runtime(
     *,
     snapshot: dict[str, object] | None = None,
@@ -900,6 +941,29 @@ def test_complete_grey_outcome_without_obsolete_scores_stays_eligible() -> None:
     assert payloads[0].eligible is True
     assert payloads[0].rejection_reasons == ()
     assert _gap_payloads(recorder) == []
+
+
+def test_pid_sp_completed_frame_records_one_model_observation_without_a_gap() -> None:
+    runtime, recorder = _production_pid_sp_runtime()
+    observation = _observation()
+
+    runtime.submit_completed_observation((0, 20_000), observation)
+    runtime.reconcile_outcomes(22.0)
+
+    gaps = _gap_payloads(recorder)
+    assert gaps == [], [gap.reason for gap in gaps]
+    assert len(_records(recorder, TraceEventKind.MODEL_OBSERVATION)) == 1
+
+
+def test_pid_sp_discontinuous_frame_records_the_exact_gap() -> None:
+    runtime, recorder = _production_pid_sp_runtime()
+    observation = _observation(continuous=False)
+
+    runtime.submit_completed_observation((0, 20_000), observation)
+    runtime.reconcile_outcomes(22.0)
+
+    assert _observation_payloads(recorder) == []
+    assert [gap.reason for gap in _gap_payloads(recorder)] == ["discontinuous"]
 
 
 def test_submission_eviction_terminal_drop_and_dropped_sequence_are_consumed_once() -> None:

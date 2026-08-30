@@ -28,31 +28,46 @@ N_CANDIDATES = DELAYS.size
 
 
 class DutyHistory:
-    """Applied auger duty as a step function, with a running cumulative integral.
-
-    An auger is on or off, so duty between reports really is piecewise constant
-    and the integral is exact rather than approximated. That turns a delayed
-    window average -- needed for every candidate delay on every observation --
-    into one searchsorted plus a linear interpolation.
-    """
+    """Applied auger duty with exact step or completed-interval ownership."""
 
     def __init__(self, max_delay):
         self._max_delay = float(max_delay)
-        self._t = []  # segment start times
+        self._mode = None
+        self._t = []  # segment start times for forward steps
         self._u = []  # duty in force from _t[i] until _t[i + 1]
         self._i = []  # integral of duty dt from _t[0] to _t[i]
         self._ta = np.empty(0)
         self._ua = np.empty(0)
         self._ia = np.empty(0)
+        self._starts = []
+        self._ends = []
+        self._ratios = []
+        self._sa = np.empty(0)
+        self._ea = np.empty(0)
+        self._ra = np.empty(0)
+        self._ca = np.empty(0)
+        self._coverage_a = np.empty(0)
 
     def __len__(self):
-        return len(self._t)
+        return len(self._starts) if self._mode == "intervals" else len(self._t)
 
     def earliest(self):
+        if self._mode == "intervals":
+            return self._starts[0] if self._starts else None
         return self._t[0] if self._t else None
 
+    def latest_end(self):
+        return self._ends[-1] if self._mode == "intervals" and self._ends else None
+
+    @property
+    def uses_exact_intervals(self):
+        return self._mode == "intervals"
+
     def record(self, timestamp, ratio):
-        """Append a duty segment. Ignores a non-advancing timestamp or a repeat."""
+        """Append a forward duty step, retaining the legacy command-history API."""
+        if self._mode == "intervals":
+            raise ValueError("cannot mix forward duty steps with completed intervals")
+        self._mode = "steps"
         timestamp = float(timestamp)
         ratio = float(ratio)
         if self._t:
@@ -67,43 +82,137 @@ class DutyHistory:
         self._u.append(ratio)
         self._sync()
 
+    def record_interval(self, start_s, end_s, ratio):
+        """Append duty owned by exactly ``[start_s, end_s)``.
+
+        Adjacent intervals remain contiguous. Gaps remain uncovered rather than
+        inheriting either neighboring duty, and overlaps are rejected because
+        two realized duties cannot own the same physical time.
+        """
+        if self._mode == "steps":
+            raise ValueError("cannot mix completed intervals with forward duty steps")
+        start = float(start_s)
+        end = float(end_s)
+        duty = float(ratio)
+        if not np.isfinite(start) or not np.isfinite(end) or end <= start:
+            raise ValueError("duty interval must have finite increasing bounds")
+        if not np.isfinite(duty) or not 0.0 <= duty <= 1.0:
+            raise ValueError("duty ratio must be finite and in [0, 1]")
+        if self._ends and start < self._ends[-1]:
+            raise ValueError("duty intervals must not overlap")
+        self._mode = "intervals"
+        self._starts.append(start)
+        self._ends.append(end)
+        self._ratios.append(duty)
+        self._sync_intervals()
+
     def _sync(self):
         self._ta = np.asarray(self._t, dtype=float)
         self._ua = np.asarray(self._u, dtype=float)
         self._ia = np.asarray(self._i, dtype=float)
 
-    def integral(self, times):
-        """Integral of duty from the earliest retained time to each of `times`.
+    def _sync_intervals(self):
+        self._sa = np.asarray(self._starts, dtype=float)
+        self._ea = np.asarray(self._ends, dtype=float)
+        self._ra = np.asarray(self._ratios, dtype=float)
+        count = self._sa.size
+        self._ca = np.zeros(count, dtype=float)
+        if count > 1:
+            durations = self._ea[:-1] - self._sa[:-1]
+            self._ca[1:] = np.cumsum(self._ra[:-1] * durations)
+        coverage = np.empty(count, dtype=float)
+        for index in range(count):
+            coverage[index] = (
+                coverage[index - 1]
+                if index and self._sa[index] == self._ea[index - 1]
+                else self._sa[index]
+            )
+        self._coverage_a = coverage
 
-        Times after the last record extrapolate the last duty forward, which is
-        what the auger is actually doing until the next report.
-        """
+    def _interval_integral(self, times):
+        times = np.asarray(times, dtype=float)
+        if self._sa.size == 0:
+            return np.zeros_like(times)
+        index = np.clip(
+            np.searchsorted(self._sa, times, side="right") - 1,
+            0,
+            self._sa.size - 1,
+        )
+        elapsed = np.clip(times - self._sa[index], 0.0, self._ea[index] - self._sa[index])
+        return self._ca[index] + self._ra[index] * elapsed
+
+    def integral(self, times):
+        """Integral from the earliest retained time to each requested time."""
+        if self._mode == "intervals":
+            return self._interval_integral(times)
         times = np.asarray(times, dtype=float)
         if self._ta.size == 0:
             return np.zeros_like(times)
         idx = np.clip(np.searchsorted(self._ta, times, side="right") - 1, 0, self._ta.size - 1)
         return self._ia[idx] + self._ua[idx] * np.maximum(times - self._ta[idx], 0.0)
 
-    def average(self, t_start, t_end, delays):
-        """Mean duty over [t_start - theta, t_end - theta) for every theta.
+    def covers(self, t_start, t_end):
+        """Whether exact recorded duty fully owns ``[t_start, t_end)``."""
+        start = float(t_start)
+        end = float(t_end)
+        if end < start:
+            return False
+        if end == start:
+            return True
+        if self._mode != "intervals":
+            earliest = self.earliest()
+            return earliest is not None and start >= earliest
+        if self._sa.size == 0:
+            return False
+        index = int(np.searchsorted(self._sa, end, side="left")) - 1
+        return (
+            index >= 0
+            and end <= self._ea[index]
+            and start >= self._coverage_a[index]
+        )
 
-        Returns (values, valid). A candidate is invalid when its window reaches
-        back before the earliest retained segment: there is no duty to average
-        there, and guessing one would fabricate an observation.
-        """
+    def average(self, t_start, t_end, delays):
+        """Mean duty over each delayed window, plus exact-coverage validity."""
         delays = np.asarray(delays, dtype=float)
         span = float(t_end) - float(t_start)
-        if span <= 0.0 or self._ta.size == 0:
+        if span <= 0.0:
             return np.zeros_like(delays), np.zeros(delays.shape, dtype=bool)
         lo = float(t_start) - delays
         hi = float(t_end) - delays
+        if self._mode == "intervals":
+            if self._sa.size == 0:
+                return np.zeros_like(delays), np.zeros(delays.shape, dtype=bool)
+            raw_index = np.searchsorted(self._sa, hi, side="left") - 1
+            index = np.clip(raw_index, 0, self._sa.size - 1)
+            valid = (
+                (raw_index >= 0)
+                & (hi <= self._ea[index])
+                & (lo >= self._coverage_a[index])
+            )
+            values = (self.integral(hi) - self.integral(lo)) / span
+            return values, valid
+        if self._ta.size == 0:
+            return np.zeros_like(delays), np.zeros(delays.shape, dtype=bool)
         values = (self.integral(hi) - self.integral(lo)) / span
         return values, lo >= self._ta[0]
 
     def segments(self, t_start, t_end):
-        """[(duration, duty)] covering [t_start, t_end), split at every change."""
+        """Recorded ``(duration, duty)`` pieces intersecting the query window."""
         t_start, t_end = float(t_start), float(t_end)
-        if t_end <= t_start or self._ta.size == 0:
+        if t_end <= t_start:
+            return []
+        if self._mode == "intervals":
+            return [
+                (min(end, t_end) - max(start, t_start), duty)
+                for start, end, duty in zip(
+                    self._starts,
+                    self._ends,
+                    self._ratios,
+                    strict=True,
+                )
+                if min(end, t_end) > max(start, t_start)
+            ]
+        if self._ta.size == 0:
             return []
         edges = [t_start]
         edges.extend(t for t in self._t if t_start < t < t_end)
@@ -117,8 +226,17 @@ class DutyHistory:
         return out
 
     def prune(self, now):
-        """Drop segments no candidate delay can still reach."""
+        """Drop history no candidate delay can still reach."""
         horizon = float(now) - self._max_delay
+        if self._mode == "intervals":
+            keep = int(np.searchsorted(self._ea, horizon, side="left"))
+            if keep:
+                del self._starts[:keep]
+                del self._ends[:keep]
+                del self._ratios[:keep]
+            if keep or self._starts:
+                self._sync_intervals()
+            return
         keep = 0
         while keep + 1 < len(self._t) and self._t[keep + 1] <= horizon:
             keep += 1
@@ -166,19 +284,37 @@ class RLSBank:
         self.P = np.tile(P0 * np.eye(self._m), (self._n, 1, 1))
         self.resid_ew = np.zeros(self._n)
 
-    def update(self, phi, y):
-        """One accepted observation into the whole bank. `phi` is (N, M)."""
+    def update(self, phi, y, candidate_mask=None):
+        """Update all candidates, or only rows with exact delayed-window coverage."""
         phi = np.asarray(phi, dtype=float)
-        Pphi = np.einsum("nij,nj->ni", self.P, phi)
-        denom = LAM + np.einsum("ni,ni->n", phi, Pphi)
+        if candidate_mask is None:
+            rows = slice(None)
+        else:
+            candidate_mask = np.asarray(candidate_mask, dtype=bool)
+            if candidate_mask.shape != (self._n,):
+                raise ValueError("candidate mask must match the estimator bank")
+            if not candidate_mask.any():
+                return
+            rows = candidate_mask
+
+        active_phi = phi[rows]
+        covariance = self.P[rows]
+        theta = self.Theta[rows]
+        Pphi = np.einsum("nij,nj->ni", covariance, active_phi)
+        denom = LAM + np.einsum("ni,ni->n", active_phi, Pphi)
         gain = Pphi / denom[:, None]
-        err = y - np.einsum("ni,ni->n", phi, self.Theta)
-        self.Theta += gain * err[:, None]
-        self.P = (self.P - np.einsum("ni,nj->nij", gain, Pphi)) / LAM
-        # Hold P symmetric against accumulated float drift.
-        self.P = 0.5 * (self.P + self.P.transpose(0, 2, 1))
-        self.resid_ew = EW_ALPHA * err**2 + (1.0 - EW_ALPHA) * self.resid_ew
-        self._reset_degenerate()
+        err = y - np.einsum("ni,ni->n", active_phi, theta)
+        self.Theta[rows] = theta + gain * err[:, None]
+        updated_covariance = (
+            covariance - np.einsum("ni,nj->nij", gain, Pphi)
+        ) / LAM
+        self.P[rows] = 0.5 * (
+            updated_covariance + updated_covariance.transpose(0, 2, 1)
+        )
+        self.resid_ew[rows] = (
+            EW_ALPHA * err**2 + (1.0 - EW_ALPHA) * self.resid_ew[rows]
+        )
+        self._reset_degenerate(candidate_mask)
 
     def reset(self, mask):
         """Return the masked candidates to their initial state."""
@@ -189,15 +325,15 @@ class RLSBank:
         self.P[mask] = P0 * np.eye(self._m)
         self.resid_ew[mask] = 0.0
 
-    def _reset_degenerate(self):
-        """A candidate whose covariance diagonal has gone non-positive, or whose
-        Theta/P/resid_ew has gone non-finite, starts over rather than poisoning
-        the bank."""
+    def _reset_degenerate(self, candidate_mask=None):
+        """Reset updated candidates whose estimator state became unusable."""
         bad = ~np.isfinite(self.Theta).all(axis=1)
         bad |= ~np.isfinite(self.P).all(axis=(1, 2))
         bad |= ~np.isfinite(self.resid_ew)
         diag = np.einsum("nii->ni", self.P)
         bad |= (diag <= 0.0).any(axis=1)
+        if candidate_mask is not None:
+            bad &= candidate_mask
         self.reset(bad)
 
 
@@ -430,6 +566,7 @@ class FOPDTIdentifier:
         self._prev = None  # (timestamp, temperature) anchor
         self._gap = True  # the next observation would span an undriven interval
         self._commanded = True  # whether the most recent report was controller-driven
+        self._last_interval_end = None
         self._accepted = 0
         self._accepted_seconds = 0.0
         self._temp_lo = None
@@ -470,6 +607,22 @@ class FOPDTIdentifier:
             return
         self._note_transition(now, applied.ratio)
 
+    def observe_interval(self, start_s, end_s, realized_duty, temperature_f):
+        """Record one completed duty interval and its terminal temperature."""
+        start = float(start_s)
+        end = float(end_s)
+        duty = float(realized_duty)
+        previous_end = self._last_interval_end
+        self._history.record_interval(start, end, duty)
+        if previous_end is not None and start != previous_end:
+            self._prev = None
+            self._gap = True
+        self._history.prune(end)
+        self._last_interval_end = end
+        self._commanded = True
+        self._note_transition(start, duty)
+        return self.observe(temperature_f, end)
+
     def _note_transition(self, now, ratio):
         """A sustained duty change is the excitation this design waits for."""
         if self._transition_from is None:
@@ -506,6 +659,7 @@ class FOPDTIdentifier:
         # A candidate whose window predates retained history contributes its
         # last known duty rather than dropping the whole observation.
         duty = np.where(valid, duty, duty[valid][0])
+        candidate_mask = valid if self._history.uses_exact_intervals else None
 
         shared = np.array([1.0, (y0 - T_REF) / T_SCALE])
         phi = np.empty((N_CANDIDATES, 3))
@@ -513,11 +667,11 @@ class FOPDTIdentifier:
         phi[:, 1] = shared[1]
         phi[:, 2] = duty
         rate = (temp - y0) / dt
-        self._bank.update(phi, rate)
+        self._bank.update(phi, rate, candidate_mask)
         iphi = np.empty((N_CANDIDATES, 2))
         iphi[:, 0] = shared[0]
         iphi[:, 1] = duty
-        self._ibank.update(iphi, rate)
+        self._ibank.update(iphi, rate, candidate_mask)
 
         self._accepted += 1
         self._accepted_seconds += dt

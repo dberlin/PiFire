@@ -894,6 +894,9 @@ class HoldLearningRuntime:
             evaluation = evaluation_value if isinstance(evaluation_value, ModelEvaluationPayload) else None
             try:
                 parsed = self._parse_outcome(outcome)
+                if parsed.rejection_reasons == ("discontinuous",):
+                    self._retire_pending(sequence, "discontinuous")
+                    continue
                 rejection = self._outcome_rejection(delivered, parsed)
                 if rejection is not None:
                     self._queue_rejected(sequence, rejection, evaluation)

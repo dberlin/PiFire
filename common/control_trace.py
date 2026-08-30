@@ -1147,11 +1147,15 @@ class ControlTraceRecord(BaseModel):
         if isinstance(self.payload, AllocationPayload) and self.controller is not ControllerType.MPC:
             raise ValueError("allocation records are MPC-only")
         if (
+            isinstance(self.payload, ModelObservationPayload)
+            and self.controller not in (ControllerType.MPC, ControllerType.PID_SP)
+        ):
+            raise ValueError("model observation records require MPC or PID-SP")
+        if (
             isinstance(
                 self.payload,
                 (
                     CalibrationTracePayload,
-                    ModelObservationPayload,
                     ModelEvaluationPayload,
                     GreyFitLifecyclePayload,
                     GreyCandidateAssessmentPayload,

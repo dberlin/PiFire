@@ -126,6 +126,64 @@ def test_delayed_average_matches_the_direct_scan():
         np.testing.assert_allclose(got[got_valid], want[want_valid], rtol=1e-12, atol=1e-12)
 
 
+def test_interval_duty_belongs_to_the_completed_interval():
+    identifier = FOPDTIdentifier()
+
+    identifier.observe_interval(0.0, 20.0, 0.25, 100.0)
+    identifier.observe_interval(20.0, 40.0, 0.75, 102.0)
+
+    assert identifier._history.segments(0.0, 40.0) == [
+        pytest.approx((20.0, 0.25)),
+        pytest.approx((20.0, 0.75)),
+    ]
+
+
+def _candidate_estimator_state(identifier, index):
+    return tuple(
+        values[index].tobytes()
+        for bank in (identifier._bank, identifier._ibank)
+        for values in (bank.Theta, bank.P, bank.resid_ew)
+    )
+
+
+def test_exact_interval_pruning_retains_the_window_needed_by_the_max_delay_candidate():
+    identifier = FOPDTIdentifier()
+    max_delay_index = DELAYS.size - 1
+
+    for step in range(6):
+        start = step * 20.0
+        identifier.observe_interval(
+            start,
+            start + 20.0,
+            0.2 if step % 2 == 0 else 0.7,
+            100.0 + step,
+        )
+
+    before = _candidate_estimator_state(identifier, max_delay_index)
+    accepted = identifier.observe_interval(120.0, 140.0, 0.2, 106.0)
+
+    assert accepted is True
+    assert identifier._history.covers(0.0, 20.0)
+    assert _candidate_estimator_state(identifier, max_delay_index) != before
+
+
+def test_gap_crossing_candidate_state_is_unchanged_while_covered_candidate_updates():
+    identifier = FOPDTIdentifier()
+    covered_index = int(np.flatnonzero(DELAYS == 0.0)[0])
+    gap_index = int(np.flatnonzero(DELAYS == 40.0)[0])
+
+    identifier.observe_interval(0.0, 20.0, 0.2, 100.0)
+    identifier.observe_interval(40.0, 60.0, 0.6, 104.0)
+    covered_before = _candidate_estimator_state(identifier, covered_index)
+    gap_before = _candidate_estimator_state(identifier, gap_index)
+
+    accepted = identifier.observe_interval(60.0, 80.0, 0.8, 108.0)
+
+    assert accepted is True
+    assert _candidate_estimator_state(identifier, covered_index) != covered_before
+    assert _candidate_estimator_state(identifier, gap_index) == gap_before
+
+
 def test_batched_bank_matches_the_scalar_loop():
     rng = np.random.default_rng(11)
     n = DELAYS.size

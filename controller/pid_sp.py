@@ -45,10 +45,18 @@ import math
 import time
 
 from common.control_trace import ControllerBranch
+from controller.applied_output import OutputSource
 from controller.base import ControllerLearningDiagnostics, PidSpTraceDiagnostics
 from controller.fopdt_identifier import FOPDTIdentifier
+from controller.model_learning.contracts import FrameObservation
 from controller.pid_base import PIDControllerBase
 from controller.pid_sp_learning import build_pid_sp_live_learning
+from controller.pid_sp_observation import (
+    PidSpInterval,
+    PidSpObservationDecision,
+    PidSpObservationOutcome,
+    canonical_pid_sp_observation_model_digest,
+)
 from controller.smith_predictor import SmithPredictor
 from grillplat.actuator_capabilities import AUGER_TIMING
 
@@ -126,8 +134,75 @@ class Controller(PIDControllerBase):
 
     # ------------------------------------------------------------ capabilities
     def set_output(self, applied):
-        self.identifier.record_output(applied)
-        self.predictor.record_output(applied)
+        """Treat progress/output feedback as telemetry; completed frames own learning."""
+        del applied
+
+    def observe_frame(self, observation: FrameObservation):
+        interval = PidSpInterval(
+            start_s=observation.frame_start_s,
+            end_s=observation.frame_end_s,
+            temperature_f=_to_f(observation.temp_c, "C"),
+            realized_duty=float(observation.realized_auger_duty),
+            continuous=observation.continuous,
+            observation_sequence=observation.observation_sequence,
+            role_generation=observation.role_generation,
+        )
+        governing_model = self.predictor.governing_model()
+        if not observation.probe_valid:
+            decision = PidSpObservationDecision.INVALID_PROBE
+        elif observation.output_source != OutputSource.CONTROLLER.value:
+            decision = PidSpObservationDecision.NON_CONTROLLER_OUTPUT
+        elif not interval.continuous:
+            decision = PidSpObservationDecision.DISCONTINUOUS
+        elif (
+            observation.lid_open
+            or observation.safety_inhibited
+            or observation.manual_override
+            or observation.stale
+            or observation.skipped
+            or observation.reset
+        ):
+            decision = PidSpObservationDecision.INHIBITED
+        else:
+            self.predictor.record_interval(
+                interval.start_s,
+                interval.end_s,
+                interval.realized_duty,
+            )
+            self.identifier.observe_interval(
+                interval.start_s,
+                interval.end_s,
+                interval.realized_duty,
+                interval.temperature_f,
+            )
+            self.predictor.trust(self.identifier.trusted_model())
+            decision = PidSpObservationDecision.ACCEPTED
+        status = self.identifier.status()
+        duty_segments = int(status["duty_segments"])
+        return PidSpObservationOutcome(
+            decision=decision,
+            effective_updates=(
+                1 if decision is PidSpObservationDecision.ACCEPTED else 0
+            ),
+            duty_variance=float(status["duty_std"]) ** 2,
+            duty_levels=(
+                2 if status["transition_seen"] else min(duty_segments, 1)
+            ),
+            role_generation=interval.role_generation,
+            model_digest=(
+                canonical_pid_sp_observation_model_digest(governing_model)
+                if decision is PidSpObservationDecision.ACCEPTED
+                else None
+            ),
+        ).as_runner_outcome()
+
+    def observation_failure(
+        self,
+        observation: FrameObservation,
+        error: BaseException,
+    ):
+        del observation, error
+        return None
 
     def get_learning_diagnostics(self) -> ControllerLearningDiagnostics:
         return ControllerLearningDiagnostics(
@@ -217,7 +292,6 @@ class Controller(PIDControllerBase):
         new_target_before = self.new_target
 
         measured_f = _to_f(current, self.units)
-        self.identifier.observe(measured_f, current_time)
         # The identified duty that holds the operating point, once there is one.
         # `center` is where the loop sits at zero error, and it is a heuristic
         # that reads 0.225 at a 225 F set point where the grill actually holds

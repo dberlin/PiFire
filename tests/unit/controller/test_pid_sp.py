@@ -8,7 +8,9 @@ import pytest
 
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.fopdt_identifier import CONFIRM_WINDOW
+from controller.model_learning.contracts import FrameObservation
 from controller.pid_sp import STARTUP_REDUCTION
+from controller.pid_sp_observation import canonical_pid_sp_observation_model_digest
 from grillplat.actuator_capabilities import AUGER_TIMING
 
 CONFIG = {"PB": 60.0, "Ti": 180.0, "Td": 45.0, "stable_window": 12, "center_factor": 0.0010}
@@ -35,6 +37,37 @@ def _controller(name, clock, units="F"):
     return mod.Controller(dict(CONFIG), units, dict(CYCLE_DATA))
 
 
+def _observe_completed_frame(controller, start_s, end_s, temperature_c, duty=0.9):
+    duration = end_s - start_s
+    observation = FrameObservation(
+        frame_start_s=start_s,
+        frame_end_s=end_s,
+        temp_c=temperature_c,
+        setpoint_c=120.0,
+        ambient_c=20.0,
+        requested_q=duty,
+        realized_q=duty,
+        requested_auger_duty=duty,
+        delivered_on_s=duration * duty,
+        requested_fan_duty=None,
+        actual_fan_duty=None,
+        result_revision=round(end_s * 1_000),
+        output_source="controller",
+        lid_open=False,
+        safety_inhibited=False,
+        manual_override=False,
+        stale=False,
+        skipped=False,
+        reset=False,
+        continuous=True,
+        role_generation=0,
+        observation_sequence=round(end_s * 1_000),
+        scheduled_on_s=duration * duty,
+        realized_auger_duty=duty,
+    )
+    return controller.observe_frame(observation)
+
+
 def test_pid_sp_paces_its_guards_off_the_real_auger_frame(clock):
     """The three-cycle windows below are three control cycles. The control
     cycle is the auger's pulse frame, which is what actually paces the auger,
@@ -42,6 +75,43 @@ def test_pid_sp_paces_its_guards_off_the_real_auger_frame(clock):
     cycle_data gives the guards the frame they mean."""
     sp = _controller("pid_sp", clock)
     assert sp.cycle_time == AUGER_TIMING.frame_s
+
+
+def test_pid_sp_completed_frame_returns_observation_outcome(clock):
+    controller = _controller("pid_sp", clock)
+    observation = FrameObservation(
+        frame_start_s=0.0,
+        frame_end_s=20.0,
+        temp_c=100.0,
+        setpoint_c=120.0,
+        ambient_c=20.0,
+        requested_q=0.25,
+        realized_q=0.25,
+        requested_auger_duty=0.25,
+        delivered_on_s=5.0,
+        requested_fan_duty=None,
+        actual_fan_duty=None,
+        result_revision=1,
+        output_source="controller",
+        lid_open=False,
+        safety_inhibited=False,
+        manual_override=False,
+        stale=False,
+        skipped=False,
+        reset=False,
+        continuous=True,
+        role_generation=0,
+        observation_sequence=1,
+        scheduled_on_s=5.0,
+        realized_auger_duty=0.25,
+    )
+
+    outcome = controller.observe_frame(observation)
+
+    assert outcome["controller"] == "pid_sp"
+    assert outcome["eligible"] is True
+    assert outcome["rejection_reasons"] == ()
+    assert outcome["effective_updates"] == 1
 
 
 def test_the_startup_reduction_is_applied_to_the_new_output(clock):
@@ -97,12 +167,15 @@ def test_a_trusted_model_makes_the_selected_temperature_diverge_from_measured(cl
     sp = _controller("pid_sp", clock)
     sp.set_target(225.0)
     sp.restore_model({"K": 800.0, "tau": 600.0, "theta": 40.0, "revision": 1})
-    sp.set_output(AppliedOutput(0.9, OutputSource.CONTROLLER, clock.t))
+    frame_start = clock.t
     clock.t += 20.0
+    _observe_completed_frame(sp, frame_start, clock.t, (200.0 - 32.0) * 5.0 / 9.0)
     assert sp.update(200.0) is not None
     assert sp.get_status()["predictor"]["active"] is True
     assert sp.get_status()["selected_temp"] == 200.0  # anchored, correction still zero
+    frame_start = clock.t
     clock.t += 20.0
+    _observe_completed_frame(sp, frame_start, clock.t, (200.0 - 32.0) * 5.0 / 9.0)
     sp.update(200.0)
     status = sp.get_status()
     selected = status["selected_temp"]
@@ -111,6 +184,43 @@ def test_a_trusted_model_makes_the_selected_temperature_diverge_from_measured(cl
     # probe reading -- the substitution this whole task exists to make.
     assert status["error"] == pytest.approx(selected - 225.0)
     assert status["p"] == pytest.approx(sp.kp * status["error"] + sp.center)
+
+
+def test_disabled_predictor_reports_fallback_model_digest_while_identifier_remains_trusted(clock):
+    sp = _controller("pid_sp", clock)
+    sp.set_target(225.0)
+    assert sp.restore_model({"K": 800.0, "tau": 600.0, "theta": 0.0, "revision": 1})
+
+    for measured_f in (200.0, 400.0, 600.0, 800.0, 1000.0):
+        frame_start = clock.t
+        clock.t += 20.0
+        _observe_completed_frame(
+            sp,
+            frame_start,
+            clock.t,
+            (measured_f - 32.0) * 5.0 / 9.0,
+            duty=0.0,
+        )
+        sp.update(measured_f)
+
+    trusted_model = sp.identifier.trusted_model()
+    fallback_digest = canonical_pid_sp_observation_model_digest(None)
+    assert trusted_model is not None
+    assert sp.predictor.status()["disabled"] is True
+    assert canonical_pid_sp_observation_model_digest(trusted_model) != fallback_digest
+
+    frame_start = clock.t
+    clock.t += 20.0
+    outcome = _observe_completed_frame(
+        sp,
+        frame_start,
+        clock.t,
+        (1000.0 - 32.0) * 5.0 / 9.0,
+        duty=0.0,
+    )
+
+    assert outcome["eligible"] is True
+    assert outcome["model_digest"] == fallback_digest
 
 
 def test_the_derivative_never_mixes_a_measured_and_a_predicted_sample(clock):
@@ -122,14 +232,19 @@ def test_the_derivative_never_mixes_a_measured_and_a_predicted_sample(clock):
     sp = _controller("pid_sp", clock)
     sp.set_target(225.0)
     sp.restore_model({"K": 800.0, "tau": 600.0, "theta": 40.0, "revision": 1})
-    sp.set_output(AppliedOutput(0.9, OutputSource.CONTROLLER, clock.t))
+    frame_start = clock.t
     clock.t += 20.0
+    _observe_completed_frame(sp, frame_start, clock.t, (200.0 - 32.0) * 5.0 / 9.0)
     sp.update(200.0)  # anchors: selected == measured
+    frame_start = clock.t
     clock.t += 20.0
+    _observe_completed_frame(sp, frame_start, clock.t, (205.0 - 32.0) * 5.0 / 9.0)
     sp.update(205.0)
     second = sp.get_status()["selected_temp"]
     assert second != 205.0, "the predictor is not correcting; the test proves nothing"
+    frame_start = clock.t
     clock.t += 20.0
+    _observe_completed_frame(sp, frame_start, clock.t, (210.0 - 32.0) * 5.0 / 9.0)
     sp.update(210.0)
     status = sp.get_status()
     third = status["selected_temp"]
@@ -372,18 +487,15 @@ def test_no_identified_hold_duty_leaves_the_integral_alone(clock):
     assert sp.feed_forward == sp.center
 
 
-def test_set_output_feeds_the_identifier_as_well_as_the_predictor(clock):
-    """Dropping predictor.record_output is caught by the divergence tests
-    above; dropping identifier.record_output is not caught anywhere else.
-    Without duty history the excitation gate can never clear, so a fresh
-    install would silently stay a plain PID forever -- no error, no
-    diagnostic, exactly the failure mode this plan exists to prevent."""
+def test_progress_output_and_control_update_do_not_create_identifier_input(clock):
+    """Only exact completed frames own PID-SP identification input."""
     sp = _controller("pid_sp", clock)
     sp.set_target(225.0)
     sp.set_output(AppliedOutput(0.9, OutputSource.CONTROLLER, clock.t))
     clock.t += 20.0
     sp.update(200.0)
-    assert sp.get_status()["identifier"]["duty_segments"] > 0
+
+    assert sp.get_status()["identifier"]["duty_segments"] == 0
 
 
 def test_a_celsius_install_scales_error_and_corrections_from_fahrenheit(clock):
@@ -406,14 +518,18 @@ def test_a_celsius_install_scales_error_and_corrections_from_fahrenheit(clock):
     model = {"K": 800.0, "tau": 600.0, "theta": 40.0, "revision": 1}
     sp_c.restore_model(model)
     sp_f.restore_model(model)
-    sp_c.set_output(AppliedOutput(0.9, OutputSource.CONTROLLER, clock.t))
-    sp_f.set_output(AppliedOutput(0.9, OutputSource.CONTROLLER, clock.t))
+    frame_start = clock.t
     clock.t += 20.0
+    _observe_completed_frame(sp_c, frame_start, clock.t, 100.0)
+    _observe_completed_frame(sp_f, frame_start, clock.t, 100.0)
     sp_c.update(100.0)
     sp_f.update(100.0 * 9 / 5 + 32)
     before_c = sp_c.get_status()["selected_temp"]
     before_f = sp_f.get_status()["selected_temp"]
+    frame_start = clock.t
     clock.t += 20.0
+    _observe_completed_frame(sp_c, frame_start, clock.t, 100.0)
+    _observe_completed_frame(sp_f, frame_start, clock.t, 100.0)
     sp_c.update(100.0)
     sp_f.update(100.0 * 9 / 5 + 32)
     after_c = sp_c.get_status()["selected_temp"]

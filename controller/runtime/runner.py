@@ -98,6 +98,17 @@ class _ActivationCore(Protocol):
 
 
 @runtime_checkable
+class _FrameLearningCore(Protocol):
+    def observe_frame(self, observation: FrameObservation) -> object: ...
+
+    def observation_failure(
+        self,
+        observation: FrameObservation,
+        error: BaseException,
+    ) -> object: ...
+
+
+@runtime_checkable
 class _MpcLearningCore(Protocol):
     def estimator_seed_requirements(self) -> tuple[float, int]: ...
 
@@ -112,14 +123,6 @@ class _MpcLearningCore(Protocol):
         cook_id: str | None,
         role_generation: int,
     ) -> None: ...
-
-    def observe_frame(self, observation: FrameObservation) -> object: ...
-
-    def observation_failure(
-        self,
-        observation: FrameObservation,
-        error: BaseException,
-    ) -> object: ...
 
     def poll_learning_off_path(
         self,
@@ -221,6 +224,11 @@ def _adapt_controller_core(core) -> _ControllerCoreCompatibilityAdapter:
 def _activation_core_for(core) -> _ActivationCore | None:
     delegated = core._core if isinstance(core, _ControllerCoreCompatibilityAdapter) else core
     return delegated if isinstance(delegated, _ActivationCore) else None
+
+
+def _frame_learning_core_for(core) -> _FrameLearningCore | None:
+    delegated = core._core if isinstance(core, _ControllerCoreCompatibilityAdapter) else core
+    return delegated if isinstance(delegated, _FrameLearningCore) else None
 
 
 def _mpc_learning_core_for(core) -> _MpcLearningCore | None:
@@ -762,6 +770,7 @@ class SyncControllerRunner(ControllerRunner):
         self._core = core
         self._activation_core = _activation_core_for(core)
         self._learning_core: _MpcLearningCore | None = _mpc_learning_core_for(core)
+        self._frame_learning_core: _FrameLearningCore | None = _frame_learning_core_for(core)
         self._temp = None
         self._revision = 0
         self._latest_result = None
@@ -873,9 +882,11 @@ class SyncControllerRunner(ControllerRunner):
             retired = self._core
             activation_core = _activation_core_for(core)
             learning_core = _mpc_learning_core_for(core)
+            frame_learning_core = _frame_learning_core_for(core)
             self._core = core
             self._activation_core = activation_core
             self._learning_core = learning_core
+            self._frame_learning_core = frame_learning_core
             self._controller_type = _controller_type_for(_selected_controller(settings))
             self._configuration_revision += 1
             self._quality.control_period = _control_period_seconds(core.get_control_period())
@@ -933,13 +944,14 @@ class SyncControllerRunner(ControllerRunner):
         self._observation_sequence += 1
         sequence = self._observation_sequence
         generation = self._configuration_revision
-        if self._learning_core is None:
+        frame_learning_core = self._frame_learning_core
+        if frame_learning_core is None:
             outcome = None
         else:
             try:
-                outcome = self._learning_core.observe_frame(observation)
+                outcome = frame_learning_core.observe_frame(observation)
             except Exception as error:
-                outcome = self._learning_core.observation_failure(observation, error)
+                outcome = frame_learning_core.observation_failure(observation, error)
         if outcome is None:
             self._observation_buffer.append_terminal_drop(
                 ObservationTerminalDrop(sequence, generation, observation, "runner-no-observation-outcome")
@@ -1054,6 +1066,7 @@ class ThreadedControllerRunner(ControllerRunner):
             self._core = core
             self._activation_core = _activation_core_for(core)
             self._learning_core: _MpcLearningCore | None = _mpc_learning_core_for(core)
+            self._frame_learning_core: _FrameLearningCore | None = _frame_learning_core_for(core)
         self._temp = None
         self._output = ControllerUpdateResult(
             cycle_ratio=0.0,
@@ -1320,6 +1333,7 @@ class ThreadedControllerRunner(ControllerRunner):
             stopping = self._stop_event.is_set()
             with self._lock:
                 learning_core = self._learning_core
+                frame_learning_core = self._frame_learning_core
                 target = self._pending_target
                 self._pending_target = _UNSET
                 seed = self._pending_seed
@@ -1333,6 +1347,7 @@ class ThreadedControllerRunner(ControllerRunner):
                 self._pending_safety_ceiling_c = _UNSET
                 new_core = None
                 new_learning_core = None
+                new_frame_learning_core = None
                 pending_learning_identities = ()
                 handoff_output = None
                 new_controller_type = None
@@ -1398,13 +1413,13 @@ class ThreadedControllerRunner(ControllerRunner):
                 self._core.set_output(applied)
                 with self._lock:
                     self._latest_delivered_output = applied
-                if learning_core is None:
+                if frame_learning_core is None:
                     outcome = None
                 else:
                     try:
-                        outcome = learning_core.observe_frame(observation)
+                        outcome = frame_learning_core.observe_frame(observation)
                     except Exception as error:
-                        outcome = learning_core.observation_failure(
+                        outcome = frame_learning_core.observation_failure(
                             observation,
                             error,
                         )
@@ -1446,7 +1461,7 @@ class ThreadedControllerRunner(ControllerRunner):
                         handoff_batch = False
                         update_temp = _UNSET if self._seed_pending_for_solve else self._temp
                 if pending_observations:
-                    if learning_core is None:
+                    if frame_learning_core is None:
                         for sequence, _, _ in pending_observations:
                             with self._lock:
                                 self._terminalize_observation_locked(
@@ -1456,12 +1471,12 @@ class ThreadedControllerRunner(ControllerRunner):
                     else:
                         for sequence, generation, observation in pending_observations:
                             try:
-                                outcome = learning_core.observe_frame(observation)
+                                outcome = frame_learning_core.observe_frame(observation)
                             except Exception as error:
                                 with self._lock:
                                     self._observations_discontinuous.add(generation)
                                 try:
-                                    outcome = learning_core.observation_failure(
+                                    outcome = frame_learning_core.observation_failure(
                                         observation,
                                         error,
                                     )
@@ -1489,6 +1504,7 @@ class ThreadedControllerRunner(ControllerRunner):
                 if self._pending_core is not None:
                     new_core = self._pending_core
                     new_learning_core = _mpc_learning_core_for(new_core)
+                    new_frame_learning_core = _frame_learning_core_for(new_core)
                     new_controller_type = self._pending_controller_type
                     self._pending_core = None
                     self._pending_controller_type = None
@@ -1496,6 +1512,7 @@ class ThreadedControllerRunner(ControllerRunner):
                     self._core = new_core
                     self._activation_core = _activation_core_for(new_core)
                     self._learning_core = new_learning_core
+                    self._frame_learning_core = new_frame_learning_core
                     self._control_period = new_core.get_control_period()
                     self._commands_fan = new_core.commands_fan()
                     self._actuation_mode = _actuation_mode_for(new_core)
@@ -2158,7 +2175,10 @@ def _build_core(
         if logger is not None:
             logger.exception(f"Error occurred building the [{controller_type}] controller. Trace dump: ")
         return None, "Inactive"
-    if controller_type == "mpc" and not isinstance(core, _MpcLearningCore):
+    if controller_type == "mpc" and (
+        not isinstance(core, _MpcLearningCore)
+        or not isinstance(core, _FrameLearningCore)
+    ):
         try:
             _close_core(core)
         except Exception:
@@ -2167,8 +2187,8 @@ def _build_core(
             )
         if logger is not None:
             logger.exception(
-                "Error occurred building the [mpc] controller: "
-                "missing required MPC learning capability [_MpcLearningCore]. "
+                "Error occurred building the [mpc] controller: missing required "
+                "MPC learning capability [_MpcLearningCore, _FrameLearningCore]. "
                 "Trace dump: "
             )
         return None, "Inactive"

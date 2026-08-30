@@ -261,6 +261,42 @@ def test_sync_pid_sp_completed_update_captures_one_aligned_learning_status_snaps
     assert runner.controller_state()["learning"] == result.learning.as_json()
 
 
+def test_sync_pid_sp_completed_frame_drains_one_observation_outcome():
+    settings = {
+        "controller": {
+            "selected": "pid_sp",
+            "config": {
+                "pid_sp": {
+                    "PB": 60.0,
+                    "Ti": 180.0,
+                    "Td": 45.0,
+                    "stable_window": 12,
+                    "center_factor": 0.001,
+                }
+            },
+        },
+        "globals": {"units": "F"},
+        "cycle_data": {"u_min": 0.1, "u_max": 0.9},
+    }
+    runner, status = build_runner(settings, {"primary_setpoint": 225.0})
+    assert status == "Active"
+    assert isinstance(runner, SyncControllerRunner)
+    runner.bind_evidence_context(0, "session", "cook")
+    observation = _frame(0)
+
+    submission = runner.complete_frame(
+        AppliedOutput(0.25, OutputSource.CONTROLLER, 20.0, requested=0.25),
+        observation,
+    )
+    drain = runner.drain_observation_outcomes()
+
+    assert drain.terminal_drops == (), tuple(drop.reason for drop in drain.terminal_drops)
+    assert [
+        (envelope.submission_sequence, envelope.observation)
+        for envelope in drain.envelopes
+    ] == [(submission.submission_sequence, observation)]
+
+
 def test_completed_result_rejects_an_invalid_learning_capability_value():
     class InvalidLearningCore(_Core):
         def get_learning_diagnostics(self):

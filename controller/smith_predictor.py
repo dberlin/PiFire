@@ -80,11 +80,22 @@ class SmithPredictor:
     def active(self):
         return self._model is not None and not self._disabled
 
+    def governing_model(self) -> dict[str, float | str] | None:
+        """Return the model currently selecting temperature, or measured fallback."""
+        return dict(self._model) if self.active else None
+
     def record_output(self, applied):
         self._history.record(applied.timestamp, applied.ratio)
         if self._earliest_seen is None:
             self._earliest_seen = self._history.earliest()
         self._history.prune(applied.timestamp)
+
+    def record_interval(self, start_s, end_s, realized_duty):
+        """Record duty owned by one exact completed actuator interval."""
+        self._history.record_interval(start_s, end_s, realized_duty)
+        if self._earliest_seen is None:
+            self._earliest_seen = self._history.earliest()
+        self._history.prune(end_s)
 
     def trust(self, model):
         """Adopt identified parameters.
@@ -204,9 +215,11 @@ class SmithPredictor:
         if pruned_past_start and (t0 < start or t0 - theta < start):
             return True
         lo0, hi0 = max(t0, start), max(t1, start)
+        lod, hid = max(t0 - theta, start), max(t1 - theta, start)
+        if not self._history.covers(lo0, hi0) or not self._history.covers(lod, hid):
+            return True
         for duration, duty in self._history.segments(lo0, hi0):
             self._x0 = self._step(self._x0, duty, duration, model)
-        lod, hid = max(t0 - theta, start), max(t1 - theta, start)
         for duration, duty in self._history.segments(lod, hid):
             self._xd = self._step(self._xd, duty, duration, model)
         return False
