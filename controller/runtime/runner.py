@@ -223,6 +223,11 @@ def _activation_core_for(core) -> _ActivationCore | None:
     return delegated if isinstance(delegated, _ActivationCore) else None
 
 
+def _mpc_learning_core_for(core) -> _MpcLearningCore | None:
+    delegated = core._core if isinstance(core, _ControllerCoreCompatibilityAdapter) else core
+    return delegated if isinstance(delegated, _MpcLearningCore) else None
+
+
 @dataclass(frozen=True, slots=True)
 class ObservationOutcomeEnvelope:
     """One runner-owned learner result for the exact observation the core saw."""
@@ -756,6 +761,7 @@ class SyncControllerRunner(ControllerRunner):
 
         self._core = core
         self._activation_core = _activation_core_for(core)
+        self._learning_core: _MpcLearningCore | None = _mpc_learning_core_for(core)
         self._temp = None
         self._revision = 0
         self._latest_result = None
@@ -782,16 +788,14 @@ class SyncControllerRunner(ControllerRunner):
         self._core.seed_from_trajectory(seed)
 
     def estimator_seed_requirements(self) -> tuple[float, int] | None:
-        requirements = getattr(self._core, "estimator_seed_requirements", None)
-        return None if not callable(requirements) else requirements()
+        return None if self._learning_core is None else self._learning_core.estimator_seed_requirements()
 
     def bind_estimator_seed_source(
         self,
         source: Callable[[float, int], object] | None,
     ) -> None:
-        bind = getattr(self._core, "bind_estimator_seed_source", None)
-        if callable(bind):
-            bind(source)
+        if self._learning_core is not None:
+            self._learning_core.bind_estimator_seed_source(source)
 
     def set_safety_ceiling_c(self, ceiling_c):
         self._core.set_safety_ceiling_c(ceiling_c)
@@ -804,9 +808,8 @@ class SyncControllerRunner(ControllerRunner):
 
     def bind_evidence_context(self, generation: int, session_id: str, cook_id: str | None) -> None:
         self._observation_buffer.bind_context(generation, session_id, cook_id)
-        bind = getattr(self._core, "bind_learning_identity", None)
-        if callable(bind):
-            bind(session_id, cook_id, generation)
+        if self._learning_core is not None:
+            self._learning_core.bind_learning_identity(session_id, cook_id, generation)
 
     def retire_evidence_context(self, generation: int) -> None:
         self._observation_buffer.retire_context(generation)
@@ -868,8 +871,11 @@ class SyncControllerRunner(ControllerRunner):
         )
         if status == "Active":
             retired = self._core
+            activation_core = _activation_core_for(core)
+            learning_core = _mpc_learning_core_for(core)
             self._core = core
-            self._activation_core = _activation_core_for(core)
+            self._activation_core = activation_core
+            self._learning_core = learning_core
             self._controller_type = _controller_type_for(_selected_controller(settings))
             self._configuration_revision += 1
             self._quality.control_period = _control_period_seconds(core.get_control_period())
@@ -927,8 +933,13 @@ class SyncControllerRunner(ControllerRunner):
         self._observation_sequence += 1
         sequence = self._observation_sequence
         generation = self._configuration_revision
-        observe = getattr(self._core, "observe_frame", None)
-        outcome = observe(observation) if observe is not None else None
+        if self._learning_core is None:
+            outcome = None
+        else:
+            try:
+                outcome = self._learning_core.observe_frame(observation)
+            except Exception as error:
+                outcome = self._learning_core.observation_failure(observation, error)
         if outcome is None:
             self._observation_buffer.append_terminal_drop(
                 ObservationTerminalDrop(sequence, generation, observation, "runner-no-observation-outcome")
@@ -960,12 +971,11 @@ class SyncControllerRunner(ControllerRunner):
         origin: CandidateOrigin,
         before_schedule: Callable[[], bool] | None,
     ) -> bool:
-        schedule = getattr(self._core, "schedule_corpus_fit", None)
-        if not callable(schedule):
+        if self._learning_core is None:
             return False
         if before_schedule is not None and not before_schedule():
             return False
-        return bool(schedule(origin))
+        return bool(self._learning_core.schedule_corpus_fit(origin))
 
     def controller_state(self):
         """A mutable, JSON-safe copy of the current status snapshot."""

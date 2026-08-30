@@ -1,6 +1,7 @@
 import json
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,7 +12,7 @@ from common.control_trace import ActuationMode, ResultStaleState
 from common.model_evidence import SessionSummaryEvidence
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.base import ControllerLearningDiagnostics
-from controller.model_learning.contracts import FrameObservation
+from controller.model_learning.contracts import CandidateOrigin, FrameObservation
 from controller.pid_sp import Controller as PidSpController
 from controller.runtime.runner import (
     ControllerUpdateResult,
@@ -503,6 +504,246 @@ class _RecordingCore:
         return None
 
 
+class _RecordingMpcCoreWithoutObservationFailure(_RecordingCore):
+    def __init__(
+        self,
+        config=None,
+        units=None,
+        cycle_data=None,
+        *,
+        activation_persistence=None,
+        trajectory_repository=None,
+        fit_partition_digest=None,
+        grey_learning_process=None,
+        logger=None,
+    ):
+        del (
+            config,
+            units,
+            cycle_data,
+            activation_persistence,
+            trajectory_repository,
+            fit_partition_digest,
+            grey_learning_process,
+            logger,
+        )
+        super().__init__()
+        self.learning_calls = []
+        self.observation_outcome = {
+            "eligible": False,
+            "rejection_reasons": ("recorded-rejection",),
+            "forecast_origin_evidence": (),
+        }
+        self.schedule_result = True
+
+    def estimator_seed_requirements(self) -> tuple[float, int]:
+        self.learning_calls.append(("estimator_seed_requirements",))
+        return 60.0, 8
+
+    def bind_estimator_seed_source(
+        self,
+        source: Callable[[float, int], object] | None,
+    ) -> None:
+        self.learning_calls.append(("bind_estimator_seed_source", source))
+
+    def bind_learning_identity(
+        self,
+        session_id: str,
+        cook_id: str | None,
+        role_generation: int,
+    ) -> None:
+        self.learning_calls.append(
+            (
+                "bind_learning_identity",
+                session_id,
+                cook_id,
+                role_generation,
+            )
+        )
+
+    def observe_frame(self, observation: FrameObservation) -> object:
+        self.learning_calls.append(("observe_frame", observation))
+        return self.observation_outcome
+
+    def poll_learning_off_path(
+        self,
+        *,
+        live_origin: CandidateOrigin | None = None,
+    ) -> object:
+        self.learning_calls.append(("poll_learning_off_path", live_origin))
+        return object()
+
+    def schedule_corpus_fit(self, origin: CandidateOrigin) -> bool:
+        self.learning_calls.append(("schedule_corpus_fit", origin))
+        return self.schedule_result
+
+    def _schedule_corpus_fit_ticket(
+        self,
+        origin: CandidateOrigin,
+    ) -> str | None:
+        self.learning_calls.append(("_schedule_corpus_fit_ticket", origin))
+        return "fit-ticket"
+
+    def _consume_terminal_corpus_fit_ticket(
+        self,
+        ticket: str,
+        origin: CandidateOrigin,
+    ) -> bool:
+        self.learning_calls.append(
+            (
+                "_consume_terminal_corpus_fit_ticket",
+                ticket,
+                origin,
+            )
+        )
+        return True
+
+    def fail_corpus_fit(
+        self,
+        ticket: str,
+        error: BaseException | str,
+    ) -> None:
+        self.learning_calls.append(("fail_corpus_fit", ticket, error))
+
+    def get_learning_diagnostics(self) -> ControllerLearningDiagnostics:
+        self.learning_calls.append(("get_learning_diagnostics",))
+        return ControllerLearningDiagnostics(schema_version=1, state={})
+
+
+class _CompleteRecordingMpcCore(_RecordingMpcCoreWithoutObservationFailure):
+    def observation_failure(
+        self,
+        observation: FrameObservation,
+        error: BaseException,
+    ) -> object:
+        self.learning_calls.append(("observation_failure", observation, error))
+        return self.observation_outcome
+
+
+def test_sync_runner_installs_complete_mpc_learning_capability_once():
+    core = _CompleteRecordingMpcCore()
+
+    runner = SyncControllerRunner(core)
+
+    assert runner._learning_core is core
+
+
+def test_sync_runner_binds_mpc_identity_and_evidence_context_directly():
+    core = _CompleteRecordingMpcCore()
+    runner = SyncControllerRunner(core)
+    observation = _frame(0)
+
+    runner.bind_evidence_context(0, "session", "cook")
+    runner.observe_frame(observation)
+    envelope = runner.drain_observation_outcomes().envelopes[0]
+
+    assert core.learning_calls == [
+        ("bind_learning_identity", "session", "cook", 0),
+        ("observe_frame", observation),
+    ]
+    assert [(record.session_id, record.cook_id) for record in envelope.evidence] == [("session", "cook")]
+
+
+def test_sync_runner_observes_frame_through_mpc_capability_directly():
+    core = _CompleteRecordingMpcCore()
+    runner = SyncControllerRunner(core)
+    observation = _frame(0)
+
+    runner.observe_frame(observation)
+
+    assert core.learning_calls == [("observe_frame", observation)]
+
+
+def test_sync_runner_schedules_corpus_fit_through_mpc_capability_directly():
+    core = _CompleteRecordingMpcCore()
+    runner = SyncControllerRunner(core)
+
+    scheduled = runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+
+    assert scheduled is True
+    assert core.learning_calls == [("schedule_corpus_fit", CandidateOrigin.PASSIVE_ONLINE)]
+
+
+def test_sync_runner_reads_and_binds_estimator_seed_through_mpc_capability_directly():
+    core = _CompleteRecordingMpcCore()
+    runner = SyncControllerRunner(core)
+
+    def seed_source(window_seconds: float, minimum_samples: int) -> object:
+        return (window_seconds, minimum_samples)
+
+    requirements = runner.estimator_seed_requirements()
+    runner.bind_estimator_seed_source(seed_source)
+
+    assert requirements == (60.0, 8)
+    assert core.learning_calls == [
+        ("estimator_seed_requirements",),
+        ("bind_estimator_seed_source", seed_source),
+    ]
+
+
+def test_sync_runner_buffers_non_mpc_evidence_without_learning_calls():
+    runner = SyncControllerRunner(_RecordingCore())
+    observation = _frame(0)
+
+    submission = runner.observe_frame(observation)
+    assert runner.drain_observation_outcomes().terminal_drops == ()
+
+    runner.bind_evidence_context(0, "session", "cook")
+    drain = runner.drain_observation_outcomes()
+
+    assert [
+        (
+            drop.submission_sequence,
+            drop.configuration_generation,
+            drop.observation,
+            drop.reason,
+        )
+        for drop in drain.terminal_drops
+    ] == [
+        (
+            submission.submission_sequence,
+            0,
+            observation,
+            "runner-no-observation-outcome",
+        )
+    ]
+    assert runner._learning_core is None
+
+
+def test_build_core_rejects_selected_mpc_missing_observation_failure_before_observation(
+    monkeypatch,
+):
+    observation_calls = []
+
+    class MissingObservationFailureMpcCore(_RecordingMpcCoreWithoutObservationFailure):
+        def observe_frame(self, observation: FrameObservation) -> object:
+            observation_calls.append(observation)
+            raise RuntimeError("observation failure must never be reached")
+
+    monkeypatch.setattr(
+        runner_module.importlib,
+        "import_module",
+        lambda _name: SimpleNamespace(Controller=MissingObservationFailureMpcCore),
+    )
+    logger = _RecordingLogger()
+    settings = {
+        "controller": {"selected": "mpc", "config": {"mpc": {}}},
+        "globals": {"units": "C"},
+        "cycle_data": {},
+    }
+
+    core, status = _build_core(
+        settings,
+        {"primary_setpoint": 100},
+        logger=logger,
+    )
+
+    assert core is None
+    assert status == "Inactive"
+    assert observation_calls == []
+    assert any("missing required MPC learning capability" in message for message in logger.exceptions)
+
+
 def test_sync_runner_forwards_set_output():
     core = _RecordingCore()
     runner = SyncControllerRunner(core)
@@ -511,35 +752,11 @@ def test_sync_runner_forwards_set_output():
     assert core.applied == [applied]
 
 
-def test_sync_runner_forwards_completed_frame_observations_immediately():
-    class ObservingCore(_RecordingCore):
-        def __init__(self):
-            super().__init__()
-            self.observations = []
-
-        def observe_frame(self, observation):
-            self.observations.append(observation)
-
-    core = ObservingCore()
-    observation = _frame(0)
-
-    SyncControllerRunner(core).observe_frame(observation)
-
-    assert core.observations == [observation]
-
-
-def test_sync_runner_ignores_observations_for_a_core_without_a_learner():
-    SyncControllerRunner(_RecordingCore()).observe_frame(_frame(0))
-
-
 def test_sync_runner_drains_the_exact_observation_outcome_once():
     outcome = {"role_generation": 0, "eligible": False}
-
-    class ObservingCore(_RecordingCore):
-        def observe_frame(self, observation):
-            return outcome
-
-    runner = SyncControllerRunner(ObservingCore())
+    core = _CompleteRecordingMpcCore()
+    core.observation_outcome = outcome
+    runner = SyncControllerRunner(core)
     runner.bind_evidence_context(0, "session", "cook")
     observation = _frame(0)
 
@@ -622,13 +839,9 @@ def test_fake_runner_resets_only_delivered_eviction_counters():
 
 
 def test_sync_runner_reports_exact_outcome_evictions():
-    outcome = {"role_generation": 0, "eligible": False}
-
-    class ObservingCore(_RecordingCore):
-        def observe_frame(self, observation):
-            return outcome
-
-    runner = SyncControllerRunner(ObservingCore())
+    core = _CompleteRecordingMpcCore()
+    core.observation_outcome = {"role_generation": 0, "eligible": False}
+    runner = SyncControllerRunner(core)
     runner.bind_evidence_context(0, "session", "cook")
     for index in range(31):
         runner.observe_frame(_frame(index))
@@ -641,13 +854,9 @@ def test_sync_runner_reports_exact_outcome_evictions():
 
 
 def test_sync_runner_bounds_exact_eviction_metadata_to_unresolved_capacity():
-    outcome = {"role_generation": 0, "eligible": False}
-
-    class ObservingCore(_RecordingCore):
-        def observe_frame(self, observation):
-            return outcome
-
-    runner = SyncControllerRunner(ObservingCore())
+    core = _CompleteRecordingMpcCore()
+    core.observation_outcome = {"role_generation": 0, "eligible": False}
+    runner = SyncControllerRunner(core)
     for index in range(91):
         runner.observe_frame(_frame(index))
 
