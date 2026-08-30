@@ -46,6 +46,7 @@ from controller.model_learning.activation import (
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
 from controller.runtime.model_persistence import (
     DurableActivationReceipt,
+    DurableCheckpointReceipt,
     EvidenceSubmission,
     ModelPersistenceWorker,
     PersistenceReceipt,
@@ -233,7 +234,7 @@ def _stored_segment(
     frame = _stored_frame(0, epoch_ms=epoch_ms, effective_mode="Smoke")
     return LearningTrajectorySegment(
         schema_version=1,
-        observation_schema_version=2,
+        observation_schema_version=3,
         segment_id=segment_id,
         cook_id=f"cook-{segment_id}",
         trajectory_session_id=f"trajectory-{segment_id}",
@@ -322,6 +323,123 @@ def test_barrier_drains_prior_work_and_leaves_worker_usable() -> None:
         assert worker.submit_evidence(_refresh("after-barrier")).accepted
         assert worker.barrier(timeout=1.0)
         assert written == ["before-barrier", "after-barrier"]
+    finally:
+        worker.close(timeout=1.0)
+
+
+def test_durable_checkpoint_receipt_reports_actual_store_save() -> None:
+    store = _Store()
+    store.release_first_save.set()
+    worker = ModelPersistenceWorker(store, _Logger())
+
+    try:
+        receipt: DurableCheckpointReceipt = worker.submit_durable_checkpoint(
+            "pid_sp",
+            {"revision": 1},
+        )
+
+        assert receipt.accepted
+        assert receipt.wait(timeout=1.0)
+        assert receipt.completed
+        assert receipt.durable
+        assert receipt.error is None
+        assert store.saved == [("pid_sp", {"revision": 1})]
+    finally:
+        worker.close(timeout=1.0)
+
+
+def test_durable_checkpoint_receipt_reports_store_failure() -> None:
+    class _FailingStore:
+        def save_outcome(self, name, snapshot):
+            return CheckpointSaveOutcome.FAILED
+
+    worker = ModelPersistenceWorker(_FailingStore(), _Logger())
+
+    try:
+        receipt = worker.submit_durable_checkpoint(
+            "pid_sp",
+            {"revision": 1},
+        )
+
+        assert receipt.accepted
+        assert not receipt.wait(timeout=1.0)
+        assert receipt.completed
+        assert not receipt.durable
+        assert receipt.error == "RuntimeError: checkpoint store failed"
+    finally:
+        worker.close(timeout=1.0)
+
+
+def test_checkpoint_terminal_protocol_writes_prepare_evidence_commit_in_order() -> None:
+    store = _Store()
+    store.release_first_save.set()
+    persisted = []
+    worker = ModelPersistenceWorker(
+        store,
+        _Logger(),
+        append_evidence=lambda records: persisted.extend(records),
+        read_evidence=lambda **_filters: list(persisted),
+    )
+    success = _evidence("success")
+    failure = _evidence("failure")
+
+    try:
+        receipt = worker.submit_checkpoint_with_terminal_evidence(
+            "pid_sp",
+            {"revision": 1, "phase": "prepared"},
+            {"revision": 2, "phase": "committed"},
+            success,
+            failure,
+        )
+
+        assert receipt.wait(timeout=1.0)
+        assert store.saved == [
+            ("pid_sp", {"revision": 1, "phase": "prepared"}),
+            ("pid_sp", {"revision": 2, "phase": "committed"}),
+        ]
+        assert persisted == [success]
+        assert worker.contains_evidence(success)
+        mismatched = success.model_copy(update={"cook_id": "different-cook"})
+        assert not worker.contains_evidence(mismatched)
+    finally:
+        worker.close(timeout=1.0)
+
+
+def test_checkpoint_terminal_evidence_failure_leaves_only_safe_prepare() -> None:
+    store = _Store()
+    store.release_first_save.set()
+    persisted = []
+    success = _evidence("success")
+    failure = _evidence("failure")
+
+    def append(records):
+        if records == (success,):
+            raise RuntimeError("terminal append failed")
+        persisted.extend(records)
+
+    worker = ModelPersistenceWorker(
+        store,
+        _Logger(),
+        append_evidence=append,
+        read_evidence=lambda **_filters: list(persisted),
+    )
+
+    try:
+        receipt = worker.submit_checkpoint_with_terminal_evidence(
+            "pid_sp",
+            {"revision": 1, "phase": "prepared"},
+            {"revision": 2, "phase": "committed"},
+            success,
+            failure,
+        )
+
+        assert not receipt.wait(timeout=1.0)
+        assert receipt.completed
+        assert store.saved == [
+            ("pid_sp", {"revision": 1, "phase": "prepared"}),
+        ]
+        assert persisted == [failure]
+        assert not worker.contains_evidence(success)
     finally:
         worker.close(timeout=1.0)
 

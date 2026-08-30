@@ -1,4 +1,4 @@
-"""Grey-only v6 controller checkpoint writer and strict runtime restore."""
+"""Grey-only v7 controller checkpoint writer and strict runtime restore."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from tests.unit.runtime._persistence_helpers import _pair_phase_state
 pytestmark = pytest.mark.usefixtures("ds")
 
 
-CURRENT_SCHEMA = 6
+CURRENT_SCHEMA = 7
 CYCLE = {"u_min": 0.1, "u_max": 0.9}
 PARAMS = {
     "C_c": 2520.0,
@@ -33,7 +33,7 @@ PARAMS = {
     "K_Q": 910.0,
     "sigma": 0.0,
 }
-CURRENT_V6_KEYS = frozenset(
+CURRENT_V7_KEYS = frozenset(
     {
         "version",
         "revision",
@@ -49,20 +49,26 @@ CURRENT_V6_KEYS = frozenset(
         "activation",
         "failure",
         "challenger_authority",
+        "installation_identity_digest",
     }
 )
-HISTORICAL_V4_KEYS = (CURRENT_V6_KEYS - {"challenger_authority"}) | {
+HISTORICAL_V4_KEYS = (CURRENT_V7_KEYS - {"challenger_authority", "installation_identity_digest"}) | {
     "challenger",
     "window",
     "candidate_pair",
     "cook_refit",
 }
-HISTORICAL_V5_KEYS = CURRENT_V6_KEYS | {"cook_refit"}
+HISTORICAL_V5_KEYS = (CURRENT_V7_KEYS - {"installation_identity_digest"}) | {"cook_refit"}
 RETIRED_SNAPSHOT_KEYS = {"challenger", "window", "candidate_pair", "cook_refit"}
 
 
 def _controller(**overrides):
-    return Controller(dict(DEFAULT_MPC_CONFIG, **overrides), "C", dict(CYCLE))
+    return Controller(
+        dict(DEFAULT_MPC_CONFIG, **overrides),
+        "C",
+        dict(CYCLE),
+        installation_identity_provider=lambda: "snapshot-test-installation",
+    )
 
 
 def _adopt(
@@ -114,7 +120,7 @@ def test_unidentified_controller_writes_complete_v6_defaults():
     snapshot = _controller().get_model_snapshot()
 
     assert snapshot["version"] == CURRENT_SCHEMA
-    assert snapshot["schema"] == "pifire-grey-learning/v6"
+    assert snapshot["schema"] == "pifire-grey-learning/v7"
     assert snapshot["structure"] == {"kind": "grey-box", "n_delay": 8, "state_count": 10}
     assert snapshot["identification"] == {"status": "unidentified"}
     assert snapshot["active"]["parameters"]["n_delay"] == 8
@@ -124,7 +130,7 @@ def test_unidentified_controller_writes_complete_v6_defaults():
 def test_current_writer_has_every_grey_learning_section_and_no_process_job_or_retired_kind():
     snapshot = _identified().get_model_snapshot()
 
-    assert set(snapshot) == CURRENT_V6_KEYS
+    assert set(snapshot) == CURRENT_V7_KEYS
     assert RETIRED_SNAPSHOT_KEYS.isdisjoint(snapshot)
     assert snapshot["active_pair"] == _identified().active_control_pair.descriptor.to_dict()
     assert snapshot["challenger_authority"] is None
@@ -243,7 +249,7 @@ def test_restore_round_trips_complete_validated_v6_checkpoint_state() -> None:
         source.close()
 
 
-def test_v5_descriptor_is_explicitly_migrated_before_current_v6_factory_restore() -> None:
+def test_v5_descriptor_migrates_but_remains_inert_without_installation_authority() -> None:
     source = _identified()
     restored = _controller()
     historical = _legacy_v5(source.get_model_snapshot())
@@ -264,13 +270,15 @@ def test_v5_descriptor_is_explicitly_migrated_before_current_v6_factory_restore(
     historical["active_pair"] = legacy.to_dict()
     current = migrate_grey_learning_snapshot(historical)
 
+    configured = restored.active_control_pair.descriptor
     try:
         assert current["version"] == CURRENT_SCHEMA
-        assert current["schema"] == "pifire-grey-learning/v6"
+        assert current["schema"] == "pifire-grey-learning/v7"
         assert current["active_pair"] != legacy.to_dict()
-        assert restored.restore_model(current) is True
-        assert restored.active_control_pair.descriptor.to_dict() == current["active_pair"]
-        assert restored.get_model_snapshot() == current
+        assert current["installation_identity_digest"] is None
+        assert restored.restore_model(current) is False
+        assert restored.active_control_pair.descriptor == configured
+        assert restored.get_model_snapshot()["installation_identity_digest"] is not None
     finally:
         restored.close()
         source.close()
@@ -312,7 +320,7 @@ def test_runtime_restore_refuses_v3_even_though_one_shot_migration_accepts_it(ca
     }
     controller = _controller()
 
-    assert migrate_grey_learning_snapshot(v3)["version"] == 6
+    assert migrate_grey_learning_snapshot(v3)["version"] == 7
     with caplog.at_level(logging.WARNING, logger=EVENT_LOG_NAME):
         assert controller.restore_model(v3) is False
     assert "migration input only" in caplog.text
@@ -354,7 +362,7 @@ def _restarted_store(blobs):
             "nfev": None,
         },
     ),
-    ids=("migrated-v6-carrying-no-restorable-pair", "superseded-v3-record"),
+    ids=("migrated-v7-carrying-no-restorable-pair", "superseded-v3-record"),
 )
 def test_a_refused_checkpoint_still_saves_the_adoption_it_falls_back_to(unrestorable):
     blobs = {}
@@ -378,21 +386,23 @@ def test_a_refused_checkpoint_still_saves_the_adoption_it_falls_back_to(unrestor
 @pytest.mark.parametrize(
     "mutation",
     [
-        lambda snapshot: snapshot.update(version=7),
+        lambda snapshot: snapshot.update(version=8),
         lambda snapshot: snapshot.update(structure={"kind": "grey-box", "n_delay": 7, "state_count": 9}),
         lambda snapshot: snapshot["active"]["parameters"].update(C_c=float("nan")),
         lambda snapshot: snapshot["active"]["parameters"].update(C_c=-1.0),
         lambda snapshot: snapshot.pop("active"),
     ],
 )
-def test_runtime_restore_refuses_future_corrupt_or_incompatible_v6_atomically(mutation):
+def test_runtime_restore_refuses_future_corrupt_or_incompatible_v7_atomically(mutation):
     controller = _controller()
     before = controller.get_model_snapshot()
     candidate = _identified().get_model_snapshot()
     mutation(candidate)
+    expected = copy.deepcopy(before)
+    expected["revision"] = candidate["revision"]
 
     assert controller.restore_model(candidate) is False
-    assert controller.get_model_snapshot() == before
+    assert controller.get_model_snapshot() == expected
 
 
 def test_restore_build_failure_closes_partial_candidate_and_keeps_incumbent_usable(monkeypatch):
@@ -477,7 +487,7 @@ def test_v6_round_trip_is_exact_for_identified_and_default_snapshots():
 
 
 def _legacy_v4(snapshot):
-    assert set(snapshot) == CURRENT_V6_KEYS
+    assert set(snapshot) == CURRENT_V7_KEYS
     legacy = copy.deepcopy(snapshot)
     legacy["version"] = 4
     legacy["schema"] = "pifire-grey-learning/v4"
@@ -488,16 +498,18 @@ def _legacy_v4(snapshot):
     legacy["identities"]["candidate_digest"] = None
     legacy["identities"]["candidate_generation"] = None
     legacy.pop("challenger_authority")
+    legacy.pop("installation_identity_digest")
     assert set(legacy) == HISTORICAL_V4_KEYS
     return legacy
 
 
 def _legacy_v5(snapshot):
-    assert set(snapshot) == CURRENT_V6_KEYS
+    assert set(snapshot) == CURRENT_V7_KEYS
     legacy = copy.deepcopy(snapshot)
     legacy["version"] = 5
     legacy["schema"] = "pifire-grey-learning/v5"
     legacy["cook_refit"] = {"status": "idle", "latest": None}
+    legacy.pop("installation_identity_digest")
     assert set(legacy) == HISTORICAL_V5_KEYS
     return legacy
 
@@ -518,9 +530,9 @@ def test_v4_and_v5_snapshots_remain_strict_migration_inputs(
     legacy = legacy_reader(current)
     assert set(legacy) == historical_keys
     migrated = migrate_grey_learning_snapshot(legacy)
-    assert set(migrated) == CURRENT_V6_KEYS
-    assert migrated["version"] == 6
-    assert migrated["schema"] == "pifire-grey-learning/v6"
+    assert set(migrated) == CURRENT_V7_KEYS
+    assert migrated["version"] == 7
+    assert migrated["schema"] == "pifire-grey-learning/v7"
     assert migrated["active_pair"] is not None
     assert RETIRED_SNAPSHOT_KEYS.isdisjoint(migrated)
 
@@ -569,11 +581,13 @@ def test_every_nested_v4_and_v5_section_is_validated_before_atomic_restore(
     snapshot[section] = corrupt
     target = _controller()
     before = target.get_model_snapshot()
+    expected = copy.deepcopy(before)
+    expected["revision"] = snapshot["revision"]
 
     with pytest.raises(GreySnapshotInvalid):
         migrate_grey_learning_snapshot(snapshot)
     assert target.restore_model(snapshot) is False
-    assert target.get_model_snapshot() == before
+    assert target.get_model_snapshot() == expected
 
 
 def test_real_live_status_failure_overrides_prior_active_activation():

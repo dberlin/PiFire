@@ -68,7 +68,7 @@ type ParentIncumbentGeneration = number;
 type RequestId = string;
 type ResultStatus = "succeeded";
 type ParameterDeltas = {
-  [k: string]: (number | null) | undefined;
+  [k: string]: number | null | undefined;
 } | null;
 type CC = number;
 type KQ = number;
@@ -99,6 +99,7 @@ type Revision1 = number | null;
 type PreRollCount = number;
 type PrefixDigest = string;
 type ScoredCount = number;
+type SegmentContentDigest = string | null;
 type SegmentId = string;
 type ThroughOrdinal = number;
 type Slices = FitCorpusSliceReport[];
@@ -123,24 +124,18 @@ type RequestId1 = string | null;
  */
 export type FitStatus = "idle" | "queued" | "running" | "succeeded" | "failed" | "stale";
 type K = number;
-type Form = "fopdt";
-type IdentifiedAtF = number | null;
-type Revision2 = number;
 type Tau = number;
 type Theta1 = number;
 type K1 = number;
-type Form1 = "fopdt";
+type Form = "fopdt";
 type Tau1 = number;
 type Theta2 = number;
 type KI = number;
 type C0 = number;
-type Form2 = "ipdt";
-type IdentifiedAtF1 = number | null;
-type Revision3 = number;
 type Theta3 = number;
 type KI1 = number;
 type C01 = number;
-type Form3 = "ipdt";
+type Form1 = "ipdt";
 type Theta4 = number;
 type Code = string;
 type Detail = string;
@@ -156,7 +151,7 @@ type CandidateDigest3 = string | null;
 type CandidateGeneration4 = number | null;
 type RollbackDigest = string | null;
 type RollbackGeneration = number | null;
-type Revision4 = string;
+type Revision2 = string;
 type SchemaVersion = 3;
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
@@ -197,47 +192,147 @@ export type MpcCalibrationAction = "start" | "pause" | "resume" | "stop" | "rese
 type AmbientC = number;
 type EmptyGrillConfirmed = boolean;
 type PelletsConfirmed = boolean;
-type Revision5 = number;
+type Revision3 = number;
 type Data = MpcCalibrationCommandResponseData | CommandResponseData | null;
 type Message = string;
 type Result = "OK" | "ERROR";
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
- * via the `definition` "PidSpCheckpointModel".
+ * via the `definition` "PidSpDelayProfileForm".
  */
-export type PidSpCheckpointModel = FopdtPidSpCheckpoint | IpdtPidSpCheckpoint;
+export type PidSpDelayProfileForm = "ipdt" | "fopdt" | "sopdt";
+type ModelDigest = string;
+type Blockers1 = string[];
+type ConfidenceLowerS = number;
+type ConfidenceMethod = "raw-basin" | "provided" | "moving-block-refit";
+type ConfidenceResamples = number;
+type ConfidenceUpperS = number;
+type EpisodeCount = number;
+type Interior = boolean;
+type LowerS = number;
+type RepresentativeS = number;
+type UpperS = number;
+type Provenance = string;
+type Revision4 = number;
+type SchemaVersion1 = 2;
+type Authorized = true;
+type CommonRowDigest = string;
+type ComparisonThreshold = number;
+type ConfigurationDigest = string;
+type ConfirmationObserved = 20;
+type ConfirmationRequired = 20;
+type EpisodeIds = string[];
+type FitCorpusDigest2 = string;
+type FoldLosses = number[];
+type Form2 = "ipdt" | "fopdt" | "sopdt";
+type HorizonLosses = [unknown, unknown][];
+type ModelDigest1 = string;
+type OneStepLoss = number;
+/**
+ * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
+ * via the `definition` "PidSpCheckpointParameters".
+ */
+export type PidSpCheckpointParameters =
+  | IpdtPidSpParameters
+  | FopdtPidSpParameters
+  | SopdtPidSpParameters;
+type K2 = number;
+type Tau11 = number;
+type Tau2 = number;
+type Theta5 = number;
+type SchemaVersion2 = "pid-sp-model-selection/v1";
+type SelectionMargin = number;
+type StandardError = number;
 type Observed = number | null;
 type Required = number;
+/**
+ * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
+ * via the `definition` "PidSpDelayBlocker".
+ */
+export type PidSpDelayBlocker =
+  | "insufficient-excitation-episodes"
+  | "insufficient-confidence-evidence"
+  | "delay-basin-too-wide"
+  | "delay-basin-edge"
+  | "delay-range-exhausted"
+  | "no-physically-valid-delay-candidate";
+/**
+ * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
+ * via the `definition` "PidSpDelayConfidenceMethod".
+ */
+export type PidSpDelayConfidenceMethod = "raw-basin" | "provided" | "moving-block-refit";
+type Authorized1 = boolean;
+type Blockers2 = PidSpDelayBlocker[];
+type CompletedEpisodeCount = number;
+type ConfidenceLowerS1 = number | null;
+type ConfidenceResamples1 = number | null;
+type ConfidenceUpperS1 = number | null;
+type EvaluatedBoundS = number;
+type RawBasinLowerS = number | null;
+type RawBasinRepresentativeS = number | null;
+type RawBasinUpperS = number | null;
+/**
+ * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
+ * via the `definition` "PidSpDelayEvidenceStatus".
+ */
+export type PidSpDelayEvidenceStatus =
+  | "insufficient-excitation-episodes"
+  | "insufficient-confidence-evidence"
+  | "delay-basin-too-wide"
+  | "delay-basin-edge"
+  | "delay-range-exhausted"
+  | "no-physically-valid-delay-candidate"
+  | "delay-basin-stable";
+type BasinLowerS = number | null;
+type BasinUpperS = number | null;
+type Blockers3 = string[];
+type ConfidenceLowerS2 = number | null;
+type ConfidenceUpperS2 = number | null;
+type Eligible = boolean;
+type FoldLosses1 = (number | null)[];
+type HorizonS = number;
+type Loss = number | null;
+type HorizonLosses1 = PidSpHorizonLossReport[];
+type OneStepLoss1 = number | null;
+type StandardError1 = number | null;
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "PidSpGateValue".
  */
 export type PidSpGateValue = number | boolean;
-type CandidatesPassing = number;
-type Confirming = number | null;
 type DistrustCount = number;
 type DutySegments = number;
+type RawCandidatesPassing = number;
 type TransitionSeen = boolean;
+/**
+ * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
+ * via the `definition` "PidSpPredictorModel".
+ */
+export type PidSpPredictorModel = FopdtPidSpPredictor | IpdtPidSpPredictor | SopdtPidSpPredictor;
+type K3 = number;
+type Form3 = "sopdt";
+type Tau12 = number;
+type Tau21 = number;
+type Theta6 = number;
 type Code1 = string;
 type Detail2 = string;
 type Terminal1 = boolean;
 type Name1 = string;
 type Passed1 = boolean;
 type Unit = string | null;
+type ComparisonThreshold1 = number | null;
+type Forms = PidSpFormComparisonReport[];
+type PrimaryBlocker = string | null;
+type SelectionMargin1 = number | null;
 type Controller = "pid_sp";
 type Gates1 = PidSpLearningGate[];
 type Live = boolean;
 type Active = boolean;
 type Disabled = boolean;
-/**
- * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
- * via the `definition` "PidSpPredictorModel".
- */
-export type PidSpPredictorModel = FopdtPidSpPredictor | IpdtPidSpPredictor;
 type ResidualStreak = number;
 type Truncated = number;
-type Revision6 = string;
-type SchemaVersion1 = 1;
+type Revision5 = string;
+type SchemaVersion3 = 1;
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "PidSpLearningStatus".
@@ -419,6 +514,7 @@ export interface FitCorpusSliceReport {
   pre_roll_count: PreRollCount;
   prefix_digest: PrefixDigest;
   scored_count: ScoredCount;
+  segment_content_digest: SegmentContentDigest;
   segment_id: SegmentId;
   through_ordinal: ThroughOrdinal;
 }
@@ -453,13 +549,10 @@ export interface FitReport {
 }
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
- * via the `definition` "FopdtPidSpCheckpoint".
+ * via the `definition` "FopdtPidSpParameters".
  */
-export interface FopdtPidSpCheckpoint {
+export interface FopdtPidSpParameters {
   K: K;
-  form: Form;
-  identified_at_f?: IdentifiedAtF;
-  revision: Revision2;
   tau: Tau;
   theta: Theta1;
 }
@@ -469,20 +562,17 @@ export interface FopdtPidSpCheckpoint {
  */
 export interface FopdtPidSpPredictor {
   K: K1;
-  form: Form1;
+  form: Form;
   tau: Tau1;
   theta: Theta2;
 }
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
- * via the `definition` "IpdtPidSpCheckpoint".
+ * via the `definition` "IpdtPidSpParameters".
  */
-export interface IpdtPidSpCheckpoint {
+export interface IpdtPidSpParameters {
   K_i: KI;
   c0: C0;
-  form: Form2;
-  identified_at_f?: IdentifiedAtF1;
-  revision: Revision3;
   theta: Theta3;
 }
 /**
@@ -492,7 +582,7 @@ export interface IpdtPidSpCheckpoint {
 export interface IpdtPidSpPredictor {
   K_i: KI1;
   c0: C01;
-  form: Form3;
+  form: Form1;
   theta: Theta4;
 }
 /**
@@ -527,12 +617,12 @@ export interface ModelEvidenceReport {
   identities: ModelIdentities;
   latest_lifecycle: ActivationLifecycle | null;
   mode: CandidateOrigin | null;
-  revision: Revision4;
+  revision: Revision2;
   schema_version: SchemaVersion;
   status: ModelEvidenceStatus;
 }
 interface Checks {
-  [k: string]: CheckStatus;
+  [k: string]: CheckStatus | undefined;
 }
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
@@ -585,7 +675,7 @@ export interface MpcCalibrationCommand {
   ambient_source: AmbientSource;
   empty_grill_confirmed: EmptyGrillConfirmed;
   pellets_confirmed: PelletsConfirmed;
-  revision: Revision5;
+  revision: Revision3;
 }
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
@@ -605,6 +695,74 @@ export interface MpcCalibrationCommandResponseData {
 }
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
+ * via the `definition` "PidSpActiveModelReport".
+ */
+export interface PidSpActiveModelReport {
+  form: PidSpDelayProfileForm;
+  model_digest: ModelDigest;
+}
+/**
+ * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
+ * via the `definition` "PidSpCheckpointBasin".
+ */
+export interface PidSpCheckpointBasin {
+  blockers: Blockers1;
+  confidence_lower_s: ConfidenceLowerS;
+  confidence_method: ConfidenceMethod;
+  confidence_resamples: ConfidenceResamples;
+  confidence_upper_s: ConfidenceUpperS;
+  episode_count: EpisodeCount;
+  interior: Interior;
+  lower_s: LowerS;
+  representative_s: RepresentativeS;
+  upper_s: UpperS;
+}
+/**
+ * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
+ * via the `definition` "PidSpCheckpointModel".
+ */
+export interface PidSpCheckpointModel {
+  provenance: Provenance;
+  revision: Revision4;
+  schema_version: SchemaVersion1;
+  selected: PidSpSelectedCheckpoint;
+}
+/**
+ * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
+ * via the `definition` "PidSpSelectedCheckpoint".
+ */
+export interface PidSpSelectedCheckpoint {
+  authorized: Authorized;
+  common_row_digest: CommonRowDigest;
+  comparison_threshold: ComparisonThreshold;
+  configuration_digest: ConfigurationDigest;
+  confirmation_observed: ConfirmationObserved;
+  confirmation_required: ConfirmationRequired;
+  delay_basin: PidSpCheckpointBasin;
+  episode_ids: EpisodeIds;
+  fit_corpus_digest: FitCorpusDigest2;
+  fold_losses: FoldLosses;
+  form: Form2;
+  horizon_losses: HorizonLosses;
+  model_digest: ModelDigest1;
+  one_step_loss: OneStepLoss;
+  parameters: PidSpCheckpointParameters;
+  schema_version: SchemaVersion2;
+  selection_margin: SelectionMargin;
+  standard_error: StandardError;
+}
+/**
+ * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
+ * via the `definition` "SopdtPidSpParameters".
+ */
+export interface SopdtPidSpParameters {
+  K: K2;
+  tau_1: Tau11;
+  tau_2: Tau2;
+  theta: Theta5;
+}
+/**
+ * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "PidSpConfirmationProgress".
  */
 export interface PidSpConfirmationProgress {
@@ -613,22 +771,77 @@ export interface PidSpConfirmationProgress {
 }
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
+ * via the `definition` "PidSpDelayEvidence".
+ */
+export interface PidSpDelayEvidence {
+  authorized: Authorized1;
+  blockers: Blockers2;
+  completed_episode_count: CompletedEpisodeCount;
+  confidence_lower_s: ConfidenceLowerS1;
+  confidence_method: PidSpDelayConfidenceMethod | null;
+  confidence_resamples: ConfidenceResamples1;
+  confidence_upper_s: ConfidenceUpperS1;
+  evaluated_bound_s: EvaluatedBoundS;
+  profile_form: PidSpDelayProfileForm | null;
+  raw_basin_lower_s: RawBasinLowerS;
+  raw_basin_representative_s: RawBasinRepresentativeS;
+  raw_basin_upper_s: RawBasinUpperS;
+  status: PidSpDelayEvidenceStatus;
+}
+/**
+ * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
+ * via the `definition` "PidSpFormComparisonReport".
+ */
+export interface PidSpFormComparisonReport {
+  basin_lower_s: BasinLowerS;
+  basin_upper_s: BasinUpperS;
+  blockers: Blockers3;
+  confidence_lower_s: ConfidenceLowerS2;
+  confidence_method: PidSpDelayConfidenceMethod | null;
+  confidence_upper_s: ConfidenceUpperS2;
+  eligible: Eligible;
+  fold_losses: FoldLosses1;
+  form: PidSpDelayProfileForm;
+  horizon_losses: HorizonLosses1;
+  one_step_loss: OneStepLoss1;
+  standard_error: StandardError1;
+}
+/**
+ * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
+ * via the `definition` "PidSpHorizonLossReport".
+ */
+export interface PidSpHorizonLossReport {
+  horizon_s: HorizonS;
+  loss: Loss;
+}
+/**
+ * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "PidSpIdentifierReport".
  */
 export interface PidSpIdentifierReport {
   accepted: FiniteNumber;
   accepted_seconds: FiniteNumber;
-  best_residual: FiniteNumber;
-  candidates_passing: CandidatesPassing;
-  confirming: Confirming;
   distrust_count: DistrustCount;
   distrust_ratio: FiniteNumber | null;
   duty_segments: DutySegments;
   duty_std: FiniteNumber;
-  runner_up_residual: FiniteNumber;
+  raw_best_residual: FiniteNumber;
+  raw_candidates_passing: RawCandidatesPassing;
+  raw_runner_up_residual: FiniteNumber;
   temp_span: FiniteNumber;
   transition_seen: TransitionSeen;
-  trusted: PidSpCheckpointModel | null;
+  trusted: PidSpPredictorModel | null;
+}
+/**
+ * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
+ * via the `definition` "SopdtPidSpPredictor".
+ */
+export interface SopdtPidSpPredictor {
+  K: K3;
+  form: Form3;
+  tau_1: Tau12;
+  tau_2: Tau21;
+  theta: Theta6;
 }
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
@@ -655,17 +868,33 @@ export interface PidSpLearningGate {
  * via the `definition` "PidSpLearningReport".
  */
 export interface PidSpLearningReport {
+  active_model: PidSpActiveModelReport | null;
   checkpoint: PidSpCheckpointModel | null;
+  comparison: PidSpModelComparisonReport | null;
   confirmation: PidSpConfirmationProgress | null;
   controller: Controller;
+  delay_evidence: PidSpDelayEvidence | null;
   failure: PidSpLearningFailure | null;
   gates: Gates1;
   identifier: PidSpIdentifierReport | null;
   live: Live;
   predictor: PidSpPredictorReport | null;
-  revision: Revision6;
-  schema_version: SchemaVersion1;
+  revision: Revision5;
+  schema_version: SchemaVersion3;
   status: PidSpLearningStatus;
+}
+/**
+ * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
+ * via the `definition` "PidSpModelComparisonReport".
+ */
+export interface PidSpModelComparisonReport {
+  best_form: PidSpDelayProfileForm | null;
+  comparison_threshold: ComparisonThreshold1;
+  confirmation: PidSpConfirmationProgress;
+  forms: Forms;
+  primary_blocker: PrimaryBlocker;
+  selected_form: PidSpDelayProfileForm | null;
+  selection_margin: SelectionMargin1;
 }
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
@@ -679,4 +908,6 @@ export interface PidSpPredictorReport {
   truncated: Truncated;
   x0: FiniteNumber;
   xd: FiniteNumber;
+  z0: FiniteNumber;
+  zd: FiniteNumber;
 }

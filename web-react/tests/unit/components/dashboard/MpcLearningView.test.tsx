@@ -109,6 +109,7 @@ const REPORT: ModelEvidenceReport = {
         segment_id: "segment-cook-7-hold-1",
         through_ordinal: 120,
         prefix_digest: PREFIX_DIGEST,
+        segment_content_digest: "a".repeat(64),
         pre_roll_count: 24,
         scored_count: 96,
       },

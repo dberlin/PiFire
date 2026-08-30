@@ -53,6 +53,7 @@ from controller.runtime.logic.pulse import PulseResetReason
 from controller.runtime.model_persistence import DurableActivationReceipt, EvidenceSubmission
 from controller.runtime.modes.hold_learning import HoldLearningRuntime
 from controller.runtime.runner import (
+    ModelRestoreOutcome,
     ObservationOutcomeDrain,
     ObservationOutcomeEnvelope,
     ObservationSubmission,
@@ -150,7 +151,7 @@ class _Runner:
         self.drains: list[ObservationOutcomeDrain] = []
         self.drain_count = 0
         self.raise_on_observe: BaseException | None = None
-        self.restore_outcome: bool | None = None
+        self.restore_outcome: ModelRestoreOutcome | None = None
         self.events = [] if events is None else events
 
     def observe_frame(self, observation: FrameObservation) -> ObservationSubmission | None:
@@ -187,11 +188,20 @@ class _Runner:
         self.events.append(("confidence", record))
         return DurableActivationReceipt(accepted=self.confidence_accepted)
 
-    def restore_model(self, snapshot: dict[str, object]) -> bool:
+    def restore_model(
+        self,
+        snapshot: dict[str, object],
+        *,
+        restore_token: str | None = None,
+    ) -> ModelRestoreOutcome:
         del snapshot
-        return False
+        return ModelRestoreOutcome(
+            restore_token=restore_token,
+            accepted=False,
+            effective_authority=None,
+        )
 
-    def drain_restore_outcome(self) -> bool | None:
+    def drain_restore_outcome(self) -> ModelRestoreOutcome | None:
         outcome = self.restore_outcome
         self.restore_outcome = None
         return outcome
@@ -236,8 +246,9 @@ class _Runner:
     def get_model_snapshot(self) -> object:
         return None
 
-    def finish_teardown(self) -> None:
-        return None
+    def finish_teardown(self, finalizer=None) -> None:
+        if finalizer is not None:
+            finalizer()
 
 
 class _NoSubmissionRunner(_Runner):
@@ -256,6 +267,8 @@ class _LifecycleRunner(_Runner):
         super().__init__(events=events)
         self.restore_accepted = restore_accepted
         self.asynchronous = asynchronous
+        self.restore_effective_authority: dict[str, object] | None = None
+        self.restore_staged_for_revalidation = False
         self.restored_models: list[dict[str, object]] = []
         self.activation_restores: list[tuple[object, tuple[ModelEvidenceRecord, ...]]] = []
         self.rollbacks: list[str] = []
@@ -267,10 +280,30 @@ class _LifecycleRunner(_Runner):
         self.snapshot: object = {"revision": 1}
         self.finish_calls = 0
         self.finish_error: BaseException | None = None
+        self.restore_token: str | None = None
 
-    def restore_model(self, snapshot: dict[str, object]) -> bool:
+    def restore_model(
+        self,
+        snapshot: dict[str, object],
+        *,
+        restore_token: str | None = None,
+    ) -> ModelRestoreOutcome:
         self.restored_models.append(snapshot)
-        return self.restore_accepted
+        self.restore_token = restore_token
+        if self.asynchronous:
+            return ModelRestoreOutcome(
+                restore_token=restore_token,
+                accepted=True,
+                effective_authority=None,
+                pending=True,
+            )
+        effective_authority = snapshot if self.restore_effective_authority is None else self.restore_effective_authority
+        return ModelRestoreOutcome(
+            restore_token=restore_token,
+            accepted=self.restore_accepted,
+            effective_authority=effective_authority,
+            staged_for_revalidation=self.restore_staged_for_revalidation,
+        )
 
     def runs_async(self) -> bool:
         return self.asynchronous
@@ -317,11 +350,14 @@ class _LifecycleRunner(_Runner):
     def get_model_snapshot(self) -> object:
         return self.snapshot
 
-    def finish_teardown(self) -> None:
+    def finish_teardown(self, finalizer=None) -> None:
         self.finish_calls += 1
         self.events.append("runner:finish")
         if self.finish_error is not None:
             raise self.finish_error
+        if finalizer is not None:
+            finalizer()
+        self.events.append("runner:close")
 
 
 class _ModelStore:
@@ -1876,14 +1912,9 @@ def test_restore_model_clears_stale_authority_before_absent_checkpoint_noop() ->
     assert logger.warnings == []
 
 
-@pytest.mark.parametrize(
-    ("asynchronous", "authority_provenance"),
-    ((False, "restored"), (True, "restore_submitted")),
-    ids=("synchronous", "asynchronous"),
-)
-def test_restore_model_records_accepted_sync_and_async_provenance(
+@pytest.mark.parametrize("asynchronous", (False, True), ids=("synchronous", "asynchronous"))
+def test_restore_model_records_accepted_sync_and_async_effective_authority(
     asynchronous: bool,
-    authority_provenance: str,
 ) -> None:
     snapshot: dict[str, object] = {"revision": 3, "K": 700.0}
     runtime, runner, store, trace, recorder, logger = _lifecycle_runtime(
@@ -1895,10 +1926,19 @@ def test_restore_model_records_accepted_sync_and_async_provenance(
 
     assert store.loads == ["pid_sp"]
     assert runner.restored_models == [snapshot]
+    if asynchronous:
+        assert trace.model_authority is None
+        assert runner.restore_token is not None
+        runner.restore_outcome = ModelRestoreOutcome(
+            restore_token=runner.restore_token,
+            accepted=True,
+            effective_authority=snapshot,
+        )
+        runtime.reconcile_outcomes(1.5)
     authority = trace.model_authority
     assert authority is not None
     assert authority.snapshot == snapshot
-    assert authority.provenance == authority_provenance
+    assert authority.provenance == "restored"
     [record] = _records(recorder, TraceEventKind.MODEL_EVENT)
     assert isinstance(record.payload, ModelEventPayload)
     assert record.ts_ms == 1_250
@@ -1909,14 +1949,50 @@ def test_restore_model_records_accepted_sync_and_async_provenance(
     assert logger.warnings == []
 
 
-def test_an_async_restore_the_worker_refuses_is_reported_when_its_verdict_arrives() -> None:
-    """An async runner answers "queued", so the verdict has to correct the record.
+@pytest.mark.parametrize("asynchronous", (False, True), ids=("synchronous", "asynchronous"))
+@pytest.mark.parametrize(
+    "installation_identity_digest",
+    (None, "f" * 64),
+    ids=("legacy", "installation-mismatch"),
+)
+def test_untrusted_restore_reports_configured_fallback_as_effective_authority(
+    asynchronous: bool,
+    installation_identity_digest: str | None,
+) -> None:
+    candidate: dict[str, object] = {
+        "revision": 9,
+        "installation_identity_digest": installation_identity_digest,
+    }
+    fallback = {"revision": 0, "provenance": "configured"}
+    runner = _LifecycleRunner(asynchronous=asynchronous)
+    runner.restore_effective_authority = fallback
+    runner.restore_staged_for_revalidation = True
+    runtime, _runner, _store, trace, _recorder, logger = _lifecycle_runtime(
+        snapshot=candidate,
+        runner=runner,
+    )
 
-    Between submission and adoption the session has already logged a restore and
-    stamped model authority from the stored snapshot. If the worker then refuses
-    it, the controller is running the configured model while the trace still
-    claims the persisted one.
-    """
+    runtime.restore_model(timestamp_ms=1_250)
+    if asynchronous:
+        assert trace.model_authority is None
+        assert runner.restore_token is not None
+        runner.restore_outcome = ModelRestoreOutcome(
+            restore_token=runner.restore_token,
+            accepted=True,
+            effective_authority=fallback,
+            staged_for_revalidation=True,
+        )
+        runtime.reconcile_outcomes(1.5)
+
+    authority = trace.model_authority
+    assert authority is not None
+    assert authority.snapshot == fallback
+    assert authority.provenance == "configured_fallback"
+    assert runner.restored_models == [candidate]
+    assert logger.warnings == []
+
+
+def test_an_async_restore_the_worker_refuses_is_reported_when_its_verdict_arrives() -> None:
     snapshot: dict[str, object] = {"revision": 4, "K": 710.0}
     runtime, runner, _store, trace, recorder, logger = _lifecycle_runtime(
         snapshot=snapshot,
@@ -1926,10 +2002,15 @@ def test_an_async_restore_the_worker_refuses_is_reported_when_its_verdict_arrive
 
     runtime.restore_model(timestamp_ms=2_500)
 
-    assert trace.model_authority is not None
+    assert trace.model_authority is None
     assert logger.infos == ["Submitted the stored pid_sp model for restore"]
 
-    runner.restore_outcome = False
+    assert runner.restore_token is not None
+    runner.restore_outcome = ModelRestoreOutcome(
+        restore_token=runner.restore_token,
+        accepted=False,
+        effective_authority={"revision": 0, "provenance": "configured"},
+    )
     runtime.reconcile_outcomes(3.0)
 
     assert trace.model_authority is None
@@ -2214,7 +2295,47 @@ def test_submit_online_checkpoint_uses_nonblocking_worker_and_availability(
     assert runtime.evidence_available is accepted
 
 
-def test_finish_teardown_orders_retire_barrier_trace_close_runner_finish_once() -> None:
+def test_refused_checkpoint_does_not_block_authorized_calibration_fit() -> None:
+    persistence = _Persistence(checkpoint_results=(False,))
+    runner = _LifecycleRunner()
+    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(
+        runner=runner,
+        persistence=persistence,
+    )
+    generation = 7
+    runtime.handoff_calibration(
+        CalibrationDecision(
+            True,
+            0.08,
+            "low",
+            CalibrationProgress(),
+            events=(CalibrationEvent("start_accepted", "low", 0.08, 0.08, 0.0),),
+            command_generation=generation,
+        ),
+        result_revision=41,
+        timestamp_ms=12_500,
+    )
+    assert not runtime.submit_online_checkpoint({"revision": 9})
+
+    runtime.handoff_calibration(
+        CalibrationDecision(
+            False,
+            0.0,
+            "high",
+            CalibrationProgress(),
+            completed_stages=("low", "middle", "high"),
+            outcome="completed",
+            command_generation=generation,
+        ),
+        result_revision=42,
+        timestamp_ms=13_000,
+    )
+
+    assert runner.fit_requests == [CandidateOrigin.OPERATOR_CALIBRATION]
+    assert persistence.barrier_calls == 1
+
+
+def test_finish_teardown_orders_retire_barrier_finalizer_and_runner_close_once() -> None:
     events: list[object] = []
     runner = _LifecycleRunner(events=events)
     persistence = _Persistence(events=events)
@@ -2233,13 +2354,117 @@ def test_finish_teardown_orders_retire_barrier_trace_close_runner_finish_once() 
     assert events == [
         ("runner:retire", 4),
         "persistence:barrier",
-        "trace:close",
         "runner:finish",
+        "trace:close",
+        "runner:close",
     ]
     assert runner.retirements == [4]
     assert persistence.barrier_calls == 1
     assert recorder.close_calls == 1
     assert runner.finish_calls == 1
+
+
+def test_submitted_stop_fit_postfit_barrier_precedes_trace_flush_and_core_close() -> None:
+    events: list[object] = []
+    runner = _LifecycleRunner(events=events)
+    persistence = _Persistence(events=events)
+    recorder = _Recorder(events=events)
+    trace, _recorder = _trace(recorder=recorder)
+    original_flush = trace.flush_pending
+
+    def record_flush() -> None:
+        events.append("trace:flush")
+        return original_flush()
+
+    trace.flush_pending = record_flush
+    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(
+        runner=runner,
+        persistence=persistence,
+        trace=trace,
+        recorder=recorder,
+        controller_name="mpc",
+    )
+    assert runtime.schedule_stop_fit(
+        {
+            "controller": {
+                "config": {
+                    "mpc": {
+                        "enable_identification": True,
+                    },
+                },
+            },
+        },
+    )
+
+    runtime.finish_teardown(generation=4)
+    runtime.finish_teardown(generation=4)
+
+    assert events == [
+        ("runner:retire", 4),
+        "persistence:barrier",
+        "runner:finish",
+        "persistence:barrier",
+        "trace:flush",
+        "trace:flush",
+        "trace:close",
+        "runner:close",
+    ]
+    assert persistence.barrier_calls == 2
+    assert recorder.close_calls == 1
+    assert runner.finish_calls == 1
+
+
+def test_postfit_barrier_failure_still_closes_trace_and_runner_core() -> None:
+    events: list[object] = []
+
+    class _PostfitFailurePersistence(_Persistence):
+        def barrier(self, timeout: float = 2.0) -> bool:
+            del timeout
+            self.barrier_calls += 1
+            self.events.append("persistence:barrier")
+            if self.barrier_calls == 2:
+                raise RuntimeError("terminal fit durability failed")
+            return True
+
+    runner = _LifecycleRunner(events=events)
+    persistence = _PostfitFailurePersistence(events=events)
+    recorder = _Recorder(events=events)
+    trace, _recorder = _trace(recorder=recorder)
+    logger = _LifecycleLogger()
+    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(
+        runner=runner,
+        persistence=persistence,
+        trace=trace,
+        recorder=recorder,
+        logger=logger,
+        controller_name="mpc",
+    )
+    assert runtime.schedule_stop_fit(
+        {
+            "controller": {
+                "config": {
+                    "mpc": {
+                        "enable_identification": True,
+                    },
+                },
+            },
+        },
+    )
+
+    runtime.finish_teardown(generation=4)
+
+    assert events == [
+        ("runner:retire", 4),
+        "persistence:barrier",
+        "runner:finish",
+        "persistence:barrier",
+        "trace:close",
+        "runner:close",
+    ]
+    assert logger.warnings == [
+        "Post-fit model persistence barrier failed: terminal fit durability failed",
+    ]
+    assert not runtime.evidence_available
 
 
 def test_successful_teardown_barrier_result_is_stable_and_fenced_once() -> None:

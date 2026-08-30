@@ -9,6 +9,7 @@ from controller.model_learning.contracts import CandidateOrigin, FrameObservatio
 from controller.runtime.model_persistence import DurableActivationReceipt
 from controller.runtime.observation_buffer import ObservationOutcomeBuffer
 from controller.runtime.runner import (
+    ModelRestoreOutcome,
     ObservationOutcomeEnvelope,
     ObservationSubmission,
 )
@@ -29,6 +30,7 @@ class FakeControllerRunner:
         self._period = period
         self.submitted_temps = []
         self.restore_outcome = None
+        self.restore_token: str | None = None
         self.calibration_requests = []
         self.calibration_cancellations = []
         self._commands_fan = commands_fan
@@ -138,6 +140,13 @@ class FakeControllerRunner:
     def drain_restore_outcome(self):
         outcome = self.restore_outcome
         self.restore_outcome = None
+        if isinstance(outcome, bool):
+            effective_authority = self.restored[-1] if outcome and self.restored else self.snapshot
+            return ModelRestoreOutcome(
+                restore_token=self.restore_token,
+                accepted=outcome,
+                effective_authority=effective_authority,
+            )
         return outcome
 
     def runs_async(self):
@@ -165,8 +174,10 @@ class FakeControllerRunner:
         self.fit_requests.append(origin)
         return True
 
-    def finish_teardown(self) -> None:
+    def finish_teardown(self, finalizer=None) -> None:
         self.finished_teardowns += 1
+        if finalizer is not None:
+            finalizer()
 
     def set_output(self, applied):
         self.applied.append(applied)
@@ -204,10 +215,25 @@ class FakeControllerRunner:
     def get_model_snapshot(self):
         return self.snapshot
 
-    def restore_model(self, snapshot):
+    def restore_model(self, snapshot, *, restore_token: str | None = None):
+        self.restore_token = restore_token
         self.restored.append(snapshot)
         self.calls.append(("restore", snapshot))
-        return snapshot is not None
+        accepted = snapshot is not None
+        if self._wants_async and accepted:
+            return ModelRestoreOutcome(
+                restore_token=restore_token,
+                accepted=True,
+                effective_authority=None,
+                pending=True,
+            )
+        if accepted:
+            self.snapshot = snapshot
+        return ModelRestoreOutcome(
+            restore_token=restore_token,
+            accepted=accepted,
+            effective_authority=self.snapshot,
+        )
 
     def controller_state(self):
         return {"fake": True}

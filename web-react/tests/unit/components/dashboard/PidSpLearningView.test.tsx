@@ -11,19 +11,48 @@ import userEvent from "@testing-library/user-event";
 import { PidSpLearningView } from "../../../../src/components/dashboard/learning/PidSpLearningView";
 import { testQueryClient } from "../../test-utils";
 
-const FOPDT: PidSpCheckpointModel = {
-  form: "fopdt",
-  K: 86.5,
-  tau: 610,
-  theta: 45,
+const CHECKPOINT: PidSpCheckpointModel = {
+  schema_version: 2,
   revision: 7,
-  identified_at_f: 250,
+  provenance: "confirmed-online-fit",
+  selected: {
+    schema_version: "pid-sp-model-selection/v1",
+    form: "sopdt",
+    parameters: { K: 86.5, tau_1: 210, tau_2: 610, theta: 45 },
+    delay_basin: {
+      lower_s: 40,
+      upper_s: 50,
+      representative_s: 45,
+      confidence_lower_s: 40,
+      confidence_upper_s: 50,
+      confidence_method: "moving-block-refit",
+      confidence_resamples: 128,
+      episode_count: 3,
+      interior: true,
+      blockers: [],
+    },
+    one_step_loss: 0.42,
+    horizon_losses: [[3, 0.43]],
+    fold_losses: [0.44, 0.46],
+    standard_error: 0.01,
+    episode_ids: ["episode-a", "episode-b", "episode-c"],
+    common_row_digest: "c".repeat(64),
+    fit_corpus_digest: "d".repeat(64),
+    configuration_digest: "e".repeat(64),
+    comparison_threshold: 0.5,
+    selection_margin: 0.08,
+    confirmation_observed: 20,
+    confirmation_required: 20,
+    authorized: true,
+    model_digest: "f".repeat(64),
+  },
 };
 
-const PREDICTOR_FOPDT: PidSpPredictorModel = {
-  form: "fopdt",
+const PREDICTOR_SOPDT: PidSpPredictorModel = {
+  form: "sopdt",
   K: 86.5,
-  tau: 610,
+  tau_1: 210,
+  tau_2: 610,
   theta: 45,
 };
 
@@ -70,7 +99,7 @@ const REPORT: PidSpLearningReport = {
       unit: "°F",
     },
   ],
-  confirmation: { observed: 3, required: 4 },
+  confirmation: { observed: 3, required: 20 },
   identifier: {
     accepted: 144,
     accepted_seconds: 720.5,
@@ -78,11 +107,10 @@ const REPORT: PidSpLearningReport = {
     temp_span: 18.25,
     transition_seen: true,
     duty_segments: 6,
-    best_residual: 0.42,
-    runner_up_residual: 0.73,
-    candidates_passing: 2,
-    confirming: 3,
-    trusted: FOPDT,
+    raw_best_residual: 0.42,
+    raw_runner_up_residual: 0.73,
+    raw_candidates_passing: 2,
+    trusted: PREDICTOR_SOPDT,
     distrust_count: 1,
     distrust_ratio: 0.125,
   },
@@ -91,11 +119,53 @@ const REPORT: PidSpLearningReport = {
     disabled: false,
     x0: 241.25,
     xd: 238.75,
+    z0: 240.5,
+    zd: 239.25,
     residual_streak: 1,
     truncated: 2,
-    model: PREDICTOR_FOPDT,
+    model: PREDICTOR_SOPDT,
   },
-  checkpoint: FOPDT,
+  checkpoint: CHECKPOINT,
+  comparison: {
+    forms: [
+      {
+        form: "fopdt",
+        eligible: false,
+        blockers: ["no-physically-valid-delay-candidate"],
+        one_step_loss: null,
+        horizon_losses: [{ horizon_s: 3, loss: null }],
+        fold_losses: [null, null],
+        standard_error: null,
+        basin_lower_s: null,
+        basin_upper_s: null,
+        confidence_lower_s: null,
+        confidence_upper_s: null,
+        confidence_method: null,
+      },
+    ],
+    best_form: "sopdt",
+    comparison_threshold: 0.5,
+    selection_margin: 0.08,
+    selected_form: "sopdt",
+    confirmation: { observed: 3, required: 20 },
+    primary_blocker: "no-physically-valid-delay-candidate",
+  },
+  active_model: { form: "sopdt", model_digest: "f".repeat(64) },
+  delay_evidence: {
+    status: "no-physically-valid-delay-candidate",
+    completed_episode_count: 3,
+    evaluated_bound_s: 300,
+    profile_form: "fopdt",
+    raw_basin_lower_s: null,
+    raw_basin_upper_s: null,
+    raw_basin_representative_s: null,
+    confidence_lower_s: null,
+    confidence_upper_s: null,
+    confidence_method: null,
+    confidence_resamples: null,
+    blockers: ["no-physically-valid-delay-candidate"],
+    authorized: false,
+  },
   failure: null,
 };
 
@@ -110,6 +180,9 @@ const IDLE: PidSpLearningReport = {
   identifier: null,
   predictor: null,
   checkpoint: null,
+  comparison: null,
+  active_model: null,
+  delay_evidence: null,
   failure: null,
 };
 
@@ -165,7 +238,7 @@ function reportForStatus(status: PidSpLearningStatus): PidSpLearningReport {
     return {
       ...IDLE,
       status: "error",
-      checkpoint: FOPDT,
+      checkpoint: CHECKPOINT,
       failure: {
         code: "live-status-invalid",
         detail: "identifier.accepted must be a number",
@@ -223,8 +296,26 @@ describe("PidSpLearningView", () => {
 
   it.each([
     [
+      "sopdt",
+      CHECKPOINT,
+      [
+        ["K", "86.5", "°F per duty ratio"],
+        ["tau_1", "210", "seconds"],
+        ["tau_2", "610", "seconds"],
+        ["theta", "45", "seconds"],
+      ],
+    ],
+    [
       "fopdt",
-      FOPDT,
+      {
+        ...CHECKPOINT,
+        revision: 8,
+        selected: {
+          ...CHECKPOINT.selected,
+          form: "fopdt",
+          parameters: { K: 86.5, tau: 610, theta: 45 },
+        },
+      } satisfies PidSpCheckpointModel,
       [
         ["K", "86.5", "°F per duty ratio"],
         ["tau", "610", "seconds"],
@@ -234,12 +325,13 @@ describe("PidSpLearningView", () => {
     [
       "ipdt",
       {
-        form: "ipdt",
-        K_i: 0.87,
-        c0: -0.18,
-        theta: 30,
+        ...CHECKPOINT,
         revision: 9,
-        identified_at_f: 275,
+        selected: {
+          ...CHECKPOINT.selected,
+          form: "ipdt",
+          parameters: { K_i: 0.87, c0: -0.18, theta: 30 },
+        },
       } satisfies PidSpCheckpointModel,
       [
         ["K_i", "0.87", "°F/s per duty ratio"],
@@ -265,13 +357,10 @@ describe("PidSpLearningView", () => {
         }),
       ).toBeVisible();
     }
-    expect(section!).toHaveTextContent(_form === "ipdt" ? "Revision 9" : "Revision 7", {
+    expect(section!).toHaveTextContent(`Revision ${model.revision}`, {
       normalizeWhitespace: true,
     });
-    expect(section!).toHaveTextContent(
-      _form === "ipdt" ? "Identified at: 275 °F" : "Identified at: 250 °F",
-      { normalizeWhitespace: true },
-    );
+    expect(section!).toHaveTextContent("Provenance: confirmed-online-fit");
   });
 
   it("displays backend gate decisions and thresholds without rederiving pass or fail", async () => {
@@ -322,7 +411,7 @@ describe("PidSpLearningView", () => {
     ]) {
       expect(identifier!).toHaveTextContent(detail);
     }
-    expect(dialog).toHaveTextContent("Confirmation progress: 3 of 4");
+    expect(dialog).toHaveTextContent("Confirmation progress: 3 of 20");
 
     const predictor = within(dialog)
       .getByRole("heading", { name: "Predictor diagnostics" })
@@ -335,11 +424,66 @@ describe("PidSpLearningView", () => {
       "Truncation count: 2",
       "x0: 241.25 °F",
       "xd: 238.75 °F",
+      "z0: 240.5 °F",
+      "zd: 239.25 °F",
     ]) {
       expect(predictor!).toHaveTextContent(detail);
     }
-    expect(predictor!).toHaveTextContent("Predictor model: fopdt");
+    expect(predictor!).toHaveTextContent("Predictor model: sopdt");
     expect(predictor!).not.toHaveTextContent("revision");
+  });
+
+  it("renders active model and typed unavailable-delay comparison without fake basin bounds", async () => {
+    renderPanel();
+    const dialog = await openPanel();
+
+    expect(dialog).toHaveTextContent("Active learned model: sopdt");
+    const delay = within(dialog)
+      .getByRole("heading", { name: "Delay evidence" })
+      .closest("section");
+    expect(delay).not.toBeNull();
+    expect(delay!).toHaveTextContent("no-physically-valid-delay-candidate");
+    expect(delay!).toHaveTextContent("No physically valid delay basin");
+
+    const comparison = within(dialog)
+      .getByRole("heading", { name: "Model comparison" })
+      .closest("section");
+    expect(comparison).not.toBeNull();
+    expect(comparison!).toHaveTextContent("fopdt");
+    expect(comparison!).toHaveTextContent("Basin unavailable");
+  });
+  it("distinguishes ordinary insufficient evidence from physical delay invalidity", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        ...REPORT,
+        active_model: null,
+        comparison: null,
+        delay_evidence: {
+          status: "insufficient-excitation-episodes",
+          completed_episode_count: 0,
+          evaluated_bound_s: 300,
+          profile_form: null,
+          raw_basin_lower_s: null,
+          raw_basin_upper_s: null,
+          raw_basin_representative_s: null,
+          confidence_lower_s: null,
+          confidence_upper_s: null,
+          confidence_method: null,
+          confidence_resamples: null,
+          blockers: ["insufficient-excitation-episodes"],
+          authorized: false,
+        },
+      }),
+    );
+    renderPanel();
+    const dialog = await openPanel();
+    const delay = within(dialog)
+      .getByRole("heading", { name: "Delay evidence" })
+      .closest("section");
+
+    expect(delay).not.toBeNull();
+    expect(delay!).toHaveTextContent("Delay basin not yet available");
+    expect(delay!).not.toHaveTextContent("No physically valid delay basin");
   });
 
   it("labels an unavailable distrust ratio instead of rendering a blank value", async () => {

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Protocol
 
 from common.model_evidence import ModelEvidenceRecord
@@ -30,4 +30,16 @@ class ModelLifecycleRunner(Protocol):
 
     def schedule_corpus_fit(self, origin: CandidateOrigin) -> bool: ...
 
-    def finish_teardown(self) -> None: ...
+    def record_corpus_fit_disabled(
+        self,
+        origin: CandidateOrigin,
+        reason: str,
+    ) -> bool: ...
+
+    def record_corpus_fit_failed(
+        self,
+        origin: CandidateOrigin,
+        reason: str,
+    ) -> bool: ...
+
+    def finish_teardown(self, finalizer: Callable[[], None] | None = None) -> None: ...

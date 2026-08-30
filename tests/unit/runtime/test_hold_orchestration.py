@@ -71,9 +71,9 @@ class _OrderedRunner(FakeControllerRunner):
         self.events.append("runner:reconfigure")
         return super().reconfigure(settings, control, logger=logger)
 
-    def restore_model(self, snapshot):
+    def restore_model(self, snapshot, *, restore_token=None):
         self.events.append("runner:restore")
-        return super().restore_model(snapshot)
+        return super().restore_model(snapshot, restore_token=restore_token)
 
     def bind_evidence_context(self, generation, session_id, cook_id):
         self.events.append(("runner:bind-evidence", generation))
@@ -100,9 +100,9 @@ class _OrderedRunner(FakeControllerRunner):
             raise RuntimeError("schedule failed")
         return super()._schedule_corpus_fit_after_barrier(origin, before_schedule)
 
-    def finish_teardown(self) -> None:
+    def finish_teardown(self, finalizer=None) -> None:
         self.events.append("runner:finish")
-        super().finish_teardown()
+        super().finish_teardown(finalizer)
 
 
 class _OrderedPersistence:
@@ -200,9 +200,12 @@ def _assert_hardware_off_first(events):
 
 
 def _assert_relative_order(events, expected):
-    assert all(event in events for event in expected), (events, expected)
-    positions = [events.index(event) for event in expected]
-    assert positions == sorted(positions)
+    cursor = 0
+    for event in expected:
+        try:
+            cursor = events.index(event, cursor) + 1
+        except ValueError:
+            pytest.fail(f"{event!r} was missing after position {cursor}: {events!r}")
 
 
 def _activation_record(evidence_id, timestamp_ms):
@@ -383,7 +386,7 @@ def test_activation_lifecycle_evidence_keeps_fifo_ahead_of_checkpoint_and_trace_
     hold.teardown(200.0)
     _assert_relative_order(
         events,
-        [evidence, "persistence:barrier", "trace:close", "runner:finish"],
+        [evidence, "persistence:barrier", "runner:finish", "trace:close"],
     )
 
 
@@ -444,36 +447,35 @@ def test_teardown_orders_cleanup_and_owns_each_resource_at_most_once(hold_cycle,
     schedule_attempted = failure not in {
         "runner-stop-and-retain",
         "persistence-barrier",
-        "checkpoint",
     }
     schedule_completed = schedule_attempted and failure != "schedule"
     schedule_event = ("runner:schedule", CandidateOrigin.PASSIVE_ONLINE)
     if schedule_attempted:
-        _assert_relative_order(
-            events,
-            [
-                "runner:stop-and-retain",
-                "persistence:barrier",
-                schedule_event,
-                "trace:close",
-                "runner:finish",
-            ],
-        )
+        expected_teardown_order = [
+            "runner:stop-and-retain",
+            "persistence:barrier",
+            schedule_event,
+            "runner:finish",
+        ]
+        if schedule_completed:
+            expected_teardown_order.append("persistence:barrier")
+        expected_teardown_order.append("trace:close")
+        _assert_relative_order(events, expected_teardown_order)
     else:
         _assert_relative_order(
             events,
             [
                 "runner:stop-and-retain",
                 "persistence:barrier",
-                "trace:close",
                 "runner:finish",
+                "trace:close",
             ],
         )
 
     assert events.count("runner:stop-and-retain") == 1
     assert events.count(schedule_event) == int(schedule_attempted)
     assert runner.fit_requests == ([CandidateOrigin.PASSIVE_ONLINE] if schedule_completed else [])
-    assert events.count("persistence:barrier") == 1
+    assert events.count("persistence:barrier") == 1 + int(schedule_completed)
     assert events.count("trace:close") == 1
     assert events.count("runner:finish") == 1
     assert (
@@ -546,6 +548,7 @@ def test_teardown_retry_resumes_delivery_after_scheduler_advance(
     _persistence, _trace = _install_boundaries(monkeypatch, events)
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
+    hold.control["cook_id"] = "teardown-delivery-retry"
     hold.state.metrics = {
         "id": "teardown-delivery-retry",
         "augerontime": 0.0,
@@ -1042,7 +1045,7 @@ def test_partial_setup_cleanup_attempts_every_owner_once_after_boundary_failure(
         monkeypatch.setattr(trace, "flush_pending", fail_trace_flush)
     else:
 
-        def fail_runner_finish():
+        def fail_runner_finish(_finalizer=None):
             events.append("runner:finish")
             raise RuntimeError("runner finish failed")
 

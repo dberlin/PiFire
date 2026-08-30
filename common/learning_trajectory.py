@@ -17,7 +17,7 @@ from pydantic import ConfigDict, Field, StringConstraints, field_validator, mode
 from pydantic.dataclasses import dataclass
 
 _FRAME_MILLISECONDS = 20_000
-TRAJECTORY_OBSERVATION_SCHEMA_VERSION = 2
+TRAJECTORY_OBSERVATION_SCHEMA_VERSION = 3
 _MAX_METADATA_BYTES = 65_536
 _MAX_CORPUS_SLICES = 256
 _DATACLASS_CONFIG = ConfigDict(
@@ -305,6 +305,7 @@ class LearningTrajectoryFrame:
     partial: bool
     boundary_reason: TrajectoryBreakReason | None
     calibration_origin: bool = False
+    role_generation: NonNegativeInt | None = None
 
     @model_validator(mode="after")
     def validate_frame(self) -> LearningTrajectoryFrame:
@@ -354,6 +355,30 @@ class LearningTrajectoryFrame:
         if self.probe_valid != (self.probe_source is not None):
             raise ValueError("probe validity must agree with probe source provenance")
         return self
+
+
+def canonical_generation_audit_ranges(
+    frames: tuple[LearningTrajectoryFrame, ...],
+) -> tuple[dict[str, int], ...]:
+    """Build exact contiguous ranges for frames with role-generation attribution."""
+    if not isinstance(frames, tuple) or not all(isinstance(frame, LearningTrajectoryFrame) for frame in frames):
+        raise TypeError("frames must be a tuple of LearningTrajectoryFrame values")
+    ranges: list[dict[str, int]] = []
+    for frame in frames:
+        generation = frame.role_generation
+        if generation is None:
+            continue
+        if ranges and ranges[-1]["role_generation"] == generation and ranges[-1]["end_sequence"] + 1 == frame.sequence:
+            ranges[-1]["end_sequence"] = frame.sequence
+        else:
+            ranges.append(
+                {
+                    "start_sequence": frame.sequence,
+                    "end_sequence": frame.sequence,
+                    "role_generation": generation,
+                }
+            )
+    return tuple(ranges)
 
 
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
@@ -410,6 +435,8 @@ def _frame_json(frame: LearningTrajectoryFrame) -> dict[str, JsonValue]:
     }
     if frame.calibration_origin:
         payload["calibration_origin"] = True
+    if frame.role_generation is not None:
+        payload["role_generation"] = frame.role_generation
     return payload
 
 
@@ -496,8 +523,11 @@ class LearningTrajectorySegment:
 
     @model_validator(mode="after")
     def validate_segment(self) -> LearningTrajectorySegment:
-        if self.observation_schema_version != TRAJECTORY_OBSERVATION_SCHEMA_VERSION:
-            raise ValueError("older trajectory observation schema is non-scoreable")
+        if self.observation_schema_version not in {
+            2,
+            TRAJECTORY_OBSERVATION_SCHEMA_VERSION,
+        }:
+            raise ValueError("unsupported trajectory observation schema")
         if not self.pre_roll_frames and not self.scored_hold_frames:
             raise ValueError("trajectory segment requires at least one frame")
         if not self.trace_session_ids or len(set(self.trace_session_ids)) != len(self.trace_session_ids):
@@ -547,6 +577,13 @@ class LearningTrajectorySegment:
             if has_gap and not (previous.partial and previous.boundary_reason is not None):
                 raise ValueError("pre-roll and scored frames must be contiguous")
         all_frames = (*self.pre_roll_frames, *self.scored_hold_frames)
+        if self.observation_schema_version == TRAJECTORY_OBSERVATION_SCHEMA_VERSION:
+            if any(frame.role_generation is None for frame in self.scored_hold_frames):
+                raise ValueError("current scored trajectory frames require role generation")
+            expected_generation_audit = canonical_generation_audit_ranges(all_frames)
+            actual_generation_audit = tuple(dict(trajectory_json_value(item)) for item in self.generation_audit_ranges)
+            if actual_generation_audit != expected_generation_audit:
+                raise ValueError("generation audit ranges must canonically cover every attributed current-schema frame")
         first = all_frames[0]
         last = all_frames[-1]
         if (
@@ -658,6 +695,7 @@ class FitCorpusSlice:
     segment_id: NonBlankString
     through_ordinal: NonNegativeInt
     prefix_digest: Digest
+    segment_content_digest: Digest | None
     pre_roll_count: NonNegativeInt
     scored_count: NonNegativeInt
 
@@ -671,20 +709,27 @@ class FitCorpusSlice:
         return self
 
 
-def _corpus_payload(identity: FitCorpusIdentity) -> dict[str, JsonValue]:
+def _corpus_payload(
+    *,
+    schema_version: int,
+    corpus_revision: int,
+    fit_partition_digest: str,
+    slices: tuple[FitCorpusSlice, ...],
+) -> dict[str, JsonValue]:
     return {
-        "schema_version": identity.schema_version,
-        "corpus_revision": identity.corpus_revision,
-        "fit_partition_digest": identity.fit_partition_digest,
+        "schema_version": schema_version,
+        "corpus_revision": corpus_revision,
+        "fit_partition_digest": fit_partition_digest,
         "slices": [
             {
                 "segment_id": item.segment_id,
                 "through_ordinal": item.through_ordinal,
                 "prefix_digest": item.prefix_digest,
+                **({"segment_content_digest": item.segment_content_digest} if schema_version == 2 else {}),
                 "pre_roll_count": item.pre_roll_count,
                 "scored_count": item.scored_count,
             }
-            for item in identity.slices
+            for item in slices
         ],
     }
 
@@ -701,13 +746,52 @@ class FitCorpusIdentity:
 
     @model_validator(mode="after")
     def validate_identity(self) -> FitCorpusIdentity:
+        if self.schema_version not in {1, 2}:
+            raise ValueError("unsupported fit corpus schema")
+        if self.schema_version == 2 and any(item.segment_content_digest is None for item in self.slices):
+            raise ValueError("fit corpus schema v2 requires segment content digests")
         segment_ids = tuple(item.segment_id for item in self.slices)
         if len(set(segment_ids)) != len(segment_ids):
             raise ValueError("fit corpus slices must have unique segment identities")
-        expected_digest = canonical_trajectory_digest(_corpus_payload(self))
+        expected_digest = canonical_fit_corpus_digest(
+            schema_version=self.schema_version,
+            corpus_revision=self.corpus_revision,
+            fit_partition_digest=self.fit_partition_digest,
+            slices=self.slices,
+        )
         if self.corpus_digest != expected_digest:
             raise ValueError("corpus digest must match the canonical ordered slices")
         return self
+
+
+def canonical_fit_corpus_digest(
+    *,
+    schema_version: int,
+    corpus_revision: int,
+    fit_partition_digest: str,
+    slices: tuple[FitCorpusSlice, ...],
+) -> str:
+    """Hash one bounded ordered fit-corpus identity without the metadata size cap."""
+
+    if schema_version not in {1, 2} or isinstance(schema_version, bool):
+        raise ValueError("unsupported fit corpus schema")
+    if not isinstance(slices, tuple) or not 1 <= len(slices) <= _MAX_CORPUS_SLICES:
+        raise ValueError(f"slices must contain between 1 and {_MAX_CORPUS_SLICES} values")
+    if not all(isinstance(item, FitCorpusSlice) for item in slices):
+        raise TypeError("slices must contain FitCorpusSlice values")
+    if schema_version == 2 and any(item.segment_content_digest is None for item in slices):
+        raise ValueError("fit corpus schema v2 requires segment content digests")
+    encoded = _canonical_json_bytes(
+        _corpus_payload(
+            schema_version=schema_version,
+            corpus_revision=corpus_revision,
+            fit_partition_digest=fit_partition_digest,
+            slices=slices,
+        ),
+        context="fit corpus identity",
+        enforce_size=False,
+    )
+    return sha256(encoded).hexdigest()
 
 
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)

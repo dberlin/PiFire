@@ -136,6 +136,22 @@ def test_strict_load_rejects_a_malformed_target_without_poisoning_a_good_control
     assert store.load("mpc") == UNRELATED
 
 
+@pytest.mark.parametrize("snapshot", [FOPDT, UNRELATED])
+def test_pid_sp_strict_load_rejects_legacy_and_other_controller_payloads(snapshot):
+    store, _ = _store()
+    assert store.save("pid_sp", snapshot) is True
+
+    with pytest.raises(ValueError, match="malformed stored snapshot.*pid_sp"):
+        store.load_strict("pid_sp")
+
+
+def test_mpc_strict_load_keeps_generic_codec_behavior():
+    store, _ = _store()
+    assert store.save("mpc", UNRELATED) is True
+
+    assert store.load_strict("mpc") == UNRELATED
+
+
 def test_strict_load_revalidates_persistence_even_when_shared_cache_is_warm():
     store, fake = _store()
     assert store.save("pid_sp", FOPDT) is True

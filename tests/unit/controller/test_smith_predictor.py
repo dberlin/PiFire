@@ -8,6 +8,7 @@ import pytest
 
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.fopdt_identifier import DELAYS, DutyHistory
+from controller.pid_sp_delay_evidence import MAX_DELAY_BOUND_S
 from controller.smith_predictor import (
     HISTORY_MARGIN_S,
     MAX_RESIDUAL_F,
@@ -17,6 +18,14 @@ from controller.smith_predictor import (
 )
 
 MODEL = {"K": 800.0, "tau": 600.0, "theta": 40.0, "revision": 1}
+SOPDT_MODEL = {
+    "form": "sopdt",
+    "K": 800.0,
+    "tau_1": 300.0,
+    "tau_2": 600.0,
+    "theta": 40.0,
+    "revision": 1,
+}
 
 
 def _predictor():
@@ -28,6 +37,57 @@ def test_returns_measured_temperature_until_trusted():
     p.record_output(AppliedOutput(0.4, OutputSource.CONTROLLER, 0.0))
     assert p.temperature(212.0, 20.0) == 212.0
     assert p.active is False
+
+
+def test_untrusted_history_covers_the_full_adaptive_delay_search():
+    predictor = _predictor()
+
+    assert predictor._history.retention_s == (MAX_DELAY_BOUND_S + HISTORY_MARGIN_S)
+
+
+def test_basin_upper_bound_governs_future_history_pruning():
+    predictor = _predictor()
+    predictor.trust({**MODEL, "basin_upper_s": 225.0})
+    for timestamp in range(0, 2501, 100):
+        predictor.record_output(
+            AppliedOutput(
+                0.2 + (timestamp // 100) % 2 * 0.4,
+                OutputSource.CONTROLLER,
+                timestamp,
+            )
+        )
+
+    assert predictor._history.retention_s == 225.0 + HISTORY_MARGIN_S
+    assert predictor._history.earliest() == 400.0
+    assert predictor.governing_model() == {
+        "form": "fopdt",
+        "K": 800.0,
+        "tau": 600.0,
+        "theta": 40.0,
+    }
+
+
+def test_legacy_model_retention_falls_back_to_theta():
+    predictor = _predictor()
+
+    predictor.trust(MODEL)
+
+    assert predictor._history.retention_s == MODEL["theta"] + HISTORY_MARGIN_S
+
+
+@pytest.mark.parametrize(
+    "basin_upper_s",
+    [39.0, float("nan"), float("inf"), MAX_DELAY_BOUND_S + 5.0],
+)
+def test_invalid_basin_upper_bound_is_not_adopted(basin_upper_s):
+    predictor = _predictor()
+    initial_retention = predictor._history.retention_s
+
+    predictor.trust({**MODEL, "basin_upper_s": basin_upper_s})
+
+    assert predictor.active is False
+    assert predictor.governing_model() is None
+    assert predictor._history.retention_s == initial_retention
 
 
 def test_the_correction_is_exactly_zero_at_the_moment_of_trust():
@@ -48,6 +108,73 @@ def test_the_undelayed_branch_follows_the_exact_first_order_solution():
     # x0 starts at 0 and is driven by u=0.5 for 600 s with tau=600
     expected = MODEL["K"] * 0.5 * (1.0 - math.exp(-600.0 / MODEL["tau"]))
     assert p.status()["x0"] == pytest.approx(expected, rel=1e-9)
+
+
+def _sopdt_step(K, duty, tau_1, tau_2, duration):
+    if math.isclose(tau_1, tau_2, rel_tol=1e-9):
+        tau = (tau_1 + tau_2) / 2.0
+        decay = math.exp(-duration / tau)
+        return K * duty * (1.0 - (1.0 + duration / tau) * decay)
+    return (
+        K * duty * (1.0 - (tau_1 * math.exp(-duration / tau_1) - tau_2 * math.exp(-duration / tau_2)) / (tau_1 - tau_2))
+    )
+
+
+@pytest.mark.parametrize(
+    ("tau_1", "tau_2"),
+    [(300.0, 600.0), (500.0, 500.0), (500.0, 500.0 + 1e-10)],
+)
+def test_sopdt_undelayed_branch_uses_stable_exact_two_pole_step(
+    tau_1,
+    tau_2,
+):
+    predictor = _predictor()
+    model = {**SOPDT_MODEL, "tau_1": tau_1, "tau_2": tau_2, "theta": 0.0}
+    predictor.trust(model)
+    predictor.record_output(AppliedOutput(0.5, OutputSource.CONTROLLER, 0.0))
+    predictor.temperature(212.0, 0.0)
+    predictor.temperature(212.0, 300.0)
+
+    expected = _sopdt_step(800.0, 0.5, tau_1, tau_2, 300.0)
+    assert predictor.status()["x0"] == pytest.approx(expected, rel=1e-9)
+    assert math.isfinite(predictor.status()["x0"])
+
+
+def test_sopdt_delayed_branch_and_piecewise_duty_use_exact_windows():
+    delayed = _predictor()
+    delayed.trust(SOPDT_MODEL)
+    delayed.record_output(AppliedOutput(0.0, OutputSource.CONTROLLER, 0.0))
+    delayed.record_output(AppliedOutput(1.0, OutputSource.CONTROLLER, 10.0))
+    delayed.temperature(212.0, 0.0)
+    delayed.temperature(212.0, 60.0)
+
+    reference = _predictor()
+    reference.trust({**SOPDT_MODEL, "theta": 0.0})
+    reference.record_output(AppliedOutput(0.0, OutputSource.CONTROLLER, 0.0))
+    reference.record_output(AppliedOutput(1.0, OutputSource.CONTROLLER, 10.0))
+    reference.temperature(212.0, 0.0)
+    reference.temperature(212.0, 20.0)
+
+    assert delayed.status()["xd"] == pytest.approx(
+        reference.status()["x0"],
+        rel=1e-9,
+    )
+    assert delayed.status()["x0"] != pytest.approx(delayed.status()["xd"])
+
+
+def test_sopdt_reset_clears_both_pole_states_for_both_branches():
+    predictor = _predictor()
+    predictor.trust(SOPDT_MODEL)
+    predictor.record_output(AppliedOutput(0.8, OutputSource.CONTROLLER, 0.0))
+    predictor.temperature(212.0, 0.0)
+    predictor.temperature(212.0, 300.0)
+    assert predictor.status()["x0"] > 0.0
+    assert predictor.status()["z0"] > 0.0
+
+    predictor.reset()
+
+    assert predictor.status()["x0"] == predictor.status()["xd"] == 0.0
+    assert predictor.status()["z0"] == predictor.status()["zd"] == 0.0
 
 
 def test_the_delayed_branch_lags_by_exactly_theta():

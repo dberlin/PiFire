@@ -24,6 +24,8 @@ from common.learning_trajectory import (
     LearningTrajectorySegment,
     ModelFitLineage,
     TrajectoryBreakReason,
+    canonical_fit_corpus_digest,
+    canonical_generation_audit_ranges,
     canonical_trajectory_digest,
     trajectory_json_value,
 )
@@ -34,7 +36,7 @@ _MAX_PRE_ROLL_PER_SEGMENT = 180
 _MAX_SEGMENTS = 256
 _MAX_SCORED_PER_SEGMENT = 180
 _ZERO_CHAIN_DIGEST = "0" * 64
-_CORPUS_SCHEMA_VERSION = 1
+_CORPUS_SCHEMA_VERSION = 2
 
 
 class LearningTrajectoryConflictError(RuntimeError):
@@ -43,6 +45,10 @@ class LearningTrajectoryConflictError(RuntimeError):
 
 class StaleSegmentCursorError(RuntimeError):
     """A segment mutation lost its optimistic cursor comparison."""
+
+
+class FitCorpusEmptyError(RuntimeError):
+    """No compatible finalized scored slices exist for a fit request."""
 
 
 class FitCorpusEvictedError(RuntimeError):
@@ -211,12 +217,15 @@ def _frame_payload(frame: LearningTrajectoryFrame) -> dict[str, object]:
     }
     if frame.calibration_origin:
         payload["calibration_origin"] = True
+    if frame.role_generation is not None:
+        payload["role_generation"] = frame.role_generation
     return payload
 
 
 def _frame_from_json(canonical_json: str) -> LearningTrajectoryFrame:
     payload = json.loads(canonical_json)
     payload.setdefault("calibration_origin", False)
+    payload.setdefault("role_generation", None)
     payload["auger_delivery_certainty"] = FrameDeliveryCertainty(payload["auger_delivery_certainty"])
     payload["fan_delivery_certainty"] = FrameDeliveryCertainty(payload["fan_delivery_certainty"])
     if payload["boundary_reason"] is not None:
@@ -285,6 +294,15 @@ def _frames_chain(frames: tuple[LearningTrajectoryFrame, ...]) -> str:
     return digest
 
 
+def trajectory_frame_prefix_digest(
+    frames: tuple[LearningTrajectoryFrame, ...],
+) -> str:
+    """Return the repository's exact canonical prefix-chain digest."""
+    if not isinstance(frames, tuple) or not all(isinstance(frame, LearningTrajectoryFrame) for frame in frames):
+        raise TypeError("frames must be a tuple of LearningTrajectoryFrame values")
+    return _frames_chain(frames)
+
+
 def _with_frames(
     segment: LearningTrajectorySegment,
     *,
@@ -302,6 +320,11 @@ def _with_frames(
         pre_roll_frames=pre_roll,
         hold_entry=hold_entry,
         scored_hold_frames=scored,
+        generation_audit_ranges=(
+            canonical_generation_audit_ranges(all_frames)
+            if segment.observation_schema_version == TRAJECTORY_OBSERVATION_SCHEMA_VERSION
+            else segment.generation_audit_ranges
+        ),
         start_monotonic_ms=all_frames[0].monotonic_start_ms,
         end_monotonic_ms=all_frames[-1].monotonic_end_ms,
         start_wall_ms=all_frames[0].wall_start_ms,
@@ -331,11 +354,9 @@ def _rolled_segment(
         hold_entry=None,
         scored_hold_frames=(),
         generation_audit_ranges=(
-            {
-                "start_sequence": first.sequence,
-                "end_sequence": last.sequence,
-                "role_generation": 0,
-            },
+            canonical_generation_audit_ranges(carried)
+            if source.observation_schema_version == TRAJECTORY_OBSERVATION_SCHEMA_VERSION
+            else source.generation_audit_ranges
         ),
         start_monotonic_ms=first.monotonic_start_ms,
         end_monotonic_ms=last.monotonic_end_ms,
@@ -353,31 +374,23 @@ def _rolled_segment(
 
 def _corpus_identity(
     *,
+    schema_version: int = _CORPUS_SCHEMA_VERSION,
     corpus_revision: int,
     fit_partition_digest: str,
     slices: tuple[FitCorpusSlice, ...],
 ) -> FitCorpusIdentity:
-    payload = {
-        "schema_version": _CORPUS_SCHEMA_VERSION,
-        "corpus_revision": corpus_revision,
-        "fit_partition_digest": fit_partition_digest,
-        "slices": [
-            {
-                "segment_id": item.segment_id,
-                "through_ordinal": item.through_ordinal,
-                "prefix_digest": item.prefix_digest,
-                "pre_roll_count": item.pre_roll_count,
-                "scored_count": item.scored_count,
-            }
-            for item in slices
-        ],
-    }
-    return FitCorpusIdentity(
-        schema_version=_CORPUS_SCHEMA_VERSION,
+    corpus_digest = canonical_fit_corpus_digest(
+        schema_version=schema_version,
         corpus_revision=corpus_revision,
         fit_partition_digest=fit_partition_digest,
         slices=slices,
-        corpus_digest=canonical_trajectory_digest(payload),
+    )
+    return FitCorpusIdentity(
+        schema_version=schema_version,
+        corpus_revision=corpus_revision,
+        fit_partition_digest=fit_partition_digest,
+        slices=slices,
+        corpus_digest=corpus_digest,
     )
 
 
@@ -690,8 +703,11 @@ class LearningTrajectoryRepository:
         for expected_ordinal, row in enumerate(rows):
             if row["ordinal"] != expected_ordinal:
                 raise ValueError("trajectory frame ordinals are not contiguous")
-            if row["payload_schema_version"] != TRAJECTORY_OBSERVATION_SCHEMA_VERSION:
-                raise ValueError("older trajectory frame payload schema is non-scoreable")
+            if row["payload_schema_version"] not in {
+                2,
+                TRAJECTORY_OBSERVATION_SCHEMA_VERSION,
+            }:
+                raise ValueError("unsupported trajectory frame payload schema")
             canonical_json = row["canonical_json"]
             payload = json.loads(canonical_json)
             if _canonical_json(payload) != canonical_json:
@@ -770,7 +786,11 @@ class LearningTrajectoryRepository:
             pre_roll_frames=pre_roll,
             hold_entry=hold_entry,
             scored_hold_frames=scored,
-            generation_audit_ranges=tuple(header["generation_audit_ranges"]),
+            generation_audit_ranges=(
+                canonical_generation_audit_ranges((*pre_roll, *scored))
+                if header["observation_schema_version"] == TRAJECTORY_OBSERVATION_SCHEMA_VERSION
+                else tuple(header["generation_audit_ranges"])
+            ),
             start_monotonic_ms=first.monotonic_start_ms,
             end_monotonic_ms=last.monotonic_end_ms,
             start_wall_ms=first.wall_start_ms,
@@ -787,7 +807,12 @@ class LearningTrajectoryRepository:
             source_row_digest=row["source_row_digest"],
             build_provenance=header["build_provenance"],
         )
-        if _canonical_json(_segment_header(segment)) != row["header_json"]:
+        verification_header = _segment_header(segment)
+        if header["observation_schema_version"] == TRAJECTORY_OBSERVATION_SCHEMA_VERSION and (
+            through_revision is not None or through_ordinal is not None
+        ):
+            verification_header["generation_audit_ranges"] = header["generation_audit_ranges"]
+        if _canonical_json(verification_header) != row["header_json"]:
             raise ValueError("trajectory segment header is corrupt")
         if segment.fit_partition_digest != row["fit_partition_digest"]:
             raise ValueError("trajectory partition digest is corrupt")
@@ -1812,12 +1837,13 @@ class LearningTrajectoryRepository:
                         segment_id=row["segment_id"],
                         through_ordinal=through_ordinal,
                         prefix_digest=prefix_digest,
+                        segment_content_digest=segment.content_digest,
                         pre_roll_count=pre_roll_count,
                         scored_count=scored_count,
                     )
                 )
             if not slices:
-                raise ValueError("fit corpus snapshot has no scored observations")
+                raise FitCorpusEmptyError("fit corpus snapshot has no scored observations")
             identity = _corpus_identity(
                 corpus_revision=revision,
                 fit_partition_digest=fit_partition_digest,
@@ -1859,16 +1885,16 @@ class LearningTrajectoryRepository:
             snapshot.segments,
             strict=True,
         ):
-            if item.segment_id != segment.segment_id:
-                raise ValueError("fit snapshot segment order is inconsistent")
+            if item.segment_id != segment.segment_id or item.segment_content_digest != segment.content_digest:
+                raise ValueError("fit snapshot segment identity is inconsistent")
             slices.append(
                 {
                     "segment_id": item.segment_id,
                     "through_ordinal": item.through_ordinal,
                     "prefix_digest": item.prefix_digest,
+                    "segment_content_digest": item.segment_content_digest,
                     "pre_roll_count": item.pre_roll_count,
                     "scored_count": item.scored_count,
-                    "content_digest": segment.content_digest,
                 }
             )
         return _canonical_json(
@@ -2150,17 +2176,24 @@ class LearningTrajectoryRepository:
                 if _canonical_json(manifest) != row["manifest_json"]:
                     raise ValueError("fit manifest is not canonical")
                 manifest_slices = manifest["slices"]
+                manifest_content_digests = tuple(
+                    item.get(
+                        "content_digest",
+                        item.get("segment_content_digest"),
+                    )
+                    for item in manifest_slices
+                )
                 slices = tuple(
                     FitCorpusSlice(
                         segment_id=item["segment_id"],
                         through_ordinal=item["through_ordinal"],
                         prefix_digest=item["prefix_digest"],
+                        segment_content_digest=item.get("segment_content_digest"),
                         pre_roll_count=item["pre_roll_count"],
                         scored_count=item["scored_count"],
                     )
                     for item in manifest_slices
                 )
-                content_digests = tuple(item["content_digest"] for item in manifest_slices)
                 identity = FitCorpusIdentity(
                     schema_version=manifest["schema_version"],
                     corpus_revision=manifest["corpus_revision"],
@@ -2169,6 +2202,7 @@ class LearningTrajectoryRepository:
                     corpus_digest=manifest["corpus_digest"],
                 )
                 if identity != _corpus_identity(
+                    schema_version=identity.schema_version,
                     corpus_revision=identity.corpus_revision,
                     fit_partition_digest=identity.fit_partition_digest,
                     slices=identity.slices,
@@ -2212,11 +2246,10 @@ class LearningTrajectoryRepository:
                     raise ValueError("fit manifest result is corrupt")
             except Exception as exc:
                 raise FitCorpusEvictedError(request_id) from exc
-
             segments: list[LearningTrajectorySegment] = []
-            for item, content_digest in zip(
+            for item, manifest_content_digest in zip(
                 slices,
-                content_digests,
+                manifest_content_digests,
                 strict=True,
             ):
                 segment_row = self._segment_row(connection, item.segment_id)
@@ -2244,9 +2277,9 @@ class LearningTrajectoryRepository:
                     raise FitCorpusEvictedError(request_id) from exc
                 if (
                     prefix_digest != item.prefix_digest
+                    or (manifest_content_digest is not None and segment.content_digest != manifest_content_digest)
                     or pre_roll_count != item.pre_roll_count
                     or scored_count != item.scored_count
-                    or segment.content_digest != content_digest
                     or segment.fit_partition_digest != identity.fit_partition_digest
                 ):
                     raise FitCorpusEvictedError(request_id)

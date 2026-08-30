@@ -96,6 +96,7 @@ function dashboardLearningReport(
           segment_id: `segment-${roleGeneration}`,
           through_ordinal: 0,
           prefix_digest: "f".repeat(64),
+          segment_content_digest: "a".repeat(64),
           pre_roll_count: 0,
           scored_count: 1,
         },
@@ -145,6 +146,9 @@ const DASHBOARD_PID_SP_REPORT: PidSpLearningReport = {
   identifier: null,
   predictor: null,
   checkpoint: null,
+  comparison: null,
+  active_model: null,
+  delay_evidence: null,
   failure: null,
 };
 

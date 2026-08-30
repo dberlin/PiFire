@@ -19,6 +19,7 @@ from common.learning_trajectory import (
     LearningTrajectoryFrame,
     LearningTrajectorySegment,
     TrajectoryBreakReason,
+    canonical_generation_audit_ranges,
     canonical_trajectory_digest,
 )
 from common.persistence.learning_trajectory import SegmentCursor
@@ -781,7 +782,8 @@ class LearningTrajectoryRuntime:
     ) -> None:
         if self._closed or not self._enabled or self._mode is None:
             return
-        if self._mode.effective_mode != "Hold":
+        mode = self._mode
+        if mode.effective_mode != "Hold":
             return
         self._reap_receipts()
         identity = (
@@ -794,40 +796,73 @@ class LearningTrajectoryRuntime:
             return
         raw_start_ms = round(observation.frame_start_s * 1_000)
         raw_end_ms = round(observation.frame_end_s * 1_000)
-        if raw_end_ms - raw_start_ms != _FRAME_MS:
+        clock_offset_ms = mode.wall_ms - mode.monotonic_ms
+        wall_domain = abs(raw_start_ms - mode.wall_ms) < abs(raw_start_ms - mode.monotonic_ms)
+        if wall_domain:
+            wall_start_ms = raw_start_ms
+            wall_end_ms = raw_end_ms
+            start_ms = raw_start_ms - clock_offset_ms
+            end_ms = raw_end_ms - clock_offset_ms
+        else:
+            start_ms = raw_start_ms
+            end_ms = raw_end_ms
+            wall_start_ms = raw_start_ms + clock_offset_ms
+            wall_end_ms = raw_end_ms + clock_offset_ms
+        if end_ms - start_ms != _FRAME_MS:
             self._split_at(
                 TrajectoryBreakReason.RECORDER_GAP,
-                raw_end_ms,
-                self._wall_for_monotonic(raw_end_ms),
+                end_ms,
+                wall_end_ms,
             )
             return
-        start_ms = raw_start_ms
-        end_ms = raw_end_ms
-        sample = self._sample_for_frame_end(end_ms)
-        if sample is None:
-            sample = self._sample_for_wall_end(raw_end_ms)
-            if sample is not None:
-                clock_offset_ms = sample.wall_ms - sample.monotonic_ms
-                start_ms = raw_start_ms - clock_offset_ms
-                end_ms = raw_end_ms - clock_offset_ms
-                wall_start_ms = raw_start_ms
-                wall_end_ms = raw_end_ms
-            else:
-                wall_start_ms = self._wall_for_monotonic(start_ms)
-                wall_end_ms = self._wall_for_monotonic(end_ms)
-        else:
-            wall_start_ms = self._wall_for_monotonic(start_ms, sample)
-            wall_end_ms = self._wall_for_monotonic(end_ms, sample)
-        if sample is None or self._hold_entry is None:
+        if not observation.probe_valid or observation.probe_source is None:
             self._finalize(TrajectoryBreakReason.PROBE_GAP)
             self._last_break_reason = TrajectoryBreakReason.PROBE_GAP
             return
+        # FrameObservation owns synchronized values and provenance. A fresh
+        # independent sample published inside the physical frame contributes
+        # only its actual timing and numeric uncertainty; a later publication
+        # cannot move the completed frame beyond its boundary.
+        buffered_timing = self._sample_for_frame_end(end_ms)
+        if (
+            buffered_timing is not None
+            and start_ms <= buffered_timing.monotonic_ms <= end_ms
+            and self._valid_sample(buffered_timing)
+        ):
+            sample_monotonic_ms = buffered_timing.monotonic_ms
+            sample_wall_ms = buffered_timing.wall_ms
+            ambient_uncertainty_c = (
+                float(buffered_timing.ambient_uncertainty)
+                if buffered_timing.units == "C"
+                else float(buffered_timing.ambient_uncertainty) * 5.0 / 9.0
+            )
+        else:
+            sample_monotonic_ms = end_ms
+            sample_wall_ms = wall_end_ms
+            ambient_uncertainty_c = 0.0
+        sample = ThermalSample(
+            monotonic_ms=sample_monotonic_ms,
+            wall_ms=sample_wall_ms,
+            chamber_temperature=observation.temp_c,
+            units="C",
+            probe_valid=True,
+            probe_source=observation.probe_source,
+            ambient_temperature=observation.ambient_c,
+            ambient_source=observation.ambient_source.value,
+            ambient_uncertainty=ambient_uncertainty_c,
+            settings_revision=mode.settings_revision,
+            recipe_step_id=mode.recipe_step_id,
+        )
         segment_id = self._segment_id
         durable_scored = 0 if segment_id is None else self._counts.get(segment_id, [0, 0])[1]
         pending_scored = segment_id is not None and any(
             pending.segment_id == segment_id and pending.scored_count > 0 for pending in self._pending_receipts
         )
-        if durable_scored == 0 and not pending_scored and not start_ms <= self._hold_entry.monotonic_ms <= end_ms:
+        if (
+            durable_scored == 0
+            and not pending_scored
+            and (self._hold_entry is None or not start_ms <= self._hold_entry.monotonic_ms <= end_ms)
+        ):
             entry_sample = next(
                 (
                     candidate
@@ -837,19 +872,27 @@ class LearningTrajectoryRuntime:
                 None,
             )
             if entry_sample is None:
-                self._finalize(TrajectoryBreakReason.PROBE_GAP)
-                self._last_break_reason = TrajectoryBreakReason.PROBE_GAP
-                return
-            self._hold_entry = HoldEntrySample(
-                monotonic_ms=entry_sample.monotonic_ms,
-                wall_ms=entry_sample.wall_ms,
-                chamber_temperature_c=self._to_celsius(
-                    entry_sample.chamber_temperature,
-                    entry_sample.units,
-                ),
-                probe_valid=True,
-                probe_source=entry_sample.probe_source,
-            )
+                self._hold_entry = HoldEntrySample(
+                    monotonic_ms=sample.monotonic_ms,
+                    wall_ms=sample.wall_ms,
+                    chamber_temperature_c=self._to_celsius(
+                        sample.chamber_temperature,
+                        sample.units,
+                    ),
+                    probe_valid=True,
+                    probe_source=sample.probe_source,
+                )
+            else:
+                self._hold_entry = HoldEntrySample(
+                    monotonic_ms=entry_sample.monotonic_ms,
+                    wall_ms=entry_sample.wall_ms,
+                    chamber_temperature_c=self._to_celsius(
+                        entry_sample.chamber_temperature,
+                        entry_sample.units,
+                    ),
+                    probe_valid=True,
+                    probe_source=entry_sample.probe_source,
+                )
         actual_fan_duty = observation.actual_fan_duty
         duration_seconds = (end_ms - start_ms) / 1_000
         if (
@@ -904,8 +947,9 @@ class LearningTrajectoryRuntime:
             boundary_reason=None,
             normalized_load=float(observation.realized_q),
             calibration_origin=observation.calibration_fit,
+            role_generation=observation.role_generation,
         )
-        if not observation.continuous or not observation.probe_valid:
+        if not observation.continuous:
             self._finalize(TrajectoryBreakReason.RECORDER_GAP)
             self._last_break_reason = TrajectoryBreakReason.RECORDER_GAP
             return
@@ -1221,6 +1265,7 @@ class LearningTrajectoryRuntime:
         boundary_reason: TrajectoryBreakReason | None,
         normalized_load: float | None = None,
         calibration_origin: bool = False,
+        role_generation: int | None = None,
     ) -> LearningTrajectoryFrame:
         duration_seconds = (end_ms - start_ms) / 1_000
         realized = integral.auger_on_seconds / duration_seconds
@@ -1271,6 +1316,7 @@ class LearningTrajectoryRuntime:
             partial=partial,
             boundary_reason=boundary_reason,
             calibration_origin=calibration_origin,
+            role_generation=role_generation,
         )
 
     def _submit_frame(
@@ -1429,7 +1475,7 @@ class LearningTrajectoryRuntime:
             pre_roll_frames=pre_roll,
             hold_entry=hold_entry,
             scored_hold_frames=scored,
-            generation_audit_ranges=(),
+            generation_audit_ranges=canonical_generation_audit_ranges(frames),
             start_monotonic_ms=first.monotonic_start_ms,
             end_monotonic_ms=last.monotonic_end_ms,
             start_wall_ms=first.wall_start_ms,

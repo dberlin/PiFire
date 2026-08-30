@@ -791,6 +791,18 @@
           "title": "Scored Count",
           "type": "integer"
         },
+        "segment_content_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Segment Content Digest"
+        },
         "segment_id": {
           "minLength": 1,
           "title": "Segment Id",
@@ -806,6 +818,7 @@
         "segment_id",
         "through_ordinal",
         "prefix_digest",
+        "segment_content_digest",
         "pre_roll_count",
         "scored_count"
       ],
@@ -873,34 +886,12 @@
       ],
       "type": "string"
     },
-    "FopdtPidSpCheckpoint": {
+    "FopdtPidSpParameters": {
       "additionalProperties": false,
       "properties": {
         "K": {
           "title": "K",
           "type": "number"
-        },
-        "form": {
-          "const": "fopdt",
-          "title": "Form",
-          "type": "string"
-        },
-        "identified_at_f": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Identified At F"
-        },
-        "revision": {
-          "minimum": 0,
-          "title": "Revision",
-          "type": "integer"
         },
         "tau": {
           "title": "Tau",
@@ -912,13 +903,11 @@
         }
       },
       "required": [
-        "form",
         "K",
         "tau",
-        "theta",
-        "revision"
+        "theta"
       ],
-      "title": "FopdtPidSpCheckpoint",
+      "title": "FopdtPidSpParameters",
       "type": "object"
     },
     "FopdtPidSpPredictor": {
@@ -996,7 +985,7 @@
       "title": "GreyParameters",
       "type": "object"
     },
-    "IpdtPidSpCheckpoint": {
+    "IpdtPidSpParameters": {
       "additionalProperties": false,
       "properties": {
         "K_i": {
@@ -1007,41 +996,17 @@
           "title": "C0",
           "type": "number"
         },
-        "form": {
-          "const": "ipdt",
-          "title": "Form",
-          "type": "string"
-        },
-        "identified_at_f": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Identified At F"
-        },
-        "revision": {
-          "minimum": 0,
-          "title": "Revision",
-          "type": "integer"
-        },
         "theta": {
           "title": "Theta",
           "type": "number"
         }
       },
       "required": [
-        "form",
         "K_i",
         "c0",
-        "theta",
-        "revision"
+        "theta"
       ],
-      "title": "IpdtPidSpCheckpoint",
+      "title": "IpdtPidSpParameters",
       "type": "object"
     },
     "IpdtPidSpPredictor": {
@@ -1682,20 +1647,140 @@
       "title": "PendingForecastOriginReport",
       "type": "object"
     },
-    "PidSpCheckpointModel": {
-      "discriminator": {
-        "mapping": {
-          "fopdt": "#/$defs/FopdtPidSpCheckpoint",
-          "ipdt": "#/$defs/IpdtPidSpCheckpoint"
+    "PidSpActiveModelReport": {
+      "additionalProperties": false,
+      "properties": {
+        "form": {
+          "$ref": "#/$defs/PidSpDelayProfileForm"
         },
-        "propertyName": "form"
+        "model_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Model Digest",
+          "type": "string"
+        }
       },
-      "oneOf": [
+      "required": [
+        "form",
+        "model_digest"
+      ],
+      "title": "PidSpActiveModelReport",
+      "type": "object"
+    },
+    "PidSpCheckpointBasin": {
+      "additionalProperties": false,
+      "properties": {
+        "blockers": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Blockers",
+          "type": "array"
+        },
+        "confidence_lower_s": {
+          "minimum": 0,
+          "title": "Confidence Lower S",
+          "type": "integer"
+        },
+        "confidence_method": {
+          "enum": [
+            "raw-basin",
+            "provided",
+            "moving-block-refit"
+          ],
+          "title": "Confidence Method",
+          "type": "string"
+        },
+        "confidence_resamples": {
+          "minimum": 0,
+          "title": "Confidence Resamples",
+          "type": "integer"
+        },
+        "confidence_upper_s": {
+          "minimum": 0,
+          "title": "Confidence Upper S",
+          "type": "integer"
+        },
+        "episode_count": {
+          "minimum": 0,
+          "title": "Episode Count",
+          "type": "integer"
+        },
+        "interior": {
+          "title": "Interior",
+          "type": "boolean"
+        },
+        "lower_s": {
+          "minimum": 0,
+          "title": "Lower S",
+          "type": "integer"
+        },
+        "representative_s": {
+          "minimum": 0,
+          "title": "Representative S",
+          "type": "integer"
+        },
+        "upper_s": {
+          "minimum": 0,
+          "title": "Upper S",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "lower_s",
+        "upper_s",
+        "representative_s",
+        "confidence_lower_s",
+        "confidence_upper_s",
+        "confidence_method",
+        "confidence_resamples",
+        "episode_count",
+        "interior",
+        "blockers"
+      ],
+      "title": "PidSpCheckpointBasin",
+      "type": "object"
+    },
+    "PidSpCheckpointModel": {
+      "additionalProperties": false,
+      "properties": {
+        "provenance": {
+          "minLength": 1,
+          "title": "Provenance",
+          "type": "string"
+        },
+        "revision": {
+          "minimum": 0,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": 2,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "selected": {
+          "$ref": "#/$defs/PidSpSelectedCheckpoint"
+        }
+      },
+      "required": [
+        "schema_version",
+        "revision",
+        "provenance",
+        "selected"
+      ],
+      "title": "PidSpCheckpointModel",
+      "type": "object"
+    },
+    "PidSpCheckpointParameters": {
+      "anyOf": [
         {
-          "$ref": "#/$defs/FopdtPidSpCheckpoint"
+          "$ref": "#/$defs/IpdtPidSpParameters"
         },
         {
-          "$ref": "#/$defs/IpdtPidSpCheckpoint"
+          "$ref": "#/$defs/FopdtPidSpParameters"
+        },
+        {
+          "$ref": "#/$defs/SopdtPidSpParameters"
         }
       ]
     },
@@ -1727,6 +1812,320 @@
       "title": "PidSpConfirmationProgress",
       "type": "object"
     },
+    "PidSpDelayBlocker": {
+      "enum": [
+        "insufficient-excitation-episodes",
+        "insufficient-confidence-evidence",
+        "delay-basin-too-wide",
+        "delay-basin-edge",
+        "delay-range-exhausted",
+        "no-physically-valid-delay-candidate"
+      ],
+      "type": "string"
+    },
+    "PidSpDelayConfidenceMethod": {
+      "enum": [
+        "raw-basin",
+        "provided",
+        "moving-block-refit"
+      ],
+      "type": "string"
+    },
+    "PidSpDelayEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "authorized": {
+          "title": "Authorized",
+          "type": "boolean"
+        },
+        "blockers": {
+          "items": {
+            "$ref": "#/$defs/PidSpDelayBlocker"
+          },
+          "title": "Blockers",
+          "type": "array"
+        },
+        "completed_episode_count": {
+          "minimum": 0,
+          "title": "Completed Episode Count",
+          "type": "integer"
+        },
+        "confidence_lower_s": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Confidence Lower S"
+        },
+        "confidence_method": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PidSpDelayConfidenceMethod"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "confidence_resamples": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Confidence Resamples"
+        },
+        "confidence_upper_s": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Confidence Upper S"
+        },
+        "evaluated_bound_s": {
+          "minimum": 0,
+          "title": "Evaluated Bound S",
+          "type": "integer"
+        },
+        "profile_form": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PidSpDelayProfileForm"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "raw_basin_lower_s": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Raw Basin Lower S"
+        },
+        "raw_basin_representative_s": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Raw Basin Representative S"
+        },
+        "raw_basin_upper_s": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Raw Basin Upper S"
+        },
+        "status": {
+          "$ref": "#/$defs/PidSpDelayEvidenceStatus"
+        }
+      },
+      "required": [
+        "status",
+        "completed_episode_count",
+        "evaluated_bound_s",
+        "profile_form",
+        "raw_basin_lower_s",
+        "raw_basin_upper_s",
+        "raw_basin_representative_s",
+        "confidence_lower_s",
+        "confidence_upper_s",
+        "confidence_method",
+        "confidence_resamples",
+        "blockers",
+        "authorized"
+      ],
+      "title": "PidSpDelayEvidence",
+      "type": "object"
+    },
+    "PidSpDelayEvidenceStatus": {
+      "enum": [
+        "insufficient-excitation-episodes",
+        "insufficient-confidence-evidence",
+        "delay-basin-too-wide",
+        "delay-basin-edge",
+        "delay-range-exhausted",
+        "no-physically-valid-delay-candidate",
+        "delay-basin-stable"
+      ],
+      "type": "string"
+    },
+    "PidSpDelayProfileForm": {
+      "enum": [
+        "ipdt",
+        "fopdt",
+        "sopdt"
+      ],
+      "type": "string"
+    },
+    "PidSpFormComparisonReport": {
+      "additionalProperties": false,
+      "properties": {
+        "basin_lower_s": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Basin Lower S"
+        },
+        "basin_upper_s": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Basin Upper S"
+        },
+        "blockers": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Blockers",
+          "type": "array"
+        },
+        "confidence_lower_s": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Confidence Lower S"
+        },
+        "confidence_method": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PidSpDelayConfidenceMethod"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "confidence_upper_s": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Confidence Upper S"
+        },
+        "eligible": {
+          "title": "Eligible",
+          "type": "boolean"
+        },
+        "fold_losses": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Fold Losses",
+          "type": "array"
+        },
+        "form": {
+          "$ref": "#/$defs/PidSpDelayProfileForm"
+        },
+        "horizon_losses": {
+          "items": {
+            "$ref": "#/$defs/PidSpHorizonLossReport"
+          },
+          "title": "Horizon Losses",
+          "type": "array"
+        },
+        "one_step_loss": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "One Step Loss"
+        },
+        "standard_error": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Standard Error"
+        }
+      },
+      "required": [
+        "form",
+        "eligible",
+        "blockers",
+        "one_step_loss",
+        "horizon_losses",
+        "fold_losses",
+        "standard_error",
+        "basin_lower_s",
+        "basin_upper_s",
+        "confidence_lower_s",
+        "confidence_upper_s",
+        "confidence_method"
+      ],
+      "title": "PidSpFormComparisonReport",
+      "type": "object"
+    },
     "PidSpGateValue": {
       "anyOf": [
         {
@@ -1740,6 +2139,33 @@
         }
       ]
     },
+    "PidSpHorizonLossReport": {
+      "additionalProperties": false,
+      "properties": {
+        "horizon_s": {
+          "minimum": 0,
+          "title": "Horizon S",
+          "type": "integer"
+        },
+        "loss": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Loss"
+        }
+      },
+      "required": [
+        "horizon_s",
+        "loss"
+      ],
+      "title": "PidSpHorizonLossReport",
+      "type": "object"
+    },
     "PidSpIdentifierReport": {
       "additionalProperties": false,
       "properties": {
@@ -1748,26 +2174,6 @@
         },
         "accepted_seconds": {
           "$ref": "#/$defs/FiniteNumber"
-        },
-        "best_residual": {
-          "$ref": "#/$defs/FiniteNumber"
-        },
-        "candidates_passing": {
-          "minimum": 0,
-          "title": "Candidates Passing",
-          "type": "integer"
-        },
-        "confirming": {
-          "anyOf": [
-            {
-              "minimum": 0,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Confirming"
         },
         "distrust_count": {
           "minimum": 0,
@@ -1792,7 +2198,15 @@
         "duty_std": {
           "$ref": "#/$defs/FiniteNumber"
         },
-        "runner_up_residual": {
+        "raw_best_residual": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "raw_candidates_passing": {
+          "minimum": 0,
+          "title": "Raw Candidates Passing",
+          "type": "integer"
+        },
+        "raw_runner_up_residual": {
           "$ref": "#/$defs/FiniteNumber"
         },
         "temp_span": {
@@ -1805,7 +2219,7 @@
         "trusted": {
           "anyOf": [
             {
-              "$ref": "#/$defs/PidSpCheckpointModel"
+              "$ref": "#/$defs/PidSpPredictorModel"
             },
             {
               "type": "null"
@@ -1820,10 +2234,9 @@
         "temp_span",
         "transition_seen",
         "duty_segments",
-        "best_residual",
-        "runner_up_residual",
-        "candidates_passing",
-        "confirming",
+        "raw_best_residual",
+        "raw_runner_up_residual",
+        "raw_candidates_passing",
         "trusted",
         "distrust_count",
         "distrust_ratio"
@@ -1899,10 +2312,30 @@
     "PidSpLearningReport": {
       "additionalProperties": false,
       "properties": {
+        "active_model": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PidSpActiveModelReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "checkpoint": {
           "anyOf": [
             {
               "$ref": "#/$defs/PidSpCheckpointModel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "comparison": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PidSpModelComparisonReport"
             },
             {
               "type": "null"
@@ -1923,6 +2356,16 @@
           "const": "pid_sp",
           "title": "Controller",
           "type": "string"
+        },
+        "delay_evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PidSpDelayEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "failure": {
           "anyOf": [
@@ -1990,6 +2433,9 @@
         "identifier",
         "predictor",
         "checkpoint",
+        "comparison",
+        "active_model",
+        "delay_evidence",
         "failure"
       ],
       "title": "PidSpLearningReport",
@@ -2007,11 +2453,92 @@
       ],
       "type": "string"
     },
+    "PidSpModelComparisonReport": {
+      "additionalProperties": false,
+      "properties": {
+        "best_form": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PidSpDelayProfileForm"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "comparison_threshold": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Comparison Threshold"
+        },
+        "confirmation": {
+          "$ref": "#/$defs/PidSpConfirmationProgress"
+        },
+        "forms": {
+          "items": {
+            "$ref": "#/$defs/PidSpFormComparisonReport"
+          },
+          "title": "Forms",
+          "type": "array"
+        },
+        "primary_blocker": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Primary Blocker"
+        },
+        "selected_form": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PidSpDelayProfileForm"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "selection_margin": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Selection Margin"
+        }
+      },
+      "required": [
+        "forms",
+        "best_form",
+        "comparison_threshold",
+        "selection_margin",
+        "selected_form",
+        "confirmation",
+        "primary_blocker"
+      ],
+      "title": "PidSpModelComparisonReport",
+      "type": "object"
+    },
     "PidSpPredictorModel": {
       "discriminator": {
         "mapping": {
           "fopdt": "#/$defs/FopdtPidSpPredictor",
-          "ipdt": "#/$defs/IpdtPidSpPredictor"
+          "ipdt": "#/$defs/IpdtPidSpPredictor",
+          "sopdt": "#/$defs/SopdtPidSpPredictor"
         },
         "propertyName": "form"
       },
@@ -2021,6 +2548,9 @@
         },
         {
           "$ref": "#/$defs/IpdtPidSpPredictor"
+        },
+        {
+          "$ref": "#/$defs/SopdtPidSpPredictor"
         }
       ]
     },
@@ -2060,6 +2590,12 @@
         },
         "xd": {
           "$ref": "#/$defs/FiniteNumber"
+        },
+        "z0": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "zd": {
+          "$ref": "#/$defs/FiniteNumber"
         }
       },
       "required": [
@@ -2067,11 +2603,208 @@
         "disabled",
         "x0",
         "xd",
+        "z0",
+        "zd",
         "residual_streak",
         "truncated",
         "model"
       ],
       "title": "PidSpPredictorReport",
+      "type": "object"
+    },
+    "PidSpSelectedCheckpoint": {
+      "additionalProperties": false,
+      "properties": {
+        "authorized": {
+          "const": true,
+          "title": "Authorized",
+          "type": "boolean"
+        },
+        "common_row_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Common Row Digest",
+          "type": "string"
+        },
+        "comparison_threshold": {
+          "title": "Comparison Threshold",
+          "type": "number"
+        },
+        "configuration_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Configuration Digest",
+          "type": "string"
+        },
+        "confirmation_observed": {
+          "const": 20,
+          "title": "Confirmation Observed",
+          "type": "integer"
+        },
+        "confirmation_required": {
+          "const": 20,
+          "title": "Confirmation Required",
+          "type": "integer"
+        },
+        "delay_basin": {
+          "$ref": "#/$defs/PidSpCheckpointBasin"
+        },
+        "episode_ids": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Episode Ids",
+          "type": "array"
+        },
+        "fit_corpus_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Fit Corpus Digest",
+          "type": "string"
+        },
+        "fold_losses": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Fold Losses",
+          "type": "array"
+        },
+        "form": {
+          "enum": [
+            "ipdt",
+            "fopdt",
+            "sopdt"
+          ],
+          "title": "Form",
+          "type": "string"
+        },
+        "horizon_losses": {
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          "title": "Horizon Losses",
+          "type": "array"
+        },
+        "model_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Model Digest",
+          "type": "string"
+        },
+        "one_step_loss": {
+          "title": "One Step Loss",
+          "type": "number"
+        },
+        "parameters": {
+          "$ref": "#/$defs/PidSpCheckpointParameters"
+        },
+        "schema_version": {
+          "const": "pid-sp-model-selection/v1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "selection_margin": {
+          "title": "Selection Margin",
+          "type": "number"
+        },
+        "standard_error": {
+          "title": "Standard Error",
+          "type": "number"
+        }
+      },
+      "required": [
+        "schema_version",
+        "form",
+        "parameters",
+        "delay_basin",
+        "one_step_loss",
+        "horizon_losses",
+        "fold_losses",
+        "standard_error",
+        "episode_ids",
+        "common_row_digest",
+        "fit_corpus_digest",
+        "configuration_digest",
+        "comparison_threshold",
+        "selection_margin",
+        "confirmation_observed",
+        "confirmation_required",
+        "authorized",
+        "model_digest"
+      ],
+      "title": "PidSpSelectedCheckpoint",
+      "type": "object"
+    },
+    "SopdtPidSpParameters": {
+      "additionalProperties": false,
+      "properties": {
+        "K": {
+          "title": "K",
+          "type": "number"
+        },
+        "tau_1": {
+          "title": "Tau 1",
+          "type": "number"
+        },
+        "tau_2": {
+          "title": "Tau 2",
+          "type": "number"
+        },
+        "theta": {
+          "title": "Theta",
+          "type": "number"
+        }
+      },
+      "required": [
+        "K",
+        "tau_1",
+        "tau_2",
+        "theta"
+      ],
+      "title": "SopdtPidSpParameters",
+      "type": "object"
+    },
+    "SopdtPidSpPredictor": {
+      "additionalProperties": false,
+      "properties": {
+        "K": {
+          "title": "K",
+          "type": "number"
+        },
+        "form": {
+          "const": "sopdt",
+          "title": "Form",
+          "type": "string"
+        },
+        "tau_1": {
+          "title": "Tau 1",
+          "type": "number"
+        },
+        "tau_2": {
+          "title": "Tau 2",
+          "type": "number"
+        },
+        "theta": {
+          "title": "Theta",
+          "type": "number"
+        }
+      },
+      "required": [
+        "form",
+        "K",
+        "tau_1",
+        "tau_2",
+        "theta"
+      ],
+      "title": "SopdtPidSpPredictor",
       "type": "object"
     }
   },
@@ -2095,10 +2828,10 @@
     "FitCorpusSliceReport",
     "FitReport",
     "FitStatus",
-    "FopdtPidSpCheckpoint",
+    "FopdtPidSpParameters",
     "FopdtPidSpPredictor",
     "GreyParameters",
-    "IpdtPidSpCheckpoint",
+    "IpdtPidSpParameters",
     "IpdtPidSpPredictor",
     "LearningFailure",
     "ModelEvidenceReport",
@@ -2114,15 +2847,29 @@
     "MpcCalibrationCommandResponse",
     "MpcCalibrationCommandResponseData",
     "PendingForecastOriginReport",
+    "PidSpActiveModelReport",
+    "PidSpCheckpointBasin",
     "PidSpCheckpointModel",
+    "PidSpCheckpointParameters",
     "PidSpConfirmationProgress",
+    "PidSpDelayBlocker",
+    "PidSpDelayConfidenceMethod",
+    "PidSpDelayEvidence",
+    "PidSpDelayEvidenceStatus",
+    "PidSpDelayProfileForm",
+    "PidSpFormComparisonReport",
     "PidSpGateValue",
+    "PidSpHorizonLossReport",
     "PidSpIdentifierReport",
     "PidSpLearningFailure",
     "PidSpLearningGate",
     "PidSpLearningReport",
     "PidSpLearningStatus",
+    "PidSpModelComparisonReport",
     "PidSpPredictorModel",
-    "PidSpPredictorReport"
+    "PidSpPredictorReport",
+    "PidSpSelectedCheckpoint",
+    "SopdtPidSpParameters",
+    "SopdtPidSpPredictor"
   ]
 }

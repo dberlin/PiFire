@@ -143,7 +143,11 @@ def _canonical_digest(document):
 def trace_fit_job(t, temp, Q, *, T_amb, init, sigma, n_delay, initial_load=None):
     """Build one explicit-anchor segmented job from a canonical typed trace."""
 
-    from common.learning_trajectory import FitCorpusIdentity, FitCorpusSlice
+    from common.learning_trajectory import (
+        FitCorpusIdentity,
+        FitCorpusSlice,
+        canonical_fit_corpus_digest,
+    )
     from controller.acados.contracts import GreyBoxMPCConfig
     from controller.model_learning.contracts import CandidateOrigin, FitRequest
     from controller.runtime.model_fitting import (
@@ -280,6 +284,7 @@ def trace_fit_job(t, temp, Q, *, T_amb, init, sigma, n_delay, initial_load=None)
         cook_id=cook_id,
         through_ordinal=pre_roll_count + scored_count - 1,
         prefix_digest=prefix_digest,
+        segment_content_digest=prefix_digest,
         fit_partition_digest=partition_digest,
         observation_sequences=sequences,
         initial_load=delay_initial_load,
@@ -297,29 +302,21 @@ def trace_fit_job(t, temp, Q, *, T_amb, init, sigma, n_delay, initial_load=None)
         segment_id=segment.segment_id,
         through_ordinal=segment.through_ordinal,
         prefix_digest=segment.prefix_digest,
+        segment_content_digest=segment.segment_content_digest,
         pre_roll_count=pre_roll_count,
         scored_count=scored_count,
     )
-    corpus_payload = {
-        "schema_version": 1,
-        "corpus_revision": 0,
-        "fit_partition_digest": partition_digest,
-        "slices": [
-            {
-                "segment_id": corpus_slice.segment_id,
-                "through_ordinal": corpus_slice.through_ordinal,
-                "prefix_digest": corpus_slice.prefix_digest,
-                "pre_roll_count": corpus_slice.pre_roll_count,
-                "scored_count": corpus_slice.scored_count,
-            }
-        ],
-    }
     corpus = FitCorpusIdentity(
-        schema_version=1,
+        schema_version=2,
         corpus_revision=0,
         fit_partition_digest=partition_digest,
         slices=(corpus_slice,),
-        corpus_digest=_canonical_digest(corpus_payload),
+        corpus_digest=canonical_fit_corpus_digest(
+            schema_version=2,
+            corpus_revision=0,
+            fit_partition_digest=partition_digest,
+            slices=(corpus_slice,),
+        ),
     )
     request_id = _canonical_digest(
         {

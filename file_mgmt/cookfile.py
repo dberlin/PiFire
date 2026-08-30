@@ -649,6 +649,7 @@ def _exact_import_segment(
                 partial=False,
                 boundary_reason=None,
                 calibration_origin=observation.calibration_fit,
+                role_generation=observation.role_generation,
             )
         )
 

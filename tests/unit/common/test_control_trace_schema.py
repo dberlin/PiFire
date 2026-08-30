@@ -121,7 +121,7 @@ def _trajectory_segment_trace_payload() -> TrajectorySegmentTracePayload:
         trace_session_ids=("trace-session-1", "trace-session-2"),
         cook_id="cook-1",
         segment_schema_version=1,
-        observation_schema_version=2,
+        observation_schema_version=3,
         state="finalized",
         source_trace_digest="b" * 64,
         content_digest="c" * 64,
@@ -613,7 +613,10 @@ def _mpc_only_learning_trace_payload_cases():
         for _, event_kind, payload in _payload_cases()
         if isinstance(payload, mpc_only_payload_types)
     )
-    return model_learning_cases + _segmented_learning_trace_payload_cases()
+    return model_learning_cases + (
+        (TraceEventKind.ESTIMATOR_SEED, _estimator_seed_trace_payload()),
+        (TraceEventKind.CHALLENGER_PROGRESS, _challenger_progress_trace_payload()),
+    )
 
 
 @pytest.mark.parametrize(("event_kind", "payload"), _segmented_learning_trace_payload_cases())
@@ -838,6 +841,36 @@ def test_non_observation_learning_payloads_are_mpc_only(controller, event_kind, 
             controller=controller,
             event_kind=event_kind,
             payload=payload,
+        )
+
+
+def test_pid_sp_trajectory_segment_round_trips_through_db() -> None:
+    payload = _trajectory_segment_trace_payload()
+    record = ControlTraceRecord(
+        ts_ms=25_000,
+        session_id="trace-session-2",
+        cook_id="cook-1",
+        controller=ControllerType.PID_SP,
+        event_kind=TraceEventKind.TRAJECTORY_SEGMENT,
+        payload=payload,
+    )
+
+    restored = ControlTraceRecord.from_db_row(record.to_db_row())
+
+    assert restored == record
+    assert restored.controller is ControllerType.PID_SP
+    assert restored.payload == payload
+
+
+def test_pid_trajectory_segment_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="MPC or PID-SP"):
+        ControlTraceRecord(
+            ts_ms=25_000,
+            session_id="trace-session-2",
+            cook_id="cook-1",
+            controller=ControllerType.PID,
+            event_kind=TraceEventKind.TRAJECTORY_SEGMENT,
+            payload=_trajectory_segment_trace_payload(),
         )
 
 

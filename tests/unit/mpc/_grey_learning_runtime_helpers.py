@@ -415,6 +415,7 @@ def _harness(
     trajectory_repository=None,
     fit_partition_digest=None,
     process_owner=None,
+    installation_identity_provider=lambda: "test-installation",
 ) -> _Harness:
     configured = dict(DEFAULT_MPC_CONFIG)
     if base_configuration is not None:
@@ -470,6 +471,7 @@ def _harness(
         ),
         "sync_configuration": lambda: published.append(dict(activation.active_pair.core.config)),
         "fit_worker_factory": fit_worker_factory,
+        "installation_identity_provider": installation_identity_provider,
     }
     if trajectory_repository is not None:
         runtime_kwargs["trajectory_repository"] = trajectory_repository

@@ -11,6 +11,7 @@ from common.control_trace import ActuationMode, AmbientSource, ModelEvaluationPa
 from common.learning_trajectory import (
     FitCorpusIdentity,
     FitCorpusSlice,
+    canonical_fit_corpus_digest,
     canonical_trajectory_digest,
 )
 from common.model_evidence import ForecastOriginEvidence
@@ -37,6 +38,7 @@ from controller.runtime.model_fitting import (
     GreyFitMessage,
     GreyFitSegmentArrays,
     GreyFitSuccess,
+    GreyLearningDelivery,
     GreyLearningOrchestrator,
     TargetTimingEvidence,
     TriggerConfig,
@@ -77,29 +79,21 @@ def _fit_corpus(identity) -> FitCorpusIdentity:
                 "last_observation_sequence": 0,
             }
         ),
+        segment_content_digest=canonical_trajectory_digest({"segment": identity.session_id, "content": "fixture"}),
         pre_roll_count=0,
         scored_count=1,
     )
-    payload = {
-        "schema_version": 1,
-        "corpus_revision": 0,
-        "fit_partition_digest": identity.configuration_digest,
-        "slices": [
-            {
-                "segment_id": corpus_slice.segment_id,
-                "through_ordinal": corpus_slice.through_ordinal,
-                "prefix_digest": corpus_slice.prefix_digest,
-                "pre_roll_count": corpus_slice.pre_roll_count,
-                "scored_count": corpus_slice.scored_count,
-            }
-        ],
-    }
     return FitCorpusIdentity(
-        schema_version=1,
+        schema_version=2,
         corpus_revision=0,
         fit_partition_digest=identity.configuration_digest,
         slices=(corpus_slice,),
-        corpus_digest=canonical_trajectory_digest(payload),
+        corpus_digest=canonical_fit_corpus_digest(
+            schema_version=2,
+            corpus_revision=0,
+            fit_partition_digest=identity.configuration_digest,
+            slices=(corpus_slice,),
+        ),
     )
 
 
@@ -317,8 +311,8 @@ def test_only_operator_fit_requests_may_replace_an_owned_challenger(
     monkeypatch.setattr(
         controller._grey_learning_runtime,
         "_request_corpus_fit_ticket",
-        lambda actual_origin, *, replace_owned_prepared: (
-            tickets.append((actual_origin, replace_owned_prepared)) or "fit-ticket"
+        lambda actual_origin, *, replace_owned_prepared, join_pending: (
+            tickets.append((actual_origin, replace_owned_prepared, join_pending)) or "fit-ticket"
         ),
     )
 
@@ -327,7 +321,7 @@ def test_only_operator_fit_requests_may_replace_an_owned_challenger(
 
     expected = (origin, replace_owned_prepared)
     assert requests == [expected]
-    assert tickets == [expected]
+    assert tickets == [(*expected, True)]
 
 
 def _frame(*, sequence=1, operator=False):
@@ -598,11 +592,11 @@ def test_identity_rebind_fences_and_discards_an_inflight_old_generation_candidat
             request = FitRequest(
                 request_id=f"racing-{self.calls}",
                 origin=CandidateOrigin.PASSIVE_ONLINE,
-                fit_corpus=_fit_corpus(live_identity),
-                configuration_digest=live_identity.configuration_digest,
-                parent_incumbent_digest=live_identity.incumbent_digest,
-                parent_incumbent_generation=live_identity.role_generation,
-                candidate_generation=live_identity.candidate_generation,
+                fit_corpus=_fit_corpus(self.identity),
+                configuration_digest=self.identity.configuration_digest,
+                parent_incumbent_digest=self.identity.incumbent_digest,
+                parent_incumbent_generation=self.identity.role_generation,
+                candidate_generation=self.identity.candidate_generation,
             )
             candidate = GreyFitSuccess(
                 request=request,
@@ -784,6 +778,7 @@ def test_rejected_real_fit_candidate_is_released_and_a_later_fit_can_prepare(mon
             cook_id="cook-controller-fixture",
             through_ordinal=count - 1,
             prefix_digest=canonical_trajectory_digest({"request_id": request_id}),
+            segment_content_digest=canonical_trajectory_digest({"request_id": request_id, "content": "fixture"}),
             fit_partition_digest=identity.configuration_digest,
             observation_sequences=tuple(range(first_sequence, first_sequence + count)),
             initial_load=loads[0],
@@ -801,29 +796,21 @@ def test_rejected_real_fit_candidate_is_released_and_a_later_fit_can_prepare(mon
             segment_id=segment.segment_id,
             through_ordinal=segment.through_ordinal,
             prefix_digest=segment.prefix_digest,
+            segment_content_digest=segment.segment_content_digest,
             pre_roll_count=0,
             scored_count=count,
         )
-        corpus_payload = {
-            "schema_version": 1,
-            "corpus_revision": 1,
-            "fit_partition_digest": identity.configuration_digest,
-            "slices": [
-                {
-                    "segment_id": corpus_slice.segment_id,
-                    "through_ordinal": corpus_slice.through_ordinal,
-                    "prefix_digest": corpus_slice.prefix_digest,
-                    "pre_roll_count": corpus_slice.pre_roll_count,
-                    "scored_count": corpus_slice.scored_count,
-                }
-            ],
-        }
         corpus = FitCorpusIdentity(
-            schema_version=1,
+            schema_version=2,
             corpus_revision=1,
             fit_partition_digest=identity.configuration_digest,
             slices=(corpus_slice,),
-            corpus_digest=canonical_trajectory_digest(corpus_payload),
+            corpus_digest=canonical_fit_corpus_digest(
+                schema_version=2,
+                corpus_revision=1,
+                fit_partition_digest=identity.configuration_digest,
+                slices=(corpus_slice,),
+            ),
         )
         request = FitRequest(
             request_id=request_id,

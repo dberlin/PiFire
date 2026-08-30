@@ -17,7 +17,7 @@ from scipy.linalg import expm
 from common.learning_trajectory import (
     FitCorpusIdentity,
     FitCorpusSlice,
-    canonical_trajectory_digest,
+    canonical_fit_corpus_digest,
 )
 from controller.acados.contracts import GreyBoxMPCConfig
 from controller.model_learning.contracts import CandidateOrigin, FitRequest
@@ -147,6 +147,7 @@ def _segment(
         cook_id=cook_id,
         through_ordinal=len(pre_roll_load) + count - 1,
         prefix_digest=hashlib.sha256(segment_id.encode()).hexdigest(),
+        segment_content_digest=hashlib.sha256(f"segment-content:{segment_id}".encode()).hexdigest(),
         fit_partition_digest=_PARTITION,
         observation_sequences=tuple(range(sequence_start, sequence_start + count)),
         initial_load=pre_roll_load[0] if initial_load is None else initial_load,
@@ -173,32 +174,23 @@ def _corpus(segments: tuple[GreyFitSegmentArrays, ...], *, partition: str = _PAR
             segment_id=segment.segment_id,
             through_ordinal=segment.through_ordinal,
             prefix_digest=segment.prefix_digest,
+            segment_content_digest=segment.segment_content_digest,
             pre_roll_count=len(segment.pre_roll_load),
             scored_count=len(segment.scored_load),
         )
         for segment in segments
     )
-    payload = {
-        "schema_version": 1,
-        "corpus_revision": 17,
-        "fit_partition_digest": partition,
-        "slices": [
-            {
-                "segment_id": item.segment_id,
-                "through_ordinal": item.through_ordinal,
-                "prefix_digest": item.prefix_digest,
-                "pre_roll_count": item.pre_roll_count,
-                "scored_count": item.scored_count,
-            }
-            for item in slices
-        ],
-    }
     return FitCorpusIdentity(
-        schema_version=1,
+        schema_version=2,
         corpus_revision=17,
         fit_partition_digest=partition,
         slices=slices,
-        corpus_digest=canonical_trajectory_digest(payload),
+        corpus_digest=canonical_fit_corpus_digest(
+            schema_version=2,
+            corpus_revision=17,
+            fit_partition_digest=partition,
+            slices=slices,
+        ),
     )
 
 

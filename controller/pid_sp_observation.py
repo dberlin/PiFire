@@ -6,6 +6,7 @@ import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from itertools import pairwise
 
 
 def _finite_float(value: object, name: str) -> float:
@@ -24,6 +25,25 @@ def _nonnegative_int(value: object, name: str) -> int:
 
 
 @dataclass(frozen=True, slots=True)
+class PidSpDutySegment:
+    start_s: float
+    end_s: float
+    realized_duty: float
+
+    def __post_init__(self) -> None:
+        start = _finite_float(self.start_s, "start_s")
+        end = _finite_float(self.end_s, "end_s")
+        if end <= start:
+            raise ValueError("end_s must be greater than start_s")
+        duty = _finite_float(self.realized_duty, "realized_duty")
+        if not 0.0 <= duty <= 1.0:
+            raise ValueError("realized_duty must be in [0, 1]")
+        object.__setattr__(self, "start_s", start)
+        object.__setattr__(self, "end_s", end)
+        object.__setattr__(self, "realized_duty", duty)
+
+
+@dataclass(frozen=True, slots=True)
 class PidSpInterval:
     start_s: float
     end_s: float
@@ -32,6 +52,7 @@ class PidSpInterval:
     continuous: bool
     observation_sequence: int
     role_generation: int
+    duty_segments: tuple[PidSpDutySegment, ...] | None = None
 
     def __post_init__(self) -> None:
         start = _finite_float(self.start_s, "start_s")
@@ -44,10 +65,27 @@ class PidSpInterval:
             raise ValueError("realized_duty must be in [0, 1]")
         if not isinstance(self.continuous, bool):
             raise TypeError("continuous must be a bool")
+        segments = self.duty_segments
+        if segments is None:
+            segments = (PidSpDutySegment(start, end, duty),)
+        elif not isinstance(segments, tuple) or not segments:
+            raise ValueError("duty_segments must be a nonempty tuple")
+        if not all(isinstance(segment, PidSpDutySegment) for segment in segments):
+            raise TypeError("duty_segments must contain PidSpDutySegment values")
+        if segments[0].start_s != start or segments[-1].end_s != end:
+            raise ValueError("duty_segments must exactly cover the interval bounds")
+        if any(left.end_s != right.start_s for left, right in pairwise(segments)):
+            raise ValueError("duty_segments must tile the interval without overlaps or gaps")
+        weighted_duty = sum((segment.end_s - segment.start_s) * segment.realized_duty for segment in segments) / (
+            end - start
+        )
+        if not math.isclose(weighted_duty, duty, rel_tol=0.0, abs_tol=1e-12):
+            raise ValueError("duty_segments weighted mean must equal realized_duty")
         object.__setattr__(self, "start_s", start)
         object.__setattr__(self, "end_s", end)
         object.__setattr__(self, "temperature_f", temperature)
         object.__setattr__(self, "realized_duty", duty)
+        object.__setattr__(self, "duty_segments", segments)
         object.__setattr__(
             self,
             "observation_sequence",

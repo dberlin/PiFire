@@ -225,6 +225,7 @@ def _corpus_dict(value: FitCorpusIdentity) -> dict[str, object]:
                 "segment_id": item.segment_id,
                 "through_ordinal": item.through_ordinal,
                 "prefix_digest": item.prefix_digest,
+                **({"segment_content_digest": item.segment_content_digest} if value.schema_version == 2 else {}),
                 "pre_roll_count": item.pre_roll_count,
                 "scored_count": item.scored_count,
             }
@@ -305,11 +306,18 @@ def _corpus_from_dict(value: object) -> FitCorpusIdentity:
     slices = data.get("slices")
     if not isinstance(slices, list):
         raise TypeError("fit corpus slices must be an array")
+    schema_version = data.get("schema_version")
+    decoded_slices: list[FitCorpusSlice] = []
+    for item in slices:
+        decoded = dict(_mapping(item, "fit corpus slice"))
+        if schema_version == 1:
+            decoded.setdefault("segment_content_digest", None)
+        decoded_slices.append(FitCorpusSlice(**decoded))
     return FitCorpusIdentity(
-        schema_version=data.get("schema_version"),
+        schema_version=schema_version,
         corpus_revision=data.get("corpus_revision"),
         fit_partition_digest=data.get("fit_partition_digest"),
-        slices=tuple(FitCorpusSlice(**_mapping(item, "fit corpus slice")) for item in slices),
+        slices=tuple(decoded_slices),
         corpus_digest=data.get("corpus_digest"),
     )
 

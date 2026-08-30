@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 import controller.runtime.runner as runner_module
-from common.control_trace import ActuationMode, ResultStaleState
+from common.control_trace import ActuationMode, AllocationClampReason, ResultStaleState
 from common.model_evidence import SessionSummaryEvidence
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.base import ControllerLearningDiagnostics
@@ -16,6 +16,7 @@ from controller.model_learning.contracts import CandidateOrigin, FrameObservatio
 from controller.pid_sp import Controller as PidSpController
 from controller.runtime.runner import (
     ControllerUpdateResult,
+    ModelRestoreOutcome,
     SyncControllerRunner,
     _build_core,
     _capture_completed_result,
@@ -259,6 +260,17 @@ def test_sync_pid_sp_completed_update_captures_one_aligned_learning_status_snaps
     assert result.learning.as_json()["capture_sequence"] == 1
     assert result.status is not None
     assert runner.controller_state()["learning"] == result.learning.as_json()
+    assert result.allocation is not None
+    assert (
+        result.cycle_ratio,
+        result.allocation.normalized_combustion_load,
+        result.allocation.auger_duty,
+    ) == pytest.approx((result.cycle_ratio,) * 3)
+    assert result.allocation.fan_duty is None
+    assert result.allocation.u_max == 1.0
+    assert result.allocation.fan_enabled is False
+    assert result.allocation.auger_clamp_reason is AllocationClampReason.NONE
+    assert result.allocation.fan_clamp_reason is AllocationClampReason.NONE
 
 
 def test_sync_pid_sp_completed_frame_drains_one_observation_outcome():
@@ -291,10 +303,44 @@ def test_sync_pid_sp_completed_frame_drains_one_observation_outcome():
     drain = runner.drain_observation_outcomes()
 
     assert drain.terminal_drops == (), tuple(drop.reason for drop in drain.terminal_drops)
-    assert [
-        (envelope.submission_sequence, envelope.observation)
-        for envelope in drain.envelopes
-    ] == [(submission.submission_sequence, observation)]
+    assert [(envelope.submission_sequence, envelope.observation) for envelope in drain.envelopes] == [
+        (submission.submission_sequence, observation)
+    ]
+
+
+def test_build_core_injects_controller_owned_learning_dependencies_into_pid_sp():
+    settings = {
+        "controller": {
+            "selected": "pid_sp",
+            "config": {
+                "pid_sp": {
+                    "PB": 60.0,
+                    "Ti": 180.0,
+                    "Td": 45.0,
+                    "stable_window": 12,
+                    "center_factor": 0.001,
+                }
+            },
+        },
+        "globals": {"units": "F"},
+        "cycle_data": {},
+    }
+    persistence = object()
+    repository = object()
+    partition = lambda: "a" * 64
+
+    core, status = _build_core(
+        settings,
+        {"primary_setpoint": 225.0},
+        model_persistence=persistence,
+        trajectory_repository=repository,
+        fit_partition_digest=partition,
+    )
+
+    assert status == "Active"
+    assert core._model_persistence is persistence
+    assert core._trajectory_repository is repository
+    assert core._fit_partition_digest is partition
 
 
 def test_completed_result_rejects_an_invalid_learning_capability_value():
@@ -531,6 +577,7 @@ class _RecordingCore:
 
     def restore_model(self, snapshot):
         self.restored = snapshot
+        self.snapshot = snapshot
         return True
 
     def trace_diagnostics(self):
@@ -909,23 +956,62 @@ def test_sync_runner_bounds_exact_eviction_metadata_to_unresolved_capacity():
     assert released.dropped_sequences == tuple(range(2, 62))
 
 
-def test_sync_runner_forwards_snapshot_and_restore():
+def test_sync_runner_reports_restored_snapshot_as_effective_authority():
     core = _RecordingCore()
     runner = SyncControllerRunner(core)
     assert runner.get_model_snapshot() == {"revision": 3, "K": 700.0}
-    assert runner.restore_model({"revision": 9}) is True
+
+    outcome = runner.restore_model({"revision": 9})
+
+    assert outcome == ModelRestoreOutcome(
+        restore_token=None,
+        accepted=True,
+        effective_authority={"revision": 9},
+    )
     assert core.restored == {"revision": 9}
 
 
-def test_sync_runner_restore_model_propagates_rejection():
+def test_sync_runner_reports_configured_fallback_when_restore_is_rejected():
     class _RejectingCore(_RecordingCore):
         def restore_model(self, snapshot):
             self.restored = snapshot
             return False
 
     core = _RejectingCore()
-    assert SyncControllerRunner(core).restore_model({"revision": 1}) is False
+
+    outcome = SyncControllerRunner(core).restore_model({"revision": 1})
+
+    assert outcome == ModelRestoreOutcome(
+        restore_token=None,
+        accepted=False,
+        effective_authority={"revision": 3, "K": 700.0},
+    )
     assert core.restored == {"revision": 1}
+
+
+def test_sync_runner_reports_configured_fallback_while_legacy_restore_is_staged():
+    class _StagingCore(_RecordingCore):
+        def restore_model(self, snapshot):
+            self.restored = snapshot
+            self.snapshot = {
+                **self.snapshot,
+                "staged_candidate_revision": snapshot["revision"],
+            }
+            return True
+
+    core = _StagingCore()
+    configured = core.get_model_snapshot()
+    candidate = {"revision": 9, "installation_identity_digest": None}
+
+    outcome = SyncControllerRunner(core).restore_model(candidate)
+
+    assert outcome == ModelRestoreOutcome(
+        restore_token=None,
+        accepted=True,
+        effective_authority=configured,
+        staged_for_revalidation=True,
+    )
+    assert core.restored == candidate
 
 
 def test_controller_state_prefers_get_status():

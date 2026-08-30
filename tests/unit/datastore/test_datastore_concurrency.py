@@ -134,8 +134,9 @@ def _assert_current_schema_complete(path: Path) -> None:
         ).fetchone()[0]
         assert " ".join(trigger_sql.split()) == " ".join(datastore._logs_retention_ddl().split())
         assert not {name for name, _type in objects if name == "history_new" or name.endswith("_new")}
-        assert connection.execute("SELECT migration_set, name FROM _sqlite_migrations").fetchall() == [
-            ("pifire-schema", "v0011_adopt_sqlite_utils_registry")
+        assert connection.execute("SELECT migration_set, name FROM _sqlite_migrations ORDER BY name").fetchall() == [
+            ("pifire-schema", "v0011_adopt_sqlite_utils_registry"),
+            ("pifire-schema", "v0012_trajectory_role_generation"),
         ]
     finally:
         connection.close()

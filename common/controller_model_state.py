@@ -146,6 +146,15 @@ class ControllerModelStore:
             persisted = models.get(name)
             if persisted is None:
                 return None
+            if name == "pid_sp":
+                from controller.pid_sp_model_selection import (
+                    project_pid_sp_persisted_checkpoint,
+                )
+
+                try:
+                    project_pid_sp_persisted_checkpoint(persisted)
+                except (KeyError, TypeError, ValueError) as error:
+                    raise ValueError("malformed stored snapshot for controller 'pid_sp'") from error
             self._remember_owned(name, persisted, committed=True)
             snapshot = deepcopy(persisted)
             self._revisions[name] = persisted["revision"]

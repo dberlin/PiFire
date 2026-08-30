@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from common.control_trace import AllocationClampReason
+from common.control_trace import AllocationClampReason, TraceEventKind
 from common.model_evidence import (
     AllocationEvidence,
     CalibrationSummaryEvidence,
@@ -43,6 +43,7 @@ from controller.runtime.model_fitting import (
     handoff_candidate,
     segmented_corpus_fit_job,
 )
+from tests.unit.common._learning_trajectory_helpers import _finalize_segment, _segment
 from tests.unit.common._model_challenger_helpers import _corpus
 from tests.unit.mpc._grey_learning_runtime_helpers import (
     _COMPLETE_SCORES,
@@ -339,6 +340,77 @@ def test_two_reopened_cooks_submit_one_ordered_persistent_corpus_job_off_path(
     harness.activation.close()
 
 
+def test_fit_lifecycle_evidence_ids_distinguish_same_millisecond_transitions(
+    tmp_path,
+) -> None:
+    repository, partition = _reopened_corpus(tmp_path)
+    trace = []
+    _DeliveringCorpusWorker.instances.clear()
+    harness = _harness(
+        trajectory_repository=repository,
+        fit_partition_digest=lambda: partition,
+        fit_worker_factory=_DeliveringCorpusWorker,
+        append_trace=trace.extend,
+    )
+    harness.runtime._clock_ms = lambda: 1234
+
+    assert harness.runtime.request_corpus_fit(CandidateOrigin.OPERATOR_CALIBRATION)
+    harness.runtime.poll_learning_off_path()
+    delivery, _evaluation = harness.runtime.poll_learning_off_path()
+
+    assert delivery is not None
+    lifecycle = [record for record in harness.persistence.evidence if record.kind is EvidenceKind.FIT_LIFECYCLE]
+    assert [record.payload.status for record in lifecycle] == ["queued", "succeeded"]
+    assert len({record.evidence_id for record in lifecycle}) == 2
+    assert [record.payload.status for record in trace if record.event_kind is TraceEventKind.FIT_LIFECYCLE] == [
+        "queued",
+        "succeeded",
+    ]
+    harness.runtime.close()
+    harness.activation.close()
+
+
+def test_completed_fit_terminalizes_before_challenger_persistence_failure(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    repository, partition = _reopened_corpus(tmp_path)
+    trace = []
+    _DeliveringCorpusWorker.instances.clear()
+    harness = _harness(
+        trajectory_repository=repository,
+        fit_partition_digest=lambda: partition,
+        fit_worker_factory=_DeliveringCorpusWorker,
+        append_trace=trace.extend,
+    )
+
+    def reject_challenger(*_args, **_kwargs):
+        raise RuntimeError("durable challenger unavailable")
+
+    monkeypatch.setattr(
+        harness.runtime,
+        "_persist_durable_challenger",
+        reject_challenger,
+    )
+
+    assert harness.runtime.request_corpus_fit(CandidateOrigin.OPERATOR_CALIBRATION)
+    harness.runtime.poll_learning_off_path()
+    delivery, _evaluation = harness.runtime.poll_learning_off_path()
+
+    assert delivery is not None
+    request = delivery.message.request
+    assert [record.payload.status for record in trace if record.event_kind is TraceEventKind.FIT_LIFECYCLE] == [
+        "queued",
+        "succeeded",
+    ]
+    assert harness.runtime._consume_terminal_fit_ticket(
+        request.request_id,
+        request.origin,
+    )
+    harness.runtime.close()
+    harness.activation.close()
+
+
 @pytest.mark.parametrize(("enabled", "scheduled"), ((False, False), (True, True)))
 def test_passive_mid_cook_corpus_submission_follows_only_online_adaptation(
     tmp_path,
@@ -372,6 +444,88 @@ def test_passive_mid_cook_corpus_submission_follows_only_online_adaptation(
     if scheduled:
         assert not harness.runtime.request_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
     assert repository.snapshot_fit_corpus(partition).identity == corpus_before
+    harness.runtime.close()
+    harness.activation.close()
+
+
+def test_teardown_ticket_joins_an_already_submitted_passive_fit(
+    tmp_path,
+) -> None:
+    repository, partition = _reopened_ready_passive_corpus(tmp_path)
+    _ControlledDeliveryCorpusWorker.instances.clear()
+    harness = _harness(
+        trajectory_repository=repository,
+        fit_partition_digest=lambda: partition,
+        fit_worker_factory=_ControlledDeliveryCorpusWorker,
+        learning_enabled=True,
+    )
+
+    assert harness.runtime.request_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+    harness.runtime.poll_learning_off_path()
+    pending = harness.runtime._learning.pending_request
+    assert pending is not None
+    assert not harness.runtime.request_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+
+    joined_ticket = harness.runtime._request_corpus_fit_ticket(
+        CandidateOrigin.PASSIVE_ONLINE,
+        join_pending=True,
+    )
+
+    assert joined_ticket == pending.request_id
+    _ControlledDeliveryCorpusWorker.instances[-1].released = True
+    delivery, _evaluation = harness.runtime.poll_learning_off_path()
+    assert delivery is not None
+    assert harness.runtime._consume_terminal_fit_ticket(
+        joined_ticket,
+        CandidateOrigin.PASSIVE_ONLINE,
+    )
+    harness.runtime.close()
+    harness.activation.close()
+
+
+def test_teardown_queues_followup_when_pending_fit_predates_final_corpus(
+    tmp_path,
+) -> None:
+    repository, partition = _reopened_ready_passive_corpus(tmp_path)
+    _ControlledDeliveryCorpusWorker.instances.clear()
+    harness = _harness(
+        trajectory_repository=repository,
+        fit_partition_digest=lambda: partition,
+        fit_worker_factory=_ControlledDeliveryCorpusWorker,
+        learning_enabled=True,
+    )
+
+    assert harness.runtime.request_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+    harness.runtime.poll_learning_off_path()
+    pending = harness.runtime._learning.pending_request
+    assert pending is not None
+    _finalize_segment(
+        repository,
+        _segment("stop-finalized", epoch_ms=5_000_000, scored_count=2),
+    )
+
+    followup_ticket = harness.runtime._request_corpus_fit_ticket(
+        CandidateOrigin.PASSIVE_ONLINE,
+        join_pending=True,
+    )
+
+    assert followup_ticket is not None
+    assert followup_ticket != pending.request_id
+    worker = _ControlledDeliveryCorpusWorker.instances[-1]
+    worker.released = True
+    first_delivery, _evaluation = harness.runtime.poll_learning_off_path()
+    assert first_delivery is not None
+    harness.runtime.poll_learning_off_path()
+    followup = harness.runtime._learning.pending_request
+    assert followup is not None
+    assert followup.request_id == followup_ticket
+    assert followup.fit_corpus != pending.fit_corpus
+    second_delivery, _evaluation = harness.runtime.poll_learning_off_path()
+    assert second_delivery is not None
+    assert harness.runtime._consume_terminal_fit_ticket(
+        followup_ticket,
+        CandidateOrigin.PASSIVE_ONLINE,
+    )
     harness.runtime.close()
     harness.activation.close()
 
@@ -1693,75 +1847,6 @@ def test_operator_two_complete_wins_prepare_durable_causal_auto_activation(
     assert components.controller.closed
 
 
-@pytest.mark.parametrize(
-    ("failure", "message"),
-    (
-        ("identity", "reviewed-candidate-identity-changed"),
-        ("snapshot", "reviewed-candidate-checkpoint-invalid"),
-        ("checkpoint", "reviewed-candidate-checkpoint-not-durable"),
-    ),
-)
-def test_reviewed_checkpoint_failure_leaves_the_checkpoint_lineage_untouched(
-    monkeypatch,
-    failure,
-    message,
-) -> None:
-    instances = []
-
-    class _Learning:
-        def __init__(self, **_kwargs) -> None:
-            self.prepared = None
-            self.pending_request = None
-            self.handoff = None
-            self.evaluation = None
-            instances.append(self)
-
-        def start(self) -> None:
-            return None
-
-        def poll_fit_off_path(self, **_kwargs):
-            return None
-
-        def evaluate_ready_off_path(self):
-            return self.evaluation
-
-        def close(self) -> None:
-            if self.prepared is not None:
-                self.prepared.candidate_pair.estimator.close()
-                self.prepared.candidate_pair.controller.close()
-
-    monkeypatch.setattr(
-        "controller.model_learning.grey_runtime.GreyLearningOrchestrator",
-        _Learning,
-    )
-    store = _CheckpointStore(CheckpointSaveOutcome.FAILED if failure == "checkpoint" else CheckpointSaveOutcome.SAVED)
-    snapshot_parameters = (
-        (lambda: (_ for _ in ()).throw(ValueError("not serializable"))) if failure == "snapshot" else None
-    )
-    harness = _harness(
-        learning_enabled=True,
-        checkpoint_store=store,
-        snapshot_parameters=snapshot_parameters,
-    )
-    preparation, evaluation, components = _reviewed_candidate(harness)
-    if failure == "identity":
-        evaluation = replace(evaluation, challenger_digest="f" * 64)
-    instances[0].prepared = preparation
-    instances[0].evaluation = evaluation
-    revision_before = harness.runtime.model_authority()[0]
-    snapshot_before = harness.runtime.get_model_snapshot()
-
-    with pytest.raises(RuntimeError, match=message):
-        harness.runtime.poll_learning_off_path()
-
-    assert harness.runtime.model_authority()[0] == revision_before
-    assert harness.runtime.get_model_snapshot() == snapshot_before
-    harness.runtime.close()
-    harness.activation.close()
-    assert components.estimator.closed
-    assert components.controller.closed
-
-
 def test_learning_status_projects_queued_running_preparing_and_handoff_states(
     monkeypatch,
 ) -> None:
@@ -2244,12 +2329,12 @@ def test_restore_replace_failure_closes_new_pair_and_keeps_incumbent(monkeypatch
     source.activation.close()
 
 
-def test_runtime_snapshot_is_exact_json_safe_v6_without_process_jobs() -> None:
+def test_runtime_snapshot_is_exact_json_safe_v7_without_process_jobs() -> None:
     harness = _harness()
     snapshot = harness.runtime.get_model_snapshot()
     assert snapshot is not None
-    assert snapshot["version"] == 6
-    assert snapshot["schema"] == "pifire-grey-learning/v6"
+    assert snapshot["version"] == 7
+    assert snapshot["schema"] == "pifire-grey-learning/v7"
     assert set(snapshot) == {
         "version",
         "schema",
@@ -2265,6 +2350,7 @@ def test_runtime_snapshot_is_exact_json_safe_v6_without_process_jobs() -> None:
         "failure",
         "active_pair",
         "challenger_authority",
+        "installation_identity_digest",
     }
     encoded = json.dumps(snapshot, sort_keys=True, allow_nan=False)
     assert "process" not in encoded

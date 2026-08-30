@@ -137,6 +137,8 @@ class SafetyEventType(StrEnum):
 class AllocationClampReason(StrEnum):
     NONE = "none"
     AUGER_MAX = "auger_max"
+    AUGER_MIN = "auger_min"
+    AUGER_NONFINITE = "auger_nonfinite"
     FAN_MIN = "fan_min"
     FAN_MAX = "fan_max"
 
@@ -1144,13 +1146,21 @@ class ControlTraceRecord(BaseModel):
             raise ValueError("controller does not match PID-SP diagnostics")
         if isinstance(self.payload, MpcUpdatePayload) and self.controller is not ControllerType.MPC:
             raise ValueError("controller does not match MPC diagnostics")
-        if isinstance(self.payload, AllocationPayload) and self.controller is not ControllerType.MPC:
-            raise ValueError("allocation records are MPC-only")
-        if (
-            isinstance(self.payload, ModelObservationPayload)
-            and self.controller not in (ControllerType.MPC, ControllerType.PID_SP)
+        if isinstance(self.payload, AllocationPayload) and self.controller not in (
+            ControllerType.MPC,
+            ControllerType.PID_SP,
+        ):
+            raise ValueError("allocation records require MPC or PID-SP")
+        if isinstance(self.payload, ModelObservationPayload) and self.controller not in (
+            ControllerType.MPC,
+            ControllerType.PID_SP,
         ):
             raise ValueError("model observation records require MPC or PID-SP")
+        if isinstance(self.payload, TrajectorySegmentTracePayload) and self.controller not in (
+            ControllerType.MPC,
+            ControllerType.PID_SP,
+        ):
+            raise ValueError("trajectory segment records require MPC or PID-SP")
         if (
             isinstance(
                 self.payload,
@@ -1162,7 +1172,6 @@ class ControlTraceRecord(BaseModel):
                     GreyActivationLifecyclePayload,
                     GreyLearningFailurePayload,
                     EstimatorSeedTracePayload,
-                    TrajectorySegmentTracePayload,
                     ChallengerProgressTracePayload,
                 ),
             )

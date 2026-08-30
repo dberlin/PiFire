@@ -12,7 +12,7 @@ from common.control_trace import AmbientSource
 from common.learning_trajectory import (
     FitCorpusIdentity,
     FitCorpusSlice,
-    canonical_trajectory_digest,
+    canonical_fit_corpus_digest,
 )
 from common.persistence.learning_trajectory import LearningTrajectoryRepository
 from controller.acados.contracts import GreyBoxMPCConfig
@@ -79,29 +79,21 @@ def _corpus(*, corpus_revision: int = 1) -> FitCorpusIdentity:
         segment_id=f"segment-{corpus_revision}",
         through_ordinal=11,
         prefix_digest=marker,
+        segment_content_digest=marker,
         pre_roll_count=0,
         scored_count=12,
     )
-    payload = {
-        "schema_version": 1,
-        "corpus_revision": corpus_revision,
-        "fit_partition_digest": _CONFIG,
-        "slices": [
-            {
-                "segment_id": corpus_slice.segment_id,
-                "through_ordinal": corpus_slice.through_ordinal,
-                "prefix_digest": corpus_slice.prefix_digest,
-                "pre_roll_count": corpus_slice.pre_roll_count,
-                "scored_count": corpus_slice.scored_count,
-            }
-        ],
-    }
     return FitCorpusIdentity(
-        schema_version=1,
+        schema_version=2,
         corpus_revision=corpus_revision,
         fit_partition_digest=_CONFIG,
         slices=(corpus_slice,),
-        corpus_digest=canonical_trajectory_digest(payload),
+        corpus_digest=canonical_fit_corpus_digest(
+            schema_version=2,
+            corpus_revision=corpus_revision,
+            fit_partition_digest=_CONFIG,
+            slices=(corpus_slice,),
+        ),
     )
 
 

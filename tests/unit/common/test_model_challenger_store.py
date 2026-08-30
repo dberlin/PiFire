@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
@@ -11,7 +12,7 @@ import pytest
 from pydantic import ValidationError
 
 from common import datastore
-from common.learning_trajectory import trajectory_json_value
+from common.learning_trajectory import canonical_fit_corpus_digest, trajectory_json_value
 from common.model_evidence import (
     MODEL_EVIDENCE_SCHEMA_VERSION,
     ChallengerRoundEvidence,
@@ -181,6 +182,74 @@ def test_create_read_and_revision_cas_are_exact_idempotent_and_conflict_closed(
             database_path=database_path,
         )
     assert read_model_challenger(database_path=database_path) == evaluating
+
+
+def test_legacy_v1_challenger_round_trips_and_appends_evidence_after_restart(
+    database_path: Path,
+) -> None:
+    built = _state()
+    create_model_challenger(built, database_path=database_path)
+    legacy_slices = tuple(replace(item, segment_content_digest=None) for item in built.fit_corpus.slices)
+    legacy_digest = canonical_fit_corpus_digest(
+        schema_version=1,
+        corpus_revision=built.fit_corpus.corpus_revision,
+        fit_partition_digest=built.fit_corpus.fit_partition_digest,
+        slices=legacy_slices,
+    )
+    connection = sqlite3.connect(database_path)
+    try:
+        raw = connection.execute("SELECT state_json FROM model_challenger_state WHERE singleton=1").fetchone()
+        assert raw is not None
+        state_json = json.loads(raw[0])
+        for corpus in (
+            state_json["fit_corpus"],
+            state_json["fit_lineage"]["fit_corpus"],
+        ):
+            corpus["schema_version"] = 1
+            corpus["corpus_digest"] = legacy_digest
+            for item in corpus["slices"]:
+                item.pop("segment_content_digest")
+        state_json["fit_lineage"]["fit_corpus_digest"] = legacy_digest
+        connection.execute(
+            "UPDATE model_challenger_state SET state_json=? WHERE singleton=1",
+            (
+                json.dumps(
+                    state_json,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    restored = read_model_challenger(database_path=database_path)
+    assert restored is not None
+    assert restored.fit_corpus.schema_version == 1
+    assert restored.fit_corpus.slices[0].segment_content_digest is None
+    evaluating = replace(
+        restored,
+        revision=1,
+        phase="evaluating",
+        updated_ms=restored.updated_ms + 1,
+    )
+    compare_and_swap_model_challenger(
+        expected_revision=0,
+        replacement=evaluating,
+        database_path=database_path,
+    )
+    evidence = _round_evidence(evaluating, round_number=1)
+
+    progressed = complete_model_challenger_round(
+        expected_revision=1,
+        evidence=evidence,
+        database_path=database_path,
+    )
+
+    assert progressed.fit_corpus.schema_version == 1
+    assert progressed.fit_corpus.slices[0].segment_content_digest is None
+    assert read_model_evidence(database_path=database_path) == [evidence]
 
 
 def test_complete_round_appends_schema_v4_evidence_and_progress_atomically(
@@ -468,15 +537,16 @@ def test_schema_v10_migration_is_additive_and_preserves_every_v9_authority_row(
     try:
         connection = datastore.connection()
 
-        assert datastore.DB_SCHEMA_VERSION == 11
+        assert datastore.DB_SCHEMA_VERSION == 12
         assert connection.execute("PRAGMA user_version").fetchone()[0] == datastore.DB_SCHEMA_VERSION
         assert connection.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='model_challenger_state'"
         ).fetchone() == ("model_challenger_state",)
         assert connection.execute("SELECT COUNT(*) FROM model_challenger_state").fetchone() == (0,)
         assert _preserved_v9_rows(database_path) == preserved
-        assert connection.execute("SELECT migration_set, name FROM _sqlite_migrations").fetchall() == [
-            ("pifire-schema", "v0011_adopt_sqlite_utils_registry")
+        assert connection.execute("SELECT migration_set, name FROM _sqlite_migrations ORDER BY name").fetchall() == [
+            ("pifire-schema", "v0011_adopt_sqlite_utils_registry"),
+            ("pifire-schema", "v0012_trajectory_role_generation"),
         ]
     finally:
         datastore._reset_for_tests(None)
@@ -533,8 +603,9 @@ def test_schema_v10_migration_rolls_back_ddl_and_version_bump_together(
         ).fetchone() == ("ix_model_challenger_identity",)
         assert connection.execute("SELECT COUNT(*) FROM model_challenger_state").fetchone() == (0,)
         assert _preserved_v9_rows(database_path) == preserved
-        assert connection.execute("SELECT migration_set, name FROM _sqlite_migrations").fetchall() == [
-            ("pifire-schema", "v0011_adopt_sqlite_utils_registry")
+        assert connection.execute("SELECT migration_set, name FROM _sqlite_migrations ORDER BY name").fetchall() == [
+            ("pifire-schema", "v0011_adopt_sqlite_utils_registry"),
+            ("pifire-schema", "v0012_trajectory_role_generation"),
         ]
     finally:
         datastore._reset_for_tests(None)

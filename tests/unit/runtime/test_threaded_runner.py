@@ -51,6 +51,7 @@ from controller.runtime.modes.hold_learning import HoldLearningRuntime
 from controller.runtime.runner import (
     _MAX_PENDING_OBSERVATIONS,
     _MAX_PENDING_OUTPUTS,
+    ModelRestoreOutcome,
     SyncControllerRunner,
     ThreadedControllerRunner,
     _freeze_evidence,
@@ -1228,7 +1229,8 @@ def test_restore_model_is_applied_on_the_worker_thread():
     core = _OrderRecordingCore()
     runner = ThreadedControllerRunner(core)
     try:
-        assert runner.restore_model({"revision": 7}) is True
+        submission = runner.restore_model({"revision": 7})
+        assert submission.accepted and submission.pending
         runner.submit(212.0)
         assert _wait_for(lambda: core.restored == [{"revision": 7}])
     finally:
@@ -1240,7 +1242,8 @@ def test_restore_model_deep_copies_the_snapshot_on_the_way_in():
     runner = ThreadedControllerRunner(core)
     try:
         snapshot = {"revision": 7, "online_adaptation": {"challenger": {"params": [1.0]}}}
-        assert runner.restore_model(snapshot) is True
+        submission = runner.restore_model(snapshot)
+        assert submission.accepted and submission.pending
         snapshot["online_adaptation"]["challenger"]["params"][0] = 999.0
         runner.submit(212.0)
         assert _wait_for(
@@ -1254,7 +1257,10 @@ def test_restore_model_rejects_none_without_touching_the_core():
     core = _OrderRecordingCore()
     runner = ThreadedControllerRunner(core)
     try:
-        assert runner.restore_model(None) is False
+        outcome = runner.restore_model(None)
+        assert not outcome.accepted
+        assert not outcome.pending
+        assert outcome.effective_authority == {"revision": 1}
         runner.submit(212.0)
         assert _wait_for(lambda: ("update", 212.0) in core.calls)
         assert core.restored == []
@@ -2495,6 +2501,7 @@ class _CorpusDrainCore(CloseAwareCore, FakeMpcLearningCore):
             self.block_poll = False
         if self.deliveries:
             ticket, origin = self.deliveries.popleft()
+            self.terminal_fit_tickets.add((ticket, origin))
             return SimpleNamespace(
                 message=SimpleNamespace(
                     request=SimpleNamespace(request_id=ticket, origin=origin),
@@ -2735,6 +2742,83 @@ def test_threaded_corpus_fit_schedules_polls_and_consumes_one_matching_ticket():
         runner.stop()
 
 
+def test_threaded_corpus_fit_requires_terminal_ticket_after_matching_delivery():
+    class DelayedTerminalTicketCore(_CorpusDrainCore):
+        def __init__(self):
+            super().__init__()
+            self.poll_count = 0
+
+        def poll_learning_off_path(
+            self,
+            *,
+            live_origin: CandidateOrigin | None = None,
+        ) -> object:
+            self.poll_count += 1
+            if self.poll_count == 1:
+                ticket = self.fit_tickets[-1]
+                origin = self.fit_requests[-1]
+                return SimpleNamespace(
+                    message=SimpleNamespace(
+                        request=SimpleNamespace(request_id=ticket, origin=origin),
+                    ),
+                )
+            self.terminal_fit_tickets.add(
+                (self.fit_tickets[-1], self.fit_requests[-1]),
+            )
+            return None
+
+    core = DelayedTerminalTicketCore()
+    runner = ThreadedControllerRunner(core)
+    try:
+        assert runner.stop_and_retain_for_teardown()
+        core.poll_count = 0
+        assert runner.schedule_corpus_fit(CandidateOrigin.OPERATOR_CALIBRATION)
+        assert _wait_for(lambda: not runner._corpus_fit_plans)
+
+        assert core.poll_count >= 2
+    finally:
+        runner.stop()
+
+
+def test_live_corpus_fit_requires_terminal_ticket_after_matching_delivery():
+    class DelayedLiveTerminalTicketCore(_CorpusDrainCore):
+        def __init__(self):
+            super().__init__()
+            self.delivered = False
+
+        def poll_learning_off_path(
+            self,
+            *,
+            live_origin: CandidateOrigin | None = None,
+        ) -> object:
+            self.fit_polls.append((threading.get_ident(), live_origin))
+            if not self.fit_tickets:
+                return None
+            ticket = self.fit_tickets[-1]
+            origin = self.fit_requests[-1]
+            if not self.delivered:
+                self.delivered = True
+                return SimpleNamespace(
+                    message=SimpleNamespace(
+                        request=SimpleNamespace(request_id=ticket, origin=origin),
+                    ),
+                )
+            self.terminal_fit_tickets.add((ticket, origin))
+            return None
+
+    core = DelayedLiveTerminalTicketCore()
+    runner = ThreadedControllerRunner(core)
+    try:
+        assert runner.schedule_corpus_fit(CandidateOrigin.OPERATOR_CALIBRATION)
+        assert _wait_for(
+            lambda: len(core.consumed_fit_tickets) >= 2 or not runner._corpus_fit_plans,
+        )
+
+        assert len(core.consumed_fit_tickets) >= 2
+    finally:
+        runner.stop()
+
+
 def test_live_fit_barrier_and_submission_run_on_learning_dispatcher():
     core = _CorpusDrainCore()
     core.deliver_on_schedule = True
@@ -2787,6 +2871,106 @@ def test_stop_passive_fit_rejection_preserves_an_existing_challenger() -> None:
         assert core.fit_failures == []
     finally:
         runner.stop()
+
+
+def test_finish_teardown_is_nonblocking_and_finalizes_once_after_stop_fit_terminalizes() -> None:
+    events: list[str] = []
+
+    class _OrderedCloseCore(_CorpusDrainCore):
+        def close(self):
+            events.append("core:close")
+            super().close()
+
+    core = _OrderedCloseCore()
+    core.deliver_on_schedule = True
+    runner = ThreadedControllerRunner(core)
+    assert runner.stop_and_retain_for_teardown()
+    core.block_poll = True
+    assert runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+    assert core.poll_entered.wait(2.0)
+
+    runner.finish_teardown(lambda: events.append("finalizer"))
+    runner.finish_teardown(lambda: events.append("duplicate-finalizer"))
+
+    assert not core.poll_release.is_set()
+    assert events == []
+    core.poll_release.set()
+    assert _wait_for(lambda: runner._final_core_closed)
+    assert events == ["finalizer", "core:close"]
+
+
+def test_finish_teardown_runs_immediate_finalizer_and_closes_when_no_fit_is_pending() -> None:
+    events: list[str] = []
+
+    class _OrderedCloseCore(_CorpusDrainCore):
+        def close(self):
+            events.append("core:close")
+            super().close()
+
+    runner = ThreadedControllerRunner(_OrderedCloseCore())
+    assert runner.stop_and_retain_for_teardown()
+
+    runner.finish_teardown(lambda: events.append("finalizer"))
+
+    assert events == ["finalizer", "core:close"]
+
+
+def test_finish_teardown_runs_new_finalizer_once_when_core_already_closed() -> None:
+    events: list[str] = []
+
+    class _OrderedCloseCore(_CorpusDrainCore):
+        def close(self):
+            events.append("core:close")
+            super().close()
+
+    runner = ThreadedControllerRunner(_OrderedCloseCore())
+    runner.stop()
+    assert events == ["core:close"]
+
+    runner.finish_teardown(lambda: events.append("late-finalizer"))
+    runner.finish_teardown(lambda: events.append("duplicate-finalizer"))
+
+    assert events == ["core:close", "late-finalizer"]
+
+
+def test_finish_teardown_runs_finalizer_after_rejected_stop_fit_fallback() -> None:
+    events: list[str] = []
+
+    class _OrderedCloseCore(_CorpusDrainCore):
+        def close(self):
+            events.append("core:close")
+            super().close()
+
+    core = _OrderedCloseCore()
+    core._schedule_corpus_fit_ticket = lambda _origin: None
+    runner = ThreadedControllerRunner(core)
+    assert runner.stop_and_retain_for_teardown()
+    assert runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+
+    runner.finish_teardown(lambda: events.append("finalizer"))
+
+    assert _wait_for(lambda: runner._final_core_closed)
+    assert events == ["finalizer", "core:close"]
+
+
+def test_finalizer_exception_cannot_prevent_final_core_close() -> None:
+    events: list[str] = []
+
+    class _OrderedCloseCore(_CorpusDrainCore):
+        def close(self):
+            events.append("core:close")
+            super().close()
+
+    runner = ThreadedControllerRunner(_OrderedCloseCore())
+    assert runner.stop_and_retain_for_teardown()
+
+    def fail_finalizer() -> None:
+        events.append("finalizer")
+        raise RuntimeError("post-fit barrier failed")
+
+    runner.finish_teardown(fail_finalizer)
+
+    assert events == ["finalizer", "core:close"]
 
 
 def test_stop_fit_drain_ignores_older_same_origin_ticket() -> None:
@@ -3528,21 +3712,61 @@ class _RefusingRestoreCore(_OrderRecordingCore):
         return False
 
 
-def test_a_restore_the_core_refuses_is_reported_back_from_the_worker():
-    """Queued is not adopted, so the worker's verdict has to travel back.
-
-    `restore_model` returns True for accepted-for-restore; the core decides on
-    the worker thread. Without a return path a refusal reaches nothing that can
-    log it or correct the session's model provenance.
-    """
+def test_a_restore_the_core_refuses_reports_the_configured_authority_from_the_worker():
     core = _RefusingRestoreCore()
     runner = ThreadedControllerRunner(core)
     try:
         assert runner.drain_restore_outcome() is None
-        assert runner.restore_model({"revision": 7}) is True
+        submission = runner.restore_model({"revision": 7}, restore_token="restore-7")
+        assert submission == ModelRestoreOutcome(
+            restore_token="restore-7",
+            accepted=True,
+            effective_authority=None,
+            pending=True,
+        )
         runner.submit(212.0)
 
-        assert _wait_for(lambda: runner.drain_restore_outcome() is False)
+        def capture_restore_outcome():
+            outcome = runner.drain_restore_outcome()
+            if outcome is None:
+                return False
+            core.observed_restore_outcome = outcome
+            return True
+
+        assert _wait_for(capture_restore_outcome)
+        assert core.observed_restore_outcome == ModelRestoreOutcome(
+            restore_token="restore-7",
+            accepted=False,
+            effective_authority={"revision": 1},
+        )
         assert runner.drain_restore_outcome() is None
+    finally:
+        runner.stop()
+
+
+def test_legacy_restore_reports_configured_authority_while_candidate_stays_staged():
+    core = _OrderRecordingCore()
+    runner = ThreadedControllerRunner(core)
+    candidate = {"revision": 7, "installation_identity_digest": None}
+    try:
+        submission = runner.restore_model(candidate, restore_token="legacy-restore")
+        assert submission.pending
+        runner.submit(212.0)
+
+        def capture_restore_outcome():
+            outcome = runner.drain_restore_outcome()
+            if outcome is None:
+                return False
+            core.observed_restore_outcome = outcome
+            return True
+
+        assert _wait_for(capture_restore_outcome)
+        assert core.observed_restore_outcome == ModelRestoreOutcome(
+            restore_token="legacy-restore",
+            accepted=True,
+            effective_authority={"revision": 1},
+            staged_for_revalidation=True,
+        )
+        assert core.restored == [candidate]
     finally:
         runner.stop()

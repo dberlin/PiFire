@@ -363,6 +363,7 @@ def _exact_corpus_frame(row: dict[str, Any]) -> LearningTrajectoryFrame:
         temperature_sample_clock_skew_ms=0,
         source_temperature_units="C",
         settings_revision=0,
+        role_generation=0,
         probe_valid=True,
         probe_source="chamber",
         ambient_temperature_c=float(row["ambient_c"]),
@@ -533,6 +534,7 @@ def _seed_passive_corpus(
             temperature_sample_clock_skew_ms=0,
             source_temperature_units="C",
             settings_revision=0,
+            role_generation=0,
             probe_valid=True,
             probe_source="simulated-grey-support",
             ambient_temperature_c=support_parameters["T_amb"],
@@ -984,7 +986,7 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
     stale_transaction_id = _seed_v6_state(config) if database_state == "upgraded-v6" else None
     if database_state == "upgraded-v6":
         migration = migrate_mpc_learning_authority(defaults=config)
-        assert migration.snapshot["version"] == 6
+        assert migration.snapshot["version"] == 7
     cook_id = f"mpc-online-learning-{database_state}"
     resumed_cook_id = f"{cook_id}-resumed"
 
@@ -1867,7 +1869,7 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
     config: dict[str, Any] = dict(DEFAULT_MPC_CONFIG)
     config["enable_online_adaptation"] = True
     migration = migrate_mpc_learning_authority(defaults=config)
-    assert migration.snapshot["version"] == 6
+    assert migration.snapshot["version"] == 7
     assert ControllerModelStore().load_strict("mpc") == migration.snapshot
     first_row = rows[0]
     repository = LearningTrajectoryRepository()
@@ -1947,7 +1949,7 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
                 return None
             return (
                 snapshot
-                if snapshot.get("version") == 6
+                if snapshot.get("version") == 7
                 and identities.get("active_digest") == _EXACT_V6_ACTIVE_DIGEST
                 and snapshot.get("challenger_authority") is None
                 else None
@@ -1958,11 +1960,11 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
             _wait_until(
                 restored_v6_projection,
                 timeout_s=5.0,
-                description="the exact restored v6 active projection",
+                description="the exact restored v7 active projection",
             ),
         )
         assert _identity(restored_v6) == (_EXACT_V6_ACTIVE_DIGEST, 0)
-        assert restored_v6["schema"] == "pifire-grey-learning/v6"
+        assert restored_v6["schema"] == "pifire-grey-learning/v7"
         assert {"challenger", "window", "candidate_pair"}.isdisjoint(restored_v6)
         assert read_model_challenger() is None
         trace_identity = trace.ensure_open(
@@ -2161,7 +2163,7 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
     assert read_model_activation() is None
 
     restart_migration = migrate_mpc_learning_authority(defaults=config)
-    assert restart_migration.snapshot["version"] == 6
+    assert restart_migration.snapshot["version"] == 7
     restart_repository = LearningTrajectoryRepository()
     restart_model_store = ControllerModelStore()
     restart_persistence = ModelPersistenceWorker(
@@ -2216,6 +2218,7 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
                 "segment_id": corpus_slice.segment_id,
                 "through_ordinal": corpus_slice.through_ordinal,
                 "prefix_digest": corpus_slice.prefix_digest,
+                "segment_content_digest": corpus_slice.segment_content_digest,
                 "pre_roll_count": corpus_slice.pre_roll_count,
                 "scored_count": corpus_slice.scored_count,
             }
@@ -2267,8 +2270,8 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
         ),
     ):
         assert _identity(checkpoint) == (_EXACT_V6_ACTIVE_DIGEST, 0)
-        assert checkpoint["version"] == 6
-        assert checkpoint["schema"] == "pifire-grey-learning/v6"
+        assert checkpoint["version"] == 7
+        assert checkpoint["schema"] == "pifire-grey-learning/v7"
         assert checkpoint["revision"] == expected_revision
         assert checkpoint["activation"] == {
             "pending_persistence": False,

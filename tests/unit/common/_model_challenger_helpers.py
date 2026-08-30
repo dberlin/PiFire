@@ -8,7 +8,7 @@ from common.learning_trajectory import (
     FitCorpusIdentity,
     FitCorpusSlice,
     ModelFitLineage,
-    canonical_trajectory_digest,
+    canonical_fit_corpus_digest,
 )
 from common.persistence.model_challenger import ModelChallengerState
 from controller.model_learning.activation import (
@@ -53,29 +53,21 @@ def _corpus(label: str = "challenger") -> FitCorpusIdentity:
         segment_id=f"segment-{label}",
         through_ordinal=2,
         prefix_digest=_digest(f"prefix-{label}"),
+        segment_content_digest=_digest(f"segment-content-{label}"),
         pre_roll_count=1,
         scored_count=2,
     )
-    payload = {
-        "schema_version": 1,
-        "corpus_revision": 7,
-        "fit_partition_digest": _digest(f"partition-{label}"),
-        "slices": [
-            {
-                "segment_id": corpus_slice.segment_id,
-                "through_ordinal": corpus_slice.through_ordinal,
-                "prefix_digest": corpus_slice.prefix_digest,
-                "pre_roll_count": corpus_slice.pre_roll_count,
-                "scored_count": corpus_slice.scored_count,
-            }
-        ],
-    }
     return FitCorpusIdentity(
-        schema_version=payload["schema_version"],
-        corpus_revision=payload["corpus_revision"],
-        fit_partition_digest=payload["fit_partition_digest"],
+        schema_version=2,
+        corpus_revision=7,
+        fit_partition_digest=_digest(f"partition-{label}"),
         slices=(corpus_slice,),
-        corpus_digest=canonical_trajectory_digest(payload),
+        corpus_digest=canonical_fit_corpus_digest(
+            schema_version=2,
+            corpus_revision=7,
+            fit_partition_digest=_digest(f"partition-{label}"),
+            slices=(corpus_slice,),
+        ),
     )
 
 

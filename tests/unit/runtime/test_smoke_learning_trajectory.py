@@ -771,7 +771,13 @@ def test_compatible_smoke_to_hold_keeps_one_segment_with_partial_tail_and_exact_
     runtime.mode_entered(_entered("Hold", at_ms=55_000))
     runtime.observe_temperature(_sample(55_025, 106.5))
     runtime.observe_temperature(_sample(74_975, 108.0))
-    runtime.observe_hold_frame(_hold_frame(1, start_ms=55_000, temp_c=108.0))
+    observation = replace(
+        _hold_frame(1, start_ms=55_000, temp_c=108.75),
+        ambient_c=26.25,
+        probe_source="frame-completion-probe",
+        ambient_source=AmbientSource.MEASURED,
+    )
+    runtime.observe_hold_frame(observation)
 
     segments = _segments(persistence)
     assert {segment.segment_id for segment in segments} == {"segment-1"}
@@ -790,11 +796,44 @@ def test_compatible_smoke_to_hold_keeps_one_segment_with_partial_tail_and_exact_
     assert anchor is not None
     assert anchor.monotonic_ms == 55_025
     assert anchor.wall_ms == _WALL_OFFSET_MS + 55_025
-    assert scored_batches[0].scored[0].temperature_sample_monotonic_ms == 74_975
-    assert scored_batches[0].scored[0].temperature_sample_age_ms == 25
+    scored = scored_batches[0].scored[0]
+    assert scored.chamber_temperature_c == pytest.approx(108.75)
+    assert scored.ambient_temperature_c == pytest.approx(26.25)
+    assert scored.probe_source == "frame-completion-probe"
+    assert scored.ambient_source == AmbientSource.MEASURED.value
+    assert scored.ambient_uncertainty_c == pytest.approx(1.5)
+    assert scored.temperature_sample_monotonic_ms == 74_975
+    assert scored.temperature_sample_wall_ms == _WALL_OFFSET_MS + 74_975
+    assert scored.temperature_sample_age_ms == 25
     assert anchor.chamber_temperature_c == pytest.approx(106.5)
     assert len(scored_batches[0].scored) == 1
     assert scored_batches[0].scored[0].sequence == 3
+
+
+def test_hold_frame_normalizes_live_wall_epoch_bounds_to_mode_monotonic_clock() -> None:
+    runtime, _journal, persistence = _runtime()
+    start_ms = 55_000
+    end_ms = start_ms + _FRAME_MS
+    runtime.mode_entered(_entered("Hold", at_ms=start_ms))
+    runtime.observe_temperature(_sample(start_ms + 25, 109.5))
+    runtime.observe_temperature(_sample(end_ms - 25, 111.0))
+    observation = replace(
+        _hold_frame(1, start_ms=start_ms, temp_c=111.25),
+        frame_start_s=(_WALL_OFFSET_MS + start_ms) / 1_000,
+        frame_end_s=(_WALL_OFFSET_MS + end_ms) / 1_000,
+    )
+
+    runtime.observe_hold_frame(observation)
+
+    (frame,) = _scored_frames(persistence)
+    assert (frame.monotonic_start_ms, frame.monotonic_end_ms) == (start_ms, end_ms)
+    assert (frame.wall_start_ms, frame.wall_end_ms) == (
+        _WALL_OFFSET_MS + start_ms,
+        _WALL_OFFSET_MS + end_ms,
+    )
+    assert frame.chamber_temperature_c == pytest.approx(111.25)
+    assert frame.temperature_sample_monotonic_ms == end_ms - 25
+    assert frame.temperature_sample_wall_ms == _WALL_OFFSET_MS + end_ms - 25
 
 
 def test_pure_hold_begins_without_pre_roll_and_anchors_first_valid_measurement() -> None:
@@ -811,6 +850,62 @@ def test_pure_hold_begins_without_pre_roll_and_anchors_first_valid_measurement()
     assert segment.hold_entry.chamber_temperature_c == pytest.approx(109.5)
     assert len(segment.scored_hold_frames) == 1
     assert segment.scored_hold_frames[0].sequence == 0
+    assert segment.scored_hold_frames[0].role_generation == 4
+    assert tuple(dict(item.items()) for item in segment.generation_audit_ranges) == (
+        {"start_sequence": 0, "end_sequence": 0, "role_generation": 4},
+    )
+
+
+def test_hold_frame_owns_synchronized_temperature_after_late_probe_publication() -> None:
+    runtime, _journal, persistence = _runtime()
+    runtime.mode_entered(_entered("Hold"))
+    runtime.observe_temperature(_sample(25, 109.5))
+    runtime.observe_temperature(
+        _sample(
+            _FRAME_MS + 60,
+            999.0,
+            ambient=99.0,
+            wall_skew_ms=7,
+        )
+    )
+    observation = replace(
+        _hold_frame(1, temp_c=111.25),
+        ambient_c=26.5,
+        probe_source="frame-completion-probe",
+        ambient_source=AmbientSource.MEASURED,
+        ambient_uncertainty=AmbientUncertainty.MEASURED,
+    )
+
+    runtime.observe_hold_frame(observation)
+
+    (frame,) = _scored_frames(persistence)
+    assert frame.monotonic_start_ms == 0
+    assert frame.monotonic_end_ms == _FRAME_MS
+    assert frame.wall_start_ms == _WALL_OFFSET_MS
+    assert frame.wall_end_ms == _WALL_OFFSET_MS + _FRAME_MS
+    assert frame.chamber_temperature_c == pytest.approx(111.25)
+    assert frame.ambient_temperature_c == pytest.approx(26.5)
+    assert frame.probe_valid is True
+    assert frame.probe_source == "frame-completion-probe"
+    assert frame.ambient_source == AmbientSource.MEASURED.value
+    assert frame.temperature_sample_monotonic_ms == _FRAME_MS
+    assert frame.temperature_sample_wall_ms == _WALL_OFFSET_MS + _FRAME_MS
+    assert frame.temperature_sample_age_ms == 0
+    assert frame.temperature_sample_wall_age_ms == 0
+    assert frame.temperature_sample_clock_skew_ms == 0
+    assert frame.source_temperature_units == "C"
+    assert frame.settings_revision == 7
+
+
+def test_hold_frame_without_probe_source_fails_closed_as_probe_gap() -> None:
+    runtime, _journal, persistence = _runtime()
+    runtime.mode_entered(_entered("Hold"))
+    runtime.observe_temperature(_sample(25, 109.5))
+
+    runtime.observe_hold_frame(replace(_hold_frame(1), probe_source=None))
+
+    assert _scored_frames(persistence) == []
+    assert runtime.status().last_break_reason is TrajectoryBreakReason.PROBE_GAP
 
 
 def test_fixed_fan_hold_uses_exact_delivery_journal_when_controller_duty_is_absent() -> None:
@@ -859,6 +954,51 @@ def test_delayed_first_hold_frame_reanchors_inside_its_scored_interval() -> None
     assert segment.hold_entry.monotonic_ms == _FRAME_MS + 25
     assert segment.hold_entry.chamber_temperature_c == pytest.approx(110.0)
     assert len(segment.scored_hold_frames) == 1
+
+
+def test_post_gap_hold_frame_reanchors_from_its_synchronized_terminal_measurement() -> None:
+    runtime, _journal, persistence = _runtime()
+    runtime.mode_entered(_entered("Hold"))
+    runtime.observe_temperature(_sample(25, 109.5))
+    runtime.observe_hold_frame(_hold_frame(1, temp_c=111.0))
+    runtime.intervention(_boundary(TrajectoryBreakReason.RECORDER_GAP, _FRAME_MS))
+    runtime.observe_temperature(_sample(2 * _FRAME_MS + 60, 999.0))
+    observation = replace(
+        _hold_frame(2, start_ms=_FRAME_MS, temp_c=112.25),
+        probe_source="frame-completion-probe",
+    )
+
+    runtime.observe_hold_frame(observation)
+
+    assert len(_scored_frames(persistence)) == 2
+    replacement = _segments(persistence)[-1]
+    assert replacement.hold_entry is not None
+    assert replacement.hold_entry.monotonic_ms == 2 * _FRAME_MS
+    assert replacement.hold_entry.wall_ms == _WALL_OFFSET_MS + 2 * _FRAME_MS
+    assert replacement.hold_entry.chamber_temperature_c == pytest.approx(112.25)
+    assert replacement.hold_entry.probe_source == "frame-completion-probe"
+    assert replacement.scored_hold_frames == (_scored_frames(persistence)[-1],)
+
+
+def test_post_gap_hold_frame_reanchors_without_duplicate_temperature_callback() -> None:
+    runtime, _journal, persistence = _runtime()
+    runtime.mode_entered(_entered("Hold"))
+    runtime.observe_temperature(_sample(25, 109.5))
+    runtime.observe_hold_frame(_hold_frame(1, temp_c=111.0))
+    runtime.intervention(_boundary(TrajectoryBreakReason.RECORDER_GAP, _FRAME_MS))
+    observation = replace(
+        _hold_frame(2, start_ms=_FRAME_MS, temp_c=112.25),
+        probe_source="frame-completion-probe",
+    )
+
+    runtime.observe_hold_frame(observation)
+
+    assert len(_scored_frames(persistence)) == 2
+    replacement = _segments(persistence)[-1]
+    assert replacement.hold_entry is not None
+    assert replacement.hold_entry.monotonic_ms == 2 * _FRAME_MS
+    assert replacement.hold_entry.chamber_temperature_c == pytest.approx(112.25)
+    assert replacement.hold_entry.probe_source == "frame-completion-probe"
 
 
 def test_scored_rollover_adopts_successor_and_reanchors_next_scored_interval() -> None:

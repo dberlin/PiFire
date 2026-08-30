@@ -16,6 +16,7 @@ from typing import Protocol, cast
 from common.control_trace import (
     COMPATIBLE_TRACE_SCHEMA_VERSIONS,
     ActuationMode,
+    AllocationClampReason,
     AllocationPayload,
     AppliedOutputPayload,
     ControllerType,
@@ -246,8 +247,12 @@ def validate_records(records: Sequence[ControlTraceRecord]) -> ReplayReport:
     _validate_framed_allocations(framed_frames, allocations, add)
     _validate_framed_timeline(framed_frames, add)
     for revision, (index, payload) in updates.items():
-        if isinstance(payload, MpcUpdatePayload) and revision not in allocations:
-            add(ReplayIssueCode.MISSING_ALLOCATION, "accepted MPC update has no joined allocation", index)
+        if isinstance(payload, (MpcUpdatePayload, PidSpUpdatePayload)) and revision not in allocations:
+            add(
+                ReplayIssueCode.MISSING_ALLOCATION,
+                "accepted learning update has no joined allocation",
+                index,
+            )
     _validate_applied_outputs(applied_outputs, framed_frames, updates, ordered, safety_events, add)
     return ReplayReport(session_record.session_id, session.controller, tuple(issues))
 
@@ -397,9 +402,7 @@ def _validate_allocations(
         if update is None:
             add(ReplayIssueCode.MISSING_UPDATE, "allocation cannot join its result revision", index)
             continue
-        if not isinstance(update[1], MpcUpdatePayload):
-            add(ReplayIssueCode.ALLOCATION_MISMATCH, "allocation can join only an MPC update", index)
-            continue
+        update_payload = update[1]
         if payload.allocator_revision != ALLOCATOR_REVISION:
             add(
                 ReplayIssueCode.UNSUPPORTED_ALLOCATOR,
@@ -407,21 +410,47 @@ def _validate_allocations(
                 index,
             )
             continue
-        expected = allocate(
-            payload.normalized_combustion_load,
-            u_max=payload.u_max,
-            fan_min_pct=payload.fan_min_pct,
-            fan_max_pct=payload.fan_max_pct,
-            enable_fan=payload.fan_enabled,
-        )
-        if not (
-            _close(payload.normalized_combustion_load, update[1].bounded_firing_load)
-            and _close(payload.normalized_combustion_load, expected.normalized_combustion_load)
-            and _close(payload.requested_auger_duty, expected.auger_duty)
-            and _optional_close(payload.requested_fan_duty, expected.fan_duty)
-            and payload.auger_clamp_reason is expected.auger_clamp_reason
-            and payload.fan_clamp_reason is expected.fan_clamp_reason
-        ):
+        if isinstance(update_payload, MpcUpdatePayload):
+            expected = allocate(
+                payload.normalized_combustion_load,
+                u_max=payload.u_max,
+                fan_min_pct=payload.fan_min_pct,
+                fan_max_pct=payload.fan_max_pct,
+                enable_fan=payload.fan_enabled,
+            )
+            matches = (
+                _close(payload.normalized_combustion_load, update_payload.bounded_firing_load)
+                and _close(payload.normalized_combustion_load, expected.normalized_combustion_load)
+                and _close(payload.requested_auger_duty, expected.auger_duty)
+                and _optional_close(payload.requested_fan_duty, expected.fan_duty)
+                and payload.auger_clamp_reason is expected.auger_clamp_reason
+                and payload.fan_clamp_reason is expected.fan_clamp_reason
+            )
+        elif isinstance(update_payload, PidSpUpdatePayload):
+            if update_payload.raw_output < 0.0:
+                expected_clamp = AllocationClampReason.AUGER_MIN
+            elif update_payload.raw_output > 1.0:
+                expected_clamp = AllocationClampReason.AUGER_MAX
+            elif payload.auger_clamp_reason is AllocationClampReason.AUGER_NONFINITE:
+                expected_clamp = AllocationClampReason.AUGER_NONFINITE
+            else:
+                expected_clamp = AllocationClampReason.NONE
+            matches = (
+                _close(payload.normalized_combustion_load, update_payload.requested_output)
+                and _close(payload.requested_auger_duty, update_payload.requested_output)
+                and payload.requested_fan_duty is None
+                and _close(payload.u_max, 1.0)
+                and _close(payload.fan_min_pct, 0.0)
+                and _close(payload.fan_max_pct, 0.0)
+                and not payload.fan_enabled
+                and not payload.mpc_has_fan_authority
+                and payload.auger_clamp_reason is expected_clamp
+                and payload.fan_clamp_reason is AllocationClampReason.NONE
+            )
+        else:
+            add(ReplayIssueCode.ALLOCATION_MISMATCH, "allocation can join only an MPC or PID-SP update", index)
+            continue
+        if not matches:
             add(ReplayIssueCode.ALLOCATION_MISMATCH, "allocation outputs do not reproduce from recorded inputs", index)
 
 

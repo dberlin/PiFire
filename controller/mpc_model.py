@@ -132,11 +132,13 @@ _KELVIN = 273.15
 #: 3  migration input only: variable-delay grey snapshot with retired nested learners
 #: 4  migration input only: fixed-delay checkpoint with inline challenger authority
 #: 5  migration input only: fixed-delay checkpoint with retired cook-refit state
-#: 6  fixed eight-delay grey checkpoint with a durable challenger reference
+#: 6  migration input only: fixed eight-delay checkpoint with durable challenger reference
+#: 7  installation-bound fixed eight-delay grey checkpoint
 #:
-#: Versions 3 through 5 are interpreted only by startup migration. Runtime
-#: restore and every current writer accept/emit version 6 exclusively.
-MODEL_SCHEMA = 6
+#: Versions 3 through 6 are interpreted only by startup migration. Runtime
+#: restore accepts legacy checkpoints only as inert migration input; current
+#: writers emit installation-bound version 7 exclusively.
+MODEL_SCHEMA = 7
 
 
 @dataclass(frozen=True, slots=True)

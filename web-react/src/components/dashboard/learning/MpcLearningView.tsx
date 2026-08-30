@@ -56,7 +56,7 @@ function yesNo(value: boolean): string {
   return value ? "yes" : "no";
 }
 
-function checkTone(status: CheckStatus): string {
+function checkTone(status: CheckStatus | undefined): string {
   if (status === "passed") return "text-ok";
   if (status === "failed") return "text-danger";
   if (status === "pending") return "text-accent";

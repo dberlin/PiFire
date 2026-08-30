@@ -341,12 +341,22 @@ function validateCorpus(value: unknown) {
     const slice = record(value, path);
     exactKeys(
       slice,
-      ["segment_id", "through_ordinal", "prefix_digest", "pre_roll_count", "scored_count"],
+      [
+        "segment_id",
+        "through_ordinal",
+        "prefix_digest",
+        "segment_content_digest",
+        "pre_roll_count",
+        "scored_count",
+      ],
       path,
     );
     nonBlankString(slice.segment_id, `${path}.segment_id`);
     nonNegativeInteger(slice.through_ordinal, `${path}.through_ordinal`);
     digest(slice.prefix_digest, `${path}.prefix_digest`);
+    nullable(slice.segment_content_digest, (item) =>
+      digest(item, `${path}.segment_content_digest`),
+    );
     nonNegativeInteger(slice.pre_roll_count, `${path}.pre_roll_count`);
     nonNegativeInteger(slice.scored_count, `${path}.scored_count`);
   });

@@ -22,7 +22,10 @@ from controller.model_learning.activation import (
     canonical_snapshot_digest,
 )
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
-from controller.model_learning.migration import migrate_mpc_learning_authority
+from controller.model_learning.migration import (
+    commit_restore_revalidation_authority,
+    migrate_mpc_learning_authority,
+)
 from controller.model_learning.report import backend_learning_report
 from controller.mpc_factory import MpcPairFactory
 from controller.mpc_model import MODEL_SCHEMA
@@ -246,14 +249,14 @@ def _stored_controller():
     return json.loads(datastore.get_blob(MODEL_STATE_KEY))["models"]["mpc"]
 
 
-def test_model_schema_is_grey_v6():
-    assert MODEL_SCHEMA == 6
+def test_model_schema_is_grey_v7():
+    assert MODEL_SCHEMA == 7
 
 
 def test_v3_migration_preserves_only_bounded_top_level_grey_data():
     migrated = migrate_grey_learning_snapshot(_v3())
 
-    assert migrated["version"] == 6
+    assert migrated["version"] == 7
     assert migrated["revision"] == 17
     assert migrated["structure"] == {"kind": "grey-box", "n_delay": 8, "state_count": 10}
     assert migrated["active"]["parameters"] == PARAMS
@@ -283,20 +286,20 @@ def test_v3_migration_preserves_only_bounded_top_level_grey_data():
     }
 
 
-def test_v4_normalizes_to_v6_without_importing_an_inline_candidate():
+def test_v4_normalizes_to_v7_without_importing_an_inline_candidate():
     migrated = migrate_grey_learning_snapshot(_v4())
 
-    assert migrated["version"] == 6
-    assert migrated["schema"] == "pifire-grey-learning/v6"
+    assert migrated["version"] == 7
+    assert migrated["schema"] == "pifire-grey-learning/v7"
     assert migrated["challenger_authority"] is None
     assert {"challenger", "window", "candidate_pair", "cook_refit"}.isdisjoint(migrated)
 
 
-def test_v5_normalizes_to_v6_without_retaining_cook_refit():
+def test_v5_normalizes_to_v7_without_retaining_cook_refit():
     migrated = migrate_grey_learning_snapshot(_v5())
 
-    assert migrated["version"] == 6
-    assert migrated["schema"] == "pifire-grey-learning/v6"
+    assert migrated["version"] == 7
+    assert migrated["schema"] == "pifire-grey-learning/v7"
     assert migrated["challenger_authority"] is None
     assert "cook_refit" not in migrated
 
@@ -363,7 +366,7 @@ def test_atomic_authority_migration_matrix(ds, activation, controller, expected_
     assert result.source == expected_source
     assert result.reason == reason
     assert stored == result.snapshot
-    assert stored["version"] == 6
+    assert stored["version"] == 7
     assert stored["active"]["parameters"]["theta"] == expected_theta
     migration = json.loads(datastore.get_blob("mpc:model_activation_migration_input"))
     assert migration["current"]["snapshot"] == stored
@@ -586,8 +589,8 @@ def test_current_active_precedes_rollback_and_controller_authorities(ds):
         (
             {
                 "model_kind": "grey-box",
-                "model_schema": 6,
-                "snapshot": {"version": 6},
+                "model_schema": 7,
+                "snapshot": {"version": 7},
             },
             "schema-invalidated",
         ),
@@ -640,7 +643,7 @@ def test_malformed_serialized_documents_are_replaced_by_defaults_without_partial
         "candidate": None,
         "current": {
             "model_kind": "grey-box",
-            "model_schema": 6,
+            "model_schema": 7,
             "snapshot": result.snapshot,
             "source": "defaults",
         },
@@ -915,6 +918,91 @@ def test_valid_legacy_v4_ready_review_imports_one_evaluating_challenger(ds):
     assert _stored_controller() == result.snapshot
 
 
+def test_restore_revalidation_commit_publishes_complete_fallback_authority(ds) -> None:
+    legacy, _, _ = _ready_review_v4()
+    _seed_controller(legacy)
+    imported = migrate_mpc_learning_authority(defaults=PARAMS)
+    challenger = read_model_challenger()
+    assert challenger is not None
+    assert imported.snapshot["active_pair"] == challenger.incumbent.to_dict()
+
+    commit_restore_revalidation_authority(
+        snapshot=imported.snapshot,
+        challenger=challenger,
+        expected_challenger=challenger,
+        fallback_pair=challenger.incumbent,
+    )
+
+    activation = read_model_activation()
+    assert _stored_controller() == imported.snapshot
+    assert activation is not None
+    assert activation.phase == ActivationPhase.ABORTED.value
+    assert activation.transaction_id is not None
+    assert activation.incumbent_pair == challenger.incumbent
+    assert activation.candidate_pair == challenger.incumbent
+    assert activation.rollback_pair == challenger.incumbent
+    assert activation.reason == "installation-restore-revalidation"
+
+
+def test_restore_revalidation_commit_rolls_back_checkpoint_when_activation_write_fails(
+    ds,
+) -> None:
+    legacy, _, _ = _ready_review_v4()
+    _seed_controller(legacy)
+    imported = migrate_mpc_learning_authority(defaults=PARAMS)
+    challenger = read_model_challenger()
+    assert challenger is not None
+    commit_restore_revalidation_authority(
+        snapshot=imported.snapshot,
+        challenger=challenger,
+        expected_challenger=challenger,
+        fallback_pair=challenger.incumbent,
+    )
+    checkpoint_before = _stored_controller()
+    activation_before = read_model_activation()
+    replacement_challenger = replace(
+        challenger,
+        challenger_id="restore-revalidation-replacement",
+        revision=0,
+        created_ms=challenger.created_ms + 1,
+        updated_ms=challenger.updated_ms + 1,
+    )
+    replacement = {
+        **imported.snapshot,
+        "revision": imported.snapshot["revision"] + 1,
+        "challenger_authority": {
+            "challenger_id": replacement_challenger.challenger_id,
+            "revision": replacement_challenger.revision,
+        },
+    }
+    with datastore.connection() as connection:
+        connection.execute(
+            """
+            CREATE TRIGGER reject_restore_revalidation
+            BEFORE UPDATE ON model_activation_state
+            BEGIN
+                SELECT RAISE(ABORT, 'forced activation write failure');
+            END
+            """
+        )
+
+    try:
+        with pytest.raises(sqlite3.IntegrityError, match="forced activation write failure"):
+            commit_restore_revalidation_authority(
+                snapshot=replacement,
+                challenger=replacement_challenger,
+                expected_challenger=challenger,
+                fallback_pair=challenger.incumbent,
+            )
+    finally:
+        with datastore.connection() as connection:
+            connection.execute("DROP TRIGGER reject_restore_revalidation")
+
+    assert _stored_controller() == checkpoint_before
+    assert read_model_activation() == activation_before
+    assert read_model_challenger() == challenger
+
+
 @pytest.mark.parametrize(
     "invalid_lineage",
     [
@@ -980,7 +1068,7 @@ def test_legacy_v4_prepared_activation_aborts_without_importing_candidate(ds):
 
 
 @pytest.mark.parametrize("mismatch", ["challenger-id", "revision"])
-def test_v6_challenger_reference_mismatch_retires_instead_of_projecting(ds, mismatch: str) -> None:
+def test_v7_challenger_reference_mismatch_retires_instead_of_projecting(ds, mismatch: str) -> None:
     legacy, _, _ = _ready_review_v4()
     _seed_controller(legacy)
     imported = migrate_mpc_learning_authority(defaults=PARAMS)
@@ -1004,7 +1092,7 @@ def test_v6_challenger_reference_mismatch_retires_instead_of_projecting(ds, mism
     assert retired.retirement_reason is not None and "reference" in retired.retirement_reason
 
 
-def test_v6_older_revision_reference_adopts_newer_durable_progress(ds) -> None:
+def test_v7_older_revision_reference_adopts_newer_durable_progress(ds) -> None:
     legacy, _, _ = _ready_review_v4()
     _seed_controller(legacy)
     imported = migrate_mpc_learning_authority(defaults=PARAMS)

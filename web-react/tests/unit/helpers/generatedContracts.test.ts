@@ -297,6 +297,55 @@ describe("generated web contract ownership", () => {
     expect(exports.has("ModelActivationAcknowledgement")).toBe(false);
   });
 
+  it("publishes the complete PID-SP schema-2 learning contract and nullable unavailable basin", () => {
+    const schema = JSON.parse(
+      readFileSync(join(WEB_ROOT, "schema/contracts/learning.schema.json"), "utf8"),
+    ) as {
+      $defs: Record<
+        string,
+        {
+          required?: string[];
+          properties?: Record<string, unknown>;
+          anyOf?: Array<{ $ref?: string }>;
+        }
+      >;
+    };
+    const report = schema.$defs.PidSpLearningReport;
+    expect([...(report?.required ?? [])].sort()).toEqual(
+      [
+        "schema_version",
+        "controller",
+        "status",
+        "live",
+        "revision",
+        "gates",
+        "confirmation",
+        "identifier",
+        "predictor",
+        "checkpoint",
+        "comparison",
+        "active_model",
+        "delay_evidence",
+        "failure",
+      ].sort(),
+    );
+    expect(schema.$defs.PidSpCheckpointModel?.required).toEqual([
+      "schema_version",
+      "revision",
+      "provenance",
+      "selected",
+    ]);
+    expect(schema.$defs.PidSpCheckpointParameters?.anyOf?.map((item) => item.$ref)).toEqual([
+      "#/$defs/IpdtPidSpParameters",
+      "#/$defs/FopdtPidSpParameters",
+      "#/$defs/SopdtPidSpParameters",
+    ]);
+    expect(schema.$defs.SopdtPidSpParameters?.required).toEqual(["K", "tau_1", "tau_2", "theta"]);
+    expect(
+      JSON.stringify(schema.$defs.PidSpFormComparisonReport?.properties?.basin_lower_s),
+    ).toContain('"null"');
+  });
+
   it("keeps migrated helpers free of Python-owned interface and type declarations", () => {
     const residuals = residualMirrors(SCANNED_ROOTS, pythonOwnedNames());
     expect(residuals).toEqual([]);

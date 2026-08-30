@@ -561,7 +561,7 @@ def _trajectory_segment(
     )
     return LearningTrajectorySegment(
         schema_version=1,
-        observation_schema_version=2,
+        observation_schema_version=3,
         segment_id=segment_id,
         cook_id=cook_id,
         trajectory_session_id=f"trajectory-{segment_id}",
@@ -865,6 +865,10 @@ def test_explicit_v7_import_is_exact_and_second_import_is_idempotent(
     assert frame.delivered_auger_on_seconds == 10.8
     assert frame.realized_auger_duty == 0.54
     assert frame.normalized_combustion_load == 0.6
+    assert frame.role_generation == 3
+    assert tuple(dict(item.items()) for item in imported.generation_audit_ranges) == (
+        {"start_sequence": 1, "end_sequence": 1, "role_generation": 3},
+    )
 
     imported_status = repository.status()
     second = import_cookfile_learning_trajectory(archive, repository=repository)

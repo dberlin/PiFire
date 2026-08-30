@@ -2,30 +2,53 @@
 
 from __future__ import annotations
 
+import json
+import logging
+import threading
+import time
+import zipfile
 from dataclasses import dataclass
 from hashlib import sha256
+from io import BytesIO
+from itertools import count, pairwise
 from math import ceil
-from typing import Any
+from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
+import controller.runtime.model_fitting as model_fitting_module
 import controller.runtime.modes.hold as hold_module
 import controller.runtime.runner as runner_module
+from common.common import ErrorKind
 from common.control_delta import control_delta
 from common.control_trace import (
     AllocationClampReason,
+    AllocationPayload,
     AmbientSource,
     AmbientUncertainty,
     ControllerType,
+    FramedPulseFramePayload,
+    MpcFailureState,
+    MpcUpdatePayload,
+    PidSpUpdatePayload,
     TraceEventKind,
 )
 from common.controller_model_state import ControllerModelStore
 from common.learning_trajectory import TrajectoryBreakReason
-from common.model_evidence import ConfidenceDecisionEvidence, EvidenceKind, ModelEvidenceRecord
+from common.model_evidence import (
+    ConfidenceDecisionEvidence,
+    EvidenceKind,
+    ModelEvidenceRecord,
+    PidSpFitDecisionEvidence,
+)
 from common.persistence import runtime as runtime_persistence
-from common.persistence.control_trace import read_control_trace_cook, read_control_trace_session
+from common.persistence.control_trace import (
+    read_control_trace_cook,
+    read_control_trace_session,
+)
 from common.persistence.learning_trajectory import LearningTrajectoryRepository
-from common.persistence.model_evidence import read_model_activation
+from common.persistence.model_evidence import read_model_activation, read_model_evidence
 from controller.acados import GreyBoxMPCConfig
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.model_learning.activation import PreparedActivationRecord
@@ -629,3 +652,704 @@ def test_cold_and_smoke_started_hold_fit_stable_parameters_from_one_physical_tra
         assert warm_value == pytest.approx(float(truth[name]), rel=0.05)
         assert cold_value == pytest.approx(float(truth[name]), rel=0.05)
         assert warm_value == pytest.approx(cold_value, rel=0.03)
+
+
+_REAL_COOK_FIXTURE_ROOT = Path(__file__).parents[1] / "fixtures" / "real_cook_learning"
+_REAL_COOK_MANIFEST_SHA256 = "93be80c440e31bb34dfbc9dd13f8f04842e339e2dff7d796c8f17b6dd1164ae6"
+
+
+@dataclass(frozen=True, slots=True)
+class _RealCookHoldStream:
+    controller: str
+    cook_id: str
+    temperatures: tuple[tuple[int, float, float], ...]
+    hold_start_index: int
+    controller_config: dict[str, Any]
+    control_period_seconds: float
+    pulse_slot_seconds: float
+    pulse_frame_seconds: float
+    fan_pwm_capable: bool
+
+
+def _load_real_cook_hold_stream(campaign_id: str, cook_name: str) -> _RealCookHoldStream:
+    manifest_bytes = (_REAL_COOK_FIXTURE_ROOT / "manifest.json").read_bytes()
+    assert sha256(manifest_bytes).hexdigest() == _REAL_COOK_MANIFEST_SHA256
+    manifest = json.loads(manifest_bytes)
+    campaign = next(item for item in manifest["campaigns"] if item["id"] == campaign_id)
+    cook = next(item for item in campaign["cooks"] if Path(item["path"]).name == cook_name)
+    archive_bytes = (_REAL_COOK_FIXTURE_ROOT / cook["path"]).read_bytes()
+    assert sha256(archive_bytes).hexdigest() == cook["sanitized_sha256"]
+
+    with zipfile.ZipFile(BytesIO(archive_bytes)) as archive:
+        metadata = json.loads(archive.read("metadata.json"))
+        sessions = json.loads(archive.read("sessions.json"))
+        transitions = json.loads(archive.read("transitions.json"))
+        chamber_samples = json.loads(archive.read("chamber_samples.json"))
+
+    assert metadata["controller"] == campaign["controller"]
+    assert metadata["cook_start_ms"] == cook["cook_start_ms"]
+    assert metadata["cook_end_ms"] == cook["cook_end_ms"]
+    assert metadata["chamber_sample_count"] == len(chamber_samples)
+    assert transitions
+    first_transition = min(transitions, key=lambda item: item["timestamp_ms"])
+    session = next(item for item in sessions if item["session_id"] == first_transition["session_id"])
+    payload = session["payload"]
+    assert payload["controller"] == campaign["controller"]
+    assert payload["temperature_unit"] == metadata["units"] == "F"
+    assert first_transition["timestamp_ms"] >= metadata["cook_start_ms"]
+
+    temperatures = tuple(
+        (
+            int(sample["timestamp_ms"]),
+            float(sample["chamber_temperature_f"]),
+            float(sample["setpoint_f"]),
+        )
+        for sample in chamber_samples
+        if metadata["cook_start_ms"] <= int(sample["timestamp_ms"]) <= metadata["cook_end_ms"]
+    )
+    assert temperatures
+    assert all(left[0] < right[0] for left, right in pairwise(temperatures))
+    assert temperatures[0][0] == metadata["cook_start_ms"]
+    assert temperatures[-1][0] == metadata["cook_end_ms"]
+    hold_start_index = next(
+        index for index, sample in enumerate(temperatures) if sample[0] >= first_transition["timestamp_ms"]
+    )
+    assert temperatures[hold_start_index][2] == pytest.approx(float(first_transition["setpoint_c"]) * 9.0 / 5.0 + 32.0)
+
+    raw_config = payload["controller_config"]
+    assert isinstance(raw_config, list)
+    controller_config = {str(item["key"]): item["value"] for item in raw_config}
+    return _RealCookHoldStream(
+        controller=str(campaign["controller"]),
+        cook_id=str(metadata["cook_id"]),
+        temperatures=temperatures,
+        hold_start_index=hold_start_index,
+        controller_config=controller_config,
+        control_period_seconds=float(payload["control_period_seconds"]),
+        pulse_slot_seconds=float(payload["pulse_slot_seconds"]),
+        pulse_frame_seconds=float(payload["pulse_frame_seconds"]),
+        fan_pwm_capable=bool(payload["fan_pwm_capable"]),
+    )
+
+
+class _DeterministicRunnerPeriodGate:
+    def __init__(self, *, start_s: float, period_s: float) -> None:
+        self._condition = threading.Condition()
+        self._period_s = period_s
+        self._next_release_s = start_s + period_s
+        self._wait_count = 0
+        self._release_count = 0
+        self._closed = False
+
+    def __call__(self, _period_s: float) -> None:
+        with self._condition:
+            self._wait_count += 1
+            wait_number = self._wait_count
+            self._condition.notify_all()
+            self._condition.wait_for(lambda: self._closed or self._release_count >= wait_number)
+
+    def advance_to(self, now_s: float) -> None:
+        if now_s < self._next_release_s:
+            return
+        while self._next_release_s <= now_s:
+            self._next_release_s += self._period_s
+        with self._condition:
+            target = self._release_count + 1
+            assert self._condition.wait_for(
+                lambda: self._closed or self._wait_count >= target,
+                timeout=5.0,
+            )
+            if self._closed:
+                return
+            self._release_count = target
+            self._condition.notify_all()
+            assert self._condition.wait_for(
+                lambda: self._closed or self._wait_count >= target + 1,
+                timeout=5.0,
+            )
+
+    def close(self) -> None:
+        with self._condition:
+            self._closed = True
+            self._condition.notify_all()
+
+
+class _RealCookClock:
+    def __init__(self, stream: _RealCookHoldStream, *, start_index: int) -> None:
+        self._stream = stream
+        start_ms = stream.temperatures[start_index][0]
+        end_ms = stream.temperatures[-1][0]
+        slot_ms = round(stream.pulse_slot_seconds * 1_000)
+        source_timestamps = {timestamp_ms for timestamp_ms, _, _ in stream.temperatures[start_index:]}
+        source_timestamps.update(range(start_ms, end_ms + 1, slot_ms))
+        source_timestamps.add(end_ms)
+        self._ticks = tuple(sorted(source_timestamps))
+        self._tick_index = 0
+        self._sample_index = start_index
+        self._period_gate: _DeterministicRunnerPeriodGate | None = None
+        self._pause_next_sleep = False
+
+    @property
+    def index(self) -> int:
+        return self._sample_index
+
+    @property
+    def timestamp_ms(self) -> int:
+        return self._ticks[self._tick_index]
+
+    def now(self) -> float:
+        return self.timestamp_ms / 1_000
+
+    def bind_period_gate(self, gate: _DeterministicRunnerPeriodGate) -> None:
+        self._period_gate = gate
+
+    def pause_next_sleep(self) -> None:
+        self._pause_next_sleep = True
+
+    def sleep(self, seconds: float) -> None:
+        assert seconds >= 0.0
+        if self._pause_next_sleep:
+            self._pause_next_sleep = False
+            return
+        if self._tick_index + 1 < len(self._ticks):
+            self._tick_index += 1
+        while (
+            self._sample_index + 1 < len(self._stream.temperatures)
+            and self._stream.temperatures[self._sample_index + 1][0] <= self.timestamp_ms
+        ):
+            self._sample_index += 1
+        if self._period_gate is not None:
+            self._period_gate.advance_to(self.now())
+
+    def pair_ms(self) -> tuple[int, int]:
+        return self.timestamp_ms, self.timestamp_ms
+
+
+class _RealCookProbes:
+    def __init__(
+        self,
+        stream: _RealCookHoldStream,
+        clock: _RealCookClock,
+        store: SqliteStore,
+        *,
+        terminal_index: int,
+        terminal_mode: str,
+    ) -> None:
+        self._stream = stream
+        self._clock = clock
+        self._store = store
+        self._probes = FakeProbes()
+        self._last_setpoint: float | None = None
+        self._terminal_index = terminal_index
+        self._terminal_mode = terminal_mode
+        self._terminal_requested = False
+        self.visited_timestamps: list[int] = []
+
+    def read_probes(self, *, excitation=None, now=None):
+        timestamp_ms, temperature_f, setpoint_f = self._stream.temperatures[self._clock.index]
+        self.visited_timestamps.append(timestamp_ms)
+        if setpoint_f > 0.0 and setpoint_f != self._last_setpoint:
+            self._last_setpoint = setpoint_f
+            self._store.enqueue_control_delta(
+                control_delta(
+                    set_values={
+                        "primary_setpoint": setpoint_f,
+                        "updated": False,
+                    }
+                ),
+                origin="real-cook-hold-setpoint",
+            )
+        if self._clock.index == self._terminal_index and not self._terminal_requested:
+            self._terminal_requested = True
+            self._clock.pause_next_sleep()
+            self._store.enqueue_control_delta(
+                control_delta(
+                    set_values={
+                        "mode": self._terminal_mode,
+                        "primary_setpoint": (setpoint_f if self._terminal_mode == "Hold" else 0.0),
+                        "updated": True,
+                    }
+                ),
+                origin="real-cook-hold-terminal",
+            )
+        return {
+            "primary": {"Grill": temperature_f},
+            "food": {},
+            "aux": {},
+            "tr": {},
+        }
+
+    def arm_stop(self) -> None:
+        self._terminal_index = len(self._stream.temperatures) - 1
+        self._terminal_mode = "Stop"
+        self._terminal_requested = False
+
+    def __getattr__(self, name: str):
+        return getattr(self._probes, name)
+
+
+def _wait_for_fit_worker(runner) -> None:
+    deadline = time.monotonic() + 30.0
+    while True:
+        worker = getattr(runner, "_corpus_fit_thread", None)
+        if worker is None:
+            return
+        remaining = deadline - time.monotonic()
+        if remaining <= 0.0:
+            break
+        worker.join(timeout=min(remaining, 0.1))
+        if getattr(runner, "_corpus_fit_thread", None) is None:
+            return
+    assert getattr(runner, "_corpus_fit_thread", None) is None
+
+
+def _assert_real_cook_hold_smoke(
+    ds,
+    monkeypatch,
+    caplog,
+    *,
+    campaign_id: str,
+    cook_name: str,
+    expected_controller: ControllerType,
+) -> None:
+    stream = _load_real_cook_hold_stream(campaign_id, cook_name)
+    assert stream.controller == expected_controller.value
+
+    settings = base_settings()
+    settings["globals"]["units"] = "F"
+    settings["controller"]["selected"] = stream.controller
+    configured = dict(settings["controller"]["config"][stream.controller])
+    configured.update(stream.controller_config)
+    configured["enable_identification"] = True
+    settings["controller"]["config"][stream.controller] = configured
+    settings["platform"]["dc_fan"] = stream.fan_pwm_capable
+    settings["safety"]["maxtemp"] = 600.0
+
+    warm_with_smoke = expected_controller is ControllerType.MPC
+    if expected_controller is ControllerType.MPC:
+        required_pre_roll_frames = ceil(3.0 * float(configured["theta"]) / stream.pulse_frame_seconds) + 2
+        smoke_start_ms = stream.temperatures[stream.hold_start_index][0] - round(
+            required_pre_roll_frames * stream.pulse_frame_seconds * 1_000
+        )
+        stream_start_index = next(
+            index for index, sample in enumerate(stream.temperatures) if sample[0] >= smoke_start_ms
+        )
+    else:
+        stream_start_index = stream.hold_start_index
+    first_setpoint = next(
+        setpoint for _, _, setpoint in stream.temperatures[stream.hold_start_index :] if setpoint > 0.0
+    )
+    control = base_control("Smoke" if warm_with_smoke else "Hold")
+    control["cook_id"] = stream.cook_id
+    control["primary_setpoint"] = 0.0 if warm_with_smoke else first_setpoint
+    control["safety"]["startuptemp"] = 0
+    control["safety"]["afterstarttemp"] = 0
+
+    store = SqliteStore()
+    real_grey_fit_worker_start = model_fitting_module.GreyFitWorker.start
+    captured_grey_fit_workers: list[Any] = []
+
+    def capture_grey_fit_worker_start(worker):
+        if all(captured is not worker for captured in captured_grey_fit_workers):
+            captured_grey_fit_workers.append(worker)
+        return real_grey_fit_worker_start(worker)
+
+    monkeypatch.setattr(
+        model_fitting_module.GreyFitWorker,
+        "start",
+        capture_grey_fit_worker_start,
+    )
+    _seed_sqlite_store(store, settings, control)
+    clock = _RealCookClock(stream, start_index=stream_start_index)
+    journal = ActuationDeliveryJournal(
+        monotonic_clock=lambda: clock.timestamp_ms,
+        wall_clock=lambda: clock.timestamp_ms,
+    )
+    physical_grill = FakeGrillPlatform(
+        dc_fan=stream.fan_pwm_capable,
+        outputs=tuple(settings["platform"]["outputs"]),
+    )
+    grill = DeliveredGrillPlatform(physical_grill, journal=journal, readback_authoritative=True)
+    grill.fan_off()
+    grill.auger_off()
+    repository = LearningTrajectoryRepository()
+    persistence = ModelPersistenceWorker(
+        ControllerModelStore(
+            reader=store.read_generic_key,
+            writer=store.write_generic_key,
+            conditional_writer=store.save_model_checkpoint,
+        ),
+        _TEST_LOGGER,
+        trajectory_repository=repository,
+    )
+    segment_ids = count(1)
+    trajectory = LearningTrajectoryRuntime(
+        journal=journal,
+        persistence=persistence,
+        segment_id_factory=lambda: f"{stream.cook_id}-segment-{next(segment_ids)}",
+        trajectory_session_id_factory=lambda: f"{stream.cook_id}-trajectory",
+    )
+    observed_trajectory_frames: list[FrameObservation] = []
+    real_observe_hold_frame = LearningTrajectoryRuntime.observe_hold_frame
+
+    def capture_observe_hold_frame(runtime, observation, *, replay_only=False):
+        observed_trajectory_frames.append(observation)
+        return real_observe_hold_frame(runtime, observation, replay_only=replay_only)
+
+    monkeypatch.setattr(
+        LearningTrajectoryRuntime,
+        "observe_hold_frame",
+        capture_observe_hold_frame,
+    )
+    probes = _RealCookProbes(
+        stream,
+        clock,
+        store,
+        terminal_index=(stream.hold_start_index if warm_with_smoke else len(stream.temperatures) - 1),
+        terminal_mode=("Hold" if warm_with_smoke else "Stop"),
+    )
+    ctx, _, _ = make_ctx(settings, control, base_pellet_db(), probes, grill=grill, store=store)
+    ctx.clock = clock
+    ctx.trajectory_repository = repository
+    ctx.model_persistence = persistence
+    ctx.learning_trajectory = trajectory
+
+    original_build_runner = runner_module.build_runner
+    captured_runners: list[tuple[Any, str]] = []
+
+    def capture_production_runner(*args, **kwargs):
+        built = original_build_runner(*args, **kwargs)
+        captured_runners.append(built)
+        runner, _status = built
+        if runner is not None and runner.runs_async():
+            period_gate = _DeterministicRunnerPeriodGate(
+                start_s=clock.now(),
+                period_s=float(runner.control_period()),
+            )
+            runner._wait_for_period = period_gate  # noqa: SLF001 - deterministic executor barrier
+            clock.bind_period_gate(period_gate)
+        return built
+
+    monkeypatch.setattr(runner_module, "build_runner", capture_production_runner)
+    monkeypatch.setattr(ControlMode, "_trajectory_clock_pair", staticmethod(clock.pair_ms))
+    real_recorder = hold_module.ControlTraceRecorder
+    monkeypatch.setattr(
+        hold_module,
+        "ControlTraceRecorder",
+        lambda warning=None: real_recorder(
+            monotonic_clock=lambda: clock.timestamp_ms,
+            wall_clock=lambda: clock.timestamp_ms,
+            warning=warning,
+        ),
+    )
+
+    errors_before = tuple(runtime_persistence.read_errors(ErrorKind.CONTROL))
+    trace_record_count_before = len(read_control_trace_cook(stream.cook_id))
+    evidence_count_before = len(read_model_evidence())
+    runner = None
+    trajectory_closed = False
+    report_before_restart = None
+    grey_owner = getattr(ctx, "grey_learning_process", None)
+    persistence_drained = False
+    grey_owner_drained = False
+    grey_fit_worker = None
+    grey_fit_worker_drained = False
+    try:
+        with caplog.at_level(logging.WARNING):
+            if warm_with_smoke:
+                run_work_cycle("Smoke", ctx)
+                hold_control = store.read_control()
+                assert hold_control["mode"] == "Hold"
+                hold_control["primary_setpoint"] = first_setpoint
+                hold_control["updated"] = False
+                store.write_control_snapshot(hold_control, origin="real-cook-hold-handoff")
+                probes.arm_stop()
+            run_work_cycle("Hold", ctx)
+
+        assert len(captured_runners) == 1
+        runner, runner_status = captured_runners[0]
+        assert runner_status == "Active"
+        assert runner.controller_type() is expected_controller
+        assert runner.actuation_mode().value == "framed_pulse"
+        if runner.runs_async():
+            assert runner.control_period() == pytest.approx(stream.control_period_seconds)
+        else:
+            assert runner.control_period() is None
+        assert stream.pulse_slot_seconds == pytest.approx(float(grill.auger_timing().pulse_s))
+        assert stream.pulse_frame_seconds == pytest.approx(float(grill.auger_timing().frame_s))
+
+        visited_start = stream_start_index
+        assert tuple(dict.fromkeys(probes.visited_timestamps)) == tuple(
+            timestamp_ms for timestamp_ms, _, _ in stream.temperatures[visited_start:]
+        )
+        assert store.read_control()["mode"] == "Stop"
+        assert store.read_control()["updated"] is True
+        assert runtime_persistence.read_errors(ErrorKind.CONTROL) == list(errors_before)
+
+        drained = runner.drain_observation_outcomes()
+        assert drained.envelopes == ()
+        assert drained.terminal_drops == ()
+        assert drained.dropped_count == 0
+        assert drained.dropped_sequences == ()
+        _wait_for_fit_worker(runner)
+        if expected_controller is ControllerType.MPC:
+            durable_after_stop = read_control_trace_cook(stream.cook_id)[trace_record_count_before:]
+            fit_lifecycle_after_stop = [
+                record.payload for record in durable_after_stop if record.event_kind is TraceEventKind.FIT_LIFECYCLE
+            ]
+            queued_stop_fit = next(
+                (payload for payload in reversed(fit_lifecycle_after_stop) if payload.status == "queued"),
+                None,
+            )
+            stop_fit_request_id = None if queued_stop_fit is None else queued_stop_fit.request_id
+            stop_fit_statuses = [
+                payload.status for payload in fit_lifecycle_after_stop if payload.request_id == stop_fit_request_id
+            ]
+            learning_core = getattr(runner, "_learning_core", None)
+            grey_runtime = getattr(learning_core, "_grey_learning_runtime", None)
+            if stop_fit_request_id is None:
+                failure = getattr(grey_runtime, "_corpus_fit_failure", None)
+                assert failure is not None and failure[0] == "corpus-snapshot-failed"
+            else:
+                assert stop_fit_statuses[-1] in {"succeeded", "failed", "stale"}, (
+                    stop_fit_request_id,
+                    stop_fit_statuses,
+                )
+                assert sum(status in {"succeeded", "failed", "stale"} for status in stop_fit_statuses) == 1
+        worker = getattr(runner, "_thread", None)
+        assert worker is None or not worker.is_alive()
+        for attribute in (
+            "_pending_observations",
+            "_accepted_observations",
+            "_inflight_observations",
+            "_pending_dispatches",
+            "_corpus_fit_plans",
+        ):
+            pending = getattr(runner, attribute, ())
+            assert not pending, (attribute, pending)
+        outcome_buffer = getattr(runner, "_observation_buffer", None)
+        if outcome_buffer is not None:
+            assert not outcome_buffer._outcomes  # noqa: SLF001 - terminal ownership proof
+            assert not outcome_buffer._terminal_drops  # noqa: SLF001 - terminal ownership proof
+    finally:
+        grey_owner = getattr(ctx, "grey_learning_process", grey_owner)
+        if grey_owner is not None and grey_owner.learning is not None:
+            grey_fit_worker = grey_owner.learning.worker
+        if grey_owner is not None:
+            grey_owner.close()
+        runners_to_stop = [built_runner for built_runner, _status in captured_runners if built_runner is not None]
+        if runner is not None and all(owned is not runner for owned in runners_to_stop):
+            runners_to_stop.append(runner)
+        for owned_runner in runners_to_stop:
+            owned_runner.stop()
+        grey_owner_drained = grey_owner is None or not grey_owner.has_pending_fit()
+        grey_fit_worker_drained = all(
+            not worker.alive and not worker.busy and worker.process_count == 0 for worker in captured_grey_fit_workers
+        )
+        persistence_drained = persistence.barrier(timeout=5.0)
+        trajectory_closed = trajectory.close()
+
+    assert trajectory_closed
+    assert grey_owner_drained
+    expected_grey_fit_workers = 1 if expected_controller is ControllerType.MPC else 0
+    assert len(captured_grey_fit_workers) == expected_grey_fit_workers
+    if grey_fit_worker is None:
+        assert not captured_grey_fit_workers
+    else:
+        assert captured_grey_fit_workers == [grey_fit_worker]
+    assert grey_fit_worker_drained
+    assert persistence_drained
+    assert not persistence.failed
+
+    report_before_restart = repository.corpus_report()
+    assert report_before_restart.open_segment_count == 0
+    records = read_control_trace_cook(stream.cook_id)[trace_record_count_before:]
+    assert records
+    trace_session_ids = {record.session_id for record in records}
+    assert len(trace_session_ids) == 1
+    if trajectory.trace_session_id is not None:
+        assert trace_session_ids == {trajectory.trace_session_id}
+    observation_payloads = [
+        record.payload for record in records if record.event_kind is TraceEventKind.MODEL_OBSERVATION
+    ]
+    assert observation_payloads
+    assert all(payload.eligible or payload.rejection_reasons for payload in observation_payloads)
+    assert report_before_restart.quarantined_segment_count == 0
+    assert report_before_restart.last_recovery_error is None
+
+    control_updates = [record.payload for record in records if record.event_kind is TraceEventKind.CONTROL_UPDATE]
+    assert control_updates
+    assert all(
+        payload.control_period_seconds == pytest.approx(stream.control_period_seconds) for payload in control_updates
+    )
+    if expected_controller is ControllerType.MPC:
+        mpc_updates = [cast(MpcUpdatePayload, payload) for payload in control_updates]
+        successful_solve_indexes = [
+            index for index, payload in enumerate(mpc_updates) if payload.failure_state is MpcFailureState.SUCCESS
+        ]
+        assert successful_solve_indexes
+        failed_solve_indexes = [
+            index
+            for index, payload in enumerate(mpc_updates)
+            if payload.failure_state is MpcFailureState.POLICY_EXCEPTION
+        ]
+        for failed_index in failed_solve_indexes:
+            recovery = next(
+                (
+                    payload
+                    for payload in mpc_updates[failed_index + 1 :]
+                    if payload.failure_state is MpcFailureState.SUCCESS
+                ),
+                None,
+            )
+            assert recovery is not None
+        fit_lifecycle = [record.payload for record in records if record.event_kind is TraceEventKind.FIT_LIFECYCLE]
+        assert fit_lifecycle
+        assert all(payload.origin == "passive-online" for payload in fit_lifecycle)
+        fit_statuses_by_request: dict[str, list[str]] = {}
+        for payload in fit_lifecycle:
+            fit_statuses_by_request.setdefault(payload.request_id, []).append(payload.status)
+        stop_fit_request_id = next(
+            payload.request_id for payload in reversed(fit_lifecycle) if payload.status == "queued"
+        )
+        stop_fit_statuses = fit_statuses_by_request[stop_fit_request_id]
+        assert stop_fit_statuses[0] == "queued"
+        assert sum(status in {"succeeded", "failed", "stale"} for status in stop_fit_statuses) == 1
+        assert stop_fit_statuses[-1] in {"succeeded", "failed", "stale"}
+    else:
+        pid_updates = [cast(PidSpUpdatePayload, payload) for payload in control_updates]
+        allocations = [
+            cast(AllocationPayload, record.payload)
+            for record in records
+            if record.event_kind is TraceEventKind.ALLOCATION
+        ]
+        assert len(allocations) == len(pid_updates)
+        updates_by_revision = {payload.result_revision: payload for payload in pid_updates}
+        assert {payload.result_revision for payload in allocations} == set(updates_by_revision)
+        for allocation in allocations:
+            update = updates_by_revision[allocation.result_revision]
+            expected_output = min(1.0, max(0.0, update.raw_output))
+            expected_clamp = (
+                AllocationClampReason.AUGER_MIN
+                if update.raw_output < 0.0
+                else (AllocationClampReason.AUGER_MAX if update.raw_output > 1.0 else AllocationClampReason.NONE)
+            )
+            assert update.requested_output == pytest.approx(expected_output)
+            assert (
+                allocation.normalized_combustion_load,
+                allocation.requested_auger_duty,
+            ) == pytest.approx((expected_output, expected_output))
+            assert allocation.requested_fan_duty is None
+            assert allocation.u_max == 1.0
+            assert allocation.fan_min_pct == allocation.fan_max_pct == 0.0
+            assert allocation.fan_enabled is False
+            assert allocation.mpc_has_fan_authority is False
+            assert allocation.auger_clamp_reason is expected_clamp
+            assert allocation.fan_clamp_reason is AllocationClampReason.NONE
+            assert allocation.allocator_revision == 2
+        assert all(
+            "missing-allocation" not in payload.rejection_reasons
+            and "allocation-revision-mismatch" not in payload.rejection_reasons
+            and payload.combined_allocation is not None
+            and payload.allocator_revision == 2
+            for payload in observation_payloads
+        )
+        assert any(payload.eligible for payload in observation_payloads), {
+            reason for payload in observation_payloads for reason in payload.rejection_reasons
+        }
+        assert trajectory.trace_session_id is not None
+        assert any(
+            observation.continuous
+            and observation.probe_source == "chamber"
+            and observation.actual_fan_duty == 1.0
+            and observation.combined_allocation is not None
+            and observation.frame_end_s - observation.frame_start_s == pytest.approx(stream.pulse_frame_seconds)
+            for observation in observed_trajectory_frames
+        )
+        assert report_before_restart.finalized_segment_count > 0
+        assert [record for record in records if record.event_kind is TraceEventKind.TRAJECTORY_SEGMENT]
+        pid_fit_evidence = [
+            record.payload
+            for record in read_model_evidence()[evidence_count_before:]
+            if record.kind is EvidenceKind.PID_SP_FIT_DECISION
+        ]
+        assert len(pid_fit_evidence) == 1
+        pid_stop_fit = pid_fit_evidence[0]
+        assert isinstance(pid_stop_fit, PidSpFitDecisionEvidence)
+        assert pid_stop_fit.origin == "passive-online"
+        assert pid_stop_fit.request_bound, (
+            pid_stop_fit.outcome,
+            pid_stop_fit.reason,
+            {kind.value: sum(record.event_kind is kind for record in records) for kind in TraceEventKind},
+            {reason for payload in observation_payloads for reason in payload.rejection_reasons},
+            trajectory.status(),
+        )
+        assert pid_stop_fit.outcome in {
+            "insufficient",
+            "rejected",
+            "failed",
+            "accepted-next-cook",
+            "checkpoint-failure",
+        }, (pid_stop_fit.outcome, pid_stop_fit.reason, pid_stop_fit.request_bound)
+    assert not [record for record in records if record.event_kind is TraceEventKind.RECORDER_GAP]
+    assert any(record.event_kind is TraceEventKind.MODEL_OBSERVATION for record in records)
+    terminal_frames = [
+        (index, cast(FramedPulseFramePayload, record.payload))
+        for index, record in enumerate(records)
+        if record.event_kind is TraceEventKind.ACTUATION_FRAME
+        and cast(FramedPulseFramePayload, record.payload).frame_end_ms == stream.temperatures[-1][0]
+    ]
+    assert len(terminal_frames) == 1
+    assert terminal_frames[0][1].reset_reason in {"mode_change", "safety"}
+    terminal_index, terminal_frame = terminal_frames[0]
+    matching_terminal_observations = [
+        (index, record.payload)
+        for index, record in enumerate(records)
+        if record.event_kind is TraceEventKind.MODEL_OBSERVATION
+        and record.payload.frame_start_ms == terminal_frame.frame_start_ms
+        and record.payload.frame_end_ms == terminal_frame.frame_end_ms
+    ]
+    assert len(matching_terminal_observations) == 1
+    terminal_observation_index, terminal_observation = matching_terminal_observations[0]
+    assert terminal_index < terminal_observation_index
+    assert terminal_observation.probe_valid
+    assert terminal_observation.eligible or terminal_observation.rejection_reasons
+
+    final_outputs = physical_grill.get_output_status()
+    assert all(not final_outputs[name] for name in ("auger", "fan", "igniter", "power"))
+    assert report_before_restart is not None
+    restarted_report = LearningTrajectoryRepository().corpus_report()
+    assert restarted_report.corpus_revision == report_before_restart.corpus_revision
+    assert restarted_report.open_segment_count == 0
+    assert restarted_report.finalized_segment_count == report_before_restart.finalized_segment_count
+    assert restarted_report.scored_count == report_before_restart.scored_count
+
+
+def test_real_cook_mpc_chamber_stream_completes_full_hold_and_drains_learning(
+    ds,
+    monkeypatch,
+    caplog,
+) -> None:
+    _assert_real_cook_hold_smoke(
+        ds,
+        monkeypatch,
+        caplog,
+        campaign_id="mpc-aug29",
+        cook_name="2026-08-29--1219.pifire",
+        expected_controller=ControllerType.MPC,
+    )
+
+
+def test_real_cook_pid_sp_august_28_chamber_stream_completes_full_hold_and_drains_learning(
+    ds,
+    monkeypatch,
+    caplog,
+) -> None:
+    _assert_real_cook_hold_smoke(
+        ds,
+        monkeypatch,
+        caplog,
+        campaign_id="pid-sp-aug28",
+        cook_name="2026-08-28--1931.pifire",
+        expected_controller=ControllerType.PID_SP,
+    )

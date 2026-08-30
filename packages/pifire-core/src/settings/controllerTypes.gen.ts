@@ -95,6 +95,7 @@ type Pb1 = number;
 type Td1 = number;
 type Ti1 = number;
 type CenterFactor = number;
+type EnableIdentification1 = boolean;
 type StableWindow = number;
 type Selected = string;
 type Lidopendetectenabled = boolean;
@@ -527,12 +528,13 @@ export interface PidSpConfig {
   Td?: Td1;
   Ti?: Ti1;
   center_factor?: CenterFactor;
+  enable_identification?: EnableIdentification1;
   stable_window?: StableWindow;
 }
 interface Config1 {
   [k: string]:
     | {
-        [k: string]: (number | boolean | string) | undefined;
+        [k: string]: number | boolean | string | undefined;
       }
     | undefined;
 }

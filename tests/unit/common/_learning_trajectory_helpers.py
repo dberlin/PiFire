@@ -66,6 +66,7 @@ def _frame(
         continuous=True,
         partial=False,
         boundary_reason=None,
+        role_generation=4,
     )
 
 
@@ -100,7 +101,7 @@ def _segment(
     hold_entry = _hold_entry(scored[0]) if scored else None
     return LearningTrajectorySegment(
         schema_version=1,
-        observation_schema_version=2,
+        observation_schema_version=3,
         segment_id=segment_id,
         cook_id=f"cook-{segment_id}",
         trajectory_session_id=f"trajectory-{segment_id}",

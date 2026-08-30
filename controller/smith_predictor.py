@@ -26,7 +26,10 @@
 
 import math
 
-from controller.fopdt_identifier import DELAYS, FORM_FOPDT, FORM_IPDT, DutyHistory
+from controller.fopdt_identifier import FORM_FOPDT, FORM_IPDT, DutyHistory
+from controller.pid_sp_delay_evidence import MAX_DELAY_BOUND_S
+
+FORM_SOPDT = "sopdt"
 
 #: Prediction outside this band is not a grill temperature.
 TEMP_MIN_F, TEMP_MAX_F = -100.0, 1200.0
@@ -43,25 +46,50 @@ HISTORY_MARGIN_S = 1800.0
 
 
 def _incoming_model(model):
-    """The identified model reduced to what propagation needs, by form.
-
-    Kept as a plain dict of floats rather than the identifier's own object so a
-    later change there cannot silently alter what the predictor integrates.
-    """
+    """The identified model reduced to what propagation needs, by form."""
     form = model.get("form", FORM_FOPDT)
     common = {"form": form, "theta": float(model["theta"])}
     if form == FORM_IPDT:
         return {**common, "K_i": float(model["K_i"]), "c0": float(model["c0"])}
-    return {**common, "K": float(model["K"]), "tau": float(model["tau"])}
+    if form == FORM_FOPDT:
+        return {**common, "K": float(model["K"]), "tau": float(model["tau"])}
+    if form == FORM_SOPDT:
+        return {
+            **common,
+            "K": float(model["K"]),
+            "tau_1": float(model["tau_1"]),
+            "tau_2": float(model["tau_2"]),
+        }
+    raise ValueError("unsupported Smith predictor model form")
+
+
+def _retention_s(model):
+    """Return the retained horizon without adding evidence to propagation."""
+    theta = float(model["theta"])
+    if "basin_upper_s" not in model:
+        return theta + HISTORY_MARGIN_S
+    raw_upper = model["basin_upper_s"]
+    if isinstance(raw_upper, bool):
+        return None
+    try:
+        upper = float(raw_upper)
+    except TypeError, ValueError:
+        return None
+    if not math.isfinite(upper) or upper < theta or upper > MAX_DELAY_BOUND_S:
+        return None
+    return upper + HISTORY_MARGIN_S
 
 
 class SmithPredictor:
     def __init__(self):
-        self._history = DutyHistory(float(DELAYS.max()) + HISTORY_MARGIN_S)
+        self._history = DutyHistory(MAX_DELAY_BOUND_S + HISTORY_MARGIN_S)
         self._model = None
+        self._authority_identity = None
         self._x0 = 0.0
         self._xd = 0.0
         self._last_t = None
+        self._z0 = 0.0
+        self._zd = 0.0
         self._last_measured = None
         self._prev_xd = None
         self._residual_streak = 0
@@ -97,40 +125,67 @@ class SmithPredictor:
             self._earliest_seen = self._history.earliest()
         self._history.prune(end_s)
 
-    def trust(self, model):
-        """Adopt identified parameters.
+    @staticmethod
+    def _validated_trust(model, authority_digest=None):
+        if model is None or not isinstance(model, dict):
+            return None
+        try:
+            retention_s = _retention_s(model)
+            incoming = _incoming_model(model)
+        except KeyError, TypeError, ValueError:
+            return None
+        if retention_s is None or any(not math.isfinite(value) for key, value in incoming.items() if key != "form"):
+            return None
+        if authority_digest is None:
+            authority_identity = tuple(sorted(incoming.items()))
+        elif (
+            isinstance(authority_digest, str)
+            and len(authority_digest) == 64
+            and all(character in "0123456789abcdef" for character in authority_digest)
+        ):
+            authority_identity = authority_digest
+        else:
+            return None
+        return incoming, retention_s, authority_identity
 
-        Going from untrusted to trusted starts both branches equal, so the
-        correction begins at exactly zero and control never steps.
+    def preflight_trust(self, model, *, authority_digest=None) -> bool:
+        """Validate activation and sticky-disable authority without mutation."""
 
-        A later revision of K or tau updates in place and KEEPS the states: the
-        identifier only revises after a confirmation window, and snapping a
-        live correction back to zero would be the very step equal-state
-        initialization exists to avoid. A revision of theta does reinitialize,
-        because the delayed state was accumulated under the old delay and no
-        longer means what it did.
+        validated = self._validated_trust(model, authority_digest)
+        if validated is None:
+            return False
+        incoming, _retention_s_value, authority_identity = validated
+        if self._authority_identity == authority_identity and self._model is not None and incoming != self._model:
+            return False
+        return not (self._disabled and self._authority_identity == authority_identity)
 
-        A disable is sticky. PID-SP re-asserts the trusted model every tick, so
-        clearing the flag on any trust() call would undo a safety disable on the
-        next tick and leave the envelope doing nothing.
-        """
-        if model is None:
-            return
-        incoming = _incoming_model(model)
+    def trust(self, model, *, authority_digest=None) -> bool:
+        """Adopt a preflight-valid authority, preserving sticky safety disables."""
+
+        validated = self._validated_trust(model, authority_digest)
+        if validated is None:
+            return False
+        incoming, retention_s, authority_identity = validated
+        if not self.preflight_trust(model, authority_digest=authority_digest):
+            return False
+        self._history.set_retention_s(retention_s)
+        prior_authority = self._authority_identity
+        self._authority_identity = authority_identity
         if self._model is None:
             self._model = incoming
             self.reset()
-            return
+            return self.active
         if self._disabled:
-            if incoming != self._model:
-                self._model = incoming
-                self.reset()
-            return
+            assert prior_authority != authority_identity
+            self._model = incoming
+            self.reset()
+            return self.active
         if incoming["theta"] != self._model["theta"]:
             self._model = incoming
             self.reset()
-            return
+            return self.active
         self._model = incoming
+        return self.active
 
     def _disable(self):
         """Fall back to measured temperature and reinitialize both branches
@@ -140,6 +195,8 @@ class SmithPredictor:
         self._xd = 0.0
         self._last_t = None
         self._last_measured = None
+        self._z0 = 0.0
+        self._zd = 0.0
         self._prev_xd = None
         self._disabled = True
 
@@ -149,6 +206,8 @@ class SmithPredictor:
         self._last_t = None
         self._last_measured = None
         self._prev_xd = None
+        self._z0 = 0.0
+        self._zd = 0.0
         self._residual_streak = 0
         self._disabled = False
 
@@ -219,25 +278,50 @@ class SmithPredictor:
         if not self._history.covers(lo0, hi0) or not self._history.covers(lod, hid):
             return True
         for duration, duty in self._history.segments(lo0, hi0):
-            self._x0 = self._step(self._x0, duty, duration, model)
+            self._x0, self._z0 = self._step_pair(
+                self._x0,
+                self._z0,
+                duty,
+                duration,
+                model,
+            )
         for duration, duty in self._history.segments(lod, hid):
-            self._xd = self._step(self._xd, duty, duration, model)
+            self._xd, self._zd = self._step_pair(
+                self._xd,
+                self._zd,
+                duty,
+                duration,
+                model,
+            )
         return False
 
     @staticmethod
     def _step(x, u, dt, model):
-        """Exact response of the identified form to a constant input over dt.
+        """Exact scalar response retained for IPDT/FOPDT callers."""
+        return SmithPredictor._step_pair(x, 0.0, u, dt, model)[0]
 
-        Both branches are exact rather than integrated numerically, so the
-        correction does not accumulate step error over a long window.
-        """
+    @staticmethod
+    def _step_pair(x, z, u, dt, model):
+        """Exact identified response to one piecewise-constant duty segment."""
         if model["form"] == FORM_IPDT:
-            # An integrating chamber has no state to decay toward: the rate is
-            # the commanded gain less the loss, and over a constant input the
-            # response is that rate times the interval.
-            return x + (model["K_i"] * u + model["c0"]) * dt
-        decay = math.exp(-dt / model["tau"])
-        return x * decay + model["K"] * u * (1.0 - decay)
+            return x + (model["K_i"] * u + model["c0"]) * dt, z
+        if model["form"] == FORM_FOPDT:
+            decay = math.exp(-dt / model["tau"])
+            return x * decay + model["K"] * u * (1.0 - decay), z
+
+        tau_1 = model["tau_1"]
+        tau_2 = model["tau_2"]
+        forcing = model["K"] * u
+        decay_1 = math.exp(-dt / tau_1)
+        decay_2 = math.exp(-dt / tau_2)
+        next_z = forcing + (z - forcing) * decay_1
+        if tau_1 == tau_2:
+            coupling = (dt / tau_1) * decay_1
+        else:
+            exponent_delta = dt * (tau_1 - tau_2) / (tau_1 * tau_2)
+            coupling = tau_1 / (tau_1 - tau_2) * decay_2 * math.expm1(exponent_delta)
+        next_x = x * decay_2 + forcing * (1.0 - decay_2) + (z - forcing) * coupling
+        return next_x, next_z
 
     def _safe(self, predicted, residual):
         """Whether the prediction and the plant/model agreement are within bounds.
@@ -268,6 +352,8 @@ class SmithPredictor:
             "disabled": self._disabled,
             "x0": self._x0,
             "xd": self._xd,
+            "z0": self._z0,
+            "zd": self._zd,
             "residual_streak": self._residual_streak,
             "truncated": self._truncated,
             "model": None if self._model is None else dict(self._model),

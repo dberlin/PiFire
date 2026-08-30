@@ -29,8 +29,9 @@ class _PersistenceBarrier:
     failed = False
     evidence_blocked = False
 
-    def __init__(self, events):
+    def __init__(self, events, *, durable=True):
         self.events = events
+        self.durable = durable
         self.checkpoints = []
 
     def submit_checkpoint(self, name, snapshot):
@@ -43,7 +44,7 @@ class _PersistenceBarrier:
     def barrier(self, timeout=2.0):
         assert timeout == 2.0
         self.events.extend(("finalize", "barrier"))
-        return True
+        return self.durable
 
 
 class _CorpusFitRunner(FakeControllerRunner):
@@ -54,6 +55,7 @@ class _CorpusFitRunner(FakeControllerRunner):
         self.legacy_refits = 0
         self.legacy_finalizations = 0
         self.schedule_error = schedule_error
+        self.fit_failures = []
         self.snapshot = {
             "version": 4,
             "revision": 7,
@@ -76,6 +78,15 @@ class _CorpusFitRunner(FakeControllerRunner):
         self.fit_requests.append(origin)
         return True
 
+    def record_corpus_fit_disabled(self, origin, reason):
+        self.events.append("disabled")
+        return True
+
+    def record_corpus_fit_failed(self, origin, reason):
+        self.events.append("failed")
+        self.fit_failures.append((origin, reason))
+        return True
+
     def refit_from_cook(self):
         self.legacy_refits += 1
         raise RuntimeError("volatile cook refit must not be called")
@@ -84,9 +95,9 @@ class _CorpusFitRunner(FakeControllerRunner):
         self.legacy_finalizations += 1
         raise RuntimeError("legacy cook-refit finalization must not be called")
 
-    def finish_teardown(self):
+    def finish_teardown(self, finalizer=None):
+        super().finish_teardown(finalizer)
         self.events.append("close")
-        super().finish_teardown()
 
     def adopt_model(self, *_args, **_kwargs):
         raise AssertionError("Stop must not adopt a fitted model")
@@ -168,12 +179,114 @@ def test_stop_finalizes_and_barriers_before_submit_then_closes_without_adoption(
     hold.teardown(225.0)
     hold.teardown(225.0)
 
-    assert events == ["stop", "finalize", "barrier", "schedule", "close"]
+    assert events == [
+        "stop",
+        "finalize",
+        "barrier",
+        "schedule",
+        "finalize",
+        "barrier",
+        "close",
+    ]
     assert runner.fit_requests == [CandidateOrigin.PASSIVE_ONLINE]
     assert runner.get_model_snapshot() == authority
     assert persistence.checkpoints == []
     assert runner.legacy_refits == 0
     assert runner.legacy_finalizations == 0
+
+
+def test_pid_sp_stop_uses_same_finalize_barrier_then_offpath_fit_contract(
+    hold_cycle,
+) -> None:
+    events = []
+    persistence = _PersistenceBarrier(events)
+    runner = _CorpusFitRunner(events)
+    hold = _hold(
+        hold_cycle,
+        runner,
+        identification=True,
+        persistence=persistence,
+        controller="pid_sp",
+    )
+
+    hold.teardown(225.0)
+
+    assert events == [
+        "stop",
+        "finalize",
+        "barrier",
+        "schedule",
+        "finalize",
+        "barrier",
+        "close",
+    ]
+    assert runner.fit_requests == [CandidateOrigin.PASSIVE_ONLINE]
+    assert runner.get_model_snapshot()["revision"] == 7
+
+
+def test_pid_sp_disabled_stop_records_terminal_without_fit_or_evidence_loss(
+    hold_cycle,
+) -> None:
+    events = []
+    persistence = _PersistenceBarrier(events)
+    runner = _CorpusFitRunner(events)
+    hold = _hold(
+        hold_cycle,
+        runner,
+        identification=False,
+        persistence=persistence,
+        controller="pid_sp",
+    )
+
+    hold.teardown(225.0)
+
+    assert events == [
+        "stop",
+        "finalize",
+        "barrier",
+        "disabled",
+        "finalize",
+        "barrier",
+        "close",
+    ]
+    assert runner.fit_requests == []
+    assert persistence.checkpoints == []
+    assert hold._hold_learning is not None
+    assert hold._hold_learning.evidence_available is True
+
+
+def test_pid_sp_stop_barrier_failure_records_terminal_without_fit_submission(
+    hold_cycle,
+) -> None:
+    events = []
+    persistence = _PersistenceBarrier(events, durable=False)
+    runner = _CorpusFitRunner(events)
+    hold = _hold(
+        hold_cycle,
+        runner,
+        identification=True,
+        persistence=persistence,
+        controller="pid_sp",
+    )
+
+    hold.teardown(225.0)
+
+    assert events == [
+        "stop",
+        "finalize",
+        "barrier",
+        "failed",
+        "finalize",
+        "barrier",
+        "close",
+    ]
+    assert runner.fit_requests == []
+    assert runner.fit_failures == [
+        (
+            CandidateOrigin.PASSIVE_ONLINE,
+            "corpus-barrier-failed: teardown persistence barrier did not become durable",
+        )
+    ]
 
 
 def test_stop_fit_waits_for_trajectory_publication_and_quarantine_barrier(
@@ -379,6 +492,8 @@ class _MpcLearningCoreMixin:
         self.fit_polls = []
         self.consumed_fit_tickets = []
         self.fit_failures = []
+        self.pre_request_fit_failures = []
+        self.pre_request_fit_failure_recorded = threading.Event()
 
     def estimator_seed_requirements(self) -> tuple[float, int]:
         self.seed_requirement_calls += 1
@@ -453,6 +568,15 @@ class _MpcLearningCoreMixin:
     ) -> None:
         self.fit_failures.append((ticket, error))
 
+    def record_corpus_fit_failed(
+        self,
+        origin: CandidateOrigin,
+        reason: str,
+    ) -> bool:
+        self.pre_request_fit_failures.append((origin, reason))
+        self.pre_request_fit_failure_recorded.set()
+        return True
+
     def get_learning_diagnostics(self) -> ControllerLearningDiagnostics:
         self.learning_diagnostics_calls += 1
         return ControllerLearningDiagnostics(
@@ -504,6 +628,22 @@ def test_sync_runner_delegates_only_the_corpus_fit_request_to_its_core() -> None
     assert runner.get_model_snapshot() == core.snapshot
 
 
+class _ControllerCorpusLearningCore(_CoreWithCorpusScheduling):
+    """Controller-owned corpus learning without MPC estimator ownership."""
+
+    estimator_seed_requirements = None
+    bind_estimator_seed_source = None
+
+
+def test_sync_runner_accepts_controller_owned_corpus_learning_without_mpc_estimator() -> None:
+    core = _ControllerCorpusLearningCore()
+    runner = SyncControllerRunner(core)
+
+    assert runner.estimator_seed_requirements() is None
+    assert runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE) is True
+    assert core.fit_requests == [CandidateOrigin.PASSIVE_ONLINE]
+
+
 def test_threaded_runner_schedules_after_stop_without_republishing_or_adopting() -> None:
     core = _CoreWithCorpusScheduling()
     runner = ThreadedControllerRunner(core)
@@ -513,6 +653,26 @@ def test_threaded_runner_schedules_after_stop_without_republishing_or_adopting()
     assert runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE) is True
     assert core.fit_requests == [CandidateOrigin.PASSIVE_ONLINE]
     assert runner.get_model_snapshot() == before
+
+
+def test_stopped_runner_barrier_failure_records_pre_request_terminal_without_snapshot() -> None:
+    core = _ControllerCorpusLearningCore()
+    runner = ThreadedControllerRunner(core)
+    runner.stop()
+
+    assert runner._schedule_corpus_fit_after_barrier(
+        CandidateOrigin.PASSIVE_ONLINE,
+        lambda: False,
+    )
+    assert core.pre_request_fit_failure_recorded.wait(1.0)
+
+    assert core.fit_ticket_schedules == []
+    assert core.pre_request_fit_failures == [
+        (
+            CandidateOrigin.PASSIVE_ONLINE,
+            "corpus-barrier-failed: trajectory persistence barrier did not become durable",
+        )
+    ]
 
 
 def test_runner_contract_requires_corpus_scheduling_instead_of_raw_cook_refit() -> None:

@@ -44,6 +44,7 @@ class EvidenceKind(StrEnum):
     LEARNING_FAILURE = "learning_failure"
     TIMING_DISTRIBUTION = "timing_distribution"
     CONFIDENCE_DECISION = "confidence_decision"
+    PID_SP_FIT_DECISION = "pid_sp_fit_decision"
     ACTIVATION = "activation"
     ROLLBACK = "rollback"
     FALLBACK = "fallback"
@@ -333,6 +334,71 @@ class ConfidenceDecisionEvidence:
 
 
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
+class PidSpFitDecisionEvidence:
+    """One terminal PID-SP corpus-fit decision with complete immutable lineage."""
+
+    request_id: NonBlankString
+    controller: Literal["pid_sp"]
+    origin: Literal["passive-online", "operator-calibration"]
+    outcome: Literal[
+        "disabled",
+        "insufficient",
+        "rejected",
+        "failed",
+        "accepted-next-cook",
+        "checkpoint-failure",
+    ]
+    reason: NonBlankString
+    request_bound: bool
+    fit_corpus_digest: Digest | None
+    configuration_digest: Digest
+    selected_form: Literal["ipdt", "fopdt", "sopdt"] | None
+    candidate_digest: Digest | None
+    parent_incumbent_digest: Digest | None
+    confirmation_observed: NonNegativeInt
+    parent_incumbent_generation: NonNegativeInt | None = None
+    candidate_generation: NonNegativeInt | None = None
+    confirmation_candidate_digest: Digest | None = None
+    confirmation_required: Literal[20] = 20
+    episode_ids: tuple[NonBlankString, ...] = ()
+    payload_type: Literal["pid_sp_fit_decision"] = "pid_sp_fit_decision"
+
+    @model_validator(mode="after")
+    def validate_decision(self) -> PidSpFitDecisionEvidence:
+        if self.confirmation_observed > self.confirmation_required:
+            raise ValueError("PID-SP confirmation exceeds its fixed window")
+        if self.request_bound != (self.fit_corpus_digest is not None):
+            raise ValueError("PID-SP request binding must match corpus attribution availability")
+        if not self.request_bound and self.outcome not in {
+            "disabled",
+            "failed",
+            "insufficient",
+        }:
+            raise ValueError("only pre-request PID-SP terminal outcomes may omit corpus attribution")
+        generations_complete = self.parent_incumbent_generation is not None and self.candidate_generation is not None
+        if self.request_bound != generations_complete:
+            raise ValueError("PID-SP request-bound evidence requires complete generation lineage")
+        if generations_complete and (self.candidate_generation != self.parent_incumbent_generation + 1):
+            raise ValueError("PID-SP candidate generation must follow its parent")
+        selected_identity_complete = self.selected_form is not None and self.candidate_digest is not None
+        if selected_identity_complete != (self.selected_form is not None or self.candidate_digest is not None):
+            raise ValueError("PID-SP selected form and candidate digest must be paired")
+        if selected_identity_complete != (self.confirmation_candidate_digest is not None):
+            raise ValueError("PID-SP selected candidate requires its confirmation identity")
+        if self.outcome == "accepted-next-cook" and (
+            not selected_identity_complete or self.confirmation_observed != self.confirmation_required
+        ):
+            raise ValueError("accepted PID-SP candidate must be fully confirmed")
+        if self.outcome in {"disabled", "insufficient", "failed"} and (
+            selected_identity_complete or self.confirmation_observed != 0
+        ):
+            raise ValueError("non-candidate PID-SP outcome cannot carry confirmation")
+        if len(set(self.episode_ids)) != len(self.episode_ids):
+            raise ValueError("PID-SP episode identities must be unique")
+        return self
+
+
+@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
 class ChallengerRoundEvidence:
     """One complete all-horizon causal decision for a durable challenger."""
 
@@ -426,6 +492,7 @@ type ModelEvidencePayload = Annotated[
     | RefreshDiagnosticsEvidence
     | TimingDistributionEvidence
     | ConfidenceDecisionEvidence
+    | PidSpFitDecisionEvidence
     | ChallengerRoundEvidence
     | ActivationEvidence
     | RollbackEvidence
@@ -512,6 +579,16 @@ class ModelEvidenceRecord(BaseModel):
                 or self.provenance_digest != self.payload.incumbent_digest
             ):
                 raise ValueError("challenger round envelope digests must match its causal payload")
+        if isinstance(self.payload, PidSpFitDecisionEvidence):
+            if self.schema_version != MODEL_EVIDENCE_SCHEMA_VERSION:
+                raise ValueError("PID-SP fit decision requires the current schema")
+            expected_model_digest = (
+                self.payload.candidate_digest
+                if self.payload.candidate_digest is not None
+                else self.payload.parent_incumbent_digest
+            )
+            if self.model_digest != expected_model_digest or self.provenance_digest != self.payload.fit_corpus_digest:
+                raise ValueError("PID-SP decision envelope digests must match its exact lineage")
         if (
             self.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION
             and isinstance(self.payload, TimingDistributionEvidence)

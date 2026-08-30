@@ -202,6 +202,7 @@ def _challenger_projection(value: object) -> dict[str, object]:
                     "segment_id": item.segment_id,
                     "through_ordinal": item.through_ordinal,
                     "prefix_digest": item.prefix_digest,
+                    "segment_content_digest": item.segment_content_digest,
                     "pre_roll_count": item.pre_roll_count,
                     "scored_count": item.scored_count,
                 }

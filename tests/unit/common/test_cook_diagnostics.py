@@ -281,7 +281,7 @@ def _trajectory_segment(
     scored = _trajectory_frame(sequence + 1, effective_mode="Hold")
     return LearningTrajectorySegment(
         schema_version=schema_version,
-        observation_schema_version=2,
+        observation_schema_version=3,
         segment_id=segment_id,
         cook_id=cook_id,
         trajectory_session_id=f"trajectory-{segment_id}",
@@ -463,7 +463,7 @@ def test_collects_complete_mixed_controller_cook_in_order() -> None:
     assert dumped["trajectory_segments"][0] == {
         "cook_id": "cook-7",
         "segment_schema_version": 2,
-        "observation_schema_version": 2,
+        "observation_schema_version": 3,
         "segment_id": "segment-v2-a",
         "trajectory_session_id": "trajectory-segment-v2-a",
         "trace_session_ids": ["trace-segment-v2-a"],

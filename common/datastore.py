@@ -27,6 +27,7 @@ _database_creation_allowed = True
 class DatabaseNotFoundError(sqlite3.OperationalError):
     """Raised when existing-only initialization cannot find the datastore."""
 
+
 # history table DDL (schema v8). `{name}` is templated so the pre-v4
 # migration below can rebuild it under a temporary name (history_new) with an
 # identical schema before swapping it in, preserving existing rows.
@@ -328,7 +329,7 @@ CREATE TABLE IF NOT EXISTS learning_trajectory_frame (
     segment_id                 TEXT NOT NULL,
     ordinal                    INTEGER NOT NULL,
     kind                       TEXT NOT NULL CHECK(kind IN ('pre-roll','scored')),
-    payload_schema_version     INTEGER NOT NULL CHECK(payload_schema_version = 2),
+    payload_schema_version     INTEGER NOT NULL CHECK(payload_schema_version IN (2, 3)),
     interval_identity          TEXT NOT NULL,
     canonical_json             TEXT NOT NULL CHECK(json_valid(canonical_json)),
     frame_digest               TEXT NOT NULL,

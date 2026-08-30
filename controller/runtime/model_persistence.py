@@ -95,6 +95,55 @@ class DurableActivationReceipt:
             self._condition.notify_all()
 
 
+class DurableCheckpointReceipt:
+    """Completion handle for one checkpoint save owned by the persistence worker."""
+
+    def __init__(self, *, accepted: bool, error: str | None = None) -> None:
+        self.accepted = accepted
+        self._condition = Condition()
+        self._completed = not accepted
+        self._durable = False
+        self._error = error if not accepted else None
+
+    @property
+    def completed(self) -> bool:
+        with self._condition:
+            return self._completed
+
+    @property
+    def durable(self) -> bool:
+        with self._condition:
+            return self._durable
+
+    @property
+    def error(self) -> str | None:
+        with self._condition:
+            return self._error
+
+    def wait(self, timeout: float | None = None) -> bool:
+        if timeout is not None and (
+            not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or timeout < 0.0
+        ):
+            raise ValueError("checkpoint receipt timeout must be nonnegative")
+        with self._condition:
+            self._condition.wait_for(lambda: self._completed, timeout=timeout)
+            return self._completed and self._durable
+
+    def _complete(
+        self,
+        *,
+        durable: bool,
+        error: BaseException | None = None,
+    ) -> None:
+        with self._condition:
+            if self._completed:
+                return
+            self._durable = durable
+            self._error = None if error is None else f"{type(error).__name__}: {error}"
+            self._completed = True
+            self._condition.notify_all()
+
+
 @dataclass(frozen=True, slots=True)
 class TrajectoryPersistenceGap:
     """Explicit continuity loss produced by a rejected trajectory work item."""
@@ -314,6 +363,23 @@ class _ActivationConfidenceWork:
     receipt: DurableActivationReceipt
 
 
+@dataclass(slots=True)
+class _CheckpointWork:
+    name: str
+    snapshot: dict[str, object]
+    receipt: DurableCheckpointReceipt
+
+
+@dataclass(slots=True)
+class _CheckpointTerminalWork:
+    name: str
+    prepared: dict[str, object]
+    committed: dict[str, object]
+    success: ModelEvidenceRecord
+    failure: ModelEvidenceRecord
+    receipt: DurableCheckpointReceipt
+
+
 def _default_persist_activation_phase(record: PreparedActivationRecord, expected_phase: ActivationPhase | None) -> None:
     commit_model_activation_phase(record, expected_phase=expected_phase)
 
@@ -363,6 +429,7 @@ class ModelPersistenceWorker:
         boundary_reserve: int = 16,
         trajectory_repository: LearningTrajectoryRepository | None = None,
         append_evidence: Callable[[Sequence[ModelEvidenceRecord]], None] = append_model_evidence,
+        read_evidence: Callable[..., list[ModelEvidenceRecord]] | None = None,
         commit_activation: Callable[[ModelEvidenceRecord], None] = commit_model_activation,
         persist_activation_phase: Callable[
             [PreparedActivationRecord, ActivationPhase | None], None
@@ -381,6 +448,7 @@ class ModelPersistenceWorker:
         self._store = store
         self._logger = logger
         self._append_evidence = append_evidence
+        self._read_evidence = read_evidence
         self._commit_activation = commit_activation
         self._persist_activation_phase = persist_activation_phase
         self._trajectory_repository = trajectory_repository
@@ -435,6 +503,31 @@ class ModelPersistenceWorker:
         """Whether an evidence loss/failure has made confidence fail closed."""
         with self._condition:
             return self._evidence_blocked or self._failed
+
+    def contains_evidence(self, record: ModelEvidenceRecord) -> bool:
+        """Whether the exact immutable terminal record is already durable."""
+        if not isinstance(record, ModelEvidenceRecord):
+            raise TypeError("record must be ModelEvidenceRecord")
+        reader = self._read_evidence
+        if reader is None:
+            return False
+        return any(
+            candidate.evidence_id == record.evidence_id and candidate == record
+            for candidate in reader(
+                session_id=record.session_id,
+                cook_id=record.cook_id,
+                kind=record.kind,
+            )
+        )
+
+    def bind_evidence_reader(
+        self,
+        reader: Callable[..., list[ModelEvidenceRecord]],
+    ) -> None:
+        """Inject the durable evidence reader used for prepared recovery."""
+        if not callable(reader):
+            raise TypeError("evidence reader must be callable")
+        self._read_evidence = reader
 
     @property
     def failed(self) -> bool:
@@ -520,6 +613,105 @@ class ModelPersistenceWorker:
             self._start_locked()
             self._condition.notify()
         return True
+
+    def submit_durable_checkpoint(
+        self,
+        name: str,
+        snapshot: dict[str, object],
+    ) -> DurableCheckpointReceipt:
+        """Queue one uncoalesced checkpoint and expose its actual save outcome."""
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("checkpoint name must be non-blank")
+        owned_snapshot = copy_valid_snapshot(snapshot)
+        if owned_snapshot is None:
+            self._logger.error(f"Could not own {name} model checkpoint: invalid persistence snapshot")
+            return DurableCheckpointReceipt(
+                accepted=False,
+                error="invalid-persistence-snapshot",
+            )
+        with self._condition:
+            if self._failed:
+                return DurableCheckpointReceipt(
+                    accepted=False,
+                    error="persistence-failed",
+                )
+            if self._stopping:
+                return DurableCheckpointReceipt(
+                    accepted=False,
+                    error="persistence-stopped",
+                )
+            if not self._admits_priority_locked(self._ORDINARY_PRIORITY):
+                return DurableCheckpointReceipt(
+                    accepted=False,
+                    error="persistence-queue-overflow",
+                )
+            if not self._stage_checkpoint_owned(name, owned_snapshot):
+                return DurableCheckpointReceipt(
+                    accepted=False,
+                    error="checkpoint-staging-failed",
+                )
+            receipt = DurableCheckpointReceipt(accepted=True)
+            self._enqueue_locked(
+                "checkpoint-durable",
+                _CheckpointWork(name, owned_snapshot, receipt),
+                self._ORDINARY_PRIORITY,
+            )
+            self._start_locked()
+            self._condition.notify()
+            return receipt
+
+    def submit_checkpoint_with_terminal_evidence(
+        self,
+        name: str,
+        prepared: dict[str, object],
+        committed: dict[str, object],
+        success: ModelEvidenceRecord,
+        failure: ModelEvidenceRecord,
+    ) -> DurableCheckpointReceipt:
+        """Prepare safely, commit terminal evidence, then publish activatable state."""
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("checkpoint name must be non-blank")
+        owned_prepared = copy_valid_snapshot(prepared)
+        owned_committed = copy_valid_snapshot(committed)
+        if owned_prepared is None or owned_committed is None:
+            return DurableCheckpointReceipt(
+                accepted=False,
+                error="invalid-persistence-snapshot",
+            )
+        owned_success = ModelEvidenceRecord.model_validate_json(success.model_dump_json())
+        owned_failure = ModelEvidenceRecord.model_validate_json(failure.model_dump_json())
+        with self._condition:
+            if self._failed:
+                return DurableCheckpointReceipt(
+                    accepted=False,
+                    error="persistence-failed",
+                )
+            if self._stopping:
+                return DurableCheckpointReceipt(
+                    accepted=False,
+                    error="persistence-stopped",
+                )
+            if not self._admits_priority_locked(self._ORDINARY_PRIORITY):
+                return DurableCheckpointReceipt(
+                    accepted=False,
+                    error="persistence-queue-overflow",
+                )
+            receipt = DurableCheckpointReceipt(accepted=True)
+            self._enqueue_locked(
+                "checkpoint-terminal",
+                _CheckpointTerminalWork(
+                    name,
+                    owned_prepared,
+                    owned_committed,
+                    owned_success,
+                    owned_failure,
+                    receipt,
+                ),
+                self._ORDINARY_PRIORITY,
+            )
+            self._start_locked()
+            self._condition.notify()
+            return receipt
 
     def submit_evidence(self, record: ModelEvidenceRecord) -> EvidenceSubmission:
         """Validate and copy one append-only record without blocking control."""
@@ -851,6 +1043,10 @@ class ModelPersistenceWorker:
     def _checkpoint_payload(
         payload: object,
     ) -> tuple[str, dict[str, object]]:
+        if isinstance(payload, _CheckpointWork):
+            return payload.name, payload.snapshot
+        if isinstance(payload, _CheckpointTerminalWork):
+            return payload.name, payload.prepared
         if (
             not isinstance(payload, tuple)
             or len(payload) != 2
@@ -1010,7 +1206,11 @@ class ModelPersistenceWorker:
         del self._pending_work[index]
         if queued.kind != "barrier":
             self._work_active = True
-        if queued.kind == "checkpoint":
+        if queued.kind in {
+            "checkpoint",
+            "checkpoint-durable",
+            "checkpoint-terminal",
+        }:
             name, snapshot = self._checkpoint_payload(queued.payload)
             self._inflight_checkpoints[name] = snapshot
         return queued
@@ -1030,6 +1230,19 @@ class ModelPersistenceWorker:
             ):
                 payload.completed = True
                 payload.succeeded = False
+            elif (
+                queued.kind == "checkpoint-terminal"
+                and isinstance(
+                    payload,
+                    _CheckpointTerminalWork,
+                )
+                or queued.kind == "checkpoint-durable"
+                and isinstance(
+                    payload,
+                    _CheckpointWork,
+                )
+            ):
+                payload.receipt._complete(durable=False, error=error)
             elif (queued.kind == "trajectory" and isinstance(payload, self._TrajectoryWork)) or (
                 queued.kind == "trajectory-quarantine" and isinstance(payload, self._TrajectoryQuarantineWork)
             ):
@@ -1215,7 +1428,20 @@ class ModelPersistenceWorker:
                 with self._condition:
                     self._condition.notify_all()
                 continue
-            inflight_checkpoint_name = self._checkpoint_payload(payload)[0] if kind == "checkpoint" else None
+            inflight_checkpoint_name = (
+                self._checkpoint_payload(payload)[0]
+                if kind
+                in {
+                    "checkpoint",
+                    "checkpoint-durable",
+                    "checkpoint-terminal",
+                }
+                else None
+            )
+            checkpoint_work = payload if kind == "checkpoint-durable" and isinstance(payload, _CheckpointWork) else None
+            terminal_work = (
+                payload if kind == "checkpoint-terminal" and isinstance(payload, _CheckpointTerminalWork) else None
+            )
             activation_work = payload if kind == "activation" and isinstance(payload, _ActivationWork) else None
             phase_work = payload if kind == "activation-phase" and isinstance(payload, _ActivationPhaseWork) else None
             confidence_work = (
@@ -1233,7 +1459,7 @@ class ModelPersistenceWorker:
             trajectory_cursor: SegmentCursor | None = None
             trajectory_segments: tuple[LearningTrajectorySegment, ...] = ()
             try:
-                if kind == "checkpoint":
+                if kind in {"checkpoint", "checkpoint-durable"}:
                     name, snapshot = self._checkpoint_payload(payload)
                     checkpoint_revision = self._revision(snapshot)
                     outcome = self._save_checkpoint(name, snapshot)
@@ -1243,6 +1469,50 @@ class ModelPersistenceWorker:
                         CheckpointSaveOutcome.SAVED,
                         CheckpointSaveOutcome.NONADVANCING,
                     ):
+                        raise RuntimeError(f"unknown checkpoint store outcome: {outcome!r}")
+                elif terminal_work is not None:
+                    checkpoint_revision = self._revision(terminal_work.prepared)
+                    outcome = self._save_checkpoint(
+                        terminal_work.name,
+                        terminal_work.prepared,
+                    )
+                    if outcome is CheckpointSaveOutcome.FAILED:
+                        checkpoint_revision = None
+                        error = RuntimeError("checkpoint prepare failed")
+                        self._append_evidence((terminal_work.failure,))
+                        terminal_work.receipt._complete(
+                            durable=False,
+                            error=error,
+                        )
+                    elif outcome in (
+                        CheckpointSaveOutcome.SAVED,
+                        CheckpointSaveOutcome.NONADVANCING,
+                    ):
+                        try:
+                            self._append_evidence((terminal_work.success,))
+                        except Exception as evidence_error:
+                            self._append_evidence((terminal_work.failure,))
+                            terminal_work.receipt._complete(
+                                durable=False,
+                                error=evidence_error,
+                            )
+                        else:
+                            commit_outcome = self._save_checkpoint(
+                                terminal_work.name,
+                                terminal_work.committed,
+                            )
+                            if commit_outcome in (
+                                CheckpointSaveOutcome.SAVED,
+                                CheckpointSaveOutcome.NONADVANCING,
+                            ):
+                                checkpoint_revision = self._revision(terminal_work.committed)
+                            else:
+                                self._logger.error(
+                                    "PID-SP checkpoint remains prepared; "
+                                    "cold recovery will reconcile its durable terminal"
+                                )
+                            terminal_work.receipt._complete(durable=True)
+                    else:
                         raise RuntimeError(f"unknown checkpoint store outcome: {outcome!r}")
                 elif kind in ("evidence", "recorder-gap"):
                     self._append_evidence(self._durable_evidence_batch(payload))
@@ -1281,6 +1551,16 @@ class ModelPersistenceWorker:
                         segment_id = self._trajectory_segment_id(trajectory_work.batch)
                         if segment_id is not None:
                             self._blocked_segments.add(segment_id)
+                    if checkpoint_work is not None:
+                        checkpoint_work.receipt._complete(
+                            durable=False,
+                            error=error,
+                        )
+                    if terminal_work is not None:
+                        terminal_work.receipt._complete(
+                            durable=False,
+                            error=error,
+                        )
                     if phase_work is not None:
                         phase_work.receipt._complete(
                             durable=False,
@@ -1310,6 +1590,8 @@ class ModelPersistenceWorker:
                     self._condition.notify_all()
                 self._logger.error(f"Could not persist model {kind}: {error}")
             else:
+                if checkpoint_work is not None:
+                    checkpoint_work.receipt._complete(durable=True)
                 if phase_work is not None:
                     phase_work.receipt._complete(durable=True)
                 if confidence_work is not None:

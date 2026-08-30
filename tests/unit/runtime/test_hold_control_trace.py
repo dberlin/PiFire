@@ -11,6 +11,8 @@ import pytest
 from common import datastore
 from common.control_trace import (
     ActuationMode,
+    AllocationClampReason,
+    AllocationPayload,
     AmbientSource,
     AmbientUncertainty,
     AppliedOutputPayload,
@@ -259,6 +261,13 @@ def _pid_sp_result(revision=1):
         fan=None,
         input_temperature=100.0,
         diagnostics=diagnostics,
+        allocation=allocate(
+            0.3,
+            u_max=1.0,
+            fan_min_pct=0.0,
+            fan_max_pct=0.0,
+            enable_fan=False,
+        ),
         revision=revision,
         solve_start_monotonic=1.0,
         solve_end_monotonic=1.1,
@@ -446,8 +455,7 @@ def test_mpc_hold_records_update_allocation_and_framed_feedback_once_per_revisio
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
     mode.control["cook_id"] = "cook-mpc"
-    output = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
-    mode.on_tick(2.0, 220.0, output)
+    mode.on_tick(2.0, 220.0, mode.grill.get_output_status())
     mode.on_tick(22.0, 220.0, mode.grill.get_output_status())
 
     event_kinds = [record.event_kind for record in recorder.records]
@@ -505,7 +513,7 @@ def test_mpc_hold_records_update_allocation_and_framed_feedback_once_per_revisio
         result.allocation.fan_max_pct,
         result.allocation.fan_enabled,
     )
-    assert validate_records(recorder.records).valid
+    assert (replay := validate_records(recorder.records)).valid, [(issue.code, issue.detail) for issue in replay.issues]
 
 
 @pytest.mark.parametrize(
@@ -520,12 +528,12 @@ def test_pid_family_hold_records_completed_framed_pulse(hold_cycle, monkeypatch,
     mode.setup()
     mode.control["cook_id"] = f"cook-{controller}"
 
-    mode.on_tick(2.0, 220.0, {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100})
+    mode.on_tick(2.0, 220.0, mode.grill.get_output_status())
     mode.on_tick(22.0, 220.0, mode.grill.get_output_status())
 
     frames = [record for record in recorder.records if record.event_kind is TraceEventKind.ACTUATION_FRAME]
     assert frames and all(record.controller.value == controller for record in frames)
-    assert validate_records(recorder.records).valid
+    assert (replay := validate_records(recorder.records)).valid, [(issue.code, issue.detail) for issue in replay.issues]
 
 
 def test_fahrenheit_hold_keeps_model_observation_ambient_celsius_while_session_displays_fahrenheit(
@@ -855,8 +863,23 @@ def test_real_pid_sp_first_hold_update_records_unidentified_model_trace(hold_cyc
     mode.on_tick(22.0, 220.0, mode.grill.get_output_status())
 
     (payload,) = [record.payload for record in recorder.records if record.event_kind is TraceEventKind.CONTROL_UPDATE]
+    (allocation,) = [record.payload for record in recorder.records if record.event_kind is TraceEventKind.ALLOCATION]
     assert isinstance(payload, PidSpUpdatePayload)
+    assert isinstance(allocation, AllocationPayload)
     assert payload.tau_seconds == 0.0
+    assert allocation.result_revision == payload.result_revision
+    assert (
+        allocation.normalized_combustion_load,
+        allocation.requested_auger_duty,
+    ) == pytest.approx((payload.requested_output, payload.requested_output))
+    assert allocation.requested_fan_duty is None
+    assert allocation.u_max == 1.0
+    assert allocation.fan_min_pct == allocation.fan_max_pct == 0.0
+    assert allocation.fan_enabled is False
+    assert allocation.mpc_has_fan_authority is False
+    assert allocation.auger_clamp_reason is AllocationClampReason.NONE
+    assert allocation.fan_clamp_reason is AllocationClampReason.NONE
+    assert allocation.allocator_revision == 2
     assert validate_records(recorder.records).valid
 
 
@@ -1216,7 +1239,8 @@ def test_async_reconfigure_does_not_leak_the_old_published_model_into_new_sessio
             self._controller_type = ControllerType.MPC
             return super().reconfigure(settings, control, logger=logger)
 
-        def restore_model(self, snapshot):
+        def restore_model(self, snapshot, *, restore_token=None):
+            self.restore_token = restore_token
             self.restored.append(snapshot)
             return restore_accepted
 

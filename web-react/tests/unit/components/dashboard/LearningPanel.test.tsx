@@ -73,6 +73,9 @@ function pidSpReport(revision: string): PidSpLearningReport {
     identifier: null,
     predictor: null,
     checkpoint: null,
+    comparison: null,
+    active_model: null,
+    delay_evidence: null,
     failure: null,
   };
 }

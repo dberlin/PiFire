@@ -205,7 +205,7 @@ Cover these observable contracts with complete fixtures and assertions:
 - `test_upper_edge_expands_from_300_to_450_seconds`: place the accepted basin on the 300-second edge and assert the next evaluated bound is 450 seconds.
 - `test_basin_touching_900_seconds_fails_closed`: keep the basin on the final edge and assert blocker `delay-range-exhausted`.
 - `test_two_independent_episodes_are_required_for_authorization`: compare identical profiles from one and two episode IDs; only the latter may clear episode count.
-- `test_august_28_fixture_reports_provisional_185_225_basin`: load the pinned sanitized fixture and assert basin bounds plus no trusted model.
+- `test_august_28_fixture_reports_provisional_190_225_basin`: load the pinned sanitized fixture and assert the common-support raw basin bounds, moving-block confidence bounds, and no trusted model.
 
 Extract only sanitized exact intervals and temperatures needed by the last test from the archived cookfile. Commit no settings, identity, network, notification, or unrelated diagnostic data. Pin the fixture SHA-256 in the test.
 
@@ -229,7 +229,7 @@ Delete PID-SP activation authority from `promote(resid_ew, mask)` and from the F
 
 - [ ] **Step 5: Expose episode and basin diagnostics**
 
-Extend `build_pid_sp_live_learning()` with completed episode count, search bound, profile form, basin bounds, confidence bounds, and one of: `insufficient-excitation-episodes`, `delay-basin-too-wide`, `delay-basin-edge`, `delay-range-exhausted`, or `delay-basin-stable`.
+Extend `build_pid_sp_live_learning()` with completed episode count, search bound, profile form, basin bounds, confidence bounds, and one of: `insufficient-excitation-episodes`, `insufficient-confidence-evidence`, `delay-basin-too-wide`, `delay-basin-edge`, `delay-range-exhausted`, or `delay-basin-stable`.
 
 - [ ] **Step 6: Verify and commit delay evidence**
 
@@ -242,7 +242,7 @@ uv run pytest -q \
   tests/unit/controller/test_pid_sp_learning.py
 ```
 
-Expected: the archived fixture reports 185–225 seconds and remains untrusted; appending flat intervals leaves its completed profile unchanged.
+Expected: the archived fixture reports a common-support raw basin of 190–225 seconds, a moving-block confidence interval of 125–225 seconds, and remains untrusted; appending flat intervals leaves its completed profile unchanged.
 
 ```bash
 jj describe -m "feat(pid_sp): retain bounded delay basin evidence"

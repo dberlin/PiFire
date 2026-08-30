@@ -13,6 +13,7 @@ from common.learning_trajectory import (
     FitCorpusIdentity,
     FitCorpusSlice,
     ModelFitLineage,
+    canonical_fit_corpus_digest,
     canonical_trajectory_digest,
 )
 from common.model_evidence import (
@@ -21,6 +22,7 @@ from common.model_evidence import (
     SchemaInvalidationEvidence,
 )
 from common.persistence.model_challenger import (
+    ModelChallengerConflictError,
     ModelChallengerState,
     _CorruptModelChallenger,
 )
@@ -44,6 +46,7 @@ from controller.model_learning.contracts import (
     CandidateOrigin,
     activation_policy_for_origin,
 )
+from controller.mpc_model import MODEL_SCHEMA
 
 
 def _exact_calibration_manifest(
@@ -253,7 +256,8 @@ def _migration_authority_snapshot(value, *, current_only):
     snapshot = value.get("snapshot")
     if current_only and (
         not isinstance(snapshot, dict)
-        or (snapshot.get("version"), value.get("model_schema")) not in {(4, 4), (5, 5), (6, 6)}
+        or (snapshot.get("version"), value.get("model_schema"))
+        not in {(version, version) for version in range(4, MODEL_SCHEMA + 1)}
     ):
         return None
     try:
@@ -383,29 +387,21 @@ def _legacy_v4_challenger_state(
         segment_id=f"legacy-v4:{session_id}:{cook_id}",
         through_ordinal=scored_count - 1,
         prefix_digest=prefix_digest,
+        segment_content_digest=prefix_digest,
         pre_roll_count=0,
         scored_count=scored_count,
     )
-    corpus_payload = {
-        "schema_version": 1,
-        "corpus_revision": 0,
-        "fit_partition_digest": configuration_digest,
-        "slices": [
-            {
-                "segment_id": corpus_slice.segment_id,
-                "through_ordinal": corpus_slice.through_ordinal,
-                "prefix_digest": corpus_slice.prefix_digest,
-                "pre_roll_count": corpus_slice.pre_roll_count,
-                "scored_count": corpus_slice.scored_count,
-            }
-        ],
-    }
     corpus = FitCorpusIdentity(
-        schema_version=1,
+        schema_version=2,
         corpus_revision=0,
         fit_partition_digest=configuration_digest,
         slices=(corpus_slice,),
-        corpus_digest=canonical_trajectory_digest(corpus_payload),
+        corpus_digest=canonical_fit_corpus_digest(
+            schema_version=2,
+            corpus_revision=0,
+            fit_partition_digest=configuration_digest,
+            slices=(corpus_slice,),
+        ),
     )
     identity_bytes = json.dumps(
         {
@@ -466,13 +462,133 @@ def _legacy_v4_challenger_state(
     )
 
 
+def commit_restore_revalidation_authority(
+    *,
+    snapshot: dict[str, object],
+    challenger: ModelChallengerState,
+    expected_challenger: ModelChallengerState | None,
+    fallback_pair: GreyControlPairDescriptor,
+    database_path: str | os.PathLike[str] | None = None,
+) -> None:
+    """Atomically publish configured fallback plus one inert restore challenger."""
+
+    from common.controller_model_state import MODEL_STATE_KEY, SCHEMA_VERSION
+    from controller.mpc_snapshot import migrate_grey_learning_snapshot
+
+    owned = migrate_grey_learning_snapshot(snapshot)
+    authority = owned["challenger_authority"]
+    if (
+        authority is None
+        or authority["challenger_id"] != challenger.challenger_id
+        or authority["revision"] != challenger.revision
+        or owned["active_pair"] != fallback_pair.to_dict()
+        or challenger.incumbent != fallback_pair
+        or challenger.phase != "evaluating"
+    ):
+        raise ValueError("restore revalidation authority is inconsistent")
+    selected_json = json.dumps(
+        owned,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    pair_json = json.dumps(
+        fallback_pair.to_dict(),
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    with _model_evidence_connection(database_path) as connection, datastore.transaction(connection) as conn:
+        current_challenger = _read_challenger_in_transaction(conn)
+        if current_challenger != expected_challenger:
+            raise ModelChallengerConflictError("restore revalidation challenger changed before authority commit")
+        _write_challenger_state(
+            conn,
+            challenger,
+            insert=current_challenger is None,
+            expected_revision=(None if current_challenger is None else current_challenger.revision),
+        )
+        envelope = _migration_json_blob(conn, MODEL_STATE_KEY)
+        models = (
+            dict(envelope["models"])
+            if isinstance(envelope, dict)
+            and envelope.get("version") == SCHEMA_VERSION
+            and isinstance(envelope.get("models"), dict)
+            else {}
+        )
+        models["mpc"] = owned
+        conn.execute(
+            "INSERT INTO kv(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (
+                MODEL_STATE_KEY,
+                json.dumps(
+                    {"version": SCHEMA_VERSION, "models": models},
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ),
+            ),
+        )
+        transaction_id = hashlib.sha256(
+            (
+                "restore-revalidation:"
+                f"{challenger.challenger_id}:{challenger.revision}:"
+                f"{fallback_pair.ownership_digest}"
+            ).encode()
+        ).hexdigest()
+        values = (
+            selected_json,
+            selected_json,
+            f"restore-revalidation:{challenger.challenger_id}",
+            fallback_pair.ownership_digest,
+            fallback_pair.role_generation,
+            "aborted",
+            transaction_id,
+            pair_json,
+            pair_json,
+            pair_json,
+            CandidateOrigin.PASSIVE_ONLINE.value,
+            ActivationPolicy.CAUSAL_AUTO.value,
+            fallback_pair.candidate_generation,
+            fallback_pair.model_digest,
+            "installation-restore-revalidation",
+        )
+        if _activation_state_row(conn) is None:
+            conn.execute(
+                """
+                INSERT INTO model_activation_state(
+                    singleton, active_snapshot_json, rollback_snapshot_json,
+                    evidence_decision_id, controller_configuration_digest,
+                    role_generation, phase, transaction_id, incumbent_pair_json,
+                    candidate_pair_json, rollback_pair_json, origin, policy,
+                    candidate_generation, candidate_digest, reason
+                ) VALUES(1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                values,
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE model_activation_state
+                SET active_snapshot_json=?, rollback_snapshot_json=?,
+                    evidence_decision_id=?, controller_configuration_digest=?,
+                    role_generation=?, phase=?, transaction_id=?,
+                    incumbent_pair_json=?, candidate_pair_json=?,
+                    rollback_pair_json=?, origin=?, policy=?,
+                    candidate_generation=?, candidate_digest=?, reason=?
+                WHERE singleton=1
+                """,
+                values,
+            )
+
+
 def migrate_mpc_learning_authority(
     *,
     defaults,
     activation_input_key: str | None = None,
     database_path: str | os.PathLike[str] | None = None,
 ) -> GreyLearningMigrationResult:
-    """Atomically converge checkpoint, activation, and challenger authority on grey v6.
+    """Atomically converge checkpoint, activation, and challenger authority on grey v7.
 
     ``activation_input_key`` names the legacy blob key to migrate from, for
     installations still on that layout. Normal startup omits it and migrates
@@ -550,7 +666,7 @@ def migrate_mpc_learning_authority(
                         return None
                     return {
                         "model_kind": "grey-box",
-                        "model_schema": 6,
+                        "model_schema": MODEL_SCHEMA,
                         "snapshot": snapshot,
                         "pair": pair.to_dict(),
                         "digest": pair.model_digest,
@@ -741,7 +857,7 @@ def migrate_mpc_learning_authority(
 
         current = {
             "model_kind": "grey-box",
-            "model_schema": 6,
+            "model_schema": MODEL_SCHEMA,
             "snapshot": selected,
             "source": source,
         }

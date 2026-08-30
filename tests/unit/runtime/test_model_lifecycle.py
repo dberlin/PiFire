@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import get_type_hints
 
 from common.model_evidence import ModelEvidenceRecord
@@ -31,7 +31,15 @@ def test_model_lifecycle_runner_publishes_exact_fixed_contract() -> None:
         ),
         "stop_and_retain_for_teardown": ({}, bool | None),
         "schedule_corpus_fit": ({"origin": CandidateOrigin}, bool),
-        "finish_teardown": ({}, type(None)),
+        "record_corpus_fit_disabled": (
+            {"origin": CandidateOrigin, "reason": str},
+            bool,
+        ),
+        "record_corpus_fit_failed": (
+            {"origin": CandidateOrigin, "reason": str},
+            bool,
+        ),
+        "finish_teardown": ({"finalizer": Callable[[], None] | None}, type(None)),
     }
 
     methods = {

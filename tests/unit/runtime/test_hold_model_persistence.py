@@ -44,6 +44,7 @@ from controller.mpc_snapshot import migrate_grey_learning_snapshot
 from controller.runtime.model_persistence import EvidenceSubmission, ModelPersistenceWorker
 from controller.runtime.runner import (
     ControllerUpdateResult,
+    ModelRestoreOutcome,
     ThreadedControllerRunner,
 )
 from tests.fakes.runner import FakeControllerRunner
@@ -157,7 +158,7 @@ def test_hold_stop_barriers_shared_persistence_without_closing_it(hold_cycle) ->
     hold.teardown(200.0)
 
     assert hold._persistence_worker is worker
-    assert worker.barrier_calls == [2.0]
+    assert worker.barrier_calls == [2.0, 2.0]
     assert worker.close_calls == []
 
 
@@ -186,7 +187,7 @@ def test_consecutive_holds_share_exact_process_worker_and_repository(hold_cycle)
 
     assert first._persistence_worker is second._persistence_worker is worker
     assert first.ctx.trajectory_repository is second.ctx.trajectory_repository is repository
-    assert worker.barrier_calls == [2.0, 2.0]
+    assert worker.barrier_calls == [2.0, 2.0, 2.0, 2.0]
     assert worker.close_calls == []
 
 
@@ -359,10 +360,11 @@ def test_mpc_setup_migrates_v3_before_restore_and_activation_reconcile(hold_cycl
 
     assert calls[:2] == ["migrate", "restore-load"]
     restored = runner.restored[0]
-    assert restored["version"] == 6
-    assert restored["schema"] == "pifire-grey-learning/v6"
+    assert restored["version"] == 7
+    assert restored["schema"] == "pifire-grey-learning/v7"
     assert restored["active_pair"] is None
     assert restored["challenger_authority"] is None
+    assert restored["installation_identity_digest"] is None
     assert restored["activation"] == {
         "phase": "aborted",
         "pending_persistence": False,
@@ -477,6 +479,190 @@ def test_setup_routes_new_prepared_pair_authority_without_legacy_activation_evid
     assert learning is not None
     learning.reconcile_activation()
     assert runner.activation_restores == [(persisted, ())]
+
+
+def test_rejected_mpc_checkpoint_cannot_reauthorize_stale_active_authority(
+    hold_cycle,
+    monkeypatch,
+):
+    from controller.runtime.modes import hold_learning as hold_learning_module
+
+    persisted, _record = _pair_phase_state(ActivationPhase.ACTIVE)
+    monkeypatch.setattr(hold_learning_module, "read_model_activation", lambda: persisted)
+    monkeypatch.setattr(hold_learning_module, "read_model_evidence", list)
+
+    class RefusingRunner(FakeControllerRunner):
+        def restore_model(self, snapshot, *, restore_token=None):
+            self.restore_token = restore_token
+            self.restored.append(snapshot)
+            self.calls.append(("restore", snapshot))
+            return ModelRestoreOutcome(
+                restore_token=restore_token,
+                accepted=False,
+                effective_authority=self.snapshot,
+            )
+
+    checkpoint = {"version": 7, "installation_identity_digest": "a" * 64}
+    runner = RefusingRunner(period=0.01)
+    hold = hold_cycle(
+        runner,
+        model_store=_FakeModelStore({"mpc": checkpoint}),
+        controller="mpc",
+    )
+
+    hold.setup()
+
+    assert runner.restored == [checkpoint]
+    assert runner.activation_restores == []
+    learning = hold._hold_learning
+    assert learning is not None
+    learning.reconcile_activation()
+    assert runner.activation_restores == []
+
+
+def test_async_checkpoint_cannot_reconcile_stale_authority_before_restore_verdict(
+    hold_cycle,
+    monkeypatch,
+):
+    from controller.runtime.modes import hold_learning as hold_learning_module
+
+    persisted, _record = _pair_phase_state(ActivationPhase.ACTIVE)
+    monkeypatch.setattr(hold_learning_module, "read_model_activation", lambda: persisted)
+    monkeypatch.setattr(hold_learning_module, "read_model_evidence", list)
+    checkpoint = {"version": 7, "installation_identity_digest": "a" * 64}
+    runner = FakeControllerRunner(period=0.01, wants_async=True)
+    hold = hold_cycle(
+        runner,
+        model_store=_FakeModelStore({"mpc": checkpoint}),
+        controller="mpc",
+    )
+
+    hold.setup()
+
+    assert runner.restored == [checkpoint]
+    assert runner.activation_restores == []
+    runner.restore_outcome = False
+    learning = hold._hold_learning
+    assert learning is not None
+    learning.reconcile_outcomes(1.0)
+    learning.reconcile_activation()
+    assert runner.activation_restores == []
+
+
+def test_async_checkpoint_reconciles_activation_only_after_successful_restore_verdict(
+    hold_cycle,
+    monkeypatch,
+):
+    from controller.runtime.modes import hold_learning as hold_learning_module
+
+    persisted, _record = _pair_phase_state(ActivationPhase.ACTIVE)
+    monkeypatch.setattr(hold_learning_module, "read_model_activation", lambda: persisted)
+    monkeypatch.setattr(hold_learning_module, "read_model_evidence", list)
+    runner = FakeControllerRunner(period=0.01, wants_async=True)
+    hold = hold_cycle(
+        runner,
+        model_store=_FakeModelStore({"mpc": {"version": 7, "installation_identity_digest": "a" * 64}}),
+        controller="mpc",
+    )
+
+    hold.setup()
+    assert runner.activation_restores == []
+    runner.restore_outcome = True
+    learning = hold._hold_learning
+    assert learning is not None
+    learning.reconcile_outcomes(1.0)
+    learning.reconcile_activation()
+    assert runner.activation_restores == [(persisted, ())]
+
+
+def test_overlapping_async_restore_verdicts_are_correlated_to_submission(
+    hold_cycle,
+    monkeypatch,
+):
+    from controller.runtime.modes import hold_learning as hold_learning_module
+
+    persisted, _record = _pair_phase_state(ActivationPhase.ACTIVE)
+    monkeypatch.setattr(hold_learning_module, "read_model_activation", lambda: persisted)
+    monkeypatch.setattr(hold_learning_module, "read_model_evidence", list)
+    first = {"version": 7, "revision": 1}
+    second = {"version": 7, "revision": 2}
+    store = _FakeModelStore({"mpc": first})
+    runner = FakeControllerRunner(period=0.01, wants_async=True)
+    hold = hold_cycle(runner, model_store=store, controller="mpc")
+    hold.setup()
+    first_token = runner.restore_token
+    learning = hold._hold_learning
+    assert learning is not None
+
+    store.models["mpc"] = second
+    learning.restore_model(timestamp_ms=2_000)
+    second_token = runner.restore_token
+
+    assert runner.restored == [first, second]
+    assert first_token is not None and second_token is not None
+    assert first_token != second_token
+    runner.restore_outcome = ModelRestoreOutcome(
+        restore_token=first_token,
+        accepted=True,
+        effective_authority=first,
+    )
+    learning.reconcile_outcomes(3.0)
+    learning.reconcile_activation()
+    assert runner.activation_restores == []
+
+    runner.restore_outcome = ModelRestoreOutcome(
+        restore_token=second_token,
+        accepted=True,
+        effective_authority=second,
+    )
+    learning.reconcile_outcomes(4.0)
+    learning.reconcile_activation()
+    assert runner.activation_restores == [(persisted, ())]
+
+
+def test_rejected_superseding_restore_cannot_adopt_an_older_async_verdict(
+    hold_cycle,
+    monkeypatch,
+) -> None:
+    from controller.runtime.modes import hold_learning as hold_learning_module
+
+    persisted, _record = _pair_phase_state(ActivationPhase.ACTIVE)
+    monkeypatch.setattr(hold_learning_module, "read_model_activation", lambda: persisted)
+    monkeypatch.setattr(hold_learning_module, "read_model_evidence", list)
+    first = {"version": 7, "revision": 1}
+    second = {"version": 7, "revision": 2}
+    store = _FakeModelStore({"mpc": first})
+
+    class RejectSecondRestore(FakeControllerRunner):
+        def restore_model(self, snapshot, *, restore_token=None):
+            super().restore_model(snapshot, restore_token=restore_token)
+            accepted = len(self.restored) == 1
+            return ModelRestoreOutcome(
+                restore_token=restore_token,
+                accepted=accepted,
+                effective_authority=(None if accepted else self.snapshot),
+                pending=accepted,
+            )
+
+    runner = RejectSecondRestore(period=0.01, wants_async=True)
+    hold = hold_cycle(runner, model_store=store, controller="mpc")
+    hold.setup()
+    first_token = runner.restore_token
+    learning = hold._hold_learning
+    assert learning is not None
+
+    store.models["mpc"] = second
+    learning.restore_model(timestamp_ms=2_000)
+    runner.restore_outcome = ModelRestoreOutcome(
+        restore_token=first_token,
+        accepted=True,
+        effective_authority=first,
+    )
+    learning.reconcile_outcomes(3.0)
+    learning.reconcile_activation()
+
+    assert runner.restored == [first, second]
+    assert runner.activation_restores == []
 
 
 def test_per_tick_saves_the_controller_snapshot(hold_cycle):

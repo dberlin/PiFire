@@ -15,6 +15,7 @@ afterEach(() => {
 const ACTIVE_DIGEST = "a".repeat(64);
 const CANDIDATE_DIGEST = "b".repeat(64);
 const CORPUS_DIGEST = "c".repeat(64);
+const SEGMENT_CONTENT_DIGEST = "d".repeat(64);
 
 const VALID_REPORT = {
   schema_version: 3,
@@ -89,6 +90,7 @@ const VALID_REPORT = {
         segment_id: "segment-4",
         through_ordinal: 200,
         prefix_digest: "f".repeat(64),
+        segment_content_digest: SEGMENT_CONTENT_DIGEST,
         pre_roll_count: 20,
         scored_count: 180,
       },
@@ -186,6 +188,39 @@ describe("fetchModelEvidenceReport", () => {
       },
     ],
     ["corpus body", { ...VALID_REPORT, corpus: null }],
+    [
+      "missing segment content digest",
+      {
+        ...VALID_REPORT,
+        corpus: {
+          ...VALID_REPORT.corpus,
+          slices: [
+            {
+              segment_id: "segment-4",
+              through_ordinal: 200,
+              prefix_digest: "f".repeat(64),
+              pre_roll_count: 20,
+              scored_count: 180,
+            },
+          ],
+        },
+      },
+    ],
+    [
+      "malformed segment content digest",
+      {
+        ...VALID_REPORT,
+        corpus: {
+          ...VALID_REPORT.corpus,
+          slices: [
+            {
+              ...VALID_REPORT.corpus.slices[0],
+              segment_content_digest: "not-a-digest",
+            },
+          ],
+        },
+      },
+    ],
   ])("rejects an invalid %s", async (_name, report) => {
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify(report), {
@@ -199,6 +234,32 @@ describe("fetchModelEvidenceReport", () => {
     expect(result.ok).toBe(false);
     expect(result.data).toBeNull();
     expect(result.message).toMatch(/^Invalid model evidence report:/);
+  });
+
+  it("accepts a legacy corpus slice with a null segment content digest", async () => {
+    const report = {
+      ...VALID_REPORT,
+      corpus: {
+        ...VALID_REPORT.corpus,
+        slices: [
+          {
+            ...VALID_REPORT.corpus.slices[0],
+            segment_content_digest: null,
+          },
+        ],
+      },
+    };
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify(report), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    const result = await fetchModelEvidenceReport();
+
+    expect(result.ok).toBe(true);
+    expect(result.data).toEqual(report);
   });
 
   it.each([

@@ -43,6 +43,25 @@ class _TestLogger:
 _TEST_LOGGER = _TestLogger()
 
 
+def _step_exact_frame(
+    plant: Any,
+    *,
+    on_seconds: int,
+    fan_frac: float,
+    frame_seconds: int = _FRAME_SECONDS,
+) -> int:
+    """Advance a simulator with exact one-second boolean auger pulses."""
+    if isinstance(on_seconds, bool) or not isinstance(on_seconds, int):
+        raise TypeError("on_seconds must be an integer")
+    if isinstance(frame_seconds, bool) or not isinstance(frame_seconds, int) or frame_seconds <= 0:
+        raise ValueError("frame_seconds must be a positive integer")
+    if not 0 <= on_seconds <= frame_seconds:
+        raise ValueError("on_seconds must be within the frame")
+    for second in range(frame_seconds):
+        plant.step(auger_on=second < on_seconds, fan_frac=fan_frac)
+    return on_seconds
+
+
 def _mak_grey_corpus_rows() -> list[dict[str, Any]]:
     pre_roll_count = 21
     pre_roll_load = (0.2,) * pre_roll_count

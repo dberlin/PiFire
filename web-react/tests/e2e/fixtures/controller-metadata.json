@@ -335,6 +335,17 @@
           "option_name": "center_factor",
           "option_step": 0.0001,
           "option_type": "float"
+        },
+        {
+          "hidden": false,
+          "option_default": true,
+          "option_description": "Fit validated PID-SP models from complete retained cook evidence for later cooks. [Default=true]",
+          "option_friendly_name": "Learn This Grill",
+          "option_max": null,
+          "option_min": null,
+          "option_name": "enable_identification",
+          "option_step": null,
+          "option_type": "bool"
         }
       ],
       "contributors": ["Ben Parmeter", "James Weber", "Ryan Steel"],

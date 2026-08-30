@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import secrets
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, replace
@@ -52,6 +53,7 @@ from controller.runtime.control_trace_session import (
 from controller.runtime.model_lifecycle import ModelLifecycleRunner
 from controller.runtime.model_persistence import EvidenceSubmission
 from controller.runtime.runner import (
+    ModelRestoreOutcome,
     ObservationOutcomeDrain,
     ObservationSubmission,
 )
@@ -186,9 +188,14 @@ class _HoldLearningRunner(ModelLifecycleRunner, Protocol):
 
     def retire_evidence_context(self, generation: int) -> None: ...
 
-    def restore_model(self, snapshot: dict[str, object]) -> bool: ...
+    def restore_model(
+        self,
+        snapshot: dict[str, object],
+        *,
+        restore_token: str | None = None,
+    ) -> ModelRestoreOutcome: ...
 
-    def drain_restore_outcome(self) -> bool | None: ...
+    def drain_restore_outcome(self) -> ModelRestoreOutcome | None: ...
 
     def runs_async(self) -> bool: ...
 
@@ -198,6 +205,11 @@ class _HoldLearningRunner(ModelLifecycleRunner, Protocol):
         self,
         origin: CandidateOrigin,
         before_schedule: Callable[[], bool],
+    ) -> bool: ...
+    def record_corpus_fit_disabled(
+        self,
+        origin: CandidateOrigin,
+        reason: str,
     ) -> bool: ...
 
     def get_model_snapshot(self) -> object: ...
@@ -296,11 +308,13 @@ class HoldLearningRuntime:
         self._generation = initial_generation
         self._pending: dict[int, _PendingObservation] = {}
         self._evidence_available = True
+        self._checkpoint_evidence_available = True
         self._seed_warmup_remaining = 0
         self._activation_state_identity: _ActivationIdentity | None = None
         self._retired_generations: set[int] = set()
         self._activation_lifecycle_evidence_id: str | None = None
-        self._submitted_restore: dict[str, object] | None = None
+        self._submitted_restore: tuple[str, dict[str, object]] | None = None
+        self._restored_authority_blocked = False
         self._last_checkpoint_succeeded = False
         self._last_checkpoint_snapshot: dict[str, object] | None = None
         self._teardown_checkpoint_retried = False
@@ -311,11 +325,14 @@ class HoldLearningRuntime:
         self._persistence_drained = False
         self._trace_finished = False
         self._runner_finished = False
+        self._stop_fit_submitted = False
+        self._postfit_persistence_finished = False
+        self._teardown_finalized = False
         self._calibration_fit_authorizations: set[int] = set()
 
     @property
     def evidence_available(self) -> bool:
-        return self._evidence_available and self._seed_warmup_remaining == 0
+        return self._evidence_available and self._checkpoint_evidence_available and self._seed_warmup_remaining == 0
 
     @property
     def seed_warmup_remaining(self) -> int:
@@ -464,6 +481,19 @@ class HoldLearningRuntime:
             ),
         )
 
+    def _apply_restore_authority(self, outcome: ModelRestoreOutcome) -> None:
+        trace = self._trace
+        if trace is None:
+            return
+        authority = outcome.effective_authority
+        if authority is None:
+            trace.clear_model_authority()
+            return
+        trace.set_model_authority(
+            cast(Mapping[str, JsonValue], authority),
+            "configured_fallback" if outcome.staged_for_revalidation else "restored",
+        )
+
     def restore_model(
         self,
         *,
@@ -486,33 +516,39 @@ class HoldLearningRuntime:
         snapshot = store.load(self._controller_name)
         if snapshot is None:
             return
-        if runner.restore_model(snapshot):
-            provenance = "restore_submitted" if runner.runs_async() else "restored"
-            if trace is not None:
-                trace.set_model_authority(
-                    cast(Mapping[str, JsonValue], snapshot),
-                    provenance,
-                )
-            if runner.runs_async():
-                self._submitted_restore = snapshot
-            self._logger.info(f"Submitted the stored {self._controller_name} model for restore")
+        restore_token = secrets.token_hex(16)
+        self._submitted_restore = None
+        self._restored_authority_blocked = False
+        outcome = runner.restore_model(
+            snapshot,
+            restore_token=(restore_token if runner.runs_async() else None),
+        )
+        if outcome.pending:
+            self._submitted_restore = (restore_token, snapshot)
+            self._restored_authority_blocked = True
+        elif outcome.accepted:
+            self._restored_authority_blocked = outcome.staged_for_revalidation
+            self._apply_restore_authority(outcome)
+        else:
+            self._restored_authority_blocked = True
+            self._logger.warning(f"Stored {self._controller_name} model was rejected; starting fresh")
             if trace is not None:
                 trace.record_model(
                     TraceModelContext(
-                        event=ModelEventType.RESTORE,
-                        detail="stored model submitted for restore",
+                        event=ModelEventType.REJECT,
+                        detail="stored model rejected for restore",
                         snapshot=cast(Mapping[str, JsonValue], snapshot),
                         provenance="persisted",
                         timestamp_ms=timestamp_ms,
                     )
                 )
             return
-        self._logger.warning(f"Stored {self._controller_name} model was rejected; starting fresh")
+        self._logger.info(f"Submitted the stored {self._controller_name} model for restore")
         if trace is not None:
             trace.record_model(
                 TraceModelContext(
-                    event=ModelEventType.REJECT,
-                    detail="stored model rejected for restore",
+                    event=ModelEventType.RESTORE,
+                    detail="stored model submitted for restore",
                     snapshot=cast(Mapping[str, JsonValue], snapshot),
                     provenance="persisted",
                     timestamp_ms=timestamp_ms,
@@ -566,6 +602,8 @@ class HoldLearningRuntime:
     def reconcile_activation(self) -> None:
         runner = self._runner
         if runner is None or self._controller_name != "mpc":
+            return
+        if self._restored_authority_blocked:
             return
         try:
             state = read_model_activation()
@@ -629,7 +667,7 @@ class HoldLearningRuntime:
         self._last_checkpoint_snapshot = deepcopy(snapshot)
         self._last_checkpoint_succeeded = bool(accepted)
         if not accepted:
-            self.mark_evidence_unavailable()
+            self._checkpoint_evidence_available = False
         return bool(accepted)
 
     @staticmethod
@@ -659,11 +697,25 @@ class HoldLearningRuntime:
             self.mark_evidence_unavailable()
             self._logger.error(f"Model fit scheduling failed at cook end: {error}")
             return False
+        runner = self._runner
         if not enabled:
-            return False
+            if self._controller_name != "pid_sp" or not self._evidence_available or runner is None:
+                return False
+            try:
+                recorded = bool(
+                    runner.record_corpus_fit_disabled(
+                        CandidateOrigin.PASSIVE_ONLINE,
+                        "identification-disabled",
+                    )
+                )
+                if recorded:
+                    self._stop_fit_submitted = True
+                return recorded
+            except Exception as error:
+                self._logger.error(f"Disabled PID-SP fit outcome recording failed at cook end: {error}")
+                return False
         if not self._evidence_available:
             return False
-        runner = self._runner
         if runner is None:
             self.mark_evidence_unavailable()
             return False
@@ -676,7 +728,38 @@ class HoldLearningRuntime:
         if not scheduled:
             self.mark_evidence_unavailable()
             return False
+        self._stop_fit_submitted = True
         return True
+
+    def record_stop_fit_failure(
+        self,
+        settings: Mapping[str, JsonValue],
+        reason: str,
+    ) -> bool:
+        try:
+            enabled = self._identification_enabled(
+                settings,
+                self._controller_name,
+            )
+        except Exception as error:
+            self._logger.error(f"Model fit failure recording failed at cook end: {error}")
+            return False
+        runner = self._runner
+        if self._controller_name != "pid_sp" or not enabled or runner is None:
+            return False
+        try:
+            recorded = bool(
+                runner.record_corpus_fit_failed(
+                    CandidateOrigin.PASSIVE_ONLINE,
+                    reason,
+                )
+            )
+            if recorded:
+                self._stop_fit_submitted = True
+            return recorded
+        except Exception as error:
+            self._logger.error(f"PID-SP fit failure recording failed at cook end: {error}")
+            return False
 
     def barrier_for_teardown(self, *, generation: int) -> bool:
         """Fence causal origins and drain process-owned persistence once."""
@@ -716,12 +799,24 @@ class HoldLearningRuntime:
             self.mark_evidence_unavailable()
         return drained
 
-    def finish_teardown(self, *, generation: int) -> None:
-        if self._teardown_started:
+    def _finish_teardown_after_fit(self) -> None:
+        if self._teardown_finalized:
             return
-        self._teardown_started = True
-        runner = self._runner
-        self.barrier_for_teardown(generation=generation)
+        self._teardown_finalized = True
+        persistence = self._persistence
+        if self._stop_fit_submitted and not self._postfit_persistence_finished:
+            self._postfit_persistence_finished = True
+            postfit_drained = persistence is None
+            if persistence is not None:
+                try:
+                    postfit_drained = persistence.barrier(timeout=2.0) and not persistence.failed
+                except Exception as error:
+                    postfit_drained = False
+                    self._logger.warning(
+                        f"Post-fit model persistence barrier failed: {error}",
+                    )
+            if not postfit_drained:
+                self.mark_evidence_unavailable()
         trace = self._trace
         if not self._trace_flushed:
             self._trace_flushed = True
@@ -737,13 +832,22 @@ class HoldLearningRuntime:
                     trace.close()
                 except Exception as error:
                     self._logger.warning(f"Control trace close failed: {error}")
-        if not self._runner_finished:
-            self._runner_finished = True
-            if runner is not None:
-                try:
-                    runner.finish_teardown()
-                except Exception as error:
-                    self._logger.warning(f"Controller teardown close failed: {error}")
+
+    def finish_teardown(self, *, generation: int) -> None:
+        if self._teardown_started:
+            return
+        self._teardown_started = True
+        runner = self._runner
+        self.barrier_for_teardown(generation=generation)
+        if runner is None:
+            self._finish_teardown_after_fit()
+            return
+        self._runner_finished = True
+        try:
+            runner.finish_teardown(self._finish_teardown_after_fit)
+        except Exception as error:
+            self._logger.warning(f"Controller teardown close failed: {error}")
+            self._finish_teardown_after_fit()
 
     def submit_completed_observation(
         self,
@@ -826,23 +930,21 @@ class HoldLearningRuntime:
         self._bound_pending()
 
     def _reconcile_submitted_restore(self, timestamp_ms: int) -> None:
-        """Correct the record once the worker rules on a queued restore.
-
-        An async runner answers `restore_model` before its core has looked
-        at the snapshot, so the authority stamped at submission describes a
-        model that may never be adopted. Only the worker knows, and only
-        once, so a refusal is reported here or nowhere.
-        """
+        """Publish only the effective authority after the worker rules."""
         runner = self._runner
-        snapshot = self._submitted_restore
-        if runner is None or snapshot is None:
+        submitted = self._submitted_restore
+        if runner is None or submitted is None:
             return
+        restore_token, snapshot = submitted
         outcome = runner.drain_restore_outcome()
-        if outcome is None:
+        if outcome is None or outcome.pending or outcome.restore_token != restore_token:
             return
         self._submitted_restore = None
-        if outcome:
+        if outcome.accepted:
+            self._restored_authority_blocked = outcome.staged_for_revalidation
+            self._apply_restore_authority(outcome)
             return
+        self._restored_authority_blocked = True
         trace = self._trace
         if trace is not None:
             trace.clear_model_authority()

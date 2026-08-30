@@ -23,6 +23,7 @@ from common.model_evidence import (
     ForecastOriginEvidence,
     ModelEvidenceDbRow,
     ModelEvidenceRecord,
+    PidSpFitDecisionEvidence,
     RollbackEvidence,
     SchemaInvalidationEvidence,
     TimingDistributionEvidence,
@@ -567,6 +568,150 @@ def test_old_schemas_explicitly_round_trip_retired_lifecycle_vocabulary(
     )
 
     assert ModelEvidenceRecord.from_db_row(record.to_db_row()) == record
+
+
+@pytest.mark.parametrize("schema_version", (1, 2, 3, 4))
+def test_extended_payload_union_preserves_historical_evidence_round_trip(
+    schema_version,
+) -> None:
+    record = ModelEvidenceRecord(
+        evidence_id=f"historical-confidence-{schema_version}",
+        kind=EvidenceKind.CONFIDENCE_DECISION,
+        session_id="session-a",
+        cook_id="cook-a",
+        timestamp_ms=400,
+        role_generation=4,
+        model_digest=_DIGEST,
+        provenance_digest=_OTHER_DIGEST,
+        schema_version=schema_version,
+        payload=ConfidenceDecisionEvidence(
+            decision_id="historical-decision",
+            blocked=True,
+            reason="historical-reason",
+        ),
+    )
+
+    assert ModelEvidenceRecord.from_db_row(record.to_db_row()) == record
+
+
+def test_current_pid_sp_fit_decision_round_trips_exact_lineage() -> None:
+    payload = PidSpFitDecisionEvidence(
+        request_id="request-a",
+        controller="pid_sp",
+        origin="passive-online",
+        outcome="rejected",
+        reason="confirmation-pending:1/20",
+        request_bound=True,
+        fit_corpus_digest="c" * 64,
+        configuration_digest="d" * 64,
+        selected_form="fopdt",
+        candidate_digest="e" * 64,
+        parent_incumbent_digest="f" * 64,
+        parent_incumbent_generation=4,
+        candidate_generation=5,
+        confirmation_observed=1,
+        confirmation_candidate_digest="a" * 64,
+        episode_ids=("episode-a", "episode-b"),
+    )
+    record = ModelEvidenceRecord(
+        evidence_id="pid-sp-decision",
+        kind=EvidenceKind.PID_SP_FIT_DECISION,
+        session_id="session-a",
+        cook_id="cook-a",
+        timestamp_ms=401,
+        role_generation=7,
+        model_digest="e" * 64,
+        provenance_digest="c" * 64,
+        payload=payload,
+    )
+
+    assert ModelEvidenceRecord.from_db_row(record.to_db_row()) == record
+
+
+@pytest.mark.parametrize(
+    ("request_bound", "fit_corpus_digest"),
+    (
+        (False, "c" * 64),
+        (True, None),
+    ),
+)
+def test_pid_sp_request_binding_exactly_matches_corpus_attribution(
+    request_bound,
+    fit_corpus_digest,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match="request binding must match corpus attribution",
+    ):
+        PidSpFitDecisionEvidence(
+            request_id="request-a",
+            controller="pid_sp",
+            origin="passive-online",
+            outcome="disabled",
+            reason="identification-disabled",
+            request_bound=request_bound,
+            fit_corpus_digest=fit_corpus_digest,
+            configuration_digest="d" * 64,
+            selected_form=None,
+            candidate_digest=None,
+            parent_incumbent_digest=None,
+            confirmation_observed=0,
+        )
+
+
+def test_pid_sp_pre_request_terminal_has_no_fabricated_corpus_provenance() -> None:
+    payload = PidSpFitDecisionEvidence(
+        request_id="disabled-ticket",
+        controller="pid_sp",
+        origin="passive-online",
+        outcome="disabled",
+        reason="identification-disabled",
+        request_bound=False,
+        fit_corpus_digest=None,
+        configuration_digest="d" * 64,
+        selected_form=None,
+        candidate_digest=None,
+        parent_incumbent_digest=None,
+        confirmation_observed=0,
+    )
+    record = ModelEvidenceRecord(
+        evidence_id="pid-sp-disabled",
+        kind=EvidenceKind.PID_SP_FIT_DECISION,
+        session_id="session-a",
+        cook_id="cook-a",
+        timestamp_ms=401,
+        role_generation=7,
+        model_digest=None,
+        provenance_digest=None,
+        payload=payload,
+    )
+
+    restored = ModelEvidenceRecord.from_db_row(record.to_db_row())
+
+    assert restored == record
+    assert restored.provenance_digest is None
+    assert restored.payload.fit_corpus_digest is None
+
+
+def test_pid_sp_pre_request_terminal_cannot_claim_candidate_decision() -> None:
+    with pytest.raises(
+        ValueError,
+        match="only pre-request PID-SP terminal outcomes",
+    ):
+        PidSpFitDecisionEvidence(
+            request_id="request-a",
+            controller="pid_sp",
+            origin="passive-online",
+            outcome="rejected",
+            reason="confirmation-pending",
+            request_bound=False,
+            fit_corpus_digest=None,
+            configuration_digest="d" * 64,
+            selected_form=None,
+            candidate_digest=None,
+            parent_incumbent_digest=None,
+            confirmation_observed=0,
+        )
 
 
 def test_old_fit_window_row_migrates_to_corpus_lifecycle_identity() -> None:

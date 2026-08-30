@@ -32,6 +32,10 @@ from controller.model_learning.grey_runtime import (
     GreyLearningProcessOwner,
     GreyLearningRuntime,
 )
+from controller.model_learning.installation_identity import (
+    InstallationIdentityProvider,
+    os_installation_identity,
+)
 from controller.mpc_allocator import AllocationResult
 from controller.mpc_calibration import MpcCalibrationRuntime
 from controller.mpc_config import (
@@ -68,6 +72,7 @@ class Controller(ControllerBase):
         fit_partition_digest: Callable[[], str | None] | None = None,
         grey_learning_process: GreyLearningProcessOwner | None = None,
         logger=None,
+        installation_identity_provider: InstallationIdentityProvider = os_installation_identity,
     ):
         super().__init__(config, units, cycle_data, logger=logger)
 
@@ -160,6 +165,7 @@ class Controller(ControllerBase):
                 sync_configuration=self._synchronize_active_core,
                 append_trace=append_control_trace,
                 logger=self._logger,
+                installation_identity_provider=installation_identity_provider,
             )
             self._grey_learning_runtime = grey_runtime
         except BaseException as construction_error:
@@ -500,6 +506,7 @@ class Controller(ControllerBase):
         return self._grey_learning_runtime._request_corpus_fit_ticket(
             origin,
             replace_owned_prepared=origin is CandidateOrigin.OPERATOR_CALIBRATION,
+            join_pending=True,
         )
 
     def _consume_terminal_corpus_fit_ticket(

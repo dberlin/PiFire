@@ -57,6 +57,8 @@ _GREY_V5_KEYS = frozenset(
 )
 _GREY_V6_SCHEMA = "pifire-grey-learning/v6"
 _GREY_V6_KEYS = _GREY_V5_KEYS - {"cook_refit"}
+_GREY_V7_SCHEMA = "pifire-grey-learning/v7"
+_GREY_V7_KEYS = _GREY_V6_KEYS | {"installation_identity_digest"}
 
 
 class GreySnapshotInvalid(ValueError):
@@ -360,7 +362,7 @@ def _grey_v4_snapshot(snapshot):
     return {
         "version": MODEL_SCHEMA,
         "revision": revision,
-        "schema": _GREY_V6_SCHEMA,
+        "schema": _GREY_V7_SCHEMA,
         "structure": {"kind": GREY_BOX_KIND, "n_delay": 8, "state_count": 10},
         "active": active,
         "active_pair": active_pair,
@@ -377,6 +379,7 @@ def _grey_v4_snapshot(snapshot):
         "activation": activation,
         "failure": failure,
         "challenger_authority": None,
+        "installation_identity_digest": None,
     }
 
 
@@ -450,13 +453,41 @@ def _grey_v6_snapshot(snapshot):
     return normalized
 
 
+def _installation_identity_digest(value):
+    if value is None:
+        return None
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise GreySnapshotInvalid("invalid-installation-identity")
+    return value
+
+
+def _grey_v7_snapshot(snapshot):
+    legacy = dict(snapshot)
+    installation_digest = legacy.pop("installation_identity_digest", None)
+    legacy["version"] = 6
+    legacy["schema"] = _GREY_V6_SCHEMA
+    normalized = _grey_v6_snapshot(legacy)
+    normalized["installation_identity_digest"] = _installation_identity_digest(installation_digest)
+    return normalized
+
+
 def _grey_parameters_digest(parameters):
     return hashlib.sha256(
         json.dumps(parameters, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
     ).hexdigest()
 
 
-def new_grey_learning_snapshot(*, revision, parameters, metadata):
+def new_grey_learning_snapshot(
+    *,
+    revision,
+    parameters,
+    metadata,
+    installation_identity_digest=None,
+):
     if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
         raise GreySnapshotInvalid("invalid-revision")
     owned_parameters = normalize_grey_parameters(parameters)
@@ -465,7 +496,7 @@ def new_grey_learning_snapshot(*, revision, parameters, metadata):
     return {
         "version": MODEL_SCHEMA,
         "revision": revision,
-        "schema": _GREY_V6_SCHEMA,
+        "schema": _GREY_V7_SCHEMA,
         "structure": {"kind": GREY_BOX_KIND, "n_delay": 8, "state_count": 10},
         "active": {"parameters": owned_parameters, "metadata": owned_metadata},
         "active_pair": None,
@@ -488,11 +519,12 @@ def new_grey_learning_snapshot(*, revision, parameters, metadata):
         },
         "failure": None,
         "challenger_authority": None,
+        "installation_identity_digest": _installation_identity_digest(installation_identity_digest),
     }
 
 
 def migrate_grey_learning_snapshot(snapshot):
-    """Own one compatible checkpoint as v6, accepting v3/v4/v5 only for migration."""
+    """Own one compatible checkpoint as v7, accepting v3-v6 only for migration."""
 
     if not isinstance(snapshot, Mapping):
         raise GreySnapshotInvalid("malformed-snapshot")
@@ -515,8 +547,12 @@ def migrate_grey_learning_snapshot(snapshot):
         if set(snapshot) != _GREY_V5_KEYS or snapshot.get("schema") != _GREY_V5_SCHEMA:
             raise GreySnapshotInvalid("malformed-v5")
         return _grey_v5_snapshot(snapshot)
+    if version == 6:
+        if set(snapshot) != _GREY_V6_KEYS or snapshot.get("schema") != _GREY_V6_SCHEMA:
+            raise GreySnapshotInvalid("malformed-v6")
+        return _grey_v6_snapshot(snapshot)
     if version != MODEL_SCHEMA:
         raise GreySnapshotInvalid("incompatible-schema")
-    if set(snapshot) != _GREY_V6_KEYS or snapshot.get("schema") != _GREY_V6_SCHEMA:
-        raise GreySnapshotInvalid("malformed-v6")
-    return _grey_v6_snapshot(snapshot)
+    if set(snapshot) != _GREY_V7_KEYS or snapshot.get("schema") != _GREY_V7_SCHEMA:
+        raise GreySnapshotInvalid("malformed-v7")
+    return _grey_v7_snapshot(snapshot)

@@ -339,6 +339,7 @@ def test_two_cooks_produce_one_exact_manifest_fit_and_replay_through_cookfile_an
                     "segment_id": item.segment_id,
                     "through_ordinal": item.through_ordinal,
                     "prefix_digest": item.prefix_digest,
+                    "segment_content_digest": item.segment_content_digest,
                     "pre_roll_count": item.pre_roll_count,
                     "scored_count": item.scored_count,
                 }

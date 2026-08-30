@@ -12,15 +12,12 @@ import pytest
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.fopdt_identifier import (
     AMBIENT_F,
-    BLEND,
-    CONFIRM_WINDOW,
     DELAYS,
     DISTRUST_RATIO,
     DISTRUST_WINDOW,
     EW_ALPHA,
     FORM_FOPDT,
     FORM_IPDT,
-    FORM_PARAMS,
     GAIN_MAX,
     GAIN_MIN,
     LAM,
@@ -124,6 +121,19 @@ def test_delayed_average_matches_the_direct_scan():
         want, want_valid = _oracle_delayed_average(collapsed, t_start, t_end, DELAYS)
         assert got_valid.tolist() == want_valid.tolist()
         np.testing.assert_allclose(got[got_valid], want[want_valid], rtol=1e-12, atol=1e-12)
+
+
+@pytest.mark.parametrize(
+    "retention_s",
+    [True, "120", 0.0, -1.0, float("nan"), float("inf")],
+)
+def test_duty_history_rejects_invalid_retention(retention_s):
+    history = DutyHistory(120.0)
+
+    with pytest.raises((TypeError, ValueError)):
+        history.set_retention_s(retention_s)
+
+    assert history.retention_s == 120.0
 
 
 def test_interval_duty_belongs_to_the_completed_interval():
@@ -418,15 +428,14 @@ def _excitation_schedule(n, dt=20.0):
     return out
 
 
-def test_identifies_a_synthetic_fopdt_plant():
+def test_synthetic_fopdt_candidates_never_become_authoritative():
     identifier = FOPDTIdentifier()
     plant = _FOPDTPlant(K=800.0, tau=600.0, theta=35.0)
+
     _drive(identifier, plant, _excitation_schedule(600))
-    model = identifier.trusted_model()
-    assert model is not None, identifier.status()
-    assert model["K"] == pytest.approx(800.0, rel=0.10)
-    assert model["tau"] == pytest.approx(600.0, rel=0.15)
-    assert abs(model["theta"] - 35.0) <= 5.0
+
+    assert identifier.status()["raw_candidates_passing"] > 0
+    assert identifier.trusted_model() is None
 
 
 def test_no_promotion_under_constant_duty():
@@ -444,29 +453,6 @@ def test_no_promotion_without_enough_temperature_span():
     assert identifier.trusted_model() is None
 
 
-def _early_excitation_schedule(n):
-    """Eighty-second duty blocks that identify the exact plant by 500 s."""
-    return [0.2 if (index // 4) % 2 == 0 else 0.6 for index in range(n)]
-
-
-def test_first_trust_is_900_seconds_at_the_production_cadence():
-    identifier = FOPDTIdentifier()
-    plant = _FOPDTPlant(K=800.0, tau=600.0, theta=20.0)
-    schedule = _early_excitation_schedule(45)
-
-    _drive(identifier, plant, schedule[:44])
-
-    assert plant.t == 880.0
-    assert identifier.status()["confirming"] == CONFIRM_WINDOW - 1
-    assert identifier.trusted_model() is None
-
-    _drive(identifier, plant, schedule[44:45])
-
-    assert plant.t == 900.0
-    assert identifier.status()["confirming"] is None
-    assert identifier.trusted_model() is not None
-
-
 def test_no_promotion_when_duty_std_is_the_sole_blocker():
     """Duty constant at 0.40 except a single 4-step excursion to 0.46: enough to
     register a held transition, not enough to move duty_std past its gate."""
@@ -482,7 +468,7 @@ def test_no_promotion_when_duty_std_is_the_sole_blocker():
     assert status["duty_std"] < MIN_DUTY_STD
     # positive control: candidates are actually recoverable here, so the block
     # is the duty_std gate, not a dead identifier.
-    assert status["candidates_passing"] > 0
+    assert status["raw_candidates_passing"] > 0
     assert identifier.trusted_model() is None
 
 
@@ -503,7 +489,7 @@ def test_no_promotion_when_temp_span_is_the_sole_blocker():
     assert status["duty_std"] >= MIN_DUTY_STD
     assert status["transition_seen"] is True
     assert status["temp_span"] < MIN_TEMP_SPAN_F
-    assert status["candidates_passing"] > 0
+    assert status["raw_candidates_passing"] > 0
     assert identifier.trusted_model() is None
 
 
@@ -514,7 +500,7 @@ def test_no_promotion_when_the_count_gate_is_satisfied_but_the_time_gate_is_not(
     status = identifier.status()
     assert status["accepted"] >= MIN_ACCEPTED
     assert status["accepted_seconds"] < MIN_ACCEPTED_SECONDS
-    assert status["candidates_passing"] > 0
+    assert status["raw_candidates_passing"] > 0
     assert identifier.trusted_model() is None
 
 
@@ -526,7 +512,7 @@ def test_no_promotion_when_the_time_gate_is_satisfied_but_the_count_gate_is_not(
     status = identifier.status()
     assert status["accepted"] < MIN_ACCEPTED
     assert status["accepted_seconds"] >= MIN_ACCEPTED_SECONDS
-    assert status["candidates_passing"] > 0
+    assert status["raw_candidates_passing"] > 0
     assert identifier.trusted_model() is None
 
 
@@ -590,28 +576,6 @@ def test_restore_adopts_a_valid_model_and_rejects_an_impossible_one():
     assert identifier.restore({"K": 800.0, "tau": 600.0}) is False
 
 
-def test_a_single_gateless_evaluation_does_not_destroy_the_confirmation_window(monkeypatch):
-    """Confirmation progress is earned over many samples and was thrown away by
-    one that gated nothing, so whether a chamber ever got identified came down
-    to the noise draw. Measured on MAKGrillSim before this: windows died at
-    depth 19 twice in a cook that eventually promoted, and never got past 15 in
-    one that never did -- same plant, same excitation, different seed.
-
-    Losing excitation altogether already only pauses the window, so the milder
-    condition must not be the harsher one.
-    """
-    identifier = FOPDTIdentifier()
-    monkeypatch.setattr(identifier, "_excited", lambda: True)
-    # This evaluation gates nothing, in either form.
-    monkeypatch.setattr("controller.fopdt_identifier.promote", lambda resid, mask: (None, None))
-    window = {"n": CONFIRM_WINDOW - 1, "form": FORM_IPDT, "K_i": 0.46, "c0": -0.033, "theta": 90.0}
-    identifier._confirm = dict(window)
-
-    identifier._evaluate()
-
-    assert identifier._confirm == window
-
-
 def _ipdt(**overrides):
     model = {"form": FORM_IPDT, "K_i": 0.55, "c0": -0.113, "theta": 90.0, "revision": 4, "identified_at_f": 450.0}
     return {**model, **overrides}
@@ -664,25 +628,8 @@ def test_retarget_moves_a_restored_model_to_the_new_operating_point():
     assert identifier.trusted_model()["revision"] == before_revision + 1
 
 
-def test_retarget_leaves_a_model_this_cook_earned_alone():
-    """A model confirmed against this cook's own plant already describes where
-    the chamber has been; only a carried one is an extrapolation."""
-    identifier = FOPDTIdentifier()
-    plant = _FOPDTPlant(K=800.0, tau=600.0, theta=40.0)
-    _drive(identifier, plant, _excitation_schedule(600))
-    earned = identifier.trusted_model()
-    assert earned is not None, identifier.status()
-
-    assert identifier.retarget(225.0) is False
-    assert identifier.trusted_model() == earned
-
-
-def test_every_promotable_form_can_be_restored():
-    """A form the identifier can promote but not restore is learning that cannot
-    outlive the cook that earned it: it drives the predictor until the cook ends
-    and is then refused at the next Hold entry, silently, as `starting fresh`.
-    """
-    assert set(FORM_PARAMS) == set(RESTORE_BOUNDS)
+def test_every_diagnostic_form_can_be_restored():
+    assert set(RESTORE_BOUNDS) == {FORM_FOPDT, FORM_IPDT, "sopdt"}
 
 
 @pytest.mark.parametrize(
@@ -714,190 +661,79 @@ def test_restore_rejects_an_impossible_integrating_model():
     assert identifier.restore({**good, "form": "no-such-form"}) is False
 
 
-def test_the_revision_advances_only_on_a_material_change():
-    """The materiality gate protects a model this cook has actually EARNED
-    (promoted and confirmed against this plant), as opposed to one merely
-    restored from a previous cook -- see
-    test_a_restored_models_materiality_gate_does_not_block_a_small_revision,
-    which runs the identical within-band perturbation against a restored
-    model and expects the opposite outcome."""
+def test_restore_accepts_profiled_delay_through_the_adaptive_bound():
     identifier = FOPDTIdentifier()
-    plant = _FOPDTPlant(K=800.0, tau=600.0, theta=40.0)
-    _drive(identifier, plant, _excitation_schedule(600))
-    model = identifier.trusted_model()
-    assert model is not None, identifier.status()
-    rev = model["revision"]
-    # within the material band of the model just earned above
-    plant2 = _FOPDTPlant(K=model["K"] * 1.02, tau=model["tau"] * 1.02, theta=model["theta"])
-    _drive(identifier, plant2, _excitation_schedule(600))
-    assert identifier.trusted_model()["revision"] == rev
-    # positive control: the identifier must have actually reached a decision,
-    # not merely have never promoted anything -- otherwise this test cannot
-    # distinguish the material gate working from a dead identifier.
-    assert identifier.status()["candidates_passing"] > 0
+
+    assert (
+        identifier.restore(
+            {
+                "form": FORM_FOPDT,
+                "K": 800.0,
+                "tau": 600.0,
+                "theta": 205.0,
+                "revision": 4,
+            }
+        )
+        is True
+    )
+    assert identifier.trusted_model()["theta"] == 205.0
 
 
-def test_a_restored_models_materiality_gate_does_not_block_a_small_revision():
-    """The positive counterpart to test_the_revision_advances_only_on_a_material_change,
-    which runs the identical within-band perturbation against an EARNED model
-    and expects the revision to stay put. A model just restored from a
-    previous cook has not yet earned that protection: it is freely revisable,
-    so the same size of change here DOES advance the revision."""
+def test_restore_rejects_delay_beyond_the_adaptive_bound():
     identifier = FOPDTIdentifier()
-    identifier.restore({"K": 800.0, "tau": 600.0, "theta": 40.0, "revision": 1})
-    rev = identifier.trusted_model()["revision"]
-    plant = _FOPDTPlant(K=802.0, tau=602.0, theta=35.0)  # within the material band
-    _drive(identifier, plant, _excitation_schedule(600))
-    assert identifier.trusted_model()["revision"] > rev
-    assert identifier.status()["candidates_passing"] > 0
+
+    assert (
+        identifier.restore(
+            {
+                "form": FORM_FOPDT,
+                "K": 800.0,
+                "tau": 600.0,
+                "theta": 905.0,
+                "revision": 4,
+            }
+        )
+        is False
+    )
 
 
-def test_an_earned_revision_re_establishes_the_materiality_gate():
-    """Once a restored model's free-revision window closes with an adoption
-    (this cook's own evidence has now earned it churn protection), a further
-    within-band perturbation must NOT advance the revision again."""
+def test_raw_bank_cannot_distrust_a_model_outside_its_delay_support():
     identifier = FOPDTIdentifier()
-    identifier.restore({"K": 800.0, "tau": 600.0, "theta": 40.0, "revision": 1})
-    plant = _FOPDTPlant(K=802.0, tau=602.0, theta=35.0)  # within the material band: revises freely
-    _drive(identifier, plant, _excitation_schedule(600))
-    model = identifier.trusted_model()
-    assert model["revision"] == 2
-    assert identifier._restored is False
-    rev = model["revision"]
-    plant2 = _FOPDTPlant(K=model["K"] * 1.02, tau=model["tau"] * 1.02, theta=model["theta"])
-    _drive(identifier, plant2, _excitation_schedule(600))
-    assert identifier.trusted_model()["revision"] == rev
+    assert identifier.restore(
+        {
+            "form": FORM_FOPDT,
+            "K": 800.0,
+            "tau": 600.0,
+            "theta": 205.0,
+            "revision": 4,
+        }
+    )
+    identifier._bank.resid_ew[:] = 1.0
+    identifier._bank.resid_ew[-1] = 100.0
 
-
-def test_confirmation_requires_a_full_window_before_trust():
-    """A candidate must hold still for CONFIRM_WINDOW evaluations before it is
-    believed: confirming climbs 1..CONFIRM_WINDOW-1 with no trusted model, then
-    the window closes and a model appears in the same step confirming clears."""
-    identifier = FOPDTIdentifier()
-    plant = _FOPDTPlant(K=800.0, tau=600.0, theta=20.0)
-    seen_confirming = []
-    for u in _early_excitation_schedule(45):
-        _drive(identifier, plant, [u])
-        confirming = identifier.status()["confirming"]
-        if confirming is not None:
-            assert identifier.trusted_model() is None
-            seen_confirming.append(confirming)
-    assert seen_confirming == list(range(1, CONFIRM_WINDOW))
-    assert plant.t == 900.0
+    assert identifier._distrust_ratio() is None
+    for _ in range(DISTRUST_WINDOW):
+        identifier._check_distrust()
     assert identifier.trusted_model() is not None
+    assert identifier.status()["distrust_count"] == 0
 
 
-def test_evaluation_continues_on_every_accepted_observation_after_900(monkeypatch):
+def test_raw_candidates_do_not_mutate_an_explicitly_restored_model():
     identifier = FOPDTIdentifier()
-    plant = _FOPDTPlant()
-    evaluated_at = []
-    original_evaluate = identifier._evaluate
+    assert identifier.restore(
+        {
+            "K": 800.0,
+            "tau": 600.0,
+            "theta": 40.0,
+            "revision": 7,
+        }
+    )
+    restored = identifier.trusted_model()
+    plant = _FOPDTPlant(K=802.0, tau=602.0, theta=35.0)
 
-    def recording_evaluate():
-        evaluated_at.append(identifier._prev[0])
-        original_evaluate()
+    _drive(identifier, plant, _excitation_schedule(600))
 
-    monkeypatch.setattr(identifier, "_evaluate", recording_evaluate)
-    _drive(identifier, plant, _excitation_schedule(50))
-
-    assert [at for at in evaluated_at if at >= 900.0] == [900.0, 920.0, 940.0, 960.0, 980.0, 1000.0]
-
-
-def test_confirmation_resets_when_the_candidate_k_jumps():
-    """A candidate that otherwise repeats exactly still restarts the window when
-    its K moves past CONFIRM_K_TOL: the window is confirming a stable estimate,
-    not merely a stable delay.
-
-    The jump is a fixed doubling, not a multiple of CONFIRM_K_TOL itself: a jump
-    derived from the same constant it's meant to test is tautological --
-    `abs(base * (1 + 2*tol) - base) / base > tol` reduces to `2*tol > tol`,
-    which holds for ANY positive tol, so it could never distinguish a sane
-    tolerance from one inflated past recognition. A fixed jump, comfortably
-    above the real tolerance and comfortably below a broken one, can.
-    """
-    identifier = FOPDTIdentifier()
-    base = {"K": 800.0, "tau": 600.0, "theta": 35.0}
-    for n in range(1, 6):
-        assert identifier._confirmed(dict(base)) is False
-        assert identifier.status()["confirming"] == n
-    jumped = {"K": base["K"] * 2.0, "tau": base["tau"], "theta": base["theta"]}
-    assert identifier._confirmed(jumped) is False
-    assert identifier.status()["confirming"] == 1
-
-
-def test_confirmation_resets_when_the_candidate_tau_jumps():
-    """The tau half of the same OR: a candidate that repeats K exactly still
-    restarts the window when its tau moves past CONFIRM_TAU_TOL.
-
-    The jump is a fixed doubling, not a multiple of CONFIRM_TAU_TOL itself: a
-    jump derived from the same constant it's meant to test is tautological --
-    `abs(base * (1 + 2*tol) - base) / base > tol` reduces to `2*tol > tol`,
-    which holds for ANY positive tol, so it could never distinguish a sane
-    tolerance from one inflated past recognition. A fixed jump, comfortably
-    above the real tolerance and comfortably below a broken one, can.
-    """
-    identifier = FOPDTIdentifier()
-    base = {"K": 800.0, "tau": 600.0, "theta": 35.0}
-    for n in range(1, 6):
-        assert identifier._confirmed(dict(base)) is False
-        assert identifier.status()["confirming"] == n
-    jumped = {"K": base["K"], "tau": base["tau"] * 2.0, "theta": base["theta"]}
-    assert identifier._confirmed(jumped) is False
-    assert identifier.status()["confirming"] == 1
-
-
-def test_a_material_change_advances_the_revision_and_blends_the_continuous_parameters():
-    """The positive counterpart to test_the_revision_advances_only_on_a_material_change:
-    a candidate outside the material band DOES advance the revision, and K/tau move
-    by the BLEND fraction toward it while theta moves to the candidate's grid value
-    outright -- the blend formula in _adopt is otherwise never exercised."""
-    identifier = FOPDTIdentifier()
-    # theta matches the plant's true delay exactly, so only K is materially
-    # wrong -- a restored delay that is ALSO wrong is the distrust check's
-    # territory (see test_distrust_clears_and_the_identifier_re_promotes_normally),
-    # and would clear trust before this blend pathway ever runs.
-    identifier.restore({"K": 800.0, "tau": 600.0, "theta": 35.0, "revision": 1})
-    plant = _FOPDTPlant(K=900.0, tau=600.0, theta=35.0)  # K moved 12.5%: outside MATERIAL_K
-    model = None
-    for u in _excitation_schedule(600):
-        _drive(identifier, plant, [u])
-        model = identifier.trusted_model()
-        if model["revision"] == 2:
-            break
-    assert model is not None and model["revision"] == 2
-
-    # Recover the exact candidate that was just adopted, from the bank state at
-    # this same instant, and check the blend arithmetic against it directly --
-    # not against a value hand-derived ahead of time.
-    params = recover_parameters(identifier.Theta)
-    winner = int(np.where(DELAYS == model["theta"])[0][0])
-    candidate_K = float(params["K"][winner])
-    candidate_tau = float(params["tau"][winner])
-    assert model["K"] == pytest.approx((1.0 - BLEND) * 800.0 + BLEND * candidate_K)
-    assert model["tau"] == pytest.approx((1.0 - BLEND) * 600.0 + BLEND * candidate_tau)
-    assert model["theta"] == float(DELAYS[winner])
-    assert model["theta"] != 35.0  # moved outright, not blended toward the restored value
-
-
-def test_restore_clears_a_stale_confirmation_window():
-    """A confirmation window accumulated against the pre-restore trusted state
-    must not count toward confirming a candidate against the restored one."""
-    identifier = FOPDTIdentifier()
-    plant = _FOPDTPlant(K=800.0, tau=600.0, theta=20.0)
-    schedule = _early_excitation_schedule(45)
-    _drive(identifier, plant, schedule[:44])
-    assert identifier.status()["confirming"] == CONFIRM_WINDOW - 1
-    assert identifier.trusted_model() is None
-    assert identifier.restore({"K": 700.0, "tau": 900.0, "theta": 10.0, "revision": 9}) is True
-    assert identifier.status()["confirming"] is None
-    _drive(identifier, plant, schedule[44:45])
-    assert identifier.trusted_model() == {
-        "form": FORM_FOPDT,
-        "K": 700.0,
-        "tau": 900.0,
-        "theta": 10.0,
-        "revision": 9,
-    }
+    assert identifier.status()["raw_candidates_passing"] > 0
+    assert identifier.trusted_model() == restored
 
 
 # ---------------------------------------------------------------------- distrust
@@ -971,9 +807,8 @@ def test_distrust_ratio_boundary_trips_just_above_the_threshold():
 
 
 def test_distrust_window_boundary_requires_the_full_sustain_count():
-    """DISTRUST_WINDOW straight bad observations are required: one short must
-    not trip it, the same boundary discipline as
-    test_confirmation_requires_a_full_window_before_trust."""
+    """DISTRUST_WINDOW straight bad observations are required; one short must
+    not trip it."""
     identifier = FOPDTIdentifier()
     identifier.restore({"K": 800.0, "tau": 600.0, "theta": 20.0, "revision": 1})
     idx, _other = _resid_setup(identifier, 20.0)
@@ -1006,37 +841,6 @@ def test_distrust_is_not_sticky():
     assert identifier.status()["distrust_count"] == 1  # unchanged: no re-trip
 
 
-def test_confirmed_current_cook_model_directly_replaces_wrong_restored_model():
-    """Twenty agreeing current-cook evaluations may revise a wrong restored
-    model directly; distrust remains the backstop when no revision confirms."""
-    identifier = FOPDTIdentifier()
-    identifier.restore({"K": 800.0, "tau": 600.0, "theta": 100.0, "revision": 9})
-    plant = _FOPDTPlant(K=800.0, tau=600.0, theta=35.0)
-    seen_confirming = []
-
-    for u in _excitation_schedule(1200):
-        _drive(identifier, plant, [u])
-        status = identifier.status()
-        model = identifier.trusted_model()
-        if status["confirming"] is not None:
-            seen_confirming.append(status["confirming"])
-        if model is not None and model["revision"] > 9:
-            break
-        assert model is not None
-        assert model["revision"] == 9
-        assert status["distrust_count"] == 0
-    else:
-        pytest.fail(f"current-cook model did not replace restored model: {identifier.status()}")
-
-    assert seen_confirming == list(range(1, CONFIRM_WINDOW))
-    assert plant.t == 1640.0
-    assert model["form"] == FORM_FOPDT
-    assert model["K"] == pytest.approx(plant.K, rel=0.10)
-    assert model["tau"] == pytest.approx(plant.tau, rel=0.10)
-    assert model["theta"] == pytest.approx(plant.theta, abs=5.0)
-    assert identifier.status()["distrust_count"] == 0
-
-
 def test_status_reports_what_the_gates_are_waiting_for():
     identifier = FOPDTIdentifier()
     status = identifier.status()
@@ -1046,10 +850,10 @@ def test_status_reports_what_the_gates_are_waiting_for():
         "duty_std",
         "temp_span",
         "duty_segments",
-        "best_residual",
-        "runner_up_residual",
+        "raw_best_residual",
+        "raw_runner_up_residual",
         "trusted",
-        "candidates_passing",
+        "raw_candidates_passing",
         "distrust_count",
         "distrust_ratio",
     ):

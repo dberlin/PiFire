@@ -186,9 +186,16 @@ class TraceAppliedState:
 class ControlTraceSession:
     """Own one recorder and all mutable state needed to produce trace envelopes."""
 
-    def __init__(self, recorder: TraceRecorder | None, *, warning: Callable[[str], None]) -> None:
+    def __init__(
+        self,
+        recorder: TraceRecorder | None,
+        *,
+        warning: Callable[[str], None],
+        session_id_factory: Callable[[], uuid.UUID | str] = uuid.uuid4,
+    ) -> None:
         self._recorder = recorder
         self._warning = warning
+        self._session_id_factory: Callable[[], uuid.UUID | str] = session_id_factory
         self._identity: TraceSessionIdentity | None = None
         self._warning_active = False
         self._pending_model_events: list[tuple[ModelEventPayload, int]] = []
@@ -291,8 +298,14 @@ class ControlTraceSession:
             software_version=context.software_version,
             build_version=context.build_version,
         )
+        try:
+            session_id = str(uuid.UUID(str(self._session_id_factory())))
+        except Exception:
+            self._warn_once("Control trace session identity generation failed")
+            return None
+
         identity = TraceSessionIdentity(
-            session_id=str(uuid.uuid4()),
+            session_id=session_id,
             cook_id=context.cook_id,
             controller=context.controller,
             runner_generation=context.runner_generation,
@@ -591,6 +604,22 @@ class ControlTraceSession:
                 target_change_ms=max(0, int(diagnostics.target_change_time * 1_000)),
                 branch=diagnostics.branch,
             )
+            allocation = result.allocation
+            if allocation is not None:
+                allocation_payload = AllocationPayload(
+                    result_revision=result.revision,
+                    normalized_combustion_load=allocation.normalized_combustion_load,
+                    requested_auger_duty=allocation.auger_duty,
+                    requested_fan_duty=allocation.fan_duty,
+                    u_max=allocation.u_max,
+                    fan_min_pct=allocation.fan_min_pct,
+                    fan_max_pct=allocation.fan_max_pct,
+                    fan_enabled=allocation.fan_enabled,
+                    mpc_has_fan_authority=False,
+                    auger_clamp_reason=allocation.auger_clamp_reason,
+                    fan_clamp_reason=allocation.fan_clamp_reason,
+                    allocator_revision=allocation.allocator_revision,
+                )
         elif isinstance(diagnostics, PidTraceDiagnostics):
             payload = PidUpdatePayload(
                 monotonic_ms=monotonic_ms,
@@ -834,7 +863,7 @@ class ControlTraceSession:
                         else context.realized_combustion_load
                     )
                 ),
-                actual_fan_duty=state.fan_duty if context.controls_fan else None,
+                actual_fan_duty=state.fan_duty,
                 sample_complete=sample_complete,
                 output_source=state.output_source,
             ),
@@ -868,7 +897,7 @@ class ControlTraceSession:
                     interval_end_ms=trace_end_ms,
                     realized_auger_duty=applied.ratio,
                     realized_combustion_load=realized_load if sample_complete else None,
-                    actual_fan_duty=completion.applied_fan_duty if controls_fan else None,
+                    actual_fan_duty=completion.applied_fan_duty,
                     sample_complete=sample_complete,
                     output_source=source,
                 ),

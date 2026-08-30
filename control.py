@@ -29,6 +29,7 @@ from common import datastore
 from common.common import ErrorKind, create_logger  # Common Module for WebUI and Control Program
 from common.controller_model_state import ControllerModelStore
 from common.persistence.learning_trajectory import LearningTrajectoryRepository
+from common.persistence.model_evidence import read_model_evidence
 from controller.model_learning.grey_runtime import GreyLearningProcessOwner
 from controller.runtime.clock import RealClock
 from controller.runtime.context import ControllerContext
@@ -115,6 +116,7 @@ if __name__ == "__main__":
         ),
         eventLogger,
         trajectory_repository=trajectory_repository,
+        read_evidence=read_model_evidence,
     )
     trajectory_repository.recover_open_segments(int(RealClock().now() * 1_000))
     learning_trajectory = LearningTrajectoryRuntime(

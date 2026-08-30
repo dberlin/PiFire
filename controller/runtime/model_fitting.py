@@ -147,6 +147,7 @@ class GreyFitSegmentArrays:
     cook_id: str
     through_ordinal: int
     prefix_digest: str
+    segment_content_digest: str
     fit_partition_digest: str
     observation_sequences: Any
     initial_load: float
@@ -170,6 +171,7 @@ class GreyFitSegmentArrays:
         ordinal = _nonnegative_int(self.through_ordinal, "through_ordinal")
         object.__setattr__(self, "through_ordinal", ordinal)
         _digest(self.prefix_digest, "prefix_digest")
+        _digest(self.segment_content_digest, "segment_content_digest")
         _digest(self.fit_partition_digest, "fit_partition_digest")
         initial_load = _finite(self.initial_load, "initial_load")
         if not 0.0 <= initial_load <= 1.0:
@@ -1855,6 +1857,8 @@ def segmented_corpus_fit_job(
         snapshot.segments,
         strict=True,
     ):
+        if corpus_slice.segment_content_digest != segment.content_digest:
+            raise ValueError("fit corpus slice does not match segment content")
         pre_roll = tuple(segment.pre_roll_frames)
         scored = tuple(segment.scored_hold_frames)
         if not scored or segment.hold_entry is None:
@@ -1866,6 +1870,7 @@ def segmented_corpus_fit_job(
                 cook_id=segment.cook_id,
                 through_ordinal=corpus_slice.through_ordinal,
                 prefix_digest=corpus_slice.prefix_digest,
+                segment_content_digest=corpus_slice.segment_content_digest,
                 fit_partition_digest=snapshot.identity.fit_partition_digest,
                 observation_sequences=tuple(frame.sequence for frame in scored),
                 initial_load=oldest.normalized_combustion_load,
@@ -2309,6 +2314,24 @@ class GreyLearningOrchestrator:
         self._handoff = None
         self._ownership_transferred = False
         self._resumed_from_previous_cook = True
+
+    def abandon_restored_challenger(
+        self,
+        preparation: CandidatePreparation,
+    ) -> bool:
+        """Release a restored challenger whose durable authority commit failed."""
+
+        if self._prepared is not preparation or self._ownership_transferred:
+            return False
+        self._release_prepared()
+        self._evaluator = None
+        self._evaluation_cursor = 0
+        self._evaluation_epoch = 0
+        self._consecutive_wins = 0
+        self._last_evaluation = None
+        self._handoff = None
+        self._resumed_from_previous_cook = False
+        return True
 
     def register_causal_forecasts(
         self,

@@ -848,6 +848,7 @@ def test_report_v3_projects_exact_causal_progress_and_lineage_for_every_phase(
                 "segment_id": corpus_slice.segment_id,
                 "through_ordinal": 2,
                 "prefix_digest": corpus_slice.prefix_digest,
+                "segment_content_digest": corpus_slice.segment_content_digest,
                 "pre_roll_count": 1,
                 "scored_count": 2,
             }

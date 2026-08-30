@@ -21,6 +21,8 @@ from common.learning_trajectory import (
     LearningTrajectorySegment,
     ModelFitLineage,
     TrajectoryBreakReason,
+    canonical_fit_corpus_digest,
+    canonical_generation_audit_ranges,
     canonical_trajectory_digest,
     trajectory_json_value,
 )
@@ -28,6 +30,7 @@ from common.learning_trajectory import (
 
 def _digest(label: str) -> str:
     return sha256(label.encode("utf-8")).hexdigest()
+
 
 _UNSET_BOUNDARY = object()
 
@@ -79,8 +82,11 @@ def _frame(
         "boundary_reason": (
             TrajectoryBreakReason.LEFT_HOLD
             if partial and boundary_reason is _UNSET_BOUNDARY
-            else None if boundary_reason is _UNSET_BOUNDARY else boundary_reason
+            else None
+            if boundary_reason is _UNSET_BOUNDARY
+            else boundary_reason
         ),
+        "role_generation": 4,
     }
     values.update(overrides)
     return LearningTrajectoryFrame(**values)
@@ -105,14 +111,12 @@ def _segment(**overrides: Any) -> LearningTrajectorySegment:
     hold_entry = overrides.pop(
         "hold_entry",
         _hold_entry(
-            scored_hold_frames[0].monotonic_start_ms
-            if scored_hold_frames
-            else pre_roll_frames[-1].monotonic_end_ms
+            scored_hold_frames[0].monotonic_start_ms if scored_hold_frames else pre_roll_frames[-1].monotonic_end_ms
         ),
     )
     values: dict[str, Any] = {
         "schema_version": 1,
-        "observation_schema_version": 2,
+        "observation_schema_version": 3,
         "segment_id": "segment-1",
         "cook_id": "cook-1",
         "trajectory_session_id": "trajectory-session-1",
@@ -169,60 +173,37 @@ def _slice(
     pre_roll_count: int = 2,
     scored_count: int = 2,
     prefix_digest: str | None = None,
+    segment_content_digest: str | None = None,
 ) -> FitCorpusSlice:
     return FitCorpusSlice(
         segment_id=segment_id,
         through_ordinal=through_ordinal,
         prefix_digest=prefix_digest or _digest(f"{segment_id}:{through_ordinal}"),
+        segment_content_digest=segment_content_digest or _digest(f"{segment_id}:content"),
         pre_roll_count=pre_roll_count,
         scored_count=scored_count,
     )
 
 
-def _corpus_payload(
-    *,
-    schema_version: int,
-    corpus_revision: int,
-    fit_partition_digest: str,
-    slices: tuple[FitCorpusSlice, ...],
-) -> dict[str, object]:
-    return {
-        "schema_version": schema_version,
-        "corpus_revision": corpus_revision,
-        "fit_partition_digest": fit_partition_digest,
-        "slices": [
-            {
-                "segment_id": item.segment_id,
-                "through_ordinal": item.through_ordinal,
-                "prefix_digest": item.prefix_digest,
-                "pre_roll_count": item.pre_roll_count,
-                "scored_count": item.scored_count,
-            }
-            for item in slices
-        ],
-    }
-
-
 def _corpus_identity(
     *,
     slices: tuple[FitCorpusSlice, ...] = (_slice(),),
-    schema_version: int = 1,
+    schema_version: int = 2,
     corpus_revision: int = 4,
     fit_partition_digest: str | None = None,
 ) -> FitCorpusIdentity:
     partition = fit_partition_digest or _segment().fit_partition_digest
-    payload = _corpus_payload(
-        schema_version=schema_version,
-        corpus_revision=corpus_revision,
-        fit_partition_digest=partition,
-        slices=slices,
-    )
     return FitCorpusIdentity(
         schema_version=schema_version,
         corpus_revision=corpus_revision,
         fit_partition_digest=partition,
         slices=slices,
-        corpus_digest=canonical_trajectory_digest(payload),
+        corpus_digest=canonical_fit_corpus_digest(
+            schema_version=schema_version,
+            corpus_revision=corpus_revision,
+            fit_partition_digest=partition,
+            slices=slices,
+        ),
     )
 
 
@@ -510,8 +491,43 @@ def test_canonical_digest_is_deterministic_and_hashes_exact_sorted_compact_json(
             canonical_trajectory_digest(invalid)
 
 
+def test_canonical_generation_audit_ranges_merge_only_contiguous_equal_generations() -> None:
+    frames = (
+        _frame(0, role_generation=4),
+        _frame(1, role_generation=4),
+        _frame(2, role_generation=9),
+        _frame(3, role_generation=9),
+        _frame(4, role_generation=4),
+    )
+
+    assert canonical_generation_audit_ranges(frames) == (
+        {"start_sequence": 0, "end_sequence": 1, "role_generation": 4},
+        {"start_sequence": 2, "end_sequence": 3, "role_generation": 9},
+        {"start_sequence": 4, "end_sequence": 4, "role_generation": 4},
+    )
+
+
+@pytest.mark.parametrize(
+    "generation_audit_ranges",
+    (
+        ({"start_sequence": 0, "end_sequence": 2, "role_generation": 4},),
+        (
+            {"start_sequence": 0, "end_sequence": 1, "role_generation": 4},
+            {"start_sequence": 3, "end_sequence": 3, "role_generation": 4},
+        ),
+        ({"start_sequence": 0, "end_sequence": 3, "role_generation": 9},),
+    ),
+)
+def test_current_observation_schema_rejects_noncanonical_generation_audit_ranges(
+    generation_audit_ranges,
+) -> None:
+    with pytest.raises(ValidationError, match="generation audit ranges"):
+        _segment(generation_audit_ranges=generation_audit_ranges)
+
+
 def test_generation_and_learned_free_parameter_changes_do_not_change_fit_partition() -> None:
     original = _segment()
+    changed_frames = tuple(replace(_frame(sequence), role_generation=400) for sequence in range(4))
     changed = _segment(
         collection_provenance={
             "origin": "operator-calibration",
@@ -522,9 +538,9 @@ def test_generation_and_learned_free_parameter_changes_do_not_change_fit_partiti
             "K_Q": 0.31,
             "theta": 90.0,
         },
-        generation_audit_ranges=(
-            {"start_sequence": 0, "end_sequence": 3, "role_generation": 400},
-        ),
+        pre_roll_frames=changed_frames[:2],
+        scored_hold_frames=changed_frames[2:],
+        generation_audit_ranges=({"start_sequence": 0, "end_sequence": 3, "role_generation": 400},),
     )
 
     assert changed.fit_partition_digest == original.fit_partition_digest
@@ -552,25 +568,39 @@ def test_fit_partition_changes_with_schema_physics_structure_cadence_and_input_s
     assert changed.fit_partition_digest != original.fit_partition_digest
 
 
-@pytest.mark.parametrize("noncurrent_schema", [1, 3], ids=["older", "future"])
-def test_noncurrent_observation_schema_is_non_scoreable_for_pre_roll_only_segment(
-    noncurrent_schema: int,
-) -> None:
+def test_previous_observation_schema_remains_decodable_without_role_generation() -> None:
     smoke_pre_roll = (
-        replace(_frame(0), effective_mode="Smoke"),
-        replace(_frame(1), effective_mode="Smoke"),
+        replace(_frame(0), effective_mode="Smoke", role_generation=None),
+        replace(_frame(1), effective_mode="Smoke", role_generation=None),
     )
-    current = _segment(
+    previous = _segment(
         observation_schema_version=2,
         pre_roll_frames=smoke_pre_roll,
         scored_hold_frames=(),
         hold_entry=None,
     )
 
-    assert current.observation_schema_version == 2
-    with pytest.raises(ValidationError, match="observation schema.*non-scoreable"):
+    assert previous.observation_schema_version == 2
+    assert all(frame.role_generation is None for frame in previous.pre_roll_frames)
+    current = _segment(
+        observation_schema_version=3,
+        pre_roll_frames=smoke_pre_roll,
+        scored_hold_frames=(),
+        hold_entry=None,
+        generation_audit_ranges=(),
+    )
+    assert current.observation_schema_version == 3
+    assert current.generation_audit_ranges == ()
+    with pytest.raises(ValidationError, match="scored trajectory frames require role generation"):
         _segment(
-            observation_schema_version=noncurrent_schema,
+            scored_hold_frames=(
+                replace(_frame(2), role_generation=None),
+                _frame(3),
+            ),
+        )
+    with pytest.raises(ValidationError, match="unsupported trajectory observation schema"):
+        _segment(
+            observation_schema_version=4,
             pre_roll_frames=smoke_pre_roll,
             scored_hold_frames=(),
             hold_entry=None,
@@ -601,7 +631,7 @@ def test_corpus_slices_are_ordered_immutable_and_validate_counts_ordinals_and_di
 
     with pytest.raises(ValidationError):
         FitCorpusIdentity(
-            schema_version=1,
+            schema_version=2,
             corpus_revision=4,
             fit_partition_digest=identity.fit_partition_digest,
             slices=[first, second],
@@ -613,12 +643,55 @@ def test_corpus_slices_are_ordered_immutable_and_validate_counts_ordinals_and_di
         replace(identity, corpus_digest="0" * 64)
 
 
+def test_legacy_v1_corpus_digest_excludes_segment_content_but_v2_requires_it() -> None:
+    current_slice = _slice("schema-bound")
+    legacy_slice = replace(current_slice, segment_content_digest=None)
+    partition = _segment().fit_partition_digest
+    legacy_digest = canonical_fit_corpus_digest(
+        schema_version=1,
+        corpus_revision=4,
+        fit_partition_digest=partition,
+        slices=(legacy_slice,),
+    )
+
+    legacy = FitCorpusIdentity(
+        schema_version=1,
+        corpus_revision=4,
+        fit_partition_digest=partition,
+        slices=(legacy_slice,),
+        corpus_digest=legacy_digest,
+    )
+
+    assert legacy.slices[0].segment_content_digest is None
+    assert legacy_digest == canonical_fit_corpus_digest(
+        schema_version=1,
+        corpus_revision=4,
+        fit_partition_digest=partition,
+        slices=(current_slice,),
+    )
+    with pytest.raises(ValueError, match="segment content"):
+        canonical_fit_corpus_digest(
+            schema_version=2,
+            corpus_revision=4,
+            fit_partition_digest=partition,
+            slices=(legacy_slice,),
+        )
+    with pytest.raises(ValidationError, match="segment content"):
+        FitCorpusIdentity(
+            schema_version=2,
+            corpus_revision=4,
+            fit_partition_digest=partition,
+            slices=(legacy_slice,),
+            corpus_digest=_digest("invalid-v2"),
+        )
+
+
 def test_mutating_content_sources_after_construction_cannot_change_object_or_digest() -> None:
     collection_nested = {"role_generation": 2}
     collection = {"origin": "passive-online", "nested": collection_nested}
     configuration_settings = [{"key": "n_delay", "value": 4}]
     configuration = {"controller": "MPC", "settings": configuration_settings}
-    audit_range = {"start_sequence": 0, "end_sequence": 3, "role_generation": 2}
+    audit_range = {"start_sequence": 0, "end_sequence": 3, "role_generation": 4}
     build_inputs = ["trace", "journal"]
     build = {"builder": "trajectory-runtime", "inputs": build_inputs}
     segment = _segment(
@@ -674,7 +747,6 @@ def test_public_frozen_json_contract_round_trips_nested_values_and_digest() -> N
         assert trajectory_json_value(scalar) == scalar
 
 
-
 def test_public_frozen_json_constructors_own_validate_and_canonicalize_nested_values() -> None:
     nested_list = [{"z": 3, "array": [1, 2]}]
     nested_object = {"list": nested_list}
@@ -713,10 +785,9 @@ def test_segment_refreezes_existing_public_provenance_instances() -> None:
     mutable_nested[0]["value"] = 999
 
     assert segment.collection_provenance is not bypassed
-    assert trajectory_json_value(segment.collection_provenance) == {
-        "nested": [{"value": 1}]
-    }
+    assert trajectory_json_value(segment.collection_provenance) == {"nested": [{"value": 1}]}
     assert segment.content_digest == original_digest
+
 
 def test_hold_entry_matches_both_clocks_and_supports_entry_before_first_score() -> None:
     mismatched_wall_anchor = replace(_hold_entry(), wall_ms=1_040_001)
@@ -782,3 +853,21 @@ def test_oversized_metadata_and_provenance_are_rejected() -> None:
                 {"payload": "y" * 40_000},
             )
         )
+
+
+def test_fit_corpus_slice_binds_exact_segment_content_not_only_frame_prefix() -> None:
+    first = FitCorpusSlice(
+        segment_id="segment-bound",
+        through_ordinal=1,
+        prefix_digest=_digest("same-frame-prefix"),
+        segment_content_digest=_digest("segment-header-a"),
+        pre_roll_count=0,
+        scored_count=2,
+    )
+    second = replace(
+        first,
+        segment_content_digest=_digest("segment-header-b"),
+    )
+
+    assert first.segment_content_digest != second.segment_content_digest
+    assert _corpus_identity(slices=(first,)).corpus_digest != _corpus_identity(slices=(second,)).corpus_digest

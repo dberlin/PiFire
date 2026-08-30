@@ -21,6 +21,7 @@ from common.controller_model_state import ControllerModelStore
 from common.learning_trajectory import TrajectoryBreakReason
 from common.modes import Mode
 from common.persistence.learning_trajectory import LearningTrajectoryRepository
+from common.persistence.model_evidence import read_model_evidence
 from common.persistence.protocols import JsonValue
 from controller.applied_output import (
     AppliedOutput,
@@ -534,7 +535,10 @@ class HoldMode(ControlMode):
         identity: TraceSessionIdentity | None,
     ) -> bool:
         trajectory = self.ctx.learning_trajectory
-        if trajectory is None or self._controller_name != ControllerType.MPC.value:
+        if trajectory is None or self._controller_name not in (
+            ControllerType.MPC.value,
+            ControllerType.PID_SP.value,
+        ):
             return True
         trace = self._control_trace
         if identity is None or trace is None:
@@ -572,6 +576,12 @@ class HoldMode(ControlMode):
         except TypeError, ValueError:
             return None
 
+    @staticmethod
+    def _actual_fan_duty(status: _HoldOutputStatus) -> float:
+        if not status.fan:
+            return 0.0
+        return 100.0 if status.pwm is None else float(status.pwm)
+
     def _configure_fan_authority(self) -> None:
         """Grant fan ownership only when the configured controller can drive it."""
         wants_fan = self._runner.commands_fan() if self._runner is not None else False
@@ -584,6 +594,10 @@ class HoldMode(ControlMode):
                 "the controller will be ignored; the non-controller fan paths stay active."
             )
         self.state.controller.controls_fan = wants_fan and has_authority
+        if not self.state.controller.controls_fan:
+            self.state.controller.fan_duty = self._actual_fan_duty(
+                self._hold_output_status(self.grill.get_output_status())
+            )
 
     def on_cook_identity_rotated(self, previous_cook_id, cook_id, now) -> None:
         """Close old cook evidence authority before opening the replacement session."""
@@ -775,6 +789,19 @@ class HoldMode(ControlMode):
                 self._fit_segment_id_cache = segment_id
             cached_segment_id = self._fit_segment_id_cache
             segment = None if cached_segment_id is None else repository.read_segment(cached_segment_id)
+            if segment is None:
+                cook_id = self.control.get("cook_id")
+                if isinstance(cook_id, str) and cook_id:
+                    segment = next(
+                        (
+                            candidate
+                            for candidate in reversed(repository.read_cook_segments(cook_id))
+                            if candidate.scored_hold_frames
+                        ),
+                        None,
+                    )
+                    if segment is not None:
+                        self._fit_segment_id_cache = segment.segment_id
             if segment is not None:
                 self._fit_partition_digest_cache = segment.fit_partition_digest
         except Exception:
@@ -855,6 +882,13 @@ class HoldMode(ControlMode):
                     self.ctx.event_log,
                     trajectory_repository=trajectory_repository,
                 )
+                bind_evidence_reader = getattr(
+                    persistence_worker,
+                    "bind_evidence_reader",
+                    None,
+                )
+                if callable(bind_evidence_reader):
+                    bind_evidence_reader(read_model_evidence)
                 self.ctx.model_persistence = persistence_worker
             self._persistence_worker = persistence_worker
         except Exception as error:
@@ -894,6 +928,7 @@ class HoldMode(ControlMode):
         if not learning_evidence_available:
             self._hold_learning.mark_evidence_unavailable()
 
+        self._configure_fan_authority()
         if self._runner is not None:
             self._framed_pulse.configure(
                 self._runner.actuation_mode(),
@@ -919,7 +954,6 @@ class HoldMode(ControlMode):
                     self._trace_warning(f"Model authority migration failed: {error}")
             self._hold_learning.restore_model(timestamp_ms=int(self.ctx.clock.now() * 1_000))
             self._hold_learning.reconcile_activation()
-        self._configure_fan_authority()
 
         self.ctx.event_log.debug(
             "On Time = "
@@ -2096,9 +2130,11 @@ class HoldMode(ControlMode):
         inhibition: _HoldInhibitionDecision,
     ) -> _HoldFramedPulse:
         result = runner_result.result
+        controller = self.state.controller
+        if not controller.controls_fan:
+            controller.fan_duty = self._actual_fan_duty(context.output_status)
         learning = self._hold_learning
         if result is not None:
-            controller = self.state.controller
             control = self.control
             if (
                 controller.pulse_stale_command
@@ -2659,8 +2695,15 @@ class HoldMode(ControlMode):
                 if learning is None
                 else learning.barrier_for_teardown(generation=self._runner_configuration_revision)
             )
+            if drained:
+                self._resolve_fit_partition_digest()
             if stop_error is None and stopped is not False and drained and learning is not None:
                 learning.schedule_stop_fit(cast(Mapping[str, JsonValue], self.settings))
+            elif stop_error is None and stopped is not False and not drained and learning is not None:
+                learning.record_stop_fit_failure(
+                    cast(Mapping[str, JsonValue], self.settings),
+                    "corpus-barrier-failed: teardown persistence barrier did not become durable",
+                )
         finally:
             try:
                 if trace is not None and not trace.status.closed:

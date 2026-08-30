@@ -158,6 +158,26 @@ def test_mpc_catalog_is_exactly_the_acados_grey_box_settings_surface():
     assert config["estimator"]["option_default"] == "ekf"
 
 
+def test_pid_sp_catalog_exposes_exact_learning_switch_metadata():
+    entry = json.loads(CATALOG.read_text())["metadata"]["pid_sp"]
+    config = {item["option_name"]: item for item in entry["config"]}
+
+    assert config["enable_identification"] == {
+        "option_name": "enable_identification",
+        "option_friendly_name": "Learn This Grill",
+        "option_description": (
+            "Fit validated PID-SP models from complete retained cook evidence for later cooks. [Default=true]"
+        ),
+        "option_type": "bool",
+        "option_default": True,
+        "option_min": None,
+        "option_max": None,
+        "option_step": None,
+        "hidden": False,
+    }
+    assert ControllerConfigs().pid_sp.enable_identification is True
+
+
 def test_mpc_learning_descriptions_state_the_grey_activation_timing():
     config = {item["option_name"]: item for item in json.loads(CATALOG.read_text())["metadata"]["mpc"]["config"]}
 

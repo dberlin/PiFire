@@ -360,19 +360,24 @@ def test_metrics_current_schema_migration_idempotent(tmp_path):
     try:
         conn = datastore.connection()
         assert conn.execute("PRAGMA user_version").fetchone()[0] == datastore.DB_SCHEMA_VERSION
-        audit_row = conn.execute("SELECT migration_set, name, applied_at FROM _sqlite_migrations").fetchone()
-        assert audit_row[0:2] == (
-            "pifire-schema",
-            "v0011_adopt_sqlite_utils_registry",
-        )
-        assert audit_row[2]
+        audit_rows = conn.execute(
+            "SELECT migration_set, name, applied_at FROM _sqlite_migrations ORDER BY name"
+        ).fetchall()
+        assert [row[0:2] for row in audit_rows] == [
+            ("pifire-schema", "v0011_adopt_sqlite_utils_registry"),
+            ("pifire-schema", "v0012_trajectory_role_generation"),
+        ]
+        assert all(row[2] for row in audit_rows)
         datastore.execute_write("INSERT INTO metrics(id, mode) VALUES ('abc', 'Hold')")
         datastore._reset_for_tests(db_path)  # drop cached connection, keep file
         conn = datastore.connection()  # reconnect -> _ensure_schema runs again
         assert conn.execute("PRAGMA user_version").fetchone()[0] == datastore.DB_SCHEMA_VERSION
         # Row must survive: idempotent migration must not re-drop the table.
         assert conn.execute("SELECT mode FROM metrics WHERE id=?", ("abc",)).fetchone()[0] == "Hold"
-        assert conn.execute("SELECT migration_set, name, applied_at FROM _sqlite_migrations").fetchall() == [audit_row]
+        assert (
+            conn.execute("SELECT migration_set, name, applied_at FROM _sqlite_migrations ORDER BY name").fetchall()
+            == audit_rows
+        )
     finally:
         datastore._reset_for_tests(None)
 
@@ -531,12 +536,14 @@ def test_history_current_schema_migration_idempotent(tmp_path):
     try:
         conn = datastore.connection()
         assert conn.execute("PRAGMA user_version").fetchone()[0] == datastore.DB_SCHEMA_VERSION
-        audit_row = conn.execute("SELECT migration_set, name, applied_at FROM _sqlite_migrations").fetchone()
-        assert audit_row[0:2] == (
-            "pifire-schema",
-            "v0011_adopt_sqlite_utils_registry",
-        )
-        assert audit_row[2]
+        audit_rows = conn.execute(
+            "SELECT migration_set, name, applied_at FROM _sqlite_migrations ORDER BY name"
+        ).fetchall()
+        assert [row[0:2] for row in audit_rows] == [
+            ("pifire-schema", "v0011_adopt_sqlite_utils_registry"),
+            ("pifire-schema", "v0012_trajectory_role_generation"),
+        ]
+        assert all(row[2] for row in audit_rows)
         conn.execute(
             "INSERT INTO history(ts, psp, primary_temps, food_temps, aux_temps, notify_targets) "
             "VALUES (2000, 165, '{}', '{}', '{}', '{}')"
@@ -546,7 +553,10 @@ def test_history_current_schema_migration_idempotent(tmp_path):
         assert conn.execute("PRAGMA user_version").fetchone()[0] == datastore.DB_SCHEMA_VERSION
         # Row must survive: idempotent migration must not re-drop the table.
         row = conn.execute("SELECT ts, psp FROM history").fetchone()
-        assert conn.execute("SELECT migration_set, name, applied_at FROM _sqlite_migrations").fetchall() == [audit_row]
+        assert (
+            conn.execute("SELECT migration_set, name, applied_at FROM _sqlite_migrations ORDER BY name").fetchall()
+            == audit_rows
+        )
         assert row == (2000, 165)
     finally:
         datastore._reset_for_tests(None)
@@ -659,12 +669,14 @@ def test_current_schema_migration_is_idempotent_on_an_already_migrated_db(tmp_pa
     try:
         conn = datastore.connection()
         assert conn.execute("PRAGMA user_version").fetchone()[0] == datastore.DB_SCHEMA_VERSION
-        audit_row = conn.execute("SELECT migration_set, name, applied_at FROM _sqlite_migrations").fetchone()
-        assert audit_row[0:2] == (
-            "pifire-schema",
-            "v0011_adopt_sqlite_utils_registry",
-        )
-        assert audit_row[2]
+        audit_rows = conn.execute(
+            "SELECT migration_set, name, applied_at FROM _sqlite_migrations ORDER BY name"
+        ).fetchall()
+        assert [row[0:2] for row in audit_rows] == [
+            ("pifire-schema", "v0011_adopt_sqlite_utils_registry"),
+            ("pifire-schema", "v0012_trajectory_role_generation"),
+        ]
+        assert all(row[2] for row in audit_rows)
     finally:
         datastore._reset_for_tests(db_path)
 
@@ -672,5 +684,8 @@ def test_current_schema_migration_is_idempotent_on_an_already_migrated_db(tmp_pa
     assert conn.execute("PRAGMA user_version").fetchone()[0] == datastore.DB_SCHEMA_VERSION
     cols = {r[1] for r in conn.execute("PRAGMA table_info(history)")}
     assert {"cycle_ratio", "realized_cycle_ratio", "fan_duty"} <= cols
-    assert conn.execute("SELECT migration_set, name, applied_at FROM _sqlite_migrations").fetchall() == [audit_row]
+    assert (
+        conn.execute("SELECT migration_set, name, applied_at FROM _sqlite_migrations ORDER BY name").fetchall()
+        == audit_rows
+    )
     datastore._reset_for_tests(str(tmp_path / "unused.db"))

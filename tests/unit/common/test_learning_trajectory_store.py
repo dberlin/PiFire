@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import random
 import sqlite3
 from dataclasses import FrozenInstanceError, replace
@@ -19,7 +20,8 @@ from common.learning_trajectory import (
     LearningTrajectoryFrame,
     ModelFitLineage,
     TrajectoryBreakReason,
-    canonical_trajectory_digest,
+    canonical_fit_corpus_digest,
+    canonical_generation_audit_ranges,
 )
 from common.persistence.learning_trajectory import (
     AppendReceipt,
@@ -70,24 +72,6 @@ def _lineage(
         result_status=status,
         candidate_digest=candidate_digest,
     )
-
-
-def _corpus_payload(identity: FitCorpusIdentity) -> dict[str, object]:
-    return {
-        "schema_version": identity.schema_version,
-        "corpus_revision": identity.corpus_revision,
-        "fit_partition_digest": identity.fit_partition_digest,
-        "slices": [
-            {
-                "segment_id": item.segment_id,
-                "through_ordinal": item.through_ordinal,
-                "prefix_digest": item.prefix_digest,
-                "pre_roll_count": item.pre_roll_count,
-                "scored_count": item.scored_count,
-            }
-            for item in identity.slices
-        ],
-    }
 
 
 def _seed_v8_database(path: Path) -> None:
@@ -198,15 +182,16 @@ def test_schema_v10_migration_from_v8_is_additive_and_declares_learning_tables(d
     datastore._reset_for_tests(str(database_path))
     try:
         connection = datastore.connection()
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == datastore.DB_SCHEMA_VERSION == 11
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == datastore.DB_SCHEMA_VERSION == 12
         assert _SCHEMA_V10_TABLES <= _table_names(database_path)
         assert connection.execute("SELECT value FROM kv WHERE key='preserved-v8'").fetchone()[0] == '{"value":8}'
         assert (
             connection.execute("SELECT payload FROM legacy_v8_data WHERE identity='legacy-row'").fetchone()[0]
             == "untouched"
         )
-        assert connection.execute("SELECT migration_set, name FROM _sqlite_migrations").fetchall() == [
-            ("pifire-schema", "v0011_adopt_sqlite_utils_registry")
+        assert connection.execute("SELECT migration_set, name FROM _sqlite_migrations ORDER BY name").fetchall() == [
+            ("pifire-schema", "v0011_adopt_sqlite_utils_registry"),
+            ("pifire-schema", "v0012_trajectory_role_generation"),
         ]
 
         assert {
@@ -249,7 +234,7 @@ def test_schema_v10_migration_from_v8_is_additive_and_declares_learning_tables(d
         frame_ddl = str(
             connection.execute("SELECT sql FROM sqlite_master WHERE name='learning_trajectory_frame'").fetchone()[0]
         )
-        assert "payload_schema_version = 2" in frame_ddl
+        assert "payload_schema_version IN (2, 3)" in frame_ddl
         assert {
             "request_id",
             "status",
@@ -361,8 +346,9 @@ def test_schema_v10_migration_failure_rolls_back_entire_v8_batch_and_retries(
         assert connection.execute("SELECT payload FROM legacy_v8_data WHERE identity='legacy-row'").fetchone() == (
             "untouched",
         )
-        assert connection.execute("SELECT migration_set, name FROM _sqlite_migrations").fetchall() == [
-            ("pifire-schema", "v0011_adopt_sqlite_utils_registry")
+        assert connection.execute("SELECT migration_set, name FROM _sqlite_migrations ORDER BY name").fetchall() == [
+            ("pifire-schema", "v0011_adopt_sqlite_utils_registry"),
+            ("pifire-schema", "v0012_trajectory_role_generation"),
         ]
     finally:
         datastore._reset_for_tests(None)
@@ -379,12 +365,11 @@ def test_schema_v10_migration_is_idempotent_and_preserves_trajectory_rows(
         database_path,
         "SELECT migration_set, name, applied_at FROM _sqlite_migrations",
     )
-    assert len(audit_rows) == 1
-    assert audit_rows[0][0:2] == (
-        "pifire-schema",
-        "v0011_adopt_sqlite_utils_registry",
-    )
-    assert audit_rows[0][2]
+    assert [(row[0], row[1]) for row in audit_rows] == [
+        ("pifire-schema", "v0011_adopt_sqlite_utils_registry"),
+        ("pifire-schema", "v0012_trajectory_role_generation"),
+    ]
+    assert all(row[2] for row in audit_rows)
 
     reopened = LearningTrajectoryRepository(str(database_path))
     current = reopened.read_segment(segment.segment_id)
@@ -464,7 +449,7 @@ def test_begin_append_finalize_updates_cursor_chain_and_corpus_atomically(
     assert status.evicted_segment_count == 0
     assert status.quarantined_segment_count == 0
 
-    scored = (_frame(1), _frame(2))
+    scored = (_frame(1), replace(_frame(2), role_generation=9))
     receipt = _append_scored(repository, cursor, scored)
     assert isinstance(receipt, AppendReceipt)
     assert receipt.cursor.next_ordinal == 3
@@ -489,6 +474,10 @@ def test_begin_append_finalize_updates_cursor_chain_and_corpus_atomically(
     assert stored.terminal_break_reason is TrajectoryBreakReason.STOP
     assert stored.pre_roll_frames == segment.pre_roll_frames
     assert stored.scored_hold_frames == scored
+    assert tuple(dict(item.items()) for item in stored.generation_audit_ranges) == (
+        {"start_sequence": 0, "end_sequence": 1, "role_generation": 4},
+        {"start_sequence": 2, "end_sequence": 2, "role_generation": 9},
+    )
     assert repository.status().scored_count == 2
 
 
@@ -519,6 +508,28 @@ def test_per_frame_calibration_origin_round_trips_without_reclassifying_legacy_r
     )
     assert '"calibration_origin"' not in canonical_rows[0][0]
     assert '"calibration_origin":true' in canonical_rows[1][0]
+
+
+def test_role_generation_round_trips_through_the_real_repository_codec(
+    repository: LearningTrajectoryRepository,
+    database_path: Path,
+) -> None:
+    segment = _segment("role-generation")
+    cursor = repository.begin_segment(segment)
+    frame = replace(_frame(1), role_generation=9)
+    receipt = _append_scored(repository, cursor, (frame,))
+    repository.finalize(receipt.cursor, TrajectoryBreakReason.STOP)
+
+    canonical_rows = _rows(
+        database_path,
+        ("SELECT canonical_json FROM learning_trajectory_frame WHERE segment_id=? AND kind='scored'"),
+        (segment.segment_id,),
+    )
+    stored = repository.read_segment(segment.segment_id)
+
+    assert stored is not None
+    assert stored.scored_hold_frames[0].role_generation == 9
+    assert '"role_generation":9' in canonical_rows[0][0]
 
 
 def test_public_repository_results_are_frozen_and_own_snapshot_tuples(
@@ -1407,12 +1418,21 @@ def test_snapshot_open_prefix_is_immutable_while_later_frames_append_and_reopens
         == original_sequences
     )
     assert historical.identity == original_identity
+    for segment in historical.segments:
+        assert segment.generation_audit_ranges == canonical_generation_audit_ranges(
+            (*segment.pre_roll_frames, *segment.scored_hold_frames)
+        )
     assert tuple(item.segment_id for item in snapshot.identity.slices) == (
         "snapshot-a",
         "snapshot-b",
     )
     assert current.identity.slices[-1].through_ordinal == (snapshot.identity.slices[-1].through_ordinal + 1)
-    assert snapshot.identity.corpus_digest == canonical_trajectory_digest(_corpus_payload(snapshot.identity))
+    assert snapshot.identity.corpus_digest == canonical_fit_corpus_digest(
+        schema_version=snapshot.identity.schema_version,
+        corpus_revision=snapshot.identity.corpus_revision,
+        fit_partition_digest=snapshot.identity.fit_partition_digest,
+        slices=snapshot.identity.slices,
+    )
 
 
 def test_fit_manifest_is_unique_ordered_bounded_and_has_exact_digest(
@@ -1431,13 +1451,19 @@ def test_fit_manifest_is_unique_ordered_bounded_and_has_exact_digest(
     assert partition is not None
 
     snapshot = repository.snapshot_fit_corpus(partition)
+    assert snapshot.identity.schema_version == 2
     slices = snapshot.identity.slices
     segment_ids = tuple(item.segment_id for item in slices)
     assert len(slices) == 256
     assert len(set(segment_ids)) == len(segment_ids)
     assert segment_ids == tuple(f"manifest-{index:03d}" for index in range(256))
     assert all(isinstance(item, FitCorpusSlice) for item in slices)
-    assert snapshot.identity.corpus_digest == canonical_trajectory_digest(_corpus_payload(snapshot.identity))
+    assert snapshot.identity.corpus_digest == canonical_fit_corpus_digest(
+        schema_version=snapshot.identity.schema_version,
+        corpus_revision=snapshot.identity.corpus_revision,
+        fit_partition_digest=snapshot.identity.fit_partition_digest,
+        slices=snapshot.identity.slices,
+    )
 
 
 def test_fit_run_queued_running_success_failure_stale_and_conflicting_completion(
@@ -1543,6 +1569,66 @@ def test_recovery_interrupts_queued_and_running_fit_runs(
     assert restarted.replay_fit("running-fit").identity == snapshot.identity
 
 
+@pytest.mark.parametrize(
+    "retain_content_audit",
+    (True, False),
+    ids=("content-audit-present", "content-audit-absent"),
+)
+def test_restart_replays_legacy_v1_manifest_with_prefix_digest_and_optional_content_audit(
+    repository: LearningTrajectoryRepository,
+    database_path: Path,
+    retain_content_audit: bool,
+) -> None:
+    segment = _segment("legacy-v1-fit", scored_count=1)
+    _finalize_segment(repository, segment)
+    snapshot = repository.snapshot_fit_corpus(segment.fit_partition_digest)
+    request_id = f"legacy-v1-fit-request-{retain_content_audit}"
+    repository.record_fit_request(
+        snapshot,
+        _lineage(snapshot, request_id, status="running"),
+    )
+    legacy_slices = tuple(replace(item, segment_content_digest=None) for item in snapshot.identity.slices)
+    legacy_digest = canonical_fit_corpus_digest(
+        schema_version=1,
+        corpus_revision=snapshot.identity.corpus_revision,
+        fit_partition_digest=snapshot.identity.fit_partition_digest,
+        slices=legacy_slices,
+    )
+    raw_manifest = _scalar(
+        database_path,
+        "SELECT manifest_json FROM learning_fit_run WHERE request_id=?",
+        (request_id,),
+    )
+    assert isinstance(raw_manifest, str)
+    manifest = json.loads(raw_manifest)
+    manifest["schema_version"] = 1
+    manifest["corpus_digest"] = legacy_digest
+    for item in manifest["slices"]:
+        content_digest = item.pop("segment_content_digest")
+        if retain_content_audit:
+            item["content_digest"] = content_digest
+    _execute(
+        database_path,
+        ("UPDATE learning_fit_run SET corpus_digest=?, manifest_json=? WHERE request_id=?"),
+        (
+            legacy_digest,
+            json.dumps(
+                manifest,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            request_id,
+        ),
+    )
+
+    replayed = LearningTrajectoryRepository(str(database_path)).replay_fit(request_id)
+
+    assert replayed.identity.schema_version == 1
+    assert replayed.identity.corpus_digest == legacy_digest
+    assert replayed.identity.slices[0].segment_content_digest is None
+    assert replayed.segments == snapshot.segments
+
+
 def test_fit_replay_is_exact_until_retention_evicts_source_without_pinning_it(
     repository: LearningTrajectoryRepository,
 ) -> None:
@@ -1599,7 +1685,7 @@ def test_fit_replay_is_exact_until_retention_evicts_source_without_pinning_it(
         (
             (
                 "UPDATE learning_fit_run SET manifest_json="
-                "json_set(manifest_json, '$.slices[0].content_digest', ?) "
+                "json_set(manifest_json, '$.slices[0].segment_content_digest', ?) "
                 "WHERE request_id=?"
             ),
             ("0" * 64, "digest-validated-fit"),
