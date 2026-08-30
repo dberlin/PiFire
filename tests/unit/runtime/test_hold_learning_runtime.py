@@ -31,7 +31,7 @@ from common.model_evidence import (
     RecorderGapEvidence,
     RollbackEvidence,
 )
-from controller.applied_output import AppliedOutput, OutputSource
+from controller.applied_output import AppliedOutput, FrameFeedbackDisposition, OutputSource
 from controller.model_learning.activation import ActivationPhase
 from controller.model_learning.calibration import (
     CalibrationDecision,
@@ -141,6 +141,7 @@ class _Runner:
         self.next_evicted_sequence: int | None = None
         self.submissions: list[FrameObservation] = []
         self.completed: list[tuple[AppliedOutput, FrameObservation]] = []
+        self.outputs: list[AppliedOutput] = []
         self.bindings: list[tuple[int, str, str | None]] = []
         self.retirements: list[int] = []
         self.confidence: list[ModelEvidenceRecord] = []
@@ -160,6 +161,9 @@ class _Runner:
         submission = ObservationSubmission(sequence, self.generation, self.next_evicted_sequence)
         self.next_evicted_sequence = None
         return submission
+
+    def set_output(self, applied: AppliedOutput) -> None:
+        self.outputs.append(applied)
 
     def complete_frame(self, applied: AppliedOutput, observation: FrameObservation) -> ObservationSubmission | None:
         self.completed.append((applied, observation))
@@ -764,13 +768,26 @@ def test_seed_warmup_requires_the_complete_trajectory_observer() -> None:
         runtime.submit_completed_observation((0, 20_000), _observation())
 
 
-def test_seed_warmup_replays_exactly_before_decrementing() -> None:
+@pytest.mark.parametrize(
+    "disposition",
+    (FrameFeedbackDisposition.COMPLETE, FrameFeedbackDisposition.DISCARDED),
+)
+def test_seed_warmup_replays_without_learning_and_delivers_terminal_feedback(
+    disposition: FrameFeedbackDisposition,
+) -> None:
     trajectory = _ReplayTrajectory()
     runtime, runner, *_ = _runtime(learning_trajectory=trajectory)
     observation = _observation(frame_start_s=0.0, frame_end_s=20.0)
+    feedback = AppliedOutput(
+        0.25,
+        OutputSource.CONTROLLER,
+        20.0,
+        requested=0.25,
+        feedback_disposition=disposition,
+    )
     runtime.set_seed_warmup_remaining(1)
 
-    runtime.submit_completed_observation((0, 20_000), observation)
+    runtime.submit_completed_observation((0, 20_000), observation, feedback)
 
     assert trajectory.replays == [(observation, True)]
     assert trajectory.estimator_seed_anchor() == (
@@ -778,6 +795,8 @@ def test_seed_warmup_replays_exactly_before_decrementing() -> None:
         observation.temp_c,
     )
     assert runtime.seed_warmup_remaining == 0
+    assert runner.outputs == [feedback]
+    assert runner.completed == []
     assert runner.submissions == []
 
 
@@ -1032,6 +1051,60 @@ def test_blocked_worker_records_gap_without_submitting_to_learner() -> None:
     assert runner.submissions == []
     assert runtime.evidence_available is False
     assert [payload.reason for payload in _gap_payloads(recorder)] == ["model-persistence-unavailable"]
+
+
+def test_blocked_worker_delivers_terminal_feedback_without_resubmitting_observation() -> None:
+    persistence = _Persistence(blocked=True)
+    runtime, runner, actual_persistence, _trace_session, recorder = _runtime(persistence=persistence)
+    observation = _observation()
+    feedback = AppliedOutput(
+        0.25,
+        OutputSource.CONTROLLER,
+        20.0,
+        requested=0.25,
+        feedback_disposition=FrameFeedbackDisposition.COMPLETE,
+    )
+
+    runtime.submit_completed_observation((0, 0), observation, feedback)
+    runner.drains.append(
+        _drain(
+            terminal_drops=(
+                ObservationTerminalDrop(
+                    submission_sequence=1,
+                    configuration_generation=0,
+                    observation=observation,
+                    reason="runner-no-observation-outcome",
+                ),
+            )
+        )
+    )
+    runtime.reconcile_outcomes(22.0)
+
+    assert runner.outputs == [feedback]
+    assert runner.completed == []
+    assert runner.submissions == []
+    assert [payload.reason for payload in _gap_payloads(recorder)] == ["model-persistence-unavailable"]
+    assert len(actual_persistence.batches) == 1
+    compact_gap = cast(RecorderGapEvidence, actual_persistence.batches[0][0].payload)
+    assert compact_gap.reason == "model-persistence-unavailable"
+
+
+def test_invalid_probe_delivers_terminal_feedback_without_learner_submission() -> None:
+    runtime, runner, _persistence, _trace_session, _recorder = _runtime()
+    observation = _observation(probe_valid=False, continuous=False)
+    feedback = AppliedOutput(
+        0.0,
+        OutputSource.CONTROLLER,
+        20.0,
+        requested=0.25,
+        feedback_disposition=FrameFeedbackDisposition.DISCARDED,
+    )
+
+    runtime.submit_completed_observation((0, 0), observation, feedback)
+
+    assert runner.outputs == [feedback]
+    assert runner.completed == []
+    assert runner.submissions == []
 
 
 def test_runner_submission_exception_is_not_hidden_or_partially_accepted() -> None:
@@ -2103,6 +2176,15 @@ def test_finish_teardown_orders_retire_barrier_trace_close_runner_finish_once() 
     assert persistence.barrier_calls == 1
     assert recorder.close_calls == 1
     assert runner.finish_calls == 1
+
+
+def test_successful_teardown_barrier_result_is_stable_and_fenced_once() -> None:
+    persistence = _Persistence(barrier_result=True)
+    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(persistence=persistence)
+
+    assert runtime.barrier_for_teardown(generation=4)
+    assert runtime.barrier_for_teardown(generation=4)
+    assert persistence.barrier_calls == 1
 
 
 @pytest.mark.parametrize("failure", ("refusal", "timeout"))

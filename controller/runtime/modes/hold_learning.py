@@ -165,6 +165,8 @@ class _LearningTrajectoryObserver(Protocol):
 class _HoldLearningRunner(ModelLifecycleRunner, Protocol):
     """Typed runner surface owned by Hold's complete learning lifecycle."""
 
+    def set_output(self, applied: AppliedOutput) -> None: ...
+
     def observe_frame(self, observation: FrameObservation) -> ObservationSubmission | None: ...
 
     def complete_frame(
@@ -326,6 +328,15 @@ class HoldLearningRuntime:
 
     def mark_evidence_unavailable(self) -> None:
         self._evidence_available = False
+
+    def _deliver_feedback_without_observation(self, feedback: AppliedOutput | None) -> None:
+        runner = self._runner
+        if (
+            runner is not None
+            and feedback is not None
+            and feedback.feedback_disposition is not FrameFeedbackDisposition.PROGRESS
+        ):
+            runner.set_output(feedback)
 
     def _trajectory_fit_barrier(self) -> bool:
         trajectory = self._learning_trajectory
@@ -700,6 +711,7 @@ class HoldLearningRuntime:
                 persistence_drained = False
                 self._logger.warning(f"Model persistence barrier failed: {error}")
         drained = trajectory_drained and persistence_drained
+        self._persistence_drained = drained
         if not drained:
             self.mark_evidence_unavailable()
         return drained
@@ -749,9 +761,11 @@ class HoldLearningRuntime:
                 replayed_exactly = isinstance(anchor, tuple) and anchor[0] == round(observation.frame_end_s * 1_000)
             if replayed_exactly and observation.probe_valid and observation.continuous:
                 self._seed_warmup_remaining -= 1
+            self._deliver_feedback_without_observation(feedback)
             return
         self._submit_calibration_frame_evidence(observation)
         if not observation.probe_valid:
+            self._deliver_feedback_without_observation(feedback)
             # The observation trace is telemetry about the frame, never part of
             # actuating it, so a payload the trace model refuses costs the record
             # and leaves a gap in its place.
@@ -774,14 +788,14 @@ class HoldLearningRuntime:
             self._bound_pending()
             return
 
+        runner = self._runner
         persistence = self._persistence
         if not self._evidence_available or (persistence is not None and persistence.evidence_blocked):
             self._evidence_available = False
             self.record_gap(observation, "model-persistence-unavailable")
-            if feedback is None or feedback.feedback_disposition is FrameFeedbackDisposition.PROGRESS:
-                return
+            self._deliver_feedback_without_observation(feedback)
+            return
 
-        runner = self._runner
         if runner is None:
             return
         submission = (

@@ -813,6 +813,168 @@ def test_pure_hold_begins_without_pre_roll_and_anchors_first_valid_measurement()
     assert segment.scored_hold_frames[0].sequence == 0
 
 
+def test_fixed_fan_hold_uses_exact_delivery_journal_when_controller_duty_is_absent() -> None:
+    runtime, journal, persistence = _runtime()
+    journal.set_exact(
+        0,
+        _FRAME_MS,
+        auger_on_s=5.0,
+        fan_on_s=20.0,
+        fan_duty_integral_s=20.0,
+    )
+    runtime.mode_entered(_entered("Hold"))
+    runtime.observe_temperature(_sample(25, 109.5))
+    runtime.observe_temperature(_sample(19_975, 111.0))
+    observation = replace(
+        _hold_frame(1, temp_c=111.0),
+        requested_fan_duty=None,
+        actual_fan_duty=None,
+    )
+
+    runtime.observe_hold_frame(observation)
+
+    (scored,) = _scored_frames(persistence)
+    assert scored.mean_actual_fan_duty == 1.0
+    assert scored.fan_delivery_certainty is FrameDeliveryCertainty.EXACT
+    assert journal.calls == [(0, _FRAME_MS)]
+
+
+def test_delayed_first_hold_frame_reanchors_inside_its_scored_interval() -> None:
+    runtime, _journal, persistence = _runtime()
+    runtime.mode_entered(_entered("Hold"))
+    runtime.observe_temperature(_sample(25, 109.5))
+    runtime.observe_temperature(_sample(_FRAME_MS + 25, 110.0))
+    runtime.observe_temperature(_sample(2 * _FRAME_MS - 25, 111.0))
+
+    runtime.observe_hold_frame(
+        _hold_frame(
+            2,
+            start_ms=_FRAME_MS,
+            temp_c=111.0,
+        )
+    )
+
+    (segment,) = _segments(persistence)
+    assert segment.hold_entry is not None
+    assert segment.hold_entry.monotonic_ms == _FRAME_MS + 25
+    assert segment.hold_entry.chamber_temperature_c == pytest.approx(110.0)
+    assert len(segment.scored_hold_frames) == 1
+
+
+def test_scored_rollover_adopts_successor_and_reanchors_next_scored_interval() -> None:
+    class _RolloverPersistence(_Persistence):
+        def __init__(self) -> None:
+            super().__init__()
+            self.roll_next_scored = True
+
+        def submit_trajectory_batch(self, batch: TrajectoryAppendBatch) -> _Receipt:
+            receipt = super().submit_trajectory_batch(batch)
+            has_scored = bool(
+                batch.scored or (batch.begin_segment is not None and batch.begin_segment.scored_hold_frames)
+            )
+            if self.roll_next_scored and has_scored and receipt.cursor is not None:
+                self.roll_next_scored = False
+                receipt.cursor = SegmentCursor(
+                    segment_id=f"{receipt.cursor.segment_id}:roll",
+                    next_ordinal=180,
+                    chain_digest=_digest("rolled"),
+                    corpus_revision=receipt.cursor.corpus_revision,
+                )
+            return receipt
+
+    persistence = _RolloverPersistence()
+    runtime, _journal, _persistence = _runtime(persistence=persistence)
+    runtime.mode_entered(_entered("Hold"))
+    runtime.observe_temperature(_sample(25, 109.5))
+    runtime.observe_temperature(_sample(_FRAME_MS - 25, 110.0))
+
+    runtime.observe_hold_frame(_hold_frame(1, temp_c=110.0))
+
+    rolled = runtime.status()
+    assert rolled.segment_id == "segment-1:roll"
+    assert rolled.pre_roll_count == 180
+    assert rolled.scored_count == 0
+
+    runtime.observe_temperature(_sample(_FRAME_MS + 25, 110.5))
+    runtime.observe_temperature(_sample(2 * _FRAME_MS - 25, 111.0))
+    runtime.observe_hold_frame(_hold_frame(2, start_ms=_FRAME_MS, temp_c=111.0))
+
+    append = persistence.batches[-1]
+    assert append.cursor is not None
+    assert append.cursor.segment_id == "segment-1:roll"
+    assert append.hold_entry is not None
+    assert append.hold_entry.monotonic_ms == _FRAME_MS + 25
+    assert runtime.status().scored_count == 1
+
+
+def test_rollover_seed_digest_is_independent_of_receipt_completion_timing() -> None:
+    def capture(*, delayed: bool) -> tuple[str, int]:
+        class _RolloverPersistence(_Persistence):
+            def __init__(self) -> None:
+                super().__init__()
+                self.scored_submissions = 0
+
+            def submit_trajectory_batch(self, batch: TrajectoryAppendBatch) -> _Receipt:
+                has_scored = bool(
+                    batch.scored or (batch.begin_segment is not None and batch.begin_segment.scored_hold_frames)
+                )
+                if has_scored:
+                    self.scored_submissions += 1
+                    if delayed and self.scored_submissions == 180:
+                        self.delay_next = True
+                receipt = super().submit_trajectory_batch(batch)
+                if self.scored_submissions == 180 and has_scored and receipt.cursor is not None:
+                    receipt.cursor = SegmentCursor(
+                        segment_id=f"{receipt.cursor.segment_id}:roll",
+                        next_ordinal=180,
+                        chain_digest=_digest("rolled"),
+                        corpus_revision=receipt.cursor.corpus_revision,
+                    )
+                return receipt
+
+        persistence = _RolloverPersistence()
+        runtime, _journal, _persistence = _runtime(persistence=persistence)
+        runtime.mode_entered(_entered("Smoke"))
+        runtime.observe_temperature(_sample(_FRAME_MS, 100.0))
+        runtime.observe_temperature(_sample(2 * _FRAME_MS, 101.0))
+        hold_start_ms = 2 * _FRAME_MS
+        runtime.mode_exited(_exited("Smoke", "Hold", hold_start_ms))
+        runtime.mode_entered(_entered("Hold", at_ms=hold_start_ms))
+        for index in range(180):
+            start_ms = hold_start_ms + index * _FRAME_MS
+            end_ms = start_ms + _FRAME_MS
+            temperature = 101.0 + index / 100
+            runtime.observe_temperature(_sample(start_ms + 25, temperature))
+            runtime.observe_temperature(_sample(end_ms - 25, temperature))
+            runtime.observe_hold_frame(
+                _hold_frame(
+                    index + 1,
+                    start_ms=start_ms,
+                    temp_c=temperature,
+                )
+            )
+        if delayed:
+            persistence.complete_next()
+            runtime.status()
+        anchor = runtime.estimator_seed_anchor()
+        assert anchor is not None
+        seed = runtime.seed_for(
+            theta=1_200.0,
+            n_delay=8,
+            at_ms=anchor[0],
+            measured_temp_c=anchor[1],
+        )
+        assert runtime.status().pre_roll_count == 180
+        assert runtime.status().scored_count == 0
+        return seed.pre_roll_digest, len(runtime._replay_frames)
+
+    immediate = capture(delayed=False)
+    delayed = capture(delayed=True)
+
+    assert immediate == delayed
+    assert immediate[1] == 180
+
+
 @pytest.mark.parametrize(
     ("exit_reason", "expected_reason"),
     [
@@ -859,6 +1021,43 @@ def test_hold_completed_frame_is_scored_once_and_generic_temperature_grid_is_not
     assert scored[0].sequence == 0
     assert scored[0].effective_mode == "Hold"
     assert _pre_roll_frames(persistence) == []
+
+
+@pytest.mark.parametrize(
+    "reason",
+    (TrajectoryBreakReason.STOP, TrajectoryBreakReason.ERROR),
+    ids=lambda reason: reason.value,
+)
+def test_terminal_intervention_finalizes_segment_before_trace_teardown(
+    reason: TrajectoryBreakReason,
+) -> None:
+    runtime, _journal, persistence = _runtime()
+    runtime.mode_entered(_entered("Hold"))
+    runtime.observe_temperature(_sample(10, 109.0))
+    runtime.observe_temperature(_sample(_FRAME_MS, 110.0))
+    runtime.observe_hold_frame(_hold_frame(1, temp_c=110.0))
+
+    runtime.intervention(_boundary(reason, _FRAME_MS))
+
+    assert reason in _finalize_reasons(persistence)
+    assert runtime.barrier()
+
+
+def test_terminal_intervention_reaps_completed_begin_before_due_smoke_boundary() -> None:
+    persistence = _Persistence()
+    persistence.delay_next = True
+    runtime, _journal, _persistence = _runtime(persistence=persistence)
+    runtime.mode_entered(_entered("Smoke"))
+    runtime.observe_temperature(_sample(_FRAME_MS, 100.0))
+    runtime.observe_temperature(_sample(2 * _FRAME_MS, 101.0))
+    persistence.complete_next()
+
+    runtime.intervention(_boundary(TrajectoryBreakReason.STOP, 2 * _FRAME_MS))
+
+    status = runtime.status()
+    assert status.enabled
+    assert status.last_error is None
+    assert TrajectoryBreakReason.STOP in _finalize_reasons(persistence)
 
 
 _NONTERMINAL_BOUNDARIES = (

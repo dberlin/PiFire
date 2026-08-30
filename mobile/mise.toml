@@ -1,2 +1,3 @@
 [tools]
+android-sdk = "16"
 java = "17"

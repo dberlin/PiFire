@@ -441,8 +441,14 @@ class LearningTrajectoryRuntime:
                 self._replay_mode = self._mode
                 self._replay_segment_id = self._segment_id
             self._replay_frames.append(frame)
-            if len(self._replay_frames) > _MAX_REPLAY_INTERVALS:
-                del self._replay_frames[:-_MAX_REPLAY_INTERVALS]
+            active_counts = self._counts.get(self._segment_id or "")
+            limit = (
+                _MAX_PRE_ROLL_PER_SEGMENT
+                if self._replay_segment_id == self._segment_id and active_counts == [_MAX_PRE_ROLL_PER_SEGMENT, 0]
+                else _MAX_REPLAY_INTERVALS
+            )
+            if len(self._replay_frames) > limit:
+                del self._replay_frames[:-limit]
             self._replay_uncertain = False
 
     def _seed_digest(
@@ -816,35 +822,76 @@ class LearningTrajectoryRuntime:
             self._finalize(TrajectoryBreakReason.PROBE_GAP)
             self._last_break_reason = TrajectoryBreakReason.PROBE_GAP
             return
+        segment_id = self._segment_id
+        durable_scored = 0 if segment_id is None else self._counts.get(segment_id, [0, 0])[1]
+        pending_scored = segment_id is not None and any(
+            pending.segment_id == segment_id and pending.scored_count > 0 for pending in self._pending_receipts
+        )
+        if durable_scored == 0 and not pending_scored and not start_ms <= self._hold_entry.monotonic_ms <= end_ms:
+            entry_sample = next(
+                (
+                    candidate
+                    for candidate in self._samples
+                    if start_ms <= candidate.monotonic_ms <= end_ms and self._valid_sample(candidate)
+                ),
+                None,
+            )
+            if entry_sample is None:
+                self._finalize(TrajectoryBreakReason.PROBE_GAP)
+                self._last_break_reason = TrajectoryBreakReason.PROBE_GAP
+                return
+            self._hold_entry = HoldEntrySample(
+                monotonic_ms=entry_sample.monotonic_ms,
+                wall_ms=entry_sample.wall_ms,
+                chamber_temperature_c=self._to_celsius(
+                    entry_sample.chamber_temperature,
+                    entry_sample.units,
+                ),
+                probe_valid=True,
+                probe_source=entry_sample.probe_source,
+            )
         actual_fan_duty = observation.actual_fan_duty
-        fan_exact = (
+        duration_seconds = (end_ms - start_ms) / 1_000
+        if (
             isinstance(actual_fan_duty, (int, float))
             and not isinstance(actual_fan_duty, bool)
             and math.isfinite(float(actual_fan_duty))
             and 0.0 <= float(actual_fan_duty) <= 1.0
-        )
-        if not fan_exact:
-            self._finalize(TrajectoryBreakReason.ACTUATION_UNKNOWN)
-            self._last_break_reason = TrajectoryBreakReason.ACTUATION_UNKNOWN
-            return
-        fan_duty = float(actual_fan_duty) if fan_exact else 0.0
-        duration_seconds = (end_ms - start_ms) / 1_000
-        integral = DeliveredActuationIntegral(
-            monotonic_start_ms=start_ms,
-            monotonic_end_ms=end_ms,
-            auger_on_seconds=float(observation.delivered_on_s),
-            fan_on_seconds=duration_seconds if fan_duty > 0.0 else 0.0,
-            fan_duty_integral_seconds=duration_seconds * fan_duty,
-            auger_start_active=False,
-            auger_end_active=False,
-            fan_start_active=fan_duty > 0.0,
-            fan_end_active=fan_duty > 0.0,
-            pwm_start=fan_duty,
-            pwm_end=fan_duty,
-            auger_certainty=FrameDeliveryCertainty.EXACT,
-            fan_certainty=(FrameDeliveryCertainty.EXACT if fan_exact else FrameDeliveryCertainty.UNKNOWN),
-            unknown_reasons=() if fan_exact else ("hold-fan-delivery-unknown",),
-        )
+        ):
+            fan_duty = float(actual_fan_duty)
+            integral = DeliveredActuationIntegral(
+                monotonic_start_ms=start_ms,
+                monotonic_end_ms=end_ms,
+                auger_on_seconds=float(observation.delivered_on_s),
+                fan_on_seconds=duration_seconds if fan_duty > 0.0 else 0.0,
+                fan_duty_integral_seconds=duration_seconds * fan_duty,
+                auger_start_active=False,
+                auger_end_active=False,
+                fan_start_active=fan_duty > 0.0,
+                fan_end_active=fan_duty > 0.0,
+                pwm_start=fan_duty,
+                pwm_end=fan_duty,
+                auger_certainty=FrameDeliveryCertainty.EXACT,
+                fan_certainty=FrameDeliveryCertainty.EXACT,
+                unknown_reasons=(),
+            )
+        else:
+            try:
+                delivered = self.journal.integrate(start_ms, end_ms)
+            except Exception:
+                delivered = None
+            if delivered is None or delivered.fan_certainty is not FrameDeliveryCertainty.EXACT:
+                self._finalize(TrajectoryBreakReason.ACTUATION_UNKNOWN)
+                self._last_break_reason = TrajectoryBreakReason.ACTUATION_UNKNOWN
+                return
+            integral = replace(
+                delivered,
+                auger_on_seconds=float(observation.delivered_on_s),
+                auger_start_active=False,
+                auger_end_active=False,
+                auger_certainty=FrameDeliveryCertainty.EXACT,
+                unknown_reasons=(),
+            )
         frame = self._frame_from_integral(
             start_ms=start_ms,
             end_ms=end_ms,
@@ -888,7 +935,14 @@ class LearningTrajectoryRuntime:
             if boundary.reason is TrajectoryBreakReason.PROCESS_RESTART
             else boundary.reason
         )
-        if boundary.reason is TrajectoryBreakReason.PROCESS_RESTART:
+        if boundary.reason in (
+            TrajectoryBreakReason.PROCESS_RESTART,
+            TrajectoryBreakReason.STOP,
+            TrajectoryBreakReason.ERROR,
+        ):
+            self._reap_receipts()
+            if not self._enabled:
+                return
             if not self._drain_due_smoke_boundary(boundary.monotonic_ms):
                 return
             if self._mode is not None and self._mode.effective_mode == "Smoke":
@@ -1468,11 +1522,27 @@ class LearningTrajectoryRuntime:
                 continue
             if pending.lineage_token != self._lineage_token:
                 continue
-            counts = self._counts.setdefault(pending.segment_id, [0, 0])
-            counts[0] += pending.pre_roll_count
-            counts[1] += pending.scored_count
-            if receipt.cursor is not None and not pending.closes_segment and pending.segment_id == self._segment_id:
-                self._cursor = receipt.cursor
+            cursor = receipt.cursor
+            if cursor is not None and not pending.closes_segment and self._segment_id is not None:
+                if cursor.segment_id != self._segment_id:
+                    previous_segment_id = self._segment_id
+                    self._segment_id = cursor.segment_id
+                    # Runtime submits one frame per append. A changed cursor can
+                    # therefore only be the repository's empty scored successor,
+                    # carrying its complete ordinal prefix as pre-roll.
+                    self._counts.setdefault(cursor.segment_id, [cursor.next_ordinal, 0])
+                    if self._replay_segment_id == previous_segment_id:
+                        self._replay_segment_id = cursor.segment_id
+                        del self._replay_frames[:-_MAX_PRE_ROLL_PER_SEGMENT]
+                else:
+                    counts = self._counts.setdefault(cursor.segment_id, [0, 0])
+                    counts[0] += pending.pre_roll_count
+                    counts[1] += pending.scored_count
+                self._cursor = cursor
+            else:
+                counts = self._counts.setdefault(pending.segment_id, [0, 0])
+                counts[0] += pending.pre_roll_count
+                counts[1] += pending.scored_count
         self._pending_receipts = remaining
         self._quarantine_retry_segment_ids.update(quarantine_segment_ids)
         for segment_id in sorted(self._quarantine_retry_segment_ids):

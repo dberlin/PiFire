@@ -379,13 +379,18 @@ def test_smoke_to_hold_warms_real_mpc_before_first_solve_and_fences_pre_active_c
     assert kinds.index(TraceEventKind.ESTIMATOR_SEED) < kinds.index(TraceEventKind.CONTROL_UPDATE)
     assert all(record.cook_id == control["cook_id"] for record in records)
     segment_records = [record for record in records if record.event_kind is TraceEventKind.TRAJECTORY_SEGMENT]
-    assert len(segment_records) == 1
-    segment_payload = segment_records[0].payload
-    assert segment_payload.segment_id == "smoke-hold-production-segment"
-    assert segment_payload.trajectory_session_id == trajectory.trajectory_session_id
-    assert segment_payload.pre_roll_frame_count >= seed.pre_roll_frame_count
-    assert segment_payload.scored_hold_frame_count == 0
-    assert segment_payload.terminal_break_reason is None
+    assert len(segment_records) == 2
+    open_payload, finalized_payload = (record.payload for record in segment_records)
+    assert open_payload.segment_id == finalized_payload.segment_id == "smoke-hold-production-segment"
+    assert open_payload.trajectory_session_id == finalized_payload.trajectory_session_id
+    assert finalized_payload.trajectory_session_id == trajectory.trajectory_session_id
+    assert open_payload.pre_roll_frame_count >= seed.pre_roll_frame_count
+    assert finalized_payload.pre_roll_frame_count == open_payload.pre_roll_frame_count
+    assert open_payload.scored_hold_frame_count == finalized_payload.scored_hold_frame_count == 0
+    assert open_payload.state == "open"
+    assert open_payload.terminal_break_reason is None
+    assert finalized_payload.state == "finalized"
+    assert finalized_payload.terminal_break_reason == TrajectoryBreakReason.RECORDER_GAP.value
 
 
 def _mode_entered(kind: str, *, at_ms: int, cook_id: str, trajectory_id: str) -> ModeEntered:
