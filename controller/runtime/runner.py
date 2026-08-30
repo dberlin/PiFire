@@ -1049,9 +1049,11 @@ class ThreadedControllerRunner(ControllerRunner):
     ):
         from controller.runtime.observation_buffer import ObservationOutcomeBuffer
 
-        self._core = core
-        self._activation_core = _activation_core_for(core)
         self._lock = threading.Lock()
+        with self._lock:
+            self._core = core
+            self._activation_core = _activation_core_for(core)
+            self._learning_core: _MpcLearningCore | None = _mpc_learning_core_for(core)
         self._temp = None
         self._output = ControllerUpdateResult(
             cycle_ratio=0.0,
@@ -1074,6 +1076,7 @@ class ThreadedControllerRunner(ControllerRunner):
         self._seed_failure: str | None = None
         self._pending_safety_ceiling_c = _UNSET
         self._pending_core = None
+        self._pending_learning_identities: collections.deque[tuple[int, str, str | None]] = collections.deque()
         self._pending_controller_type = None
         self._configuration_revision = 0
         self._pending_dispatches: collections.deque[tuple[str, object]] = collections.deque()
@@ -1134,16 +1137,18 @@ class ThreadedControllerRunner(ControllerRunner):
         self._thread.start()
 
     def bind_evidence_context(self, generation: int, session_id: str, cook_id: str | None) -> None:
+        learning_core: _MpcLearningCore | None = None
         with self._lock:
             self._observation_buffer.bind_context(generation, session_id, cook_id)
-            target = (
-                self._pending_core
-                if self._pending_core is not None and generation == self._configuration_revision + 1
-                else self._core
-            )
-        bind = getattr(target, "bind_learning_identity", None)
-        if callable(bind):
-            bind(session_id, cook_id, generation)
+            pending_generation = self._configuration_revision + 1
+            if self._pending_core is not None and generation == pending_generation:
+                self._pending_learning_identities.append(
+                    (generation, session_id, cook_id),
+                )
+            else:
+                learning_core = self._learning_core
+        if learning_core is not None:
+            learning_core.bind_learning_identity(session_id, cook_id, generation)
 
     def retire_evidence_context(self, generation: int) -> None:
         with self._lock:
@@ -1177,48 +1182,46 @@ class ThreadedControllerRunner(ControllerRunner):
         while not self._learning_stop_event.is_set():
             with self._learning_condition:
                 core = self._core
+                learning_core = self._learning_core
                 self._learning_poll_core = core
             plan: _CorpusFitPlan | None = None
             try:
-                poll = getattr(core, "poll_learning_off_path", None)
-                if callable(poll):
+                if learning_core is not None:
                     with self._lock:
                         plan = self._corpus_fit_plans[0] if self._corpus_fit_plans else None
                     if plan is not None and not plan.scheduled:
+                        barrier_ready = False
                         try:
                             barrier_ready = plan.before_schedule is None or bool(plan.before_schedule())
                         except Exception as error:
                             self._fail_scheduled_corpus_fit(
                                 "corpus-barrier-failed",
                                 f"{type(error).__name__}: {error}",
-                                core=core,
+                                learning_core=learning_core,
                             )
                             with self._lock:
                                 self._corpus_fit_plans.clear()
                             plan = None
                         if plan is not None:
-                            schedule_ticket = getattr(
-                                core,
-                                "_schedule_corpus_fit_ticket",
-                                None,
-                            )
-                            if not barrier_ready or not callable(schedule_ticket):
+                            if not barrier_ready:
                                 self._fail_scheduled_corpus_fit(
                                     "corpus-barrier-failed",
                                     "trajectory persistence barrier did not become durable",
-                                    core=core,
+                                    learning_core=learning_core,
                                 )
                                 with self._lock:
                                     self._corpus_fit_plans.clear()
                                 plan = None
                             else:
                                 try:
-                                    ticket = schedule_ticket(plan.origin)
+                                    ticket = learning_core._schedule_corpus_fit_ticket(
+                                        plan.origin,
+                                    )
                                 except Exception as error:
                                     self._fail_scheduled_corpus_fit(
                                         "fit-submission-failed",
                                         f"{type(error).__name__}: {error}",
-                                        core=core,
+                                        learning_core=learning_core,
                                     )
                                     with self._lock:
                                         self._corpus_fit_plans.clear()
@@ -1228,7 +1231,7 @@ class ThreadedControllerRunner(ControllerRunner):
                                         self._fail_scheduled_corpus_fit(
                                             "fit-submission-failed",
                                             "core rejected corpus fit scheduling",
-                                            core=core,
+                                            learning_core=learning_core,
                                         )
                                         with self._lock:
                                             self._corpus_fit_plans.clear()
@@ -1237,23 +1240,20 @@ class ThreadedControllerRunner(ControllerRunner):
                                         with self._lock:
                                             plan.ticket = ticket
                                             plan.scheduled = True
-                    result = poll()
+                    result = learning_core.poll_learning_off_path()
                     delivery = result[0] if isinstance(result, tuple) else result
                     request = getattr(
                         getattr(delivery, "message", None),
                         "request",
                         None,
                     )
-                    consume_terminal = getattr(
-                        core,
-                        "_consume_terminal_corpus_fit_ticket",
-                        None,
-                    )
                     ticket_terminal = (
                         plan is not None
                         and plan.ticket is not None
-                        and callable(consume_terminal)
-                        and bool(consume_terminal(plan.ticket, plan.origin))
+                        and learning_core._consume_terminal_corpus_fit_ticket(
+                            plan.ticket,
+                            plan.origin,
+                        )
                     )
                     if plan is not None and (
                         ticket_terminal
@@ -1271,7 +1271,7 @@ class ThreadedControllerRunner(ControllerRunner):
                 self._fail_scheduled_corpus_fit(
                     "fit-poll-failed",
                     error,
-                    core=core,
+                    learning_core=learning_core,
                 )
                 with self._lock:
                     self._corpus_fit_plans.clear()
@@ -1319,15 +1319,21 @@ class ThreadedControllerRunner(ControllerRunner):
         while True:
             stopping = self._stop_event.is_set()
             with self._lock:
+                learning_core = self._learning_core
                 target = self._pending_target
                 self._pending_target = _UNSET
                 seed = self._pending_seed
                 self._pending_seed = _UNSET
-                seed_source = self._pending_seed_source
-                self._pending_seed_source = _UNSET
+                if self._pending_core is None:
+                    seed_source = self._pending_seed_source
+                    self._pending_seed_source = _UNSET
+                else:
+                    seed_source = _UNSET
                 safety_ceiling_c = self._pending_safety_ceiling_c
                 self._pending_safety_ceiling_c = _UNSET
                 new_core = None
+                new_learning_core = None
+                pending_learning_identities = ()
                 handoff_output = None
                 new_controller_type = None
                 retired_core = None
@@ -1344,14 +1350,8 @@ class ThreadedControllerRunner(ControllerRunner):
                 adopted = self._core.restore_model(restore)
                 with self._lock:
                     self._restore_outcome = bool(adopted)
-            if seed_source is not _UNSET:
-                bind_seed_source = getattr(
-                    self._core,
-                    "bind_estimator_seed_source",
-                    None,
-                )
-                if callable(bind_seed_source):
-                    bind_seed_source(seed_source)
+            if seed_source is not _UNSET and learning_core is not None:
+                learning_core.bind_estimator_seed_source(seed_source)
             if seed is not _UNSET:
                 seed_value, seed_ack, seed_outcome = seed
                 seed_failure: str | None = None
@@ -1398,12 +1398,16 @@ class ThreadedControllerRunner(ControllerRunner):
                 self._core.set_output(applied)
                 with self._lock:
                     self._latest_delivered_output = applied
-                observe = getattr(self._core, "observe_frame", None)
-                try:
-                    outcome = None if observe is None else observe(observation)
-                except Exception as error:
-                    reject = getattr(self._core, "observation_failure", None)
-                    outcome = reject(observation, error) if callable(reject) else None
+                if learning_core is None:
+                    outcome = None
+                else:
+                    try:
+                        outcome = learning_core.observe_frame(observation)
+                    except Exception as error:
+                        outcome = learning_core.observation_failure(
+                            observation,
+                            error,
+                        )
                 with self._lock:
                     if outcome is None:
                         self._terminalize_observation_locked(sequence, "runner-no-observation-outcome")
@@ -1442,34 +1446,41 @@ class ThreadedControllerRunner(ControllerRunner):
                         handoff_batch = False
                         update_temp = _UNSET if self._seed_pending_for_solve else self._temp
                 if pending_observations:
-                    observe = getattr(self._core, "observe_frame", None)
-                    for sequence, generation, observation in pending_observations:
-                        if observe is None:
+                    if learning_core is None:
+                        for sequence, _, _ in pending_observations:
                             with self._lock:
-                                self._terminalize_observation_locked(sequence, "runner-no-observation-learner")
-                            continue
-                        try:
-                            outcome = observe(observation)
-                        except Exception as error:
-                            with self._lock:
-                                self._observations_discontinuous.add(generation)
-                            reject = getattr(self._core, "observation_failure", None)
-                            if callable(reject):
+                                self._terminalize_observation_locked(
+                                    sequence,
+                                    "runner-no-observation-learner",
+                                )
+                    else:
+                        for sequence, generation, observation in pending_observations:
+                            try:
+                                outcome = learning_core.observe_frame(observation)
+                            except Exception as error:
+                                with self._lock:
+                                    self._observations_discontinuous.add(generation)
                                 try:
-                                    outcome = reject(observation, error)
+                                    outcome = learning_core.observation_failure(
+                                        observation,
+                                        error,
+                                    )
                                 except Exception:
                                     outcome = None
-                            else:
-                                outcome = None
-                            if outcome is None:
-                                outcome = {
-                                    "role_generation": observation.role_generation,
-                                    "eligible": False,
-                                    "rejection_reasons": ("learner-exception",),
-                                    "learner_error": f"{type(error).__name__}: {error}",
-                                }
-                        with self._lock:
-                            self._complete_observation_locked(sequence, generation, observation, outcome)
+                                if outcome is None:
+                                    outcome = {
+                                        "role_generation": observation.role_generation,
+                                        "eligible": False,
+                                        "rejection_reasons": ("learner-exception",),
+                                        "learner_error": f"{type(error).__name__}: {error}",
+                                    }
+                            with self._lock:
+                                self._complete_observation_locked(
+                                    sequence,
+                                    generation,
+                                    observation,
+                                    outcome,
+                                )
                     if handoff_batch:
                         break
                     continue
@@ -1477,12 +1488,14 @@ class ThreadedControllerRunner(ControllerRunner):
             with self._lock:
                 if self._pending_core is not None:
                     new_core = self._pending_core
+                    new_learning_core = _mpc_learning_core_for(new_core)
                     new_controller_type = self._pending_controller_type
                     self._pending_core = None
                     self._pending_controller_type = None
                     retired_core = self._core
                     self._core = new_core
                     self._activation_core = _activation_core_for(new_core)
+                    self._learning_core = new_learning_core
                     self._control_period = new_core.get_control_period()
                     self._commands_fan = new_core.commands_fan()
                     self._actuation_mode = _actuation_mode_for(new_core)
@@ -1492,8 +1505,17 @@ class ThreadedControllerRunner(ControllerRunner):
                         self._seed_failure = None
                     self._quality.control_period = _control_period_seconds(self._control_period)
                     self._configuration_revision += 1
+                    pending_learning_identities = tuple(self._pending_learning_identities)
+                    self._pending_learning_identities.clear()
                     handoff_output = self._latest_delivered_output
             if new_core is not None:
+                if new_learning_core is not None:
+                    for generation, session_id, cook_id in pending_learning_identities:
+                        new_learning_core.bind_learning_identity(
+                            session_id,
+                            cook_id,
+                            generation,
+                        )
                 # The replacement owns every operation that raced with its
                 # installation, before its first physical handoff and solve.
                 for operation, payload in pending_calibrations:
@@ -1568,8 +1590,8 @@ class ThreadedControllerRunner(ControllerRunner):
 
     def estimator_seed_requirements(self) -> tuple[float, int] | None:
         with self._lock:
-            requirements = getattr(self._core, "estimator_seed_requirements", None)
-            return None if not callable(requirements) else requirements()
+            learning_core = self._learning_core
+            return None if learning_core is None else learning_core.estimator_seed_requirements()
 
     def bind_estimator_seed_source(
         self,
@@ -1669,7 +1691,9 @@ class ThreadedControllerRunner(ControllerRunner):
             with self._lock:
                 retired_pending = self._pending_core
                 self._pending_core = core
-                self._pending_controller_type = _controller_type_for(_selected_controller(settings))
+                self._pending_controller_type = _controller_type_for(
+                    _selected_controller(settings),
+                )
             _close_core(retired_pending)
         else:
             report_reconfigure_failure(settings, logger=logger)
@@ -1817,28 +1841,14 @@ class ThreadedControllerRunner(ControllerRunner):
         origin: CandidateOrigin,
         before_schedule: Callable[[], bool] | None,
     ) -> bool:
-        schedule = getattr(self._core, "schedule_corpus_fit", None)
-        if not callable(schedule):
-            return False
-        poll = getattr(self._core, "poll_learning_off_path", None)
-        if not callable(poll):
-            if before_schedule is not None and not before_schedule():
+        with self._lock:
+            if self._learning_core is None:
                 return False
-            return bool(schedule(origin))
-        if not callable(getattr(self._core, "_schedule_corpus_fit_ticket", None)):
-            return False
-        with self._lock:
             live_dispatcher = not self._learning_stop_event.is_set() and not self._controller_worker_finished
-            if live_dispatcher:
-                self._corpus_fit_plans.append(
-                    _CorpusFitPlan(origin, before_schedule),
-                )
-                return True
-        with self._lock:
             self._corpus_fit_plans.append(
                 _CorpusFitPlan(origin, before_schedule),
             )
-            if self._corpus_fit_thread is not None:
+            if live_dispatcher or self._corpus_fit_thread is not None:
                 return True
             thread = threading.Thread(
                 target=self._drain_scheduled_corpus_fit,
@@ -1853,21 +1863,27 @@ class ThreadedControllerRunner(ControllerRunner):
         code: str,
         error: BaseException | str,
         *,
-        core=None,
+        learning_core: _MpcLearningCore | None = None,
     ) -> None:
-        fail = getattr(self._core if core is None else core, "fail_corpus_fit", None)
-        if not callable(fail):
+        if learning_core is None:
+            with self._lock:
+                learning_core = self._learning_core
+        if learning_core is None:
             return
         try:
-            fail(code, error)
+            learning_core.fail_corpus_fit(code, error)
         except Exception as failure_error:
             with self._lock:
                 self._learning_poll_failure = f"{type(failure_error).__name__}: {failure_error}"
 
     def _drain_scheduled_corpus_fit(self) -> None:
         try:
-            poll = self._core.poll_learning_off_path
-            schedule_ticket = self._core._schedule_corpus_fit_ticket
+            with self._lock:
+                learning_core = self._learning_core
+            if learning_core is None:
+                with self._lock:
+                    self._corpus_fit_plans.clear()
+                return
             while True:
                 with self._lock:
                     if not self._corpus_fit_plans:
@@ -1875,11 +1891,14 @@ class ThreadedControllerRunner(ControllerRunner):
                     plan = self._corpus_fit_plans[0]
                 if not plan.scheduled:
                     try:
-                        barrier_ready = plan.before_schedule is None or bool(plan.before_schedule())
+                        barrier_ready = plan.before_schedule is None or bool(
+                            plan.before_schedule(),
+                        )
                     except Exception as error:
                         self._fail_scheduled_corpus_fit(
                             "corpus-barrier-failed",
                             error,
+                            learning_core=learning_core,
                         )
                         with self._lock:
                             self._corpus_fit_plans.clear()
@@ -1888,16 +1907,20 @@ class ThreadedControllerRunner(ControllerRunner):
                         self._fail_scheduled_corpus_fit(
                             "corpus-barrier-failed",
                             "trajectory persistence barrier did not become durable",
+                            learning_core=learning_core,
                         )
                         with self._lock:
                             self._corpus_fit_plans.clear()
                         return
                     try:
-                        ticket = schedule_ticket(plan.origin)
+                        ticket = learning_core._schedule_corpus_fit_ticket(
+                            plan.origin,
+                        )
                     except Exception as error:
                         self._fail_scheduled_corpus_fit(
                             "fit-submission-failed",
                             error,
+                            learning_core=learning_core,
                         )
                         with self._lock:
                             self._corpus_fit_plans.clear()
@@ -1911,6 +1934,7 @@ class ThreadedControllerRunner(ControllerRunner):
                         self._fail_scheduled_corpus_fit(
                             "fit-submission-failed",
                             "core rejected corpus fit scheduling",
+                            learning_core=learning_core,
                         )
                         with self._lock:
                             self._corpus_fit_plans.clear()
@@ -1919,11 +1943,12 @@ class ThreadedControllerRunner(ControllerRunner):
                         plan.ticket = ticket
                         plan.scheduled = True
                 try:
-                    result = poll()
+                    result = learning_core.poll_learning_off_path()
                 except Exception as error:
                     self._fail_scheduled_corpus_fit(
                         "fit-poll-failed",
                         error,
+                        learning_core=learning_core,
                     )
                     with self._lock:
                         self._corpus_fit_plans.clear()
@@ -1934,15 +1959,9 @@ class ThreadedControllerRunner(ControllerRunner):
                     "request",
                     None,
                 )
-                consume_terminal = getattr(
-                    self._core,
-                    "_consume_terminal_corpus_fit_ticket",
-                    None,
-                )
-                ticket_terminal = (
-                    plan.ticket is not None
-                    and callable(consume_terminal)
-                    and bool(consume_terminal(plan.ticket, plan.origin))
+                ticket_terminal = plan.ticket is not None and learning_core._consume_terminal_corpus_fit_ticket(
+                    plan.ticket,
+                    plan.origin,
                 )
                 if ticket_terminal or (
                     getattr(request, "request_id", None) == plan.ticket
@@ -1952,26 +1971,25 @@ class ThreadedControllerRunner(ControllerRunner):
                         if self._corpus_fit_plans and self._corpus_fit_plans[0] is plan:
                             self._corpus_fit_plans.popleft()
                     continue
-                diagnostics = getattr(
-                    self._core,
-                    "get_learning_diagnostics",
-                    None,
-                )
-                if callable(diagnostics):
-                    try:
-                        state = getattr(diagnostics(), "state", None)
-                    except Exception as error:
-                        self._fail_scheduled_corpus_fit(
-                            "fit-poll-failed",
-                            error,
-                        )
-                        with self._lock:
-                            self._corpus_fit_plans.clear()
-                        return
-                    if isinstance(state, Mapping) and state.get("failure") is not None:
-                        with self._lock:
-                            self._corpus_fit_plans.clear()
-                        return
+                try:
+                    state = getattr(
+                        learning_core.get_learning_diagnostics(),
+                        "state",
+                        None,
+                    )
+                except Exception as error:
+                    self._fail_scheduled_corpus_fit(
+                        "fit-poll-failed",
+                        error,
+                        learning_core=learning_core,
+                    )
+                    with self._lock:
+                        self._corpus_fit_plans.clear()
+                    return
+                if isinstance(state, Mapping) and state.get("failure") is not None:
+                    with self._lock:
+                        self._corpus_fit_plans.clear()
+                    return
                 time.sleep(0.02)
         finally:
             with self._lock:

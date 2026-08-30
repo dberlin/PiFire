@@ -39,10 +39,10 @@ def _control():
     return {"primary_setpoint": 225}
 
 
-def test_selected_mpc_core_missing_learning_capability_is_inactive(
+def test_selected_mpc_core_missing_ticket_consumption_is_inactive(
     monkeypatch,
 ) -> None:
-    class IncompleteMpcCore(ControllerBase):
+    class MissingTicketConsumptionMpcCore(ControllerBase):
         def __init__(
             self,
             config,
@@ -66,10 +66,66 @@ def test_selected_mpc_core_missing_learning_capability_is_inactive(
         def wants_async(self):
             return True
 
+        def estimator_seed_requirements(self) -> tuple[float, int]:
+            return 60.0, 8
+
+        def bind_estimator_seed_source(
+            self,
+            source: Callable[[float, int], object] | None,
+        ) -> None:
+            del source
+
+        def bind_learning_identity(
+            self,
+            session_id: str,
+            cook_id: str | None,
+            role_generation: int,
+        ) -> None:
+            del session_id, cook_id, role_generation
+
+        def observe_frame(self, observation: FrameObservation) -> object:
+            return observation
+
+        def observation_failure(
+            self,
+            observation: FrameObservation,
+            error: BaseException,
+        ) -> object:
+            del error
+            return observation
+
+        def poll_learning_off_path(
+            self,
+            *,
+            live_origin: CandidateOrigin | None = None,
+        ) -> object:
+            return live_origin
+
+        def schedule_corpus_fit(self, origin: CandidateOrigin) -> bool:
+            del origin
+            return True
+
+        def _schedule_corpus_fit_ticket(
+            self,
+            origin: CandidateOrigin,
+        ) -> str | None:
+            del origin
+            return "fit-ticket"
+
+        def fail_corpus_fit(
+            self,
+            ticket: str,
+            error: BaseException | str,
+        ) -> None:
+            del ticket, error
+
+        def get_learning_diagnostics(self) -> ControllerLearningDiagnostics:
+            return ControllerLearningDiagnostics(schema_version=1, state={})
+
     monkeypatch.setattr(
         runner_module.importlib,
         "import_module",
-        lambda _name: SimpleNamespace(Controller=IncompleteMpcCore),
+        lambda _name: SimpleNamespace(Controller=MissingTicketConsumptionMpcCore),
     )
     logger = _Logger()
 

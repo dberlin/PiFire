@@ -2,6 +2,7 @@ import collections
 import json
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -161,6 +162,7 @@ class FakeCore:
         self.tag = "core-a"
         self.activation_calls = []
         self._activation_terminated = False
+        self.closed = 0
 
     def get_control_period(self):
         return self._period
@@ -234,6 +236,121 @@ class FakeCore:
 
     def terminate_mpc_activation(self, reason):
         self._activation_terminated = True
+
+    def close(self):
+        self.closed += 1
+
+
+class FakeMpcLearningCore(FakeCore):
+    """Complete MPC-learning core with explicit, observable hook calls."""
+
+    def __init__(self, period=0.01, commands_fan=False, ratio=0.5):
+        super().__init__(period=period, commands_fan=commands_fan, ratio=ratio)
+        self.seed_requirement_calls = 0
+        self.learning_diagnostics_calls = 0
+        self.seed_source_bindings = []
+        self.learning_identity_bindings = []
+        self.observations = []
+        self.observation_failures = []
+        self.fit_schedules = []
+        self.fit_ticket_schedules = []
+        self.fit_polls = []
+        self.consumed_fit_tickets = []
+        self.fit_failures = []
+        self.terminal_fit_tickets = set()
+        self.schedule_result = True
+        self.observation_outcome = {
+            "role_generation": 0,
+            "eligible": False,
+            "rejection_reasons": (),
+            "forecast_origin_evidence": (),
+        }
+
+    def estimator_seed_requirements(self) -> tuple[float, int]:
+        self.seed_requirement_calls += 1
+        return 60.0, 8
+
+    def bind_estimator_seed_source(
+        self,
+        source: Callable[[float, int], object] | None,
+    ) -> None:
+        self.seed_source_bindings.append(source)
+
+    def bind_learning_identity(
+        self,
+        session_id: str,
+        cook_id: str | None,
+        role_generation: int,
+    ) -> None:
+        self.learning_identity_bindings.append(
+            (session_id, cook_id, role_generation),
+        )
+
+    def observe_frame(self, observation: FrameObservation) -> object:
+        self.observations.append(observation)
+        return dict(
+            self.observation_outcome,
+            role_generation=observation.role_generation,
+        )
+
+    def observation_failure(
+        self,
+        observation: FrameObservation,
+        error: BaseException,
+    ) -> object:
+        self.observation_failures.append((observation, error))
+        return {
+            "role_generation": observation.role_generation,
+            "eligible": False,
+            "rejection_reasons": ("learner-exception",),
+            "learner_error": f"{type(error).__name__}: {error}",
+        }
+
+    def poll_learning_off_path(
+        self,
+        *,
+        live_origin: CandidateOrigin | None = None,
+    ) -> object:
+        self.fit_polls.append((threading.get_ident(), live_origin))
+        return None
+
+    def schedule_corpus_fit(self, origin: CandidateOrigin) -> bool:
+        self.fit_schedules.append(origin)
+        return self.schedule_result
+
+    def _schedule_corpus_fit_ticket(
+        self,
+        origin: CandidateOrigin,
+    ) -> str | None:
+        ticket = f"{len(self.fit_ticket_schedules) + 1:064x}"
+        self.fit_ticket_schedules.append((ticket, origin))
+        return ticket
+
+    def _consume_terminal_corpus_fit_ticket(
+        self,
+        ticket: str,
+        origin: CandidateOrigin,
+    ) -> bool:
+        terminal = (ticket, origin)
+        self.consumed_fit_tickets.append(terminal)
+        if terminal not in self.terminal_fit_tickets:
+            return False
+        self.terminal_fit_tickets.remove(terminal)
+        return True
+
+    def fail_corpus_fit(
+        self,
+        ticket: str,
+        error: BaseException | str,
+    ) -> None:
+        self.fit_failures.append((ticket, error))
+
+    def get_learning_diagnostics(self) -> ControllerLearningDiagnostics:
+        self.learning_diagnostics_calls += 1
+        return ControllerLearningDiagnostics(
+            schema_version=1,
+            state={"failure": None},
+        )
 
 
 def test_threaded_runner_captures_fallback_evidence_from_an_ordinary_compute():
@@ -316,7 +433,7 @@ class CloseAwarePeriodWait:
 
 
 def test_runners_retire_generation_bound_context_until_rebound() -> None:
-    class NoOutcomeCore(FakeCore):
+    class NoOutcomeCore(FakeMpcLearningCore):
         def __init__(self):
             super().__init__()
             self.observed = threading.Event()
@@ -427,7 +544,7 @@ def test_threaded_result_retains_consumed_temperature_after_newer_submit():
 
 
 def test_threaded_result_retains_owned_learning_snapshot_across_repolls():
-    class LearningCore(FakeCore):
+    class LearningCore(FakeMpcLearningCore):
         def __init__(self):
             super().__init__()
             self.learning_state = {"generation": 0, "gates": [{"passed": False}]}
@@ -1224,7 +1341,7 @@ def _drain_once(runner):
 
 
 def test_completed_frame_does_not_overtake_older_output_dispatch():
-    class _BlockedDispatchCore(_BlockedWorkerCore):
+    class _BlockedDispatchCore(_BlockedWorkerCore, FakeMpcLearningCore):
         def observe_frame(self, observation):
             with self.lock:
                 self.calls.append(("observe_frame", observation.frame_end_s))
@@ -1254,7 +1371,7 @@ def test_completed_frame_does_not_overtake_older_output_dispatch():
 @pytest.mark.parametrize("operation", ("restore", "rollback", "fallback"))
 @pytest.mark.parametrize("transition_first", (False, True))
 def test_role_transition_and_completed_frame_share_one_causal_fifo(operation, transition_first):
-    class _RoleCore(_BlockedWorkerCore):
+    class _RoleCore(_BlockedWorkerCore, FakeMpcLearningCore):
         def __init__(self):
             super().__init__()
             self.role = 0
@@ -1342,7 +1459,7 @@ def test_deadline_fallback_waits_behind_frame_queued_during_the_solve():
             with self.lock:
                 self.value += seconds
 
-    class _DeadlineCore(_OrderRecordingCore):
+    class _DeadlineCore(_OrderRecordingCore, FakeMpcLearningCore):
         def __init__(self, clock):
             super().__init__()
             self.clock = clock
@@ -1444,7 +1561,7 @@ class _ObservationBarrier:
         self.release.clear()
 
 
-class _ObservationRecordingCore(_OrderRecordingCore):
+class _ObservationRecordingCore(_OrderRecordingCore, FakeMpcLearningCore):
     def __init__(self):
         super().__init__()
         self.observations = []
@@ -1582,7 +1699,6 @@ def test_threaded_runner_isolates_observation_failure_and_marks_the_next_frame_d
         def __init__(self):
             super().__init__()
             self.failed = False
-            self.failures = []
 
         def observe_frame(self, observation):
             super().observe_frame(observation)
@@ -1590,20 +1706,13 @@ def test_threaded_runner_isolates_observation_failure_and_marks_the_next_frame_d
                 self.failed = True
                 raise FloatingPointError("learner failed")
 
-        def observation_failure(self, observation, error):
-            self.failures.append((observation, error))
-            return {
-                "role_generation": observation.role_generation,
-                "eligible": False,
-                "rejection_reasons": ("learner-exception",),
-            }
-
     core = RaisingCore()
     runner = ThreadedControllerRunner(core, wait_for_period=barrier)
     core.runner = runner
-    runner.bind_evidence_context(0, "session", "cook")
     try:
         assert barrier.first_waiting.wait(2.0)
+        assert runner._learning_core is core
+        runner.bind_evidence_context(0, "session", "cook")
         first = _frame(0)
         first_submission = runner.observe_frame(first)
         runner.submit(212.0)
@@ -1612,9 +1721,14 @@ def test_threaded_runner_isolates_observation_failure_and_marks_the_next_frame_d
         assert _wait_for(lambda: ("update", 212.0) in core.calls)
         first_drain = runner.drain_observation_outcomes()
         assert len(first_drain.envelopes) == 1
+        assert first_drain.terminal_drops == ()
         assert first_drain.envelopes[0].submission_sequence == first_submission.submission_sequence
         assert first_drain.envelopes[0].outcome["rejection_reasons"] == ("learner-exception",)
-        assert core.failures and isinstance(core.failures[0][1], FloatingPointError)
+        assert len(core.observation_failures) == 1
+        failed_observation, failure = core.observation_failures[0]
+        assert failed_observation is first
+        assert isinstance(failure, FloatingPointError)
+        assert runner.drain_observation_outcomes().envelopes == ()
         assert runner._thread.is_alive()
 
         runner.observe_frame(_frame(1))
@@ -1758,6 +1872,94 @@ def test_threaded_runner_seeds_swapped_core_before_reserved_observation_and_solv
         runner.stop()
 
 
+def test_threaded_reconfigure_installs_learning_capability_before_queued_learning_work(
+    monkeypatch,
+):
+    import controller.runtime.runner as runner_module
+
+    class AtomicLearningCore(FakeMpcLearningCore):
+        def __init__(self):
+            super().__init__(period=0.001)
+            self.runner = None
+            self.installation_snapshots = []
+
+        def _record_installation(self, operation: str) -> None:
+            with self.runner._lock:
+                self.installation_snapshots.append(
+                    (
+                        operation,
+                        self.runner._core is self,
+                        self.runner._learning_core is self,
+                    )
+                )
+
+        def bind_estimator_seed_source(
+            self,
+            source: Callable[[float, int], object] | None,
+        ) -> None:
+            self._record_installation("seed-source")
+            super().bind_estimator_seed_source(source)
+
+        def bind_learning_identity(
+            self,
+            session_id: str,
+            cook_id: str | None,
+            role_generation: int,
+        ) -> None:
+            self._record_installation("identity")
+            super().bind_learning_identity(session_id, cook_id, role_generation)
+
+        def observe_frame(self, observation: FrameObservation) -> object:
+            self._record_installation("observation")
+            return super().observe_frame(observation)
+
+    barrier = _ObservationBarrier()
+    old = FakeMpcLearningCore(period=0.001)
+    replacement = AtomicLearningCore()
+    monkeypatch.setattr(
+        runner_module,
+        "_build_core",
+        lambda *args, **kwargs: (replacement, "Active"),
+    )
+    runner = ThreadedControllerRunner(old, wait_for_period=barrier)
+    replacement.runner = runner
+
+    def seed_source(window_seconds: float, minimum_samples: int) -> object:
+        return window_seconds, minimum_samples
+
+    observation = replace(_frame(0), role_generation=1)
+    try:
+        assert barrier.first_waiting.wait(2.0)
+        assert runner.reconfigure({"controller": {"selected": "mpc"}}, {}) == "Active"
+        runner.bind_evidence_context(1, "replacement-session", "replacement-cook")
+        runner.bind_estimator_seed_source(seed_source)
+        submission = runner.observe_frame(observation)
+        runner.submit(212.0)
+        barrier.release.set()
+
+        assert submission is not None
+        assert _wait_for(lambda: len(replacement.installation_snapshots) == 3)
+        assert replacement.installation_snapshots == [
+            ("identity", True, True),
+            ("seed-source", True, True),
+            ("observation", True, True),
+        ]
+        assert replacement.learning_identity_bindings == [
+            ("replacement-session", "replacement-cook", 1),
+        ]
+        assert replacement.seed_source_bindings == [seed_source]
+        assert replacement.observations == [observation]
+        with runner._lock:
+            assert runner._core is replacement
+            assert runner._learning_core is replacement
+        assert old.learning_identity_bindings == []
+        assert old.seed_source_bindings == []
+        assert old.observations == []
+    finally:
+        barrier.release.set()
+        runner.stop()
+
+
 def test_threaded_submission_reports_exact_out_of_order_input_eviction():
     barrier = _ObservationBarrier()
     core = _ObservationRecordingCore()
@@ -1849,12 +2051,15 @@ def test_threaded_generation_specific_overflow_marks_only_reserved_generation():
         runner.stop()
 
 
-def test_threaded_runner_ignores_observations_for_a_core_without_a_learner():
+def test_threaded_non_learning_core_runs_and_closes_without_learning_dispatch():
     barrier = _ObservationBarrier()
     core = FakeCore()
     runner = ThreadedControllerRunner(core, wait_for_period=barrier)
     try:
         assert barrier.first_waiting.wait(2.0)
+        assert runner._learning_core is None
+        assert runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE) is False
+        assert not runner._corpus_fit_plans
         runner.observe_frame(_frame(0))
         runner.submit(212.0)
         barrier.release.set()
@@ -1865,6 +2070,7 @@ def test_threaded_runner_ignores_observations_for_a_core_without_a_learner():
     finally:
         barrier.release.set()
         runner.stop()
+    assert core.closed == 1
 
 
 class _DeliveryBlockingObservationCore(_ObservationRecordingCore):
@@ -2249,7 +2455,7 @@ def test_threaded_stop_never_closes_a_core_under_a_live_timed_out_worker():
     assert core.closed == 1
 
 
-class _CorpusDrainCore(CloseAwareCore):
+class _CorpusDrainCore(CloseAwareCore, FakeMpcLearningCore):
     def __init__(self) -> None:
         super().__init__(period=0.001)
         self.fit_requests = []
@@ -2261,18 +2467,28 @@ class _CorpusDrainCore(CloseAwareCore):
         self.block_poll = False
         self.fit_failures = []
 
-    def schedule_corpus_fit(self, origin):
+    def schedule_corpus_fit(self, origin: CandidateOrigin) -> bool:
+        self.fit_schedules.append(origin)
         return self._schedule_corpus_fit_ticket(origin) is not None
 
-    def _schedule_corpus_fit_ticket(self, origin):
+    def _schedule_corpus_fit_ticket(
+        self,
+        origin: CandidateOrigin,
+    ) -> str | None:
         ticket = f"{len(self.fit_tickets) + 1:064x}"
         self.fit_requests.append(origin)
         self.fit_tickets.append(ticket)
+        self.fit_ticket_schedules.append((ticket, origin))
         if self.deliver_on_schedule:
             self.deliveries.append((ticket, origin))
         return ticket
 
-    def poll_learning_off_path(self):
+    def poll_learning_off_path(
+        self,
+        *,
+        live_origin: CandidateOrigin | None = None,
+    ) -> object:
+        self.fit_polls.append((threading.get_ident(), live_origin))
         self.poll_entered.set()
         if self.block_poll:
             assert self.poll_release.wait(2.0)
@@ -2286,11 +2502,18 @@ class _CorpusDrainCore(CloseAwareCore):
             )
         return None
 
-    def get_learning_diagnostics(self):
-        return SimpleNamespace(state={"failure": None})
+    def get_learning_diagnostics(self) -> ControllerLearningDiagnostics:
+        return ControllerLearningDiagnostics(
+            schema_version=1,
+            state={"failure": None},
+        )
 
-    def fail_corpus_fit(self, code, error):
-        self.fit_failures.append((code, str(error)))
+    def fail_corpus_fit(
+        self,
+        ticket: str,
+        error: BaseException | str,
+    ) -> None:
+        self.fit_failures.append((ticket, str(error)))
 
 
 class _RuntimeCorpusOwnerCore(_CorpusDrainCore):
@@ -2299,32 +2522,52 @@ class _RuntimeCorpusOwnerCore(_CorpusDrainCore):
         self.harness = harness
         self.scheduled_tickets = []
 
-    def schedule_corpus_fit(self, origin):
+    def schedule_corpus_fit(self, origin: CandidateOrigin) -> bool:
+        self.fit_schedules.append(origin)
         return self.harness.runtime.request_corpus_fit(
             origin,
             replace_owned_prepared=True,
         )
 
-    def _schedule_corpus_fit_ticket(self, origin):
+    def _schedule_corpus_fit_ticket(
+        self,
+        origin: CandidateOrigin,
+    ) -> str | None:
         ticket = self.harness.runtime._request_corpus_fit_ticket(
             origin,
             replace_owned_prepared=True,
         )
         if ticket is not None:
             self.scheduled_tickets.append(ticket)
+            self.fit_ticket_schedules.append((ticket, origin))
         return ticket
 
-    def _consume_terminal_corpus_fit_ticket(self, ticket, origin):
+    def _consume_terminal_corpus_fit_ticket(
+        self,
+        ticket: str,
+        origin: CandidateOrigin,
+    ) -> bool:
+        self.consumed_fit_tickets.append((ticket, origin))
         return self.harness.runtime._consume_terminal_fit_ticket(
             ticket,
             origin,
         )
 
-    def poll_learning_off_path(self):
-        return self.harness.runtime.poll_learning_off_path()
+    def poll_learning_off_path(
+        self,
+        *,
+        live_origin: CandidateOrigin | None = None,
+    ) -> object:
+        self.fit_polls.append((threading.get_ident(), live_origin))
+        return self.harness.runtime.poll_learning_off_path(
+            live_origin=live_origin,
+        )
 
-    def get_learning_diagnostics(self):
-        return SimpleNamespace(state=self.harness.runtime.learning_status())
+    def get_learning_diagnostics(self) -> ControllerLearningDiagnostics:
+        return ControllerLearningDiagnostics(
+            schema_version=1,
+            state=self.harness.runtime.learning_status(),
+        )
 
     def close(self):
         if self.closed:
@@ -2447,6 +2690,49 @@ def _prepared_process_candidate(tmp_path, origin):
     assert prepared.candidate.request.origin is origin
     assert isinstance(prepared.candidate.request.fit_corpus, FitCorpusIdentity)
     return repository, partition, owner, first, worker, prepared
+
+
+def test_threaded_corpus_fit_schedules_polls_and_consumes_one_matching_ticket():
+    class TerminalTicketCore(_CorpusDrainCore):
+        def __init__(self):
+            super().__init__()
+            self.marked_terminal = False
+
+        def poll_learning_off_path(
+            self,
+            *,
+            live_origin: CandidateOrigin | None = None,
+        ) -> object:
+            if self.fit_tickets and not self.marked_terminal:
+                self.terminal_fit_tickets.add(
+                    (self.fit_tickets[-1], self.fit_requests[-1]),
+                )
+                self.marked_terminal = True
+            return super().poll_learning_off_path(live_origin=live_origin)
+
+    core = TerminalTicketCore()
+    runner = ThreadedControllerRunner(core)
+    try:
+        assert runner._learning_core is core
+        assert runner.schedule_corpus_fit(CandidateOrigin.OPERATOR_CALIBRATION)
+        assert _wait_for(lambda: not runner._corpus_fit_plans)
+
+        ticket = "0" * 63 + "1"
+        assert core.fit_requests == [CandidateOrigin.OPERATOR_CALIBRATION]
+        assert core.fit_tickets == [ticket]
+        assert core.fit_ticket_schedules == [
+            (ticket, CandidateOrigin.OPERATOR_CALIBRATION),
+        ]
+        assert core.fit_polls
+        assert all(thread_id != runner._thread.ident for thread_id, _live_origin in core.fit_polls)
+        assert {thread_id for thread_id, _live_origin in core.fit_polls} == {
+            runner._learning_thread.ident,
+        }
+        assert core.consumed_fit_tickets == [
+            (ticket, CandidateOrigin.OPERATOR_CALIBRATION),
+        ]
+    finally:
+        runner.stop()
 
 
 def test_live_fit_barrier_and_submission_run_on_learning_dispatcher():
@@ -2792,7 +3078,7 @@ def test_finish_teardown_closes_after_stop_and_retain_timeout_worker_exits():
 
 
 def test_learning_lifecycle_dispatcher_drains_each_fit_off_the_controller_worker():
-    class LearningCore(FakeCore):
+    class LearningCore(FakeMpcLearningCore):
         def __init__(self):
             super().__init__(period=0.001)
             self.pending = False
@@ -2801,7 +3087,8 @@ def test_learning_lifecycle_dispatcher_drains_each_fit_off_the_controller_worker
             self.poll_threads = []
             self.condition = threading.Condition()
 
-        def observe_frame(self, observation):
+        def observe_frame(self, observation: FrameObservation) -> object:
+            self.observations.append(observation)
             with self.condition:
                 if not self.pending:
                     self.pending = True
@@ -2814,7 +3101,12 @@ def test_learning_lifecycle_dispatcher_drains_each_fit_off_the_controller_worker
                 "forecast_origin_evidence": (),
             }
 
-        def poll_learning_off_path(self):
+        def poll_learning_off_path(
+            self,
+            *,
+            live_origin: CandidateOrigin | None = None,
+        ) -> object:
+            self.fit_polls.append((threading.get_ident(), live_origin))
             with self.condition:
                 self.poll_threads.append(threading.get_ident())
                 if self.pending:
