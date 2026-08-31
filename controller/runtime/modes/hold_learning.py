@@ -517,6 +517,8 @@ class HoldLearningRuntime:
             self._activation_lifecycle_evidence_id = None
             self._last_checkpoint_snapshot = None
             self._last_checkpoint_succeeded = False
+        self._submitted_restore = None
+        self._restored_authority_blocked = False
         trace = self._trace
         if trace is not None:
             trace.clear_model_authority()
@@ -528,8 +530,6 @@ class HoldLearningRuntime:
         if snapshot is None:
             return
         restore_token = secrets.token_hex(16)
-        self._submitted_restore = None
-        self._restored_authority_blocked = False
         outcome = runner.restore_model(
             snapshot,
             restore_token=(restore_token if runner.runs_async() else None),

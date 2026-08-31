@@ -1164,7 +1164,10 @@ def test_first_safety_callback_opens_and_binds_the_trace_session(
     ]
 
 
-def test_initial_async_restore_session_uses_queued_snapshot_not_old_published_snapshot(hold_cycle, monkeypatch):
+def test_initial_async_restore_session_records_immutable_submission_without_publishing_authority(
+    hold_cycle,
+    monkeypatch,
+):
     class _ModelStore:
         def load(self, controller):
             return {"revision": 8} if controller == "mpc" else None
@@ -1180,8 +1183,16 @@ def test_initial_async_restore_session_uses_queued_snapshot_not_old_published_sn
     mode = hold_cycle(runner, controller="mpc", model_store=_ModelStore())
     mode.setup()
     mode.control["cook_id"] = "cook-async-restore"
+    trace = _trace(mode)
+    learning = _learning(mode)
+
+    submitted = learning.submitted_restore_authority
+    assert submitted is not None
+    assert (submitted.snapshot, submitted.provenance) == ({"revision": 8}, "restore_submitted")
+    assert trace.model_authority is None
 
     _open_trace_session(mode, 1.0)
+    assert trace.model_authority is None
 
     (session,) = [record for record in recorder.records if record.event_kind is TraceEventKind.SESSION]
     assert (session.payload.model_revision, session.payload.model_provenance) == (8, "restore_submitted")
@@ -1189,6 +1200,20 @@ def test_initial_async_restore_session_uses_queued_snapshot_not_old_published_sn
     assert [
         record.payload.event.value for record in recorder.records if record.event_kind is TraceEventKind.MODEL_EVENT
     ] == ["restore"]
+
+    assert runner.restore_token is not None
+    runner.restore_outcome = ModelRestoreOutcome(
+        restore_token=runner.restore_token,
+        accepted=True,
+        effective_authority={"revision": 8},
+    )
+    learning.reconcile_outcomes(1.5)
+
+    authority = trace.model_authority
+    assert authority is not None
+    assert (authority.snapshot, authority.provenance) == ({"revision": 8}, "restored")
+    assert learning.submitted_restore_authority is None
+    assert (session.payload.model_revision, session.payload.model_provenance) == (8, "restore_submitted")
 
 
 def _run_first_loop_safety_trace(hold_cycle, monkeypatch, *, control_mode=None, guard_temperature=None):

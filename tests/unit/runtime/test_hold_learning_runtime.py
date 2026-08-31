@@ -1970,6 +1970,177 @@ def test_restore_model_clears_stale_authority_before_absent_checkpoint_noop() ->
     assert logger.warnings == []
 
 
+def test_missing_checkpoint_for_new_controller_supersedes_old_pending_restore(
+    monkeypatch,
+) -> None:
+    from controller.runtime.modes import hold_learning as learning_module
+
+    activation_reads = 0
+
+    def read_activation():
+        nonlocal activation_reads
+        activation_reads += 1
+        return None
+
+    monkeypatch.setattr(learning_module, "read_model_activation", read_activation)
+    monkeypatch.setattr(learning_module, "read_model_evidence", lambda: ())
+    old_snapshot: dict[str, object] = {"revision": 8, "K": 700.0}
+    runtime, runner, store, trace, recorder, _logger = _lifecycle_runtime(
+        snapshot=old_snapshot,
+        asynchronous=True,
+    )
+
+    runtime.restore_model(timestamp_ms=1_250)
+    old_restore_token = runner.restore_token
+    assert old_restore_token is not None
+    assert runtime.submitted_restore_authority is not None
+
+    store.snapshot = None
+    runtime.restore_model(timestamp_ms=1_500, controller_name="mpc")
+
+    assert runtime.submitted_restore_authority is None
+    assert trace.model_authority is None
+
+    trace.rotate(runner_snapshot_fallback_safe=False)
+    next_context = replace(
+        _trace_context(),
+        controller=ControllerType.MPC,
+        runner_generation=1,
+        submitted_model=runtime.submitted_restore_authority,
+    )
+    assert trace.ensure_open(next_context, timestamp_ms=1_500) is not None
+    new_session = _records(recorder, TraceEventKind.SESSION)[-1]
+    assert (new_session.payload.model_revision, new_session.payload.model_provenance) == (None, None)
+
+    runner.restore_outcome = ModelRestoreOutcome(
+        restore_token=old_restore_token,
+        accepted=True,
+        effective_authority=old_snapshot,
+    )
+    runtime.reconcile_outcomes(1.75)
+    runtime.reconcile_activation()
+
+    assert runtime.submitted_restore_authority is None
+    assert trace.model_authority is None
+    assert activation_reads == 1
+
+@pytest.mark.parametrize(
+    (
+        "outcome",
+        "asynchronous",
+        "verdict",
+        "staged_for_revalidation",
+        "expected_revision",
+        "expected_provenance",
+        "expected_events",
+    ),
+    (
+        pytest.param(
+            "pending",
+            True,
+            None,
+            False,
+            None,
+            None,
+            (ModelEventType.RESTORE,),
+            id="pending",
+        ),
+        pytest.param(
+            "accepted-immediate",
+            False,
+            True,
+            False,
+            8,
+            "restored",
+            (ModelEventType.RESTORE,),
+            id="accepted-immediate",
+        ),
+        pytest.param(
+            "accepted-staged",
+            True,
+            True,
+            True,
+            0,
+            "configured_fallback",
+            (ModelEventType.RESTORE,),
+            id="accepted-staged",
+        ),
+        pytest.param(
+            "rejected",
+            True,
+            False,
+            False,
+            None,
+            None,
+            (ModelEventType.RESTORE, ModelEventType.REJECT),
+            id="rejected",
+        ),
+    ),
+)
+def test_restore_authority_state_table_separates_pending_submission_from_effective_authority(
+    outcome: str,
+    asynchronous: bool,
+    verdict: bool | None,
+    staged_for_revalidation: bool,
+    expected_revision: int | None,
+    expected_provenance: str | None,
+    expected_events: tuple[ModelEventType, ...],
+) -> None:
+    candidate: dict[str, object] = {"revision": 8, "K": 700.0}
+    fallback: dict[str, object] = {"revision": 0, "provenance": "configured"}
+    runner = _LifecycleRunner(asynchronous=asynchronous)
+    runtime, _runner, _store, trace, recorder, _logger = _lifecycle_runtime(
+        snapshot=candidate,
+        runner=runner,
+    )
+
+    runtime.restore_model(timestamp_ms=1_250)
+
+    if asynchronous:
+        submitted = runtime.submitted_restore_authority
+        assert submitted is not None
+        assert (submitted.snapshot, submitted.provenance) == (candidate, "restore_submitted")
+        assert trace.model_authority is None
+    else:
+        assert runtime.submitted_restore_authority is None
+
+    if asynchronous and verdict is not None:
+        assert runner.restore_token is not None
+        runner.restore_outcome = ModelRestoreOutcome(
+            restore_token=runner.restore_token,
+            accepted=verdict,
+            effective_authority=fallback if staged_for_revalidation or not verdict else candidate,
+            staged_for_revalidation=staged_for_revalidation,
+        )
+        runtime.reconcile_outcomes(1.5)
+
+    if outcome == "pending":
+        submitted = runtime.submitted_restore_authority
+        assert submitted is not None
+        assert (submitted.snapshot, submitted.provenance) == (candidate, "restore_submitted")
+    else:
+        assert runtime.submitted_restore_authority is None
+
+    authority = trace.model_authority
+    if expected_revision is None:
+        assert authority is None
+    else:
+        assert authority is not None
+        assert (
+            authority.snapshot["revision"],
+            authority.provenance,
+        ) == (
+            expected_revision,
+            expected_provenance,
+        )
+    events = tuple(
+        record.payload.event
+        for record in _records(recorder, TraceEventKind.MODEL_EVENT)
+        if isinstance(record.payload, ModelEventPayload)
+    )
+    assert events == expected_events
+
+
 @pytest.mark.parametrize("asynchronous", (False, True), ids=("synchronous", "asynchronous"))
 def test_restore_model_records_accepted_sync_and_async_effective_authority(
     asynchronous: bool,
