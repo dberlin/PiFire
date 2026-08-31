@@ -1,9 +1,18 @@
 """Hold reports observed framed-pulse output and explicit overrides."""
 
 from dataclasses import replace
+from types import SimpleNamespace
 
+import controller.runtime.modes.hold as hold_mode_module
+from common.control_trace import ModelObservationPayload
+from controller.acados.contracts import GreyBoxMPCConfig
 from controller.applied_output import FrameFeedbackDisposition, OutputSource
+from controller.model_learning.grey_runtime import GreyLearningRuntime
+from controller.mpc_allocator import allocate
+from controller.mpc_config import MpcConfig
 from controller.runtime.logic.pulse import PulseResetReason
+from controller.runtime.model_fitting import CandidatePair
+from controller.runtime.runner import ObservationOutcomeEnvelope
 from tests.fakes.runner import FakeControllerRunner
 from tests.unit.runtime.conftest import _off, _output
 
@@ -16,6 +25,42 @@ def _completed_output(ratio):
         solve_end_monotonic=1.125,
         solve_duration_seconds=0.125,
         completed_wall_time=1.125,
+    )
+
+
+def _mpc_admission_runtime():
+    class NoopFitWorker:
+        def start(self):
+            pass
+
+        def close(self):
+            pass
+
+    config = GreyBoxMPCConfig()
+    components = CandidatePair(
+        estimator=object(),
+        controller=SimpleNamespace(config=config),
+    )
+    pair_factory = SimpleNamespace(
+        build_estimator=lambda _config: object(),
+        build_solver=lambda _config: object(),
+        probe_solver=lambda _solver: None,
+    )
+    return GreyLearningRuntime(
+        pair_factory=pair_factory,
+        activation_runtime=object(),
+        learning_enabled=True,
+        units="C",
+        cycle_data={},
+        active_pair=lambda: SimpleNamespace(),
+        active_components=lambda: components,
+        configuration=MpcConfig,
+        snapshot_parameters=dict,
+        sync_configuration=lambda: None,
+        append_trace=lambda _records: None,
+        checkpoint_store=object(),
+        fit_worker_factory=NoopFitWorker,
+        installation_identity_provider=lambda: "manual-takeover-test",
     )
 
 
@@ -46,7 +91,39 @@ def test_manual_auger_on_reports_full_duty(hold_cycle):
 
 
 def test_manual_takeover_resets_the_active_frame_before_manual_feedback(hold_cycle, monkeypatch):
-    runner = FakeControllerRunner(period=1.0).script([_completed_output(0.9)])
+    class Recorder:
+        def __init__(self):
+            self.records = []
+
+        def record(self, record):
+            self.records.append(record)
+
+        def flush_due(self, now_ms):
+            del now_ms
+
+        def close(self):
+            pass
+
+    recorder = Recorder()
+    monkeypatch.setattr(
+        hold_mode_module,
+        "ControlTraceRecorder",
+        lambda **_kwargs: recorder,
+    )
+    runner = FakeControllerRunner(period=1.0).script(
+        [
+            replace(
+                _completed_output(0.9),
+                allocation=allocate(
+                    0.9,
+                    u_max=1.0,
+                    fan_min_pct=0.0,
+                    fan_max_pct=0.0,
+                    enable_fan=False,
+                ),
+            )
+        ]
+    )
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
@@ -54,11 +131,13 @@ def test_manual_takeover_resets_the_active_frame_before_manual_feedback(hold_cyc
     hold._last_ptemp = 200.0
     runner.applied.clear()
     events = []
+    reset_results = []
     set_output = runner.set_output
     observe_frame = runner.observe_frame
     runtime = hold._framed_pulse
     assert runtime is not None
     reset = runtime.reset
+    admission = _mpc_admission_runtime()
 
     def record_output(applied):
         if applied.source is OutputSource.MANUAL_OVERRIDE:
@@ -67,10 +146,22 @@ def test_manual_takeover_resets_the_active_frame_before_manual_feedback(hold_cyc
 
     def record_observation(observation):
         events.append(("runner-observation", observation.reset))
-        return observe_frame(observation)
+        submission = observe_frame(observation)
+        outcome = admission.observe_frame(observation)
+        assert outcome is not None
+        runner.append_observation_outcome(
+            ObservationOutcomeEnvelope(
+                submission.submission_sequence,
+                submission.configuration_generation,
+                observation,
+                outcome,
+            )
+        )
+        return submission
 
     def record_reset(*args, **kwargs):
         result = reset(*args, **kwargs)
+        reset_results.append(result)
         events.append(("frame-reset", args[0]))
         return result
 
@@ -85,6 +176,54 @@ def test_manual_takeover_resets_the_active_frame_before_manual_feedback(hold_cyc
         ("runner-observation", True),
         ("manual-feedback", FrameFeedbackDisposition.PROGRESS),
     ]
+    (reset_result,) = reset_results
+    (interrupted,) = reset_result.completions
+    (observation,) = runner.observations
+    assert interrupted.frame_key == (2_000, 2_500)
+    assert interrupted.observation == observation
+    assert (
+        observation.frame_start_s,
+        observation.frame_end_s,
+        observation.result_revision,
+        observation.observation_sequence,
+    ) == (2.0, 2.5, 1, 1)
+    assert (
+        observation.output_source,
+        observation.manual_override,
+        observation.reset,
+        observation.continuous,
+    ) == (OutputSource.MANUAL_OVERRIDE.value, True, True, False)
+
+    hold.on_tick(3.0, 200.0, hold.grill.get_output_status())
+
+    scored = [
+        record.payload
+        for record in recorder.records
+        if isinstance(record.payload, ModelObservationPayload)
+    ]
+    assert len(scored) == 1
+    assert (
+        scored[0].frame_start_ms,
+        scored[0].frame_end_ms,
+        scored[0].result_revision,
+        scored[0].observation_sequence,
+    ) == (2_000, 2_500, 1, 1)
+    assert (
+        scored[0].eligible,
+        scored[0].rejection_reasons,
+        scored[0].output_source,
+        scored[0].manual_override,
+        scored[0].reset,
+        scored[0].continuous,
+    ) == (
+        False,
+        ("manual",),
+        OutputSource.MANUAL_OVERRIDE,
+        True,
+        True,
+        False,
+    )
+    admission.close()
 
 
 def test_manual_release_reseeds_before_fresh_controller_authority(hold_cycle, monkeypatch):
