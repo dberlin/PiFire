@@ -34,7 +34,7 @@ class GateCommand:
 
 @dataclass(frozen=True, slots=True)
 class CommandEvidence:
-    """Durable result and logs for one mandatory command."""
+    """Durable result and logs for one gate command."""
 
     name: str
     argv: tuple[str, ...]
@@ -51,9 +51,10 @@ class CommandEvidence:
 class GateEvidence:
     """Complete evidence for an attempted exact-revision gate."""
 
-    schema_version: Literal[1]
+    schema_version: Literal[2]
     revision: str
     status: Literal["passed", "failed"]
+    preflight: tuple[CommandEvidence, ...]
     commands: tuple[CommandEvidence, ...]
 
 
@@ -64,6 +65,21 @@ class _CompletedCommand(Protocol):
 _RunCommand = Callable[..., _CompletedCommand]
 _ResolveRevision = Callable[[], str]
 
+_PREFLIGHT_COMMANDS = (
+    GateCommand(
+        "contract-preflight",
+        (
+            "uv",
+            "run",
+            "pytest",
+            "tests/unit/test_no_cross_test_imports.py",
+            "tests/unit/mpc/test_mutation_score.py",
+            "tests/unit/common/test_current_contract_fixtures.py",
+            "-q",
+        ),
+        ".",
+    ),
+)
 _REQUIRED_COMMANDS = (
     GateCommand("rebuild-acados", ("./rebuild-acados.sh", "--if-needed"), "."),
     GateCommand("python-default", ("uv", "run", "pytest", "tests/"), "."),
@@ -79,6 +95,12 @@ _FULL_REVISION = re.compile(r"[0-9a-f]{40}\Z")
 _VERIFIED_BOOKMARK = "cumulative-mpc-learning"
 _DEFAULT_ARTIFACT_ROOT = Path(".artifacts/exact-revision")
 _BROWSER_BACKEND_OVERRIDES = ("PUBLIC_PIFIRE_URL", "PUBLIC_PIFIRE_TARGET")
+
+
+def preflight_commands() -> tuple[GateCommand, ...]:
+    """Return prerequisite contract checks that do not count as release commands."""
+
+    return _PREFLIGHT_COMMANDS
 
 
 def required_commands() -> tuple[GateCommand, ...]:
@@ -145,32 +167,35 @@ def _write_evidence(path: Path, evidence: GateEvidence) -> None:
 def _failed_evidence(
     *,
     expected_revision: str,
+    preflight: list[CommandEvidence],
     commands: list[CommandEvidence],
     evidence_path: Path,
 ) -> GateEvidence:
     evidence = GateEvidence(
-        schema_version=1,
+        schema_version=2,
         revision=expected_revision,
         status="failed",
+        preflight=tuple(preflight),
         commands=tuple(commands),
     )
     _write_evidence(evidence_path, evidence)
     return evidence
 
 
-def _invalid_pass_evidence_index(
-    commands: list[CommandEvidence],
+def _invalid_stage_evidence_index(
+    *,
+    expected: tuple[GateCommand, ...],
+    actual: list[CommandEvidence],
     revision_dir: Path,
+    first_log_index: int,
 ) -> int | None:
-    if len(commands) != len(_REQUIRED_COMMANDS):
+    if len(actual) != len(expected):
         return 0
 
-    for index, (required, evidence) in enumerate(
-        zip(_REQUIRED_COMMANDS, commands, strict=True),
-        start=1,
-    ):
-        stdout_name = f"{index:02d}-{required.name}.stdout.log"
-        stderr_name = f"{index:02d}-{required.name}.stderr.log"
+    for position, (required, evidence) in enumerate(zip(expected, actual, strict=True)):
+        log_index = first_log_index + position
+        stdout_name = f"{log_index:02d}-{required.name}.stdout.log"
+        stderr_name = f"{log_index:02d}-{required.name}.stderr.log"
         if (
             evidence.name != required.name
             or evidence.argv != required.argv
@@ -182,18 +207,18 @@ def _invalid_pass_evidence_index(
             or evidence.stdout_sha256 is None
             or evidence.stderr_sha256 is None
         ):
-            return index - 1
+            return position
 
         try:
             stdout_sha256 = _sha256(revision_dir / stdout_name)
             stderr_sha256 = _sha256(revision_dir / stderr_name)
         except OSError:
-            return index - 1
+            return position
         if (
             stdout_sha256 != evidence.stdout_sha256
             or stderr_sha256 != evidence.stderr_sha256
         ):
-            return index - 1
+            return position
 
     return None
 
@@ -270,36 +295,49 @@ def _run_gate_attempt(
     resolved_revision: str | None,
     resolve_revision: _ResolveRevision,
     revision_dir: Path,
+    preflight: tuple[GateCommand, ...],
     commands: tuple[GateCommand, ...],
     run_command: _RunCommand,
 ) -> GateEvidence:
     evidence_path = revision_dir / "evidence.json"
+    preflight_evidence = [_not_run(command) for command in _PREFLIGHT_COMMANDS]
     command_evidence = [_not_run(command) for command in _REQUIRED_COMMANDS]
 
     if resolved_revision != expected_revision:
-        command_evidence[0] = replace(command_evidence[0], status="revision_changed")
+        preflight_evidence[0] = replace(preflight_evidence[0], status="revision_changed")
         return _failed_evidence(
             expected_revision=revision_dir.name,
+            preflight=preflight_evidence,
             commands=command_evidence,
             evidence_path=evidence_path,
         )
 
     attempt_evidence = GateEvidence(
-        schema_version=1,
+        schema_version=2,
         revision=expected_revision,
         status="failed",
+        preflight=tuple(preflight_evidence),
         commands=tuple(command_evidence),
     )
     _write_evidence(evidence_path, attempt_evidence)
 
-    if commands != _REQUIRED_COMMANDS:
+    if preflight != _PREFLIGHT_COMMANDS or commands != _REQUIRED_COMMANDS:
         return attempt_evidence
 
-    for index, command in enumerate(commands, start=1):
-        if index > 1 and not _revision_is_expected(resolve_revision, expected_revision):
-            command_evidence[index - 1] = replace(command_evidence[index - 1], status="revision_changed")
+    gate_commands = preflight + commands
+    for log_index, command in enumerate(gate_commands):
+        is_preflight = log_index < len(preflight)
+        evidence_index = log_index if is_preflight else log_index - len(preflight)
+        stage_evidence = preflight_evidence if is_preflight else command_evidence
+
+        if log_index > 0 and not _revision_is_expected(resolve_revision, expected_revision):
+            stage_evidence[evidence_index] = replace(
+                stage_evidence[evidence_index],
+                status="revision_changed",
+            )
             return _failed_evidence(
                 expected_revision=expected_revision,
+                preflight=preflight_evidence,
                 commands=command_evidence,
                 evidence_path=evidence_path,
             )
@@ -307,22 +345,24 @@ def _run_gate_attempt(
         result = _run_one_command(
             root=root,
             revision_dir=revision_dir,
-            index=index,
+            index=log_index,
             command=command,
             run_command=run_command,
         )
-        command_evidence[index - 1] = result
+        stage_evidence[evidence_index] = result
 
         if not _revision_is_expected(resolve_revision, expected_revision):
-            command_evidence[index - 1] = replace(result, status="revision_changed")
+            stage_evidence[evidence_index] = replace(result, status="revision_changed")
             return _failed_evidence(
                 expected_revision=expected_revision,
+                preflight=preflight_evidence,
                 commands=command_evidence,
                 evidence_path=evidence_path,
             )
         if result.status != "passed":
             return _failed_evidence(
                 expected_revision=expected_revision,
+                preflight=preflight_evidence,
                 commands=command_evidence,
                 evidence_path=evidence_path,
             )
@@ -331,26 +371,52 @@ def _run_gate_attempt(
         command_evidence[-1] = replace(command_evidence[-1], status="revision_changed")
         return _failed_evidence(
             expected_revision=expected_revision,
+            preflight=preflight_evidence,
             commands=command_evidence,
             evidence_path=evidence_path,
         )
 
-    invalid_index = _invalid_pass_evidence_index(command_evidence, revision_dir)
-    if invalid_index is not None:
-        command_evidence[invalid_index] = replace(
-            command_evidence[invalid_index],
+    invalid_preflight_index = _invalid_stage_evidence_index(
+        expected=_PREFLIGHT_COMMANDS,
+        actual=preflight_evidence,
+        revision_dir=revision_dir,
+        first_log_index=0,
+    )
+    if invalid_preflight_index is not None:
+        preflight_evidence[invalid_preflight_index] = replace(
+            preflight_evidence[invalid_preflight_index],
             status="failed",
         )
         return _failed_evidence(
             expected_revision=expected_revision,
+            preflight=preflight_evidence,
+            commands=command_evidence,
+            evidence_path=evidence_path,
+        )
+
+    invalid_command_index = _invalid_stage_evidence_index(
+        expected=_REQUIRED_COMMANDS,
+        actual=command_evidence,
+        revision_dir=revision_dir,
+        first_log_index=len(_PREFLIGHT_COMMANDS),
+    )
+    if invalid_command_index is not None:
+        command_evidence[invalid_command_index] = replace(
+            command_evidence[invalid_command_index],
+            status="failed",
+        )
+        return _failed_evidence(
+            expected_revision=expected_revision,
+            preflight=preflight_evidence,
             commands=command_evidence,
             evidence_path=evidence_path,
         )
 
     evidence = GateEvidence(
-        schema_version=1,
+        schema_version=2,
         revision=expected_revision,
         status="passed",
+        preflight=tuple(preflight_evidence),
         commands=tuple(command_evidence),
     )
     _write_evidence(evidence_path, evidence)
@@ -373,6 +439,7 @@ def _run_gate_with_lock_held(
     artifact_root: Path,
     run_command: _RunCommand,
 ) -> GateEvidence:
+    preflight = preflight_commands()
     commands = required_commands()
     resolved_revision = _resolve_revision_safely(resolve_revision)
     artifact_revision = (
@@ -388,6 +455,7 @@ def _run_gate_with_lock_held(
         resolved_revision=resolved_revision,
         resolve_revision=resolve_revision,
         revision_dir=revision_dir,
+        preflight=preflight,
         commands=commands,
         run_command=run_command,
     )
@@ -401,12 +469,25 @@ def _validate_durable_pass_evidence(*, evidence: GateEvidence, revision_dir: Pat
         raise RuntimeError("durable evidence could not be revalidated after push") from error
 
     expected = json.loads(json.dumps(asdict(evidence)))
-    invalid_index = _invalid_pass_evidence_index(list(evidence.commands), revision_dir)
+    invalid_preflight_index = _invalid_stage_evidence_index(
+        expected=_PREFLIGHT_COMMANDS,
+        actual=list(evidence.preflight),
+        revision_dir=revision_dir,
+        first_log_index=0,
+    )
+    invalid_command_index = _invalid_stage_evidence_index(
+        expected=_REQUIRED_COMMANDS,
+        actual=list(evidence.commands),
+        revision_dir=revision_dir,
+        first_log_index=len(_PREFLIGHT_COMMANDS),
+    )
     if (
-        evidence.status != "passed"
+        evidence.schema_version != 2
+        or evidence.status != "passed"
         or evidence.revision != revision_dir.name
         or persisted != expected
-        or invalid_index is not None
+        or invalid_preflight_index is not None
+        or invalid_command_index is not None
     ):
         raise RuntimeError("durable evidence could not be revalidated after push")
 

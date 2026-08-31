@@ -22,6 +22,7 @@ from scripts.exact_revision_gate import (
     CommandEvidence,
     GateCommand,
     GateEvidence,
+    preflight_commands,
     push_verified_bookmark,
     required_commands,
     resolve_bookmark_revision,
@@ -79,7 +80,8 @@ class _CommandRunner:
         self.environments.append(env)
         assert check is False
         if self._events is not None:
-            command = next(command for command in required_commands() if command.argv == argv)
+            commands = preflight_commands() + required_commands()
+            command = next(command for command in commands if command.argv == argv)
             self._events.append(f"run:{command.name}")
         self.calls.append((argv, cwd))
         result = next(self._results)
@@ -94,7 +96,7 @@ class _CommandRunner:
 
 
 def _success_results() -> tuple[tuple[int, bytes, bytes], ...]:
-    return tuple((0, f"stdout-{index}\n".encode(), f"stderr-{index}\n".encode()) for index in range(5))
+    return tuple((0, f"stdout-{index}\n".encode(), f"stderr-{index}\n".encode()) for index in range(6))
 
 
 def _run_gate(
@@ -120,6 +122,22 @@ def _read_json(path: Path) -> dict[str, object]:
     return cast(dict[str, object], value)
 
 
+def _assert_logged_evidence(
+    command: CommandEvidence,
+    revision_dir: Path,
+    *,
+    log_index: int,
+    stdout_bytes: bytes,
+    stderr_bytes: bytes,
+) -> None:
+    assert command.stdout_log == f"{log_index:02d}-{command.name}.stdout.log"
+    assert command.stderr_log == f"{log_index:02d}-{command.name}.stderr.log"
+    assert (revision_dir / command.stdout_log).read_bytes() == stdout_bytes
+    assert (revision_dir / command.stderr_log).read_bytes() == stderr_bytes
+    assert command.stdout_sha256 == hashlib.sha256(stdout_bytes).hexdigest()
+    assert command.stderr_sha256 == hashlib.sha256(stderr_bytes).hexdigest()
+
+
 def test_required_commands_match_release_gate() -> None:
     assert required_commands() == (
         GateCommand("rebuild-acados", ("./rebuild-acados.sh", "--if-needed"), "."),
@@ -134,6 +152,94 @@ def test_required_commands_match_release_gate() -> None:
     )
 
 
+def test_contract_preflight_is_separate_from_the_five_release_commands() -> None:
+    assert preflight_commands() == (
+        GateCommand(
+            "contract-preflight",
+            (
+                "uv",
+                "run",
+                "pytest",
+                "tests/unit/test_no_cross_test_imports.py",
+                "tests/unit/mpc/test_mutation_score.py",
+                "tests/unit/common/test_current_contract_fixtures.py",
+                "-q",
+            ),
+            ".",
+        ),
+    )
+    assert len(required_commands()) == 5
+
+
+def test_agents_requires_schema_v2_preflight_evidence_to_authorize_push() -> None:
+    rules = (_REPOSITORY_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+
+    assert (
+        "Only schema v2 evidence with the separate contract preflight can authorize a push."
+        in rules
+    )
+    assert (
+        "Preserved schema v1 evidence is historical-only and cannot authorize a push."
+        in rules
+    )
+
+
+@pytest.mark.parametrize(
+    "result,status",
+    [
+        pytest.param((7, b"preflight stdout\n", b"preflight failure\n"), "failed", id="failed"),
+        pytest.param(KeyboardInterrupt(), "interrupted", id="interrupted"),
+    ],
+)
+def test_failed_or_interrupted_preflight_preserves_evidence_and_leaves_release_not_run(
+    tmp_path: Path,
+    result: tuple[int, bytes, bytes] | BaseException,
+    status: str,
+) -> None:
+    resolver = _RevisionResolver(_REVISION, _REVISION)
+    runner = _CommandRunner(result)
+
+    evidence, revision_dir = _run_gate(tmp_path, resolver=resolver, runner=runner)
+
+    assert evidence.status == "failed"
+    assert [command.status for command in evidence.preflight] == [status]
+    assert [command.status for command in evidence.commands] == ["not_run"] * 5
+    preflight = evidence.preflight[0]
+    assert preflight.stdout_log == "00-contract-preflight.stdout.log"
+    assert preflight.stderr_log == "00-contract-preflight.stderr.log"
+    assert preflight.stdout_sha256 == hashlib.sha256(
+        (revision_dir / preflight.stdout_log).read_bytes()
+    ).hexdigest()
+    assert preflight.stderr_sha256 == hashlib.sha256(
+        (revision_dir / preflight.stderr_log).read_bytes()
+    ).hexdigest()
+    assert _read_json(revision_dir / "evidence.json")["preflight"] == [
+        {
+            "name": preflight.name,
+            "argv": list(preflight.argv),
+            "cwd": preflight.cwd,
+            "exit_code": preflight.exit_code,
+            "status": preflight.status,
+            "stdout_log": preflight.stdout_log,
+            "stderr_log": preflight.stderr_log,
+            "stdout_sha256": preflight.stdout_sha256,
+            "stderr_sha256": preflight.stderr_sha256,
+        }
+    ]
+
+
+def test_revision_drift_during_preflight_fails_before_release_commands(tmp_path: Path) -> None:
+    resolver = _RevisionResolver(_REVISION, _OTHER_REVISION)
+    runner = _CommandRunner((0, b"preflight stdout\n", b""))
+
+    evidence, _ = _run_gate(tmp_path, resolver=resolver, runner=runner)
+
+    assert evidence.status == "failed"
+    assert [command.status for command in evidence.preflight] == ["revision_changed"]
+    assert [command.status for command in evidence.commands] == ["not_run"] * 5
+    assert len(runner.calls) == 1
+
+
 def test_in_tree_artifact_root_is_ignored_and_supports_a_complete_attempt(tmp_path: Path) -> None:
     ignore_rules = (_REPOSITORY_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert "/.artifacts/" in ignore_rules
@@ -143,7 +249,7 @@ def test_in_tree_artifact_root_is_ignored_and_supports_a_complete_attempt(tmp_pa
         / "exact-revision"
         / f"unit-{os.getpid()}-{tmp_path.name}"
     )
-    resolver = _RevisionResolver(*([_REVISION] * 11))
+    resolver = _RevisionResolver(*([_REVISION] * 13))
     runner = _CommandRunner(*_success_results())
 
     try:
@@ -158,8 +264,8 @@ def test_in_tree_artifact_root_is_ignored_and_supports_a_complete_attempt(tmp_pa
         shutil.rmtree(artifact_root, ignore_errors=True)
 
     assert evidence.status == "passed"
-    assert resolver.calls == 11
-    assert len(runner.calls) == 5
+    assert resolver.calls == 13
+    assert len(runner.calls) == 6
 
 
 def test_evidence_records_have_exact_typed_immutable_fields() -> None:
@@ -199,15 +305,17 @@ def test_evidence_records_have_exact_typed_immutable_fields() -> None:
         "stderr_sha256",
     ]
     assert get_type_hints(GateEvidence) == {
-        "schema_version": Literal[1],
+        "schema_version": Literal[2],
         "revision": str,
         "status": Literal["passed", "failed"],
+        "preflight": tuple[CommandEvidence, ...],
         "commands": tuple[CommandEvidence, ...],
     }
     assert [field.name for field in fields(GateEvidence)] == [
         "schema_version",
         "revision",
         "status",
+        "preflight",
         "commands",
     ]
 
@@ -224,9 +332,10 @@ def test_evidence_records_have_exact_typed_immutable_fields() -> None:
         stderr_sha256=None,
     )
     gate_evidence = GateEvidence(
-        schema_version=1,
+        schema_version=2,
         revision=_REVISION,
         status="failed",
+        preflight=(command_evidence,),
         commands=(command_evidence,),
     )
     for record, attribute in (
@@ -241,13 +350,16 @@ def test_evidence_records_have_exact_typed_immutable_fields() -> None:
 
 def test_success_checks_revision_around_every_command_and_at_end(tmp_path: Path) -> None:
     events: list[str] = []
-    resolver = _RevisionResolver(*([_REVISION] * 11), events=events)
+    resolver = _RevisionResolver(*([_REVISION] * 13), events=events)
     runner = _CommandRunner(*_success_results(), events=events)
 
     evidence, revision_dir = _run_gate(tmp_path, resolver=resolver, runner=runner)
 
     assert evidence.status == "passed"
     assert events == [
+        "resolve",
+        "run:contract-preflight",
+        "resolve",
         "resolve",
         "run:rebuild-acados",
         "resolve",
@@ -267,8 +379,9 @@ def test_success_checks_revision_around_every_command_and_at_end(tmp_path: Path)
     ]
     assert runner.calls == [
         (command.argv, _REPOSITORY_ROOT / command.cwd)
-        for command in required_commands()
+        for command in preflight_commands() + required_commands()
     ]
+    assert [command.status for command in evidence.preflight] == ["passed"]
     assert [command.status for command in evidence.commands] == ["passed"] * 5
     assert _read_json(revision_dir / "evidence.json")["status"] == "passed"
 
@@ -276,7 +389,7 @@ def test_success_checks_revision_around_every_command_and_at_end(tmp_path: Path)
 def test_success_evidence_is_not_published_before_the_final_revision_check(tmp_path: Path) -> None:
     artifact_root = tmp_path / "artifacts"
     evidence_path = artifact_root / _REVISION / "evidence.json"
-    resolver = _RevisionResolver(*([_REVISION] * 11))
+    resolver = _RevisionResolver(*([_REVISION] * 13))
 
     class InspectingRunner(_CommandRunner):
         @override
@@ -316,7 +429,7 @@ def test_prior_success_is_replaced_before_a_new_attempt_runs(tmp_path: Path) -> 
     evidence_path = artifact_root / _REVISION / "evidence.json"
     evidence_path.parent.mkdir(parents=True)
     _ = evidence_path.write_text('{"status": "passed"}\n', encoding="utf-8")
-    resolver = _RevisionResolver(*([_REVISION] * 11))
+    resolver = _RevisionResolver(*([_REVISION] * 13))
 
     class InspectingRunner(_CommandRunner):
         @override
@@ -410,7 +523,7 @@ def test_same_revision_attempts_are_serialized_before_logs_are_touched(tmp_path:
 
     first_thread = threading.Thread(
         target=invoke,
-        args=(first_runner, _RevisionResolver(*([_REVISION] * 11))),
+        args=(first_runner, _RevisionResolver(*([_REVISION] * 13))),
     )
     second_thread = threading.Thread(target=invoke, args=(second_runner, second_resolver))
     first_thread.start()
@@ -434,16 +547,29 @@ def test_same_revision_attempts_are_serialized_before_logs_are_touched(tmp_path:
 
 
 def test_success_writes_separate_logs_hashes_and_atomic_json(tmp_path: Path) -> None:
-    resolver = _RevisionResolver(*([_REVISION] * 11))
+    resolver = _RevisionResolver(*([_REVISION] * 13))
     runner = _CommandRunner(*_success_results())
 
     evidence, revision_dir = _run_gate(tmp_path, resolver=resolver, runner=runner)
 
     payload = _read_json(revision_dir / "evidence.json")
     assert payload == {
-        "schema_version": 1,
+        "schema_version": 2,
         "revision": _REVISION,
         "status": "passed",
+        "preflight": [
+            {
+                "name": "contract-preflight",
+                "argv": list(preflight_commands()[0].argv),
+                "cwd": ".",
+                "exit_code": 0,
+                "status": "passed",
+                "stdout_log": "00-contract-preflight.stdout.log",
+                "stderr_log": "00-contract-preflight.stderr.log",
+                "stdout_sha256": hashlib.sha256(b"stdout-0\n").hexdigest(),
+                "stderr_sha256": hashlib.sha256(b"stderr-0\n").hexdigest(),
+            }
+        ],
         "commands": [
             {
                 "name": command.name,
@@ -453,13 +579,13 @@ def test_success_writes_separate_logs_hashes_and_atomic_json(tmp_path: Path) -> 
                 "status": "passed",
                 "stdout_log": f"{index:02d}-{command.name}.stdout.log",
                 "stderr_log": f"{index:02d}-{command.name}.stderr.log",
-                "stdout_sha256": hashlib.sha256(f"stdout-{index - 1}\n".encode()).hexdigest(),
-                "stderr_sha256": hashlib.sha256(f"stderr-{index - 1}\n".encode()).hexdigest(),
+                "stdout_sha256": hashlib.sha256(f"stdout-{index}\n".encode()).hexdigest(),
+                "stderr_sha256": hashlib.sha256(f"stderr-{index}\n".encode()).hexdigest(),
             }
             for index, command in enumerate(required_commands(), start=1)
         ],
     }
-    for command in evidence.commands:
+    for command in evidence.preflight + evidence.commands:
         assert command.stdout_log is not None
         assert command.stderr_log is not None
         assert hashlib.sha256((revision_dir / command.stdout_log).read_bytes()).hexdigest() == command.stdout_sha256
@@ -480,7 +606,7 @@ def test_success_revalidates_ordered_command_entries_before_publication(
         return result
 
     monkeypatch.setattr(gate_module, "_run_one_command", corrupting_run_one_command)
-    resolver = _RevisionResolver(*([_REVISION] * 11))
+    resolver = _RevisionResolver(*([_REVISION] * 13))
     runner = _CommandRunner(*_success_results())
 
     evidence, revision_dir = _run_gate(tmp_path, resolver=resolver, runner=runner)
@@ -515,7 +641,7 @@ def test_success_revalidates_both_logs_and_hashes_before_publication(
         stdout: IO[bytes],
         stderr: IO[bytes],
     ) -> subprocess.CompletedProcess[bytes]:
-        if len(delegate.calls) == 1:
+        if len(delegate.calls) == 2:
             earlier_log = revision_dir / f"01-rebuild-acados.{stream}.log"
             if mutation == "remove":
                 earlier_log.unlink()
@@ -533,11 +659,11 @@ def test_success_revalidates_both_logs_and_hashes_before_publication(
         root=_REPOSITORY_ROOT,
         expected_revision=_REVISION,
         artifact_root=artifact_root,
-        resolve_revision=_RevisionResolver(*([_REVISION] * 11)),
+        resolve_revision=_RevisionResolver(*([_REVISION] * 13)),
         run_command=mutating_runner,
     )
 
-    assert len(delegate.calls) == 5
+    assert len(delegate.calls) == 6
     assert evidence.status == "failed"
     assert [command.status for command in evidence.commands] == [
         "failed",
@@ -578,54 +704,156 @@ def test_evidence_json_replacement_is_atomic_when_replace_fails(
     assert not runner.calls
 
 
-def test_nonzero_exit_fails_and_marks_remaining_commands_not_run(tmp_path: Path) -> None:
-    resolver = _RevisionResolver(_REVISION, _REVISION)
-    runner = _CommandRunner((7, b"partial stdout\n", b"failure stderr\n"))
-
-    evidence, revision_dir = _run_gate(tmp_path, resolver=resolver, runner=runner)
-
-    assert evidence.status == "failed"
-    assert [command.status for command in evidence.commands] == ["failed"] + ["not_run"] * 4
-    failed = evidence.commands[0]
-    assert failed.exit_code == 7
-    assert failed.stdout_log is not None
-    assert failed.stderr_log is not None
-    assert (revision_dir / failed.stdout_log).read_bytes() == b"partial stdout\n"
-    assert (revision_dir / failed.stderr_log).read_bytes() == b"failure stderr\n"
-    assert _read_json(revision_dir / "evidence.json")["status"] == "failed"
-
-
 @pytest.mark.parametrize(
-    "raised",
+    "failure_kind,expected_status,expected_exit_code,expected_stdout,expected_stderr",
     [
-        pytest.param(KeyboardInterrupt(), id="keyboard-interrupt"),
-        pytest.param(subprocess.TimeoutExpired(("command",), timeout=1), id="timeout"),
-        pytest.param(RuntimeError("runner broke"), id="exception"),
-        pytest.param(SystemExit(0), id="system-exit"),
+        pytest.param(
+            "nonzero",
+            "failed",
+            7,
+            b"nonzero stdout\n",
+            b"nonzero stderr\n",
+            id="nonzero",
+        ),
+        pytest.param(
+            "timeout",
+            "interrupted",
+            None,
+            b"partial stdout before interruption\n",
+            b"partial stderr before interruption\n",
+            id="timeout",
+        ),
+        pytest.param(
+            "keyboard-interrupt",
+            "interrupted",
+            None,
+            b"partial stdout before interruption\n",
+            b"partial stderr before interruption\n",
+            id="keyboard-interrupt",
+        ),
+        pytest.param(
+            "exception",
+            "interrupted",
+            None,
+            b"partial stdout before interruption\n",
+            b"partial stderr before interruption\n",
+            id="exception",
+        ),
     ],
 )
-def test_interruption_or_exception_fails_with_logs_and_remaining_not_run(
+@pytest.mark.parametrize(
+    "failing_index",
+    range(5),
+    ids=[command.name for command in required_commands()],
+)
+def test_release_stage_failure_after_successful_preflight_fails_closed_at_every_index(
     tmp_path: Path,
-    raised: BaseException,
+    failure_kind: Literal["nonzero", "timeout", "keyboard-interrupt", "exception"],
+    expected_status: Literal["failed", "interrupted"],
+    expected_exit_code: int | None,
+    expected_stdout: bytes,
+    expected_stderr: bytes,
+    failing_index: int,
 ) -> None:
-    resolver = _RevisionResolver(_REVISION, _REVISION)
-    runner = _CommandRunner(raised)
+    commands = required_commands()
+    preflight_stdout = b"preflight stdout\n"
+    preflight_stderr = b"preflight stderr\n"
+    prior_results = tuple(
+        (
+            0,
+            f"{command.name} stdout\n".encode(),
+            f"{command.name} stderr\n".encode(),
+        )
+        for command in commands[:failing_index]
+    )
+    failed_result: tuple[int, bytes, bytes] | BaseException
+    if failure_kind == "nonzero":
+        failed_result = (7, expected_stdout, expected_stderr)
+    elif failure_kind == "timeout":
+        failed_result = subprocess.TimeoutExpired(commands[failing_index].argv, timeout=1)
+    elif failure_kind == "keyboard-interrupt":
+        failed_result = KeyboardInterrupt()
+    else:
+        failed_result = RuntimeError("runner broke")
+    events: list[str] = []
+    resolver = _RevisionResolver(*([_REVISION] * 13), events=events)
+    runner = _CommandRunner(
+        (0, preflight_stdout, preflight_stderr),
+        *prior_results,
+        failed_result,
+        events=events,
+    )
 
     evidence, revision_dir = _run_gate(tmp_path, resolver=resolver, runner=runner)
 
     assert evidence.status == "failed"
-    assert [command.status for command in evidence.commands] == ["interrupted"] + ["not_run"] * 4
-    interrupted = evidence.commands[0]
-    assert interrupted.exit_code is None
-    assert interrupted.stdout_log is not None
-    assert interrupted.stderr_log is not None
-    stdout_bytes = b"partial stdout before interruption\n"
-    stderr_bytes = b"partial stderr before interruption\n"
-    assert (revision_dir / interrupted.stdout_log).read_bytes() == stdout_bytes
-    assert (revision_dir / interrupted.stderr_log).read_bytes() == stderr_bytes
-    assert interrupted.stdout_sha256 == hashlib.sha256(stdout_bytes).hexdigest()
-    assert interrupted.stderr_sha256 == hashlib.sha256(stderr_bytes).hexdigest()
-    assert _read_json(revision_dir / "evidence.json")["status"] == "failed"
+    assert [command.status for command in evidence.preflight] == ["passed"]
+    assert [command.name for command in evidence.commands] == [
+        command.name for command in commands
+    ]
+    assert [command.status for command in evidence.commands] == (
+        ["passed"] * failing_index
+        + [expected_status]
+        + ["not_run"] * (len(commands) - failing_index - 1)
+    )
+    assert runner.calls == [
+        (command.argv, _REPOSITORY_ROOT / command.cwd)
+        for command in preflight_commands() + commands[: failing_index + 1]
+    ]
+    expected_events = ["resolve", "run:contract-preflight", "resolve"]
+    for command in commands[: failing_index + 1]:
+        expected_events.extend(["resolve", f"run:{command.name}", "resolve"])
+    assert events == expected_events
+
+    preflight = evidence.preflight[0]
+    assert preflight.exit_code == 0
+    _assert_logged_evidence(
+        preflight,
+        revision_dir,
+        log_index=0,
+        stdout_bytes=preflight_stdout,
+        stderr_bytes=preflight_stderr,
+    )
+    for release_index, passed in enumerate(evidence.commands[:failing_index]):
+        assert passed.exit_code == 0
+        _assert_logged_evidence(
+            passed,
+            revision_dir,
+            log_index=release_index + 1,
+            stdout_bytes=f"{passed.name} stdout\n".encode(),
+            stderr_bytes=f"{passed.name} stderr\n".encode(),
+        )
+
+    failed = evidence.commands[failing_index]
+    assert failed.exit_code == expected_exit_code
+    _assert_logged_evidence(
+        failed,
+        revision_dir,
+        log_index=failing_index + 1,
+        stdout_bytes=expected_stdout,
+        stderr_bytes=expected_stderr,
+    )
+    for not_run in evidence.commands[failing_index + 1 :]:
+        assert (
+            not_run.exit_code,
+            not_run.stdout_log,
+            not_run.stderr_log,
+            not_run.stdout_sha256,
+            not_run.stderr_sha256,
+        ) == (None, None, None, None, None)
+
+    payload = _read_json(revision_dir / "evidence.json")
+    persisted_preflight = cast(list[dict[str, object]], payload["preflight"])
+    persisted_commands = cast(list[dict[str, object]], payload["commands"])
+    assert payload["schema_version"] == 2
+    assert payload["status"] == "failed"
+    assert [entry["status"] for entry in persisted_preflight] == ["passed"]
+    assert [entry["name"] for entry in persisted_commands] == [
+        command.name for command in commands
+    ]
+    assert [entry["status"] for entry in persisted_commands] == [
+        command.status for command in evidence.commands
+    ]
 
 
 def test_initial_revision_mismatch_preserves_expected_revision_evidence(tmp_path: Path) -> None:
@@ -647,40 +875,41 @@ def test_initial_revision_mismatch_preserves_expected_revision_evidence(tmp_path
 
     assert evidence.revision == _OTHER_REVISION
     assert evidence.status == "failed"
-    assert [command.status for command in evidence.commands] == [
-        "revision_changed",
-        "not_run",
-        "not_run",
-        "not_run",
-        "not_run",
-    ]
+    assert [command.status for command in evidence.preflight] == ["revision_changed"]
+    assert [command.status for command in evidence.commands] == ["not_run"] * 5
     assert expected_evidence_path.read_bytes() == prior_evidence
     assert _read_json(artifact_root / _OTHER_REVISION / "evidence.json")["status"] == "failed"
     assert not runner.calls
 
 
-@pytest.mark.parametrize("failing_check", range(1, 12))
+@pytest.mark.parametrize("failing_check", range(1, 14))
 def test_revision_drift_fails_at_every_exact_check(
     tmp_path: Path,
     failing_check: int,
 ) -> None:
-    revisions = [_REVISION] * 11
+    revisions = [_REVISION] * 13
     revisions[failing_check - 1] = _OTHER_REVISION
     resolver = _RevisionResolver(*revisions)
     runner = _CommandRunner(*_success_results())
 
     evidence, revision_dir = _run_gate(tmp_path, resolver=resolver, runner=runner)
 
-    affected_command = min((failing_check - 1) // 2, 4)
-    expected_statuses = (
-        ["passed"] * affected_command
-        + ["revision_changed"]
-        + ["not_run"] * (4 - affected_command)
-    )
+    if failing_check <= 2:
+        expected_preflight = ["revision_changed"]
+        expected_commands = ["not_run"] * 5
+    else:
+        affected_command = min((failing_check - 3) // 2, 4)
+        expected_preflight = ["passed"]
+        expected_commands = (
+            ["passed"] * affected_command
+            + ["revision_changed"]
+            + ["not_run"] * (4 - affected_command)
+        )
     assert resolver.calls == failing_check
     assert len(runner.calls) == failing_check // 2
     assert evidence.status == "failed"
-    assert [command.status for command in evidence.commands] == expected_statuses
+    assert [command.status for command in evidence.preflight] == expected_preflight
+    assert [command.status for command in evidence.commands] == expected_commands
     artifact_revision_dir = revision_dir.parent / evidence.revision
     assert _read_json(artifact_revision_dir / "evidence.json")["status"] == "failed"
 
@@ -703,7 +932,8 @@ def test_revision_resolution_exception_fails_closed(
 
     assert evidence.status == "failed"
     assert not runner.calls
-    assert [command.status for command in evidence.commands] == ["revision_changed"] + ["not_run"] * 4
+    assert [command.status for command in evidence.preflight] == ["revision_changed"]
+    assert [command.status for command in evidence.commands] == ["not_run"] * 5
 
 
 @pytest.mark.parametrize(
@@ -932,17 +1162,18 @@ def test_only_playwright_receives_the_live_runtime_datastore_environment(
         root=_REPOSITORY_ROOT,
         expected_revision=_REVISION,
         artifact_root=tmp_path / "artifacts",
-        resolve_revision=_RevisionResolver(*([_REVISION] * 11)),
+        resolve_revision=_RevisionResolver(*([_REVISION] * 13)),
         run_command=runner,
     )
+    assert evidence.status == "passed"
 
-    for command_environment in runner.environments[:4]:
+    for command_environment in runner.environments[:5]:
         assert command_environment is not None
         assert "PIFIRE_GATE_LIVE_DB_PATH" not in command_environment
         assert "PIFIRE_GATE_LIVE_LOG_DIR" not in command_environment
         assert "PIFIRE_DB_PATH" not in command_environment
         assert "PIFIRE_LOG_DIR" not in command_environment
-    playwright_environment = runner.environments[4]
+    playwright_environment = runner.environments[5]
     assert playwright_environment is not None
     assert playwright_environment["PIFIRE_DB_PATH"] == live_db
     assert playwright_environment["PIFIRE_LOG_DIR"] == live_logs
@@ -1076,7 +1307,7 @@ def test_verify_bookmark_runs_gate_inside_an_isolated_live_runtime(
         monkeypatch,
         {
             "cumulative-mpc-learning": [_REVISION],
-            "@": [_REVISION] * 12,
+            "@": [_REVISION] * 14,
         },
     )
 
@@ -1099,6 +1330,7 @@ def test_verify_bookmark_runs_gate_inside_an_isolated_live_runtime(
     assert evidence.status == "passed"
     assert events == [
         "runtime:start",
+        "run:contract-preflight",
         "run:rebuild-acados",
         "run:python-default",
         "run:python-slow",
@@ -1116,7 +1348,7 @@ def test_push_runs_a_fresh_gate_and_only_the_authorized_push(
         monkeypatch,
         {
             "cumulative-mpc-learning": [_REVISION, _REVISION],
-            "@": [_REVISION] * 13,
+            "@": [_REVISION] * 15,
             "cumulative-mpc-learning@origin": [_REVISION],
         },
     )
@@ -1130,7 +1362,7 @@ def test_push_runs_a_fresh_gate_and_only_the_authorized_push(
     )
 
     assert evidence.status == "passed"
-    assert len(runner.calls) == 5
+    assert len(runner.calls) == 6
     assert runner.push_calls == [
         (
             ("jj", "git", "push", "-b", "cumulative-mpc-learning"),
@@ -1150,7 +1382,7 @@ def test_push_owns_artifact_lock_until_remote_and_durable_evidence_are_verified(
         monkeypatch,
         {
             "cumulative-mpc-learning": [_REVISION, _REVISION],
-            "@": [_REVISION] * 13,
+            "@": [_REVISION] * 15,
             "cumulative-mpc-learning@origin": [_REVISION],
         },
     )
@@ -1322,7 +1554,8 @@ def test_push_is_not_invoked_when_fresh_gate_fails(
     )
 
     assert evidence.status == "failed"
-    assert evidence.commands[0].status == "failed"
+    assert evidence.preflight[0].status == "failed"
+    assert [command.status for command in evidence.commands] == ["not_run"] * 5
     assert runner.push_calls == []
 
 
@@ -1333,7 +1566,7 @@ def test_push_is_not_invoked_when_revision_drifts_after_the_gate(
     drifting_identity: str,
 ) -> None:
     bookmark_revisions = [_REVISION, _REVISION]
-    current_revisions = [_REVISION] * 13
+    current_revisions = [_REVISION] * 15
     if drifting_identity == "bookmark":
         bookmark_revisions[-1] = _OTHER_REVISION
     else:
@@ -1355,7 +1588,7 @@ def test_push_is_not_invoked_when_revision_drifts_after_the_gate(
             run_command=runner,
         )
 
-    assert len(runner.calls) == 5
+    assert len(runner.calls) == 6
     assert runner.push_calls == []
 
 
@@ -1367,7 +1600,7 @@ def test_post_push_remote_mismatch_fails_after_exactly_one_push(
         monkeypatch,
         {
             "cumulative-mpc-learning": [_REVISION, _REVISION],
-            "@": [_REVISION] * 13,
+            "@": [_REVISION] * 15,
             "cumulative-mpc-learning@origin": [_OTHER_REVISION],
         },
     )
