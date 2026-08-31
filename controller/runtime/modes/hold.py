@@ -624,6 +624,7 @@ class HoldMode(ControlMode):
         trace = self._control_trace
         runner = self._runner
         runtime = self._framed_pulse
+        learning = self._hold_learning
         scheduler = None if runtime is None else runtime.scheduler
         controller = self._trace_type()
         cook_id = self.control.get("cook_id")
@@ -647,6 +648,7 @@ class HoldMode(ControlMode):
         ambient_celsius = float(config.get("T_amb", 0.0))
         ambient = ambient_celsius * 9.0 / 5.0 + 32.0 if temperature_unit == "F" else ambient_celsius
         fallback_safe = not runner.runs_async()
+        submitted_model = None if learning is None else learning.submitted_restore_authority
         fallback_model: TraceModelAuthority | None = None
         if trace.model_authority is None and fallback_safe:
             snapshot = runner.get_model_snapshot()
@@ -663,6 +665,7 @@ class HoldMode(ControlMode):
             temperature_unit=temperature_unit,
             control_period_seconds=float(runner.control_period() or scheduler.timing.frame_s),
             fallback_model=fallback_model,
+            submitted_model=submitted_model,
             runner_snapshot_fallback_safe=fallback_safe,
             pulse_slot_seconds=float(scheduler.timing.pulse_s),
             pulse_frame_seconds=float(scheduler.timing.frame_s),

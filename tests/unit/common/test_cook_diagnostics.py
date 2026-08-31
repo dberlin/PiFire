@@ -265,6 +265,7 @@ def _trajectory_frame(sequence: int, *, effective_mode: str) -> LearningTrajecto
         continuous=True,
         partial=False,
         boundary_reason=None,
+        role_generation=4,
     )
 
 

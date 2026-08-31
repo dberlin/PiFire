@@ -54,6 +54,7 @@ from controller.runtime.modes.hold import HoldMode
 from controller.runtime.modes.hold_learning import parse_model_lifecycle_payload
 from controller.runtime.runner import (
     ControllerUpdateResult,
+    ModelRestoreOutcome,
     ObservationOutcomeEnvelope,
     SyncControllerRunner,
     ThreadedControllerRunner,
@@ -1242,7 +1243,12 @@ def test_async_reconfigure_does_not_leak_the_old_published_model_into_new_sessio
         def restore_model(self, snapshot, *, restore_token=None):
             self.restore_token = restore_token
             self.restored.append(snapshot)
-            return restore_accepted
+            return ModelRestoreOutcome(
+                restore_token=restore_token,
+                accepted=restore_accepted,
+                effective_authority=None,
+                pending=restore_accepted,
+            )
 
     class _ModelStore:
         def load(self, controller):

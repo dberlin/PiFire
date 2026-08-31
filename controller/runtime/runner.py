@@ -691,9 +691,10 @@ def _capture_completed_result(core, temp, revision, *, monotonic_clock, wall_clo
     captured = core.capture_status()
     learning = captured.learning
     status = captured.status
-    cycle_ratio, fan = normalize_controller_output(raw)
+    public_cycle_ratio, fan = normalize_controller_output(raw)
     diagnostics = core.trace_diagnostics()
     allocation = core.trace_allocation()
+    cycle_ratio = allocation.auger_duty if allocation is not None else public_cycle_ratio
     baseline_allocation = core.trace_baseline_allocation()
     calibration = core.trace_calibration()
     result = ControllerUpdateResult(

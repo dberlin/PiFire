@@ -537,6 +537,7 @@ def _trajectory_frame(
         continuous=True,
         partial=False,
         boundary_reason=None,
+        role_generation=3,
     )
 
 

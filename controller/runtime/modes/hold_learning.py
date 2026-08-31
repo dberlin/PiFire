@@ -47,6 +47,7 @@ from controller.model_learning.contracts import CandidateOrigin, FrameObservatio
 from controller.mpc_allocator import AllocationResult
 from controller.runtime.control_trace_session import (
     ControlTraceSession,
+    TraceModelAuthority,
     TraceModelContext,
     TraceSessionIdentity,
 )
@@ -337,6 +338,16 @@ class HoldLearningRuntime:
     @property
     def seed_warmup_remaining(self) -> int:
         return self._seed_warmup_remaining
+    @property
+    def submitted_restore_authority(self) -> TraceModelAuthority | None:
+        submitted = self._submitted_restore
+        if submitted is None:
+            return None
+        return TraceModelAuthority(
+            cast(Mapping[str, JsonValue], submitted[1]),
+            "restore_submitted",
+        )
+
 
     def set_seed_warmup_remaining(self, frame_count: int) -> None:
         if isinstance(frame_count, bool) or not isinstance(frame_count, int) or frame_count < 0:

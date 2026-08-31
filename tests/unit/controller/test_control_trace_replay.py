@@ -239,6 +239,24 @@ def _allocation(revision=1):
     )
 
 
+def _pid_sp_allocation(revision=1):
+    result = allocate(0.5, u_max=1.0, fan_min_pct=0.0, fan_max_pct=0.0, enable_fan=False)
+    return AllocationPayload(
+        result_revision=revision,
+        normalized_combustion_load=result.normalized_combustion_load,
+        requested_auger_duty=result.auger_duty,
+        requested_fan_duty=result.fan_duty,
+        u_max=result.u_max,
+        fan_min_pct=result.fan_min_pct,
+        fan_max_pct=result.fan_max_pct,
+        fan_enabled=result.fan_enabled,
+        mpc_has_fan_authority=False,
+        auger_clamp_reason=result.auger_clamp_reason,
+        fan_clamp_reason=result.fan_clamp_reason,
+        allocator_revision=ALLOCATOR_REVISION,
+    )
+
+
 def _applied(revision=1):
     return AppliedOutputPayload(
         result_revision=revision,
@@ -254,11 +272,16 @@ def _applied(revision=1):
 
 def _pid_records(controller=ControllerType.PID):
     update = _pid_sp_update() if controller is ControllerType.PID_SP else _pid_update()
-    return [
+    records = [
         _record(0, controller, TraceEventKind.SESSION, _pid_session(controller)),
         _record(2_000, controller, TraceEventKind.CONTROL_UPDATE, update),
-        _record(4_000, controller, TraceEventKind.APPLIED_OUTPUT, replace(_applied(), realized_combustion_load=None)),
     ]
+    if controller is ControllerType.PID_SP:
+        records.append(_record(2_000, controller, TraceEventKind.ALLOCATION, _pid_sp_allocation()))
+    records.append(
+        _record(4_000, controller, TraceEventKind.APPLIED_OUTPUT, replace(_applied(), realized_combustion_load=None))
+    )
+    return records
 
 
 def _mpc_framed_records():
@@ -307,9 +330,22 @@ def _mpc_framed_records():
 def _pid_framed_records(controller=ControllerType.PID):
     pid_records = _pid_records(controller)
     mpc_records = _mpc_framed_records()
-    frame = _record(22_000, controller, TraceEventKind.ACTUATION_FRAME, mpc_records[3].payload)
-    applied = _record(22_000, controller, TraceEventKind.APPLIED_OUTPUT, mpc_records[4].payload)
-    return [*pid_records[:2], frame, applied]
+    frame_payload = mpc_records[3].payload
+    if controller is ControllerType.PID_SP:
+        allocation = _pid_sp_allocation()
+        frame_payload = replace(
+            frame_payload,
+            requested_combustion_load=allocation.normalized_combustion_load,
+            requested_auger_duty=allocation.requested_auger_duty,
+            requested_fan_duty=None,
+            applied_fan_duty=None,
+        )
+    frame = _record(22_000, controller, TraceEventKind.ACTUATION_FRAME, frame_payload)
+    applied_payload = mpc_records[4].payload
+    if controller is ControllerType.PID_SP:
+        applied_payload = replace(applied_payload, actual_fan_duty=None)
+    applied = _record(22_000, controller, TraceEventKind.APPLIED_OUTPUT, applied_payload)
+    return [*pid_records[:-1], frame, applied]
 
 
 @pytest.mark.parametrize("records", [_pid_records(), _pid_records(ControllerType.PID_SP), _mpc_framed_records()])

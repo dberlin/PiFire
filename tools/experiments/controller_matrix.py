@@ -168,6 +168,16 @@ def _report(core, ratio, source_name, t, requested=None):
     setter(AppliedOutput(ratio=ratio, source=OutputSource(source_name), timestamp=float(t), requested=requested))
 
 
+def _role_generation(core) -> int:
+    active_pair = getattr(core, "active_control_pair", None)
+    descriptor = getattr(active_pair, "descriptor", None)
+    generation = getattr(descriptor, "role_generation", None)
+    if isinstance(generation, int) and not isinstance(generation, bool) and generation >= 0:
+        return generation
+    generation = getattr(core, "_learning_role_generation", 0)
+    return generation if isinstance(generation, int) and not isinstance(generation, bool) and generation >= 0 else 0
+
+
 def _observe_frame(core, frame, *, sequence, temp_c, setpoint_c, fan_frac, lid_open, manual_override, revision):
     """Hand a completed pulse frame to the controller's corpus repository.
 
@@ -206,7 +216,7 @@ def _observe_frame(core, frame, *, sequence, temp_c, setpoint_c, fan_frac, lid_o
             skipped=frame.skipped,
             reset=frame.reset_reason is not None,
             continuous=True,
-            role_generation=core.active_control_pair.descriptor.role_generation,
+            role_generation=_role_generation(core),
             observation_sequence=sequence,
             scheduled_on_s=float(frame.scheduled_on_s),
             realized_auger_duty=realized_auger_duty,

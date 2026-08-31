@@ -15,8 +15,8 @@ from typing import Any
 import numpy as np
 import pytest
 
-import controller.acados.grey_box as grey_box_module
 import controller.acados._library as library_module
+import controller.acados.grey_box as grey_box_module
 from controller.acados import (
     AcadosGreyBoxMPC,
     GreyBoxMPCConfig,
@@ -30,12 +30,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 @pytest.fixture
 def built_native_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
-    built_library = PROJECT_ROOT / "build" / "acados-configure" / "native-output" / library_module._library_filename()
+    built_library = PROJECT_ROOT / "controller" / "_native" / "current" / library_module._library_filename()
     if not built_library.is_file():
         pytest.fail(
-            f"Built native library is missing at {built_library}. "
-            "Run `cmake --build build/acados-configure -j2 "
-            "--target acados_pifire` before this focused gate.",
+            f"Published native library is missing at {built_library}. "
+            "Run `./rebuild-acados.sh --if-needed` before this focused gate.",
             pytrace=False,
         )
 

@@ -227,8 +227,8 @@ MUTATIONS = [
     (
         "M33 the snapshot schema never moves with the model",
         MODEL,
+        "MODEL_SCHEMA = 7",
         "MODEL_SCHEMA = 6",
-        "MODEL_SCHEMA = 5",
     ),
     (
         "M34 restore_model takes a snapshot of any version",
@@ -242,7 +242,7 @@ MUTATIONS = [
         (
             "            self._logger.warning(\n"
             '                f"[mpc] discarding a version {version!r} model snapshot: runtime restore "\n'
-            '                f"accepts only grey schema {self.MODEL_SCHEMA}; versions 4 and 5 are migration input only."\n'
+            '                f"accepts only grey schema {self.MODEL_SCHEMA}; versions 3 through 6 are migration input only."\n'
             "            )\n"
             "            return False"
         ),

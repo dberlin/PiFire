@@ -1263,7 +1263,7 @@ def test_non_finite_numeric_payload_values_are_rejected(invalid):
                     allocator_revision=0,
                 ),
             ),
-            "MPC-only",
+            "MPC or PID-SP",
         ),
         (
             lambda: ControlTraceRecord(

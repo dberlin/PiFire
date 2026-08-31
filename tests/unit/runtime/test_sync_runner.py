@@ -13,6 +13,7 @@ from common.model_evidence import SessionSummaryEvidence
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.base import ControllerLearningDiagnostics
 from controller.model_learning.contracts import CandidateOrigin, FrameObservation
+from controller.mpc_allocator import AllocationResult
 from controller.pid_sp import Controller as PidSpController
 from controller.runtime.runner import (
     ControllerUpdateResult,
@@ -111,6 +112,31 @@ def test_sync_runner_float_output_has_no_fan():
 
     out = SyncControllerRunner(FloatCore()).latest_from(190.0)
     assert out.cycle_ratio == 0.25 and out.fan is None
+
+def test_sync_runner_uses_bounded_allocation_instead_of_raw_controller_demand():
+    allocation = AllocationResult(
+        normalized_combustion_load=0.0,
+        auger_duty=0.0,
+        fan_duty=None,
+        u_max=1.0,
+        fan_min_pct=0.0,
+        fan_max_pct=0.0,
+        fan_enabled=False,
+        auger_clamp_reason=AllocationClampReason.AUGER_MIN,
+        fan_clamp_reason=AllocationClampReason.NONE,
+    )
+
+    class AllocatedCore(_Core):
+        def update(self, temp):
+            return -0.25
+
+        def trace_allocation(self):
+            return allocation
+
+    out = SyncControllerRunner(AllocatedCore()).latest_from(190.0)
+
+    assert out.cycle_ratio == 0.0
+    assert out.allocation is allocation
 
 
 def test_sync_runner_forwards_safety_cancellation_without_an_operator_command():

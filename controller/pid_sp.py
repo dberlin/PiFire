@@ -1791,7 +1791,7 @@ class Controller(PIDControllerBase):
             target_change_time=self.last_set_time,
             branch=branch,
         )
-        return self.u
+        return raw_output
 
     def trace_diagnostics(self) -> PidSpTraceDiagnostics | None:
         return self._trace_diagnostics

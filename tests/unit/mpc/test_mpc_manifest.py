@@ -56,7 +56,7 @@ def test_pid_sp_no_longer_offers_tau_or_theta():
     options = {o["option_name"] for o in _meta()["pid_sp"]["config"]}
     assert "tau" not in options
     assert "theta" not in options
-    assert options == {"PB", "Td", "Ti", "stable_window", "center_factor"}
+    assert options == {"PB", "Td", "Ti", "stable_window", "center_factor", "enable_identification"}
 
 
 def test_numpy_is_an_explicit_project_dependency():

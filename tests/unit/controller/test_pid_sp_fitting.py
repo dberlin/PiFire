@@ -18,14 +18,14 @@ from controller.model_learning.contracts import CandidateOrigin, FitRequest
 from controller.model_learning.pid_sp_fitting import PidSpFitStatus, fit_pid_sp_corpus
 from controller.pid_sp_delay_evidence import DelayBasin, DelayBlocker, DelayProfile
 from controller.pid_sp_model_selection import ModelForm
-from tests.unit.common.test_learning_trajectory_contracts import (
+from tests.unit.common._learning_trajectory_contract_fixtures import (
     _corpus_identity,
     _digest,
     _frame,
     _segment,
     _slice,
 )
-from tests.unit.controller.test_pid_sp_model_selection import _comparison, _fit
+from tests.unit.controller._pid_sp_model_selection_helpers import _comparison, _fit
 
 
 def _exact_frame(sequence: int, duty: float, *, role_generation: int = 4) -> LearningTrajectoryFrame:

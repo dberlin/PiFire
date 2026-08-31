@@ -1692,7 +1692,8 @@ def test_pid_sp_owns_bounded_direct_auger_allocation_after_every_update(
 
     output = sp.update(225.0)
 
-    assert output == expected_output
+    assert output == raw_output
+    assert sp.u == expected_output
     diagnostics = sp.trace_diagnostics()
     assert diagnostics.raw_output == raw_output
     assert diagnostics.final_output == expected_output

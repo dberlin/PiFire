@@ -18,6 +18,7 @@ from controller.runtime.runner import SyncControllerRunner
 from controller.runtime.state import WorkCycleState
 from tests.characterization.fixtures import base_control, base_pellet_db, base_settings
 from tests.characterization.harness import make_ctx
+from tests.fakes.learning_trajectory import ExactEstimatorSeedSource
 from tests.fakes.probes import FakeProbes
 
 
@@ -29,12 +30,14 @@ def main() -> int:
     mpc_config["enable_identification"] = True
     control = base_control(mode="Hold")
     control["primary_setpoint"] = 225
+    control["cook_id"] = "smoke-acados-hold"
     context, grill, _notifier = make_ctx(
         settings,
         control,
         base_pellet_db(),
         FakeProbes().script([180.0] * 100),
     )
+    context.learning_trajectory = ExactEstimatorSeedSource()
 
     persisted: dict[str, object] = {}
     source = Controller(mpc_config, "F", settings["cycle_data"])

@@ -82,6 +82,7 @@ def test_manual_takeover_resets_the_active_frame_before_manual_feedback(hold_cyc
 
     assert events == [
         ("frame-reset", PulseResetReason.MANUAL),
+        ("runner-observation", True),
         ("manual-feedback", FrameFeedbackDisposition.PROGRESS),
     ]
 

@@ -148,6 +148,7 @@ def _frame(
         partial=False,
         boundary_reason=None,
         calibration_origin=calibration_origin,
+        role_generation=4,
     )
 
 

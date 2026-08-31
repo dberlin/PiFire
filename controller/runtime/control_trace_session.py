@@ -85,6 +85,7 @@ class TraceSessionContext:
     build_version: str
     cook_id: str
     runner_generation: int
+    submitted_model: TraceModelAuthority | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,6 +269,11 @@ class ControlTraceSession:
             return None
 
         authority = self._model_authority
+        if authority is None and context.submitted_model is not None:
+            authority = self._validated_authority(
+                context.submitted_model.snapshot,
+                context.submitted_model.provenance,
+            )
         if (
             authority is None
             and self._runner_snapshot_fallback_safe
