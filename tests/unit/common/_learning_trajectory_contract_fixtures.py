@@ -1,20 +1,23 @@
 """Shared strict learning-trajectory contract fixtures."""
 
 from __future__ import annotations
+from dataclasses import replace
 
 from hashlib import sha256
 from typing import Any
 
+from common.control_trace import TRACE_SCHEMA_VERSION
 from common.learning_trajectory import (
+    TRAJECTORY_OBSERVATION_SCHEMA_VERSION,
     FitCorpusIdentity,
     FitCorpusSlice,
-    FrameDeliveryCertainty,
     HoldEntrySample,
     LearningTrajectoryFrame,
     LearningTrajectorySegment,
     TrajectoryBreakReason,
     canonical_fit_corpus_digest,
 )
+from tests.fakes.current_contracts import current_trajectory_frame
 
 _UNSET_BOUNDARY = object()
 
@@ -26,58 +29,23 @@ def _digest(label: str) -> str:
 def _frame(
     sequence: int,
     *,
+    role_generation: int = 4,
     start_ms: int | None = None,
     end_ms: int | None = None,
     partial: bool = False,
     boundary_reason: object = _UNSET_BOUNDARY,
     **overrides: Any,
 ) -> LearningTrajectoryFrame:
-    start_ms = sequence * 20_000 if start_ms is None else start_ms
-    end_ms = start_ms + 20_000 if end_ms is None else end_ms
-    duration_seconds = (end_ms - start_ms) / 1_000
-    values: dict[str, Any] = {
-        "sequence": sequence,
-        "monotonic_start_ms": start_ms,
-        "monotonic_end_ms": end_ms,
-        "wall_start_ms": 1_000_000 + start_ms,
-        "wall_end_ms": 1_000_000 + end_ms,
-        "chamber_temperature_c": 110.0 + sequence,
-        "temperature_sample_monotonic_ms": end_ms,
-        "temperature_sample_wall_ms": 1_000_000 + end_ms,
-        "temperature_sample_age_ms": 0,
-        "temperature_sample_wall_age_ms": 0,
-        "temperature_sample_clock_skew_ms": 0,
-        "source_temperature_units": "C",
-        "settings_revision": 7,
-        "probe_valid": True,
-        "probe_source": "grill-probe-1",
-        "ambient_temperature_c": 24.0,
-        "ambient_source": "configured",
-        "ambient_uncertainty_c": 1.5,
-        "delivered_auger_on_seconds": duration_seconds * 0.4,
-        "realized_auger_duty": 0.4,
-        "normalized_combustion_load": 0.4,
-        "delivered_fan_on_seconds": duration_seconds,
-        "fan_duty_integral_seconds": duration_seconds * 0.5,
-        "mean_actual_fan_duty": 0.5,
-        "auger_delivery_certainty": FrameDeliveryCertainty.EXACT,
-        "fan_delivery_certainty": FrameDeliveryCertainty.EXACT,
-        "effective_mode": "Hold",
-        "recipe_step_id": None,
-        "complete": not partial,
-        "continuous": True,
-        "partial": partial,
-        "boundary_reason": (
-            TrajectoryBreakReason.LEFT_HOLD
-            if partial and boundary_reason is _UNSET_BOUNDARY
-            else None
-            if boundary_reason is _UNSET_BOUNDARY
-            else boundary_reason
-        ),
-        "role_generation": 4,
-    }
-    values.update(overrides)
-    return LearningTrajectoryFrame(**values)
+    frame = current_trajectory_frame(
+        sequence,
+        role_generation=role_generation,
+        start_ms=start_ms,
+        end_ms=end_ms,
+        partial=partial,
+    )
+    if boundary_reason is not _UNSET_BOUNDARY:
+        overrides["boundary_reason"] = boundary_reason
+    return replace(frame, **overrides)
 
 
 def _hold_entry(at_ms: int = 40_000) -> HoldEntrySample:
@@ -104,7 +72,7 @@ def _segment(**overrides: Any) -> LearningTrajectorySegment:
     )
     values: dict[str, Any] = {
         "schema_version": 1,
-        "observation_schema_version": 3,
+        "observation_schema_version": TRAJECTORY_OBSERVATION_SCHEMA_VERSION,
         "segment_id": "segment-1",
         "cook_id": "cook-1",
         "trajectory_session_id": "trajectory-session-1",
@@ -146,7 +114,7 @@ def _segment(**overrides: Any) -> LearningTrajectorySegment:
         "terminal_break_reason": TrajectoryBreakReason.STOP,
         "state": "finalized",
         "source_trace_digest": _digest("source-trace"),
-        "source_schema_version": 7,
+        "source_schema_version": TRACE_SCHEMA_VERSION,
         "source_row_digest": _digest("source-rows"),
         "build_provenance": {"builder": "trajectory-runtime", "revision": 1},
     }

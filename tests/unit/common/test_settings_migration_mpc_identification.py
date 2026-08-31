@@ -2,9 +2,9 @@
 
 from copy import deepcopy
 
-from common.defaults import default_settings
 from common.settings_migration import _apply_shape_migrations, _clear_mpc_identification_choice
 from common.settings_schema import SETTINGS_SCHEMA_VERSION
+from tests.fakes.current_contracts import current_settings_payload
 
 #: A completed fit -- update_mpc's free set, all moved together. The surviving
 #: neighbour has to be one, because v10 returns anything less to the defaults,
@@ -30,7 +30,7 @@ def _v5_settings(stored):
 
 
 def test_learning_switches_ship_on():
-    defaults = default_settings()["controller"]["config"]
+    defaults = current_settings_payload()["controller"]["config"]
 
     assert defaults["mpc"]["enable_identification"] is True
     assert defaults["pid_sp"]["enable_identification"] is True

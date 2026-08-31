@@ -52,6 +52,7 @@ from controller.runtime.model_persistence import (
     PersistenceReceipt,
     TrajectoryAppendBatch,
 )
+from tests.fakes.current_contracts import current_model_snapshot
 from tests.unit.runtime._persistence_helpers import _current_pair_descriptor
 
 _DIGEST = "a" * 64
@@ -1092,12 +1093,14 @@ def test_activation_and_checkpoint_receipts_survive_trajectory_priority() -> Non
 
 
 def test_checkpoint_submission_coalesces_latest_owned_snapshot_without_blocking():
+    first = current_model_snapshot(parameters={"gain": 1}, revision=1)
+    second = current_model_snapshot(parameters={"gain": 2}, revision=2)
     store = _Store()
     worker = ModelPersistenceWorker(store, _Logger())
     try:
-        assert worker.submit_checkpoint("mpc", {"revision": 1, "parameters": {"gain": 1}})
+        assert worker.submit_checkpoint("mpc", first)
         assert store.first_save_started.wait(timeout=1.0)
-        assert worker.submit_checkpoint("mpc", {"revision": 2, "parameters": {"gain": 2}})
+        assert worker.submit_checkpoint("mpc", second)
         store.release_first_save.set()
         assert worker.close(timeout=1.0)
     finally:
@@ -1154,14 +1157,15 @@ def test_resubmitting_a_revision_already_being_saved_does_not_persist_it_twice()
     enqueued a revision that was already on its way to the store -- persisting
     the same revision twice.
     """
+    snapshot = current_model_snapshot(parameters={"gain": 1}, revision=7)
     store = _Store()
     worker = ModelPersistenceWorker(store, _Logger())
     try:
-        assert worker.submit_checkpoint("mpc", {"revision": 7, "parameters": {"gain": 1}})
+        assert worker.submit_checkpoint("mpc", snapshot)
         assert store.first_save_started.wait(timeout=1.0)
         # The worker has dequeued revision 7 and is blocked inside save_outcome,
         # so _pending_checkpoints no longer holds it.
-        assert worker.submit_checkpoint("mpc", {"revision": 7, "parameters": {"gain": 1}})
+        assert worker.submit_checkpoint("mpc", snapshot)
         store.release_first_save.set()
         assert worker.close(timeout=1.0)
     finally:
@@ -1181,10 +1185,11 @@ def test_resubmitting_a_revision_already_saved_is_not_saved_again():
     the worker should not spend a write to discover it, and a store that simply
     records what it is asked to save sees the duplicate.
     """
+    snapshot = current_model_snapshot(parameters={"gain": 1}, revision=7)
     store = _Store()
     worker = ModelPersistenceWorker(store, _Logger())
     try:
-        assert worker.submit_checkpoint("mpc", {"revision": 7, "parameters": {"gain": 1}})
+        assert worker.submit_checkpoint("mpc", snapshot)
         assert store.first_save_started.wait(timeout=1.0)
         store.release_first_save.set()
         # Wait for the worker to finish the save and drop its in-flight record,
@@ -1192,7 +1197,7 @@ def test_resubmitting_a_revision_already_saved_is_not_saved_again():
         with worker._condition:
             assert worker._condition.wait_for(lambda: not worker._inflight_checkpoints, timeout=1.0)
 
-        assert worker.submit_checkpoint("mpc", {"revision": 7, "parameters": {"gain": 1}})
+        assert worker.submit_checkpoint("mpc", snapshot)
         assert worker.close(timeout=1.0)
     finally:
         store.release_first_save.set()
