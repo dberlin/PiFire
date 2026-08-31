@@ -90,6 +90,55 @@ def _install(monkeypatch, core):
     core.instances.clear()
 
 
+def test_role_generation_uses_each_controllers_own_generation():
+    mpc = types.SimpleNamespace(
+        active_control_pair=types.SimpleNamespace(
+            descriptor=types.SimpleNamespace(role_generation=6),
+        ),
+    )
+    pid_sp = types.SimpleNamespace(_learning_role_generation=9)
+
+    assert matrix._role_generation(mpc) == 6
+    assert matrix._role_generation(pid_sp) == 9
+
+
+@pytest.mark.parametrize(
+    "core",
+    [
+        types.SimpleNamespace(
+            active_control_pair=types.SimpleNamespace(
+                descriptor=types.SimpleNamespace(role_generation=True),
+            ),
+        ),
+        types.SimpleNamespace(
+            active_control_pair=types.SimpleNamespace(
+                descriptor=types.SimpleNamespace(role_generation=False),
+            ),
+        ),
+        types.SimpleNamespace(
+            active_control_pair=types.SimpleNamespace(
+                descriptor=types.SimpleNamespace(role_generation=-1),
+            ),
+        ),
+        types.SimpleNamespace(_learning_role_generation=True),
+        types.SimpleNamespace(_learning_role_generation=False),
+        types.SimpleNamespace(_learning_role_generation=-1),
+        types.SimpleNamespace(),
+    ],
+    ids=[
+        "mpc-true",
+        "mpc-false",
+        "mpc-negative",
+        "pid-sp-true",
+        "pid-sp-false",
+        "pid-sp-negative",
+        "absent",
+    ],
+)
+def test_role_generation_rejects_boolean_negative_and_absent_values(core):
+    assert matrix._role_generation(core) == 0
+
+
 def test_every_run_uses_framed_pulses_without_a_controller_mode_capability(monkeypatch):
     _install(monkeypatch, _ProbeCore)
     shipped = _settings(config={"ratio": 0.2}, cycle={"PMode": 4, "u_min": 0.05})
