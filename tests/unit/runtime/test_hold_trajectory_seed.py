@@ -9,7 +9,7 @@ from typing import Any, Literal, cast
 import numpy as np
 import pytest
 
-from common.control_trace import ControllerType
+from common.control_trace import ControllerType, RecorderGapPayload, TraceEventKind
 from common.learning_trajectory import FrameDeliveryCertainty, TrajectoryBreakReason
 from common.persistence.learning_trajectory import SegmentCursor
 from controller.acados import GreyBoxMPCConfig
@@ -723,6 +723,59 @@ def _assert_order(events: list[str], expected: tuple[str, ...]) -> None:
     assert all(item in events for item in expected), events
     positions = tuple(events.index(item) for item in expected)
     assert positions == tuple(sorted(positions)), events
+
+
+def test_hold_rejects_evidence_without_durable_cook_identity(
+    hold_cycle,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trajectory = LearningTrajectoryRuntime(
+        _Journal(),
+        _Persistence(),
+        segment_id_factory=_SegmentIds(),
+        trajectory_session_id_factory=lambda: "missing-cook-trajectory",
+    )
+    runner = FakeControllerRunner(
+        period=1.0,
+        controller_type=ControllerType.PID_SP,
+    ).script([_ordered_runner_result()])
+    hold = hold_cycle(
+        runner,
+        controller="pid_sp",
+        bind_learning_inputs=False,
+    )
+    hold.ctx.learning_trajectory = trajectory
+
+    assert hold.control["cook_id"] is None
+    try:
+        hold.setup()
+        trace = hold._control_trace
+        learning = hold._hold_learning
+        assert trace is not None
+        assert learning is not None
+        recorded_gaps: list[RecorderGapPayload] = []
+        record = trace.record
+
+        def capture_record(kind, payload, timestamp_ms):
+            if kind is TraceEventKind.RECORDER_GAP:
+                assert isinstance(payload, RecorderGapPayload)
+                recorded_gaps.append(payload)
+            return record(kind, payload, timestamp_ms)
+
+        monkeypatch.setattr(trace, "record", capture_record)
+        hold.on_tick(2.0, 110.0, hold.grill.get_output_status())
+        hold.on_tick(22.0, 110.0, hold.grill.get_output_status())
+
+        status = trajectory.status()
+        assert runner.observations == []
+        assert len(recorded_gaps) == 1
+        assert recorded_gaps[0].reason == "model-persistence-unavailable"
+        assert recorded_gaps[0].frame_end_ms > recorded_gaps[0].frame_start_ms
+        assert learning.evidence_available is False
+        assert status.gap is True
+        assert status.last_error == "control-trace-session-unavailable"
+    finally:
+        hold.teardown(110.0)
 
 
 def test_hold_rejects_an_incomplete_mpc_seed_source(hold_cycle) -> None:

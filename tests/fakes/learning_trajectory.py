@@ -1,11 +1,30 @@
-from collections.abc import Callable
+from __future__ import annotations
+
+from collections.abc import Callable, MutableMapping
 from hashlib import sha256
 from math import ceil
+from typing import Any, cast
 
 from common.learning_trajectory import LearningTrajectorySegment
 from controller.model_learning.contracts import FrameObservation
 from controller.mpc_model import EstimatorSeed
-from controller.runtime.learning_trajectory import TrajectoryBoundary
+from controller.runtime.context import ControllerContext
+from controller.runtime.learning_trajectory import LearningTrajectoryRuntime, TrajectoryBoundary
+
+
+def bind_exact_learning_inputs(
+    context: ControllerContext,
+    control: MutableMapping[str, Any],
+    *,
+    cook_id: str,
+) -> ExactEstimatorSeedSource:
+    normalized_cook_id = cook_id.strip()
+    if not normalized_cook_id:
+        raise ValueError("cook_id must be a non-blank durable identity")
+    source = ExactEstimatorSeedSource()
+    control["cook_id"] = normalized_cook_id
+    context.learning_trajectory = cast(LearningTrajectoryRuntime, cast(object, source))
+    return source
 
 
 class ExactEstimatorSeedSource:

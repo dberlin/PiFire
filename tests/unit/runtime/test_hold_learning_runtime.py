@@ -40,6 +40,7 @@ from controller.model_learning.calibration import (
 )
 from controller.model_learning.contracts import CandidateOrigin, FrameObservation
 from controller.mpc_allocator import allocate
+from controller.mpc_model import EstimatorSeed
 from controller.runtime.control_trace_session import (
     ControlTraceSession,
     TraceSessionContext,
@@ -62,7 +63,64 @@ from controller.runtime.runner import (
 )
 from controller.runtime.state import ControllerState
 from grillplat.actuator_capabilities import AugerTiming
+from tests.characterization.fixtures import base_control, base_pellet_db, base_settings
+from tests.characterization.harness import make_ctx
+from tests.fakes import learning_trajectory
+from tests.fakes.learning_trajectory import ExactEstimatorSeedSource
+from tests.fakes.probes import FakeProbes
 from tests.unit.runtime._persistence_helpers import _pair_phase_state
+
+
+def _learning_input_context():
+    control = base_control(mode="Hold")
+    context, _grill, _notifier = make_ctx(
+        base_settings(),
+        control,
+        base_pellet_db(),
+        FakeProbes().script([225.0]),
+    )
+    return context, control
+
+
+@pytest.mark.parametrize("cook_id", ("", " ", "\t\n"), ids=("empty", "space", "whitespace"))
+def test_bind_exact_learning_inputs_rejects_blank_cook_identity(cook_id: str) -> None:
+    context, control = _learning_input_context()
+
+    with pytest.raises(ValueError, match="cook_id"):
+        learning_trajectory.bind_exact_learning_inputs(context, control, cook_id=cook_id)
+
+
+def test_bind_exact_learning_inputs_normalizes_padded_cook_identity() -> None:
+    context, control = _learning_input_context()
+
+    learning_trajectory.bind_exact_learning_inputs(
+        context,
+        control,
+        cook_id="  hold-learning-cook\t",
+    )
+
+    assert control["cook_id"] == "hold-learning-cook"
+
+
+def test_bind_exact_learning_inputs_installs_complete_production_shaped_inputs() -> None:
+    context, control = _learning_input_context()
+
+    source = learning_trajectory.bind_exact_learning_inputs(
+        context,
+        control,
+        cook_id="hold-learning-cook",
+    )
+
+    assert control["cook_id"] == "hold-learning-cook"
+    assert isinstance(source, ExactEstimatorSeedSource)
+    assert context.learning_trajectory is source
+    seed = source.seed_for(
+        theta=60.0,
+        n_delay=3,
+        at_ms=1_000,
+        measured_temp_c=107.5,
+    )
+    assert isinstance(seed, EstimatorSeed)
 
 
 class _Recorder:

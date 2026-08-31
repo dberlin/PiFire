@@ -6,7 +6,7 @@ from controller.runtime.runner import ControllerRunner, ControllerUpdateResult
 from controller.runtime.state import WorkCycleState
 from tests.characterization.fixtures import base_control, base_pellet_db, base_settings
 from tests.characterization.harness import make_ctx
-from tests.fakes.learning_trajectory import ExactEstimatorSeedSource
+from tests.fakes.learning_trajectory import bind_exact_learning_inputs
 from tests.fakes.probes import FakeProbes
 
 
@@ -29,17 +29,24 @@ def hold_cycle(monkeypatch):
     would otherwise seed before the loop starts.
     """
 
-    def build(runner, *, cycle_data_extra=None, model_store=None, controller="pid_sp", dc_fan=False):
+    def build(
+        runner,
+        *,
+        cycle_data_extra=None,
+        model_store=None,
+        controller="pid_sp",
+        dc_fan=False,
+        bind_learning_inputs=True,
+    ):
         settings = base_settings()
         settings["controller"]["selected"] = controller
         settings["platform"]["dc_fan"] = dc_fan
         settings["cycle_data"].update(cycle_data_extra or {})
         control_data = base_control(mode="Hold")
         control_data["primary_setpoint"] = 225
-        control_data["cook_id"] = "hold-test-cook"
         ctx, _grill, _notifier = make_ctx(settings, control_data, base_pellet_db(), FakeProbes().script([225] * 200))
-        if controller == "mpc":
-            ctx.learning_trajectory = ExactEstimatorSeedSource()
+        if bind_learning_inputs:
+            bind_exact_learning_inputs(ctx, control_data, cook_id="hold-test-cook")
         if runner is not None:
             if not hasattr(runner, "estimator_seed_requirements"):
                 monkeypatch.setattr(
