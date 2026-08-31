@@ -161,6 +161,8 @@ htmlcov/
 # Local tool state
 .lsp.json
 .pi/
+# Exact-revision gate evidence; fulfills Task 2's artifact ignore item early.
+/.artifacts/
 # tokensave's code-graph database, per-checkout and machine-local. The SQLite
 # WAL/shm sidecars change on every read, so tracking them made `jj st` dirty
 # constantly and dragged a 30MB binary toward every commit.
