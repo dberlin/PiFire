@@ -18,7 +18,6 @@ from common.control_trace import (
     AmbientSource,
     AmbientUncertainty,
     AppliedOutputPayload,
-    ControllerBranch,
     ControllerType,
     ControlTraceRecord,
     FramedPulseFramePayload,
@@ -60,16 +59,29 @@ from file_mgmt.cookfile import (
     import_cookfile_learning_trajectory,
     read_cookfile,
 )
+from tests.unit.controller._control_trace_fixtures import current_pid_sp_records
 
 _COOK_ID = "cook-mixed-controller-7"
 _PID_SESSION_ID = "session-pid-sp-7"
 _MPC_SESSION_ID = "session-mpc-7"
-_EXPECTED_TRACE_CONTROLLERS = ["pid_sp", "pid_sp", "pid_sp", "pid_sp", "mpc", "mpc", "mpc", "mpc", "mpc"]
+_EXPECTED_TRACE_CONTROLLERS = [
+    "pid_sp",
+    "pid_sp",
+    "pid_sp",
+    "pid_sp",
+    "pid_sp",
+    "mpc",
+    "mpc",
+    "mpc",
+    "mpc",
+    "mpc",
+]
 _EXPECTED_TRACE_EVENTS = [
     "session",
     "control_update",
-    "applied_output",
+    "allocation",
     "actuation_frame",
+    "applied_output",
     "session",
     "control_update",
     "allocation",
@@ -77,6 +89,7 @@ _EXPECTED_TRACE_EVENTS = [
     "applied_output",
 ]
 _EXPECTED_TRACE_SESSIONS = [
+    _PID_SESSION_ID,
     _PID_SESSION_ID,
     _PID_SESSION_ID,
     _PID_SESSION_ID,
@@ -126,84 +139,27 @@ def _session(
     )
 
 
-def _pid_sp_update() -> ControlTraceRecord:
-    return ControlTraceRecord(
-        ts_ms=2_000,
+def _current_pid_sp_trace() -> tuple[ControlTraceRecord, ...]:
+    records = current_pid_sp_records(
         session_id=_PID_SESSION_ID,
         cook_id=_COOK_ID,
-        controller=ControllerType.PID_SP,
-        event_kind=TraceEventKind.CONTROL_UPDATE,
-        payload=PidSpUpdatePayload(
-            monotonic_ms=2_000,
-            wall_ms=2_000,
-            result_revision=1,
-            result_age_ms=0,
-            control_period_seconds=2.0,
-            observed_dt_seconds=2.0,
-            setpoint=225.0,
-            measured_temperature=220.0,
-            raw_output=0.45,
-            requested_output=0.45,
-            actuation_mode=ActuationMode.FRAMED_PULSE,
-            prior_requested_auger_duty=0.4,
-            prior_realized_auger_duty=0.35,
-            requested_fan_duty=None,
-            applied_fan_duty=None,
-            output_source=OutputSource.CONTROLLER,
-            inhibit_reason=InhibitReason.NONE,
-            learning=LearningSnapshotPayload(
-                schema_version=1,
-                state={"status": "collecting", "accepted_samples": 12},
-            ),
-            error=5.0,
-            proportional_term=0.3,
-            integral_term=0.1,
-            derivative_term=0.05,
-            integral_accumulator=2.0,
-            integral_clamped=False,
-            derivative_input=-0.5,
-            derivative_state=-0.25,
-            proportional_band=30.0,
-            kp=1.0,
-            ki=0.1,
-            kd=0.01,
-            center=225.0,
-            previous_temperature=219.0,
-            previous_update_ms=0,
-            measured_rate=0.5,
-            predicted_temperature=221.0,
-            predicted_error=4.0,
-            tau_seconds=60.0,
-            theta_seconds=5.0,
-            stable_window_seconds=20.0,
-            center_factor=1.0,
-            new_target_before=False,
-            new_target_after=False,
-            target_change_temperature=225.0,
-            target_change_ms=0,
-            branch=ControllerBranch.NONE,
-        ),
+        raw_demand=0.45,
+        include_frame=True,
     )
-
-
-def _pid_sp_applied() -> ControlTraceRecord:
-    return ControlTraceRecord(
-        ts_ms=22_000,
-        session_id=_PID_SESSION_ID,
-        cook_id=_COOK_ID,
-        controller=ControllerType.PID_SP,
-        event_kind=TraceEventKind.APPLIED_OUTPUT,
-        payload=AppliedOutputPayload(
-            result_revision=1,
-            interval_start_ms=2_000,
-            interval_end_ms=22_000,
-            realized_auger_duty=0.45,
-            realized_combustion_load=None,
-            actual_fan_duty=None,
-            sample_complete=True,
-            output_source=OutputSource.CONTROLLER,
-        ),
+    update = records[1]
+    assert isinstance(update.payload, PidSpUpdatePayload)
+    update = update.model_copy(
+        update={
+            "payload": replace(
+                update.payload,
+                learning=LearningSnapshotPayload(
+                    schema_version=1,
+                    state={"status": "collecting", "accepted_samples": 12},
+                ),
+            )
+        }
     )
+    return records[:1] + (update,) + records[2:]
 
 
 def _frame(
@@ -675,7 +631,7 @@ def _assert_mixed_controller_envelope(payload: Mapping[str, Any]) -> None:
     trace = payload["control_trace"]
     assert isinstance(trace, dict)
     records = trace["records"]
-    assert len(records) == 9
+    assert len(records) == 10
     assert [record["controller"] for record in records] == _EXPECTED_TRACE_CONTROLLERS
     assert [record["event_kind"] for record in records] == _EXPECTED_TRACE_EVENTS
     assert [record["session_id"] for record in records] == _EXPECTED_TRACE_SESSIONS
@@ -685,7 +641,13 @@ def _assert_mixed_controller_envelope(payload: Mapping[str, Any]) -> None:
         "schema_version": 1,
         "state": {"status": "collecting", "accepted_samples": 12},
     }
-    assert records[5]["payload"]["learning"] == {
+    assert records[1]["payload"]["raw_output"] == 0.45
+    assert records[1]["payload"]["requested_output"] == 0.45
+    assert records[3]["payload"]["requested_auger_duty"] == 0.45
+    assert records[3]["payload"]["scheduled_on_seconds"] == 8.0
+    assert records[4]["payload"]["realized_auger_duty"] == 0.4
+    assert records[4]["payload"]["realized_combustion_load"] == 0.4
+    assert records[6]["payload"]["learning"] == {
         "schema_version": 1,
         "state": {"status": "evaluating", "candidate_generation": 3},
     }
@@ -721,10 +683,7 @@ def test_mixed_controller_diagnostics_round_trip_through_real_sqlite_and_cookfil
     _seed_archive_prerequisites()
 
     trace_records = [
-        _session(ControllerType.PID_SP, _PID_SESSION_ID, 1_000),
-        _pid_sp_update(),
-        _pid_sp_applied(),
-        _frame(ControllerType.PID_SP, _PID_SESSION_ID, 1, 2_000),
+        *_current_pid_sp_trace(),
         _session(ControllerType.MPC, _MPC_SESSION_ID, 30_000),
         _mpc_update(),
         _mpc_allocation(),

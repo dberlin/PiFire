@@ -11,7 +11,6 @@ from common.control_trace import (
     ActuationMode,
     AllocationPayload,
     AppliedOutputPayload,
-    ControllerBranch,
     ControllerType,
     ControlTraceRecord,
     FramedPulseFramePayload,
@@ -33,6 +32,8 @@ from common.control_trace import (
 from controller.applied_output import OutputSource
 from controller.control_trace_replay import ReplayIssueCode, TraceSelectionError, replay_session, validate_records
 from controller.mpc_allocator import ALLOCATOR_REVISION, allocate
+import tests.unit.controller._control_trace_fixtures as control_trace_fixtures
+from tests.unit.controller._control_trace_fixtures import current_pid_sp_records
 
 _SESSION_ID = "session-1"
 
@@ -161,37 +162,6 @@ def _pid_update(revision=1):
     )
 
 
-def _pid_sp_update(revision=1):
-    return PidSpUpdatePayload(
-        **_common(revision),
-        error=5.0,
-        proportional_term=0.2,
-        integral_term=0.2,
-        derivative_term=0.1,
-        integral_accumulator=0.2,
-        integral_clamped=False,
-        derivative_input=0.0,
-        derivative_state=0.0,
-        proportional_band=100.0,
-        kp=1.0,
-        ki=0.1,
-        kd=0.0,
-        center=225.0,
-        previous_temperature=219.0,
-        previous_update_ms=(revision - 1) * 2_000,
-        measured_rate=0.0,
-        predicted_temperature=220.0,
-        predicted_error=5.0,
-        tau_seconds=20.0,
-        theta_seconds=2.0,
-        stable_window_seconds=10.0,
-        center_factor=1.0,
-        new_target_before=False,
-        new_target_after=False,
-        target_change_temperature=220.0,
-        target_change_ms=0,
-        branch=ControllerBranch.NONE,
-    )
 
 
 def _mpc_update(revision=1, *, mode=ActuationMode.FRAMED_PULSE):
@@ -239,22 +209,6 @@ def _allocation(revision=1):
     )
 
 
-def _pid_sp_allocation(revision=1):
-    result = allocate(0.5, u_max=1.0, fan_min_pct=0.0, fan_max_pct=0.0, enable_fan=False)
-    return AllocationPayload(
-        result_revision=revision,
-        normalized_combustion_load=result.normalized_combustion_load,
-        requested_auger_duty=result.auger_duty,
-        requested_fan_duty=result.fan_duty,
-        u_max=result.u_max,
-        fan_min_pct=result.fan_min_pct,
-        fan_max_pct=result.fan_max_pct,
-        fan_enabled=result.fan_enabled,
-        mpc_has_fan_authority=False,
-        auger_clamp_reason=result.auger_clamp_reason,
-        fan_clamp_reason=result.fan_clamp_reason,
-        allocator_revision=ALLOCATOR_REVISION,
-    )
 
 
 def _applied(revision=1):
@@ -271,17 +225,18 @@ def _applied(revision=1):
 
 
 def _pid_records(controller=ControllerType.PID):
-    update = _pid_sp_update() if controller is ControllerType.PID_SP else _pid_update()
-    records = [
-        _record(0, controller, TraceEventKind.SESSION, _pid_session(controller)),
-        _record(2_000, controller, TraceEventKind.CONTROL_UPDATE, update),
-    ]
     if controller is ControllerType.PID_SP:
-        records.append(_record(2_000, controller, TraceEventKind.ALLOCATION, _pid_sp_allocation()))
-    records.append(
-        _record(4_000, controller, TraceEventKind.APPLIED_OUTPUT, replace(_applied(), realized_combustion_load=None))
-    )
-    return records
+        return list(current_pid_sp_records())
+    return [
+        _record(0, controller, TraceEventKind.SESSION, _pid_session(controller)),
+        _record(2_000, controller, TraceEventKind.CONTROL_UPDATE, _pid_update()),
+        _record(
+            4_000,
+            controller,
+            TraceEventKind.APPLIED_OUTPUT,
+            replace(_applied(), realized_combustion_load=None),
+        ),
+    ]
 
 
 def _mpc_framed_records():
@@ -328,24 +283,96 @@ def _mpc_framed_records():
 
 
 def _pid_framed_records(controller=ControllerType.PID):
+    if controller is ControllerType.PID_SP:
+        return list(current_pid_sp_records(include_frame=True))
     pid_records = _pid_records(controller)
     mpc_records = _mpc_framed_records()
-    frame_payload = mpc_records[3].payload
-    if controller is ControllerType.PID_SP:
-        allocation = _pid_sp_allocation()
-        frame_payload = replace(
-            frame_payload,
-            requested_combustion_load=allocation.normalized_combustion_load,
-            requested_auger_duty=allocation.requested_auger_duty,
-            requested_fan_duty=None,
-            applied_fan_duty=None,
-        )
-    frame = _record(22_000, controller, TraceEventKind.ACTUATION_FRAME, frame_payload)
-    applied_payload = mpc_records[4].payload
-    if controller is ControllerType.PID_SP:
-        applied_payload = replace(applied_payload, actual_fan_duty=None)
-    applied = _record(22_000, controller, TraceEventKind.APPLIED_OUTPUT, applied_payload)
+    frame = _record(22_000, controller, TraceEventKind.ACTUATION_FRAME, mpc_records[3].payload)
+    applied = _record(22_000, controller, TraceEventKind.APPLIED_OUTPUT, mpc_records[4].payload)
     return [*pid_records[:-1], frame, applied]
+
+
+def test_current_pid_sp_trace_has_current_order_and_valid_replay():
+    records = current_pid_sp_records()
+
+    assert tuple(record.event_kind for record in records) == (
+        TraceEventKind.SESSION,
+        TraceEventKind.CONTROL_UPDATE,
+        TraceEventKind.ALLOCATION,
+        TraceEventKind.APPLIED_OUTPUT,
+    )
+    assert validate_records(records).valid
+
+
+def test_current_pid_sp_completed_frame_uses_production_quantized_delivery():
+    records = current_pid_sp_records(raw_demand=0.45, include_frame=True)
+    allocation = cast(AllocationPayload, records[2].payload)
+    frame = cast(FramedPulseFramePayload, records[3].payload)
+    applied = cast(AppliedOutputPayload, records[4].payload)
+
+    assert tuple(record.event_kind for record in records) == (
+        TraceEventKind.SESSION,
+        TraceEventKind.CONTROL_UPDATE,
+        TraceEventKind.ALLOCATION,
+        TraceEventKind.ACTUATION_FRAME,
+        TraceEventKind.APPLIED_OUTPUT,
+    )
+    assert allocation.requested_auger_duty == pytest.approx(0.45)
+    assert frame.requested_auger_duty == pytest.approx(0.45)
+    assert frame.scheduled_on_seconds == pytest.approx(8.0)
+    assert frame.delivered_on_seconds == pytest.approx(8.0)
+    assert frame.credit_before_seconds == pytest.approx(0.0)
+    assert frame.credit_after_seconds == pytest.approx(1.0)
+    assert applied.realized_auger_duty == pytest.approx(0.4)
+    assert applied.realized_combustion_load == pytest.approx(0.4)
+    assert validate_records(records).valid
+
+
+def test_current_pid_sp_negative_demand_allocates_once_from_bounded_zero(monkeypatch):
+    production_allocate = allocate
+    calls = []
+
+    def recording_allocate(raw_demand, **limits):
+        calls.append((raw_demand, limits))
+        return production_allocate(raw_demand, **limits)
+
+    monkeypatch.setattr(control_trace_fixtures, "allocate", recording_allocate)
+
+    current_pid_sp_records(raw_demand=-0.15963)
+
+    assert calls == [
+        (
+            0.0,
+            {
+                "u_max": 1.0,
+                "fan_min_pct": 0.0,
+                "fan_max_pct": 0.0,
+                "enable_fan": False,
+            },
+        )
+    ]
+
+
+def test_current_pid_sp_negative_demand_stays_raw_while_all_physical_output_is_zero():
+    records = current_pid_sp_records(raw_demand=-0.15963, include_frame=True)
+    update = cast(PidSpUpdatePayload, records[1].payload)
+    allocation = cast(AllocationPayload, records[2].payload)
+    frame = cast(FramedPulseFramePayload, records[3].payload)
+    applied = cast(AppliedOutputPayload, records[4].payload)
+
+    assert update.raw_output == pytest.approx(-0.15963)
+    assert update.requested_output == pytest.approx(0.0)
+    assert update.prior_requested_auger_duty == pytest.approx(0.0)
+    assert update.prior_realized_auger_duty == pytest.approx(0.0)
+    assert allocation.normalized_combustion_load == pytest.approx(0.0)
+    assert allocation.requested_auger_duty == pytest.approx(0.0)
+    assert frame.requested_combustion_load == pytest.approx(0.0)
+    assert frame.requested_auger_duty == pytest.approx(0.0)
+    assert frame.scheduled_on_seconds == pytest.approx(0.0)
+    assert frame.delivered_on_seconds == pytest.approx(0.0)
+    assert applied.realized_auger_duty == pytest.approx(0.0)
+    assert applied.realized_combustion_load == pytest.approx(0.0)
+    assert validate_records(records).valid
 
 
 @pytest.mark.parametrize("records", [_pid_records(), _pid_records(ControllerType.PID_SP), _mpc_framed_records()])
