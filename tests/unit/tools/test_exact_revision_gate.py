@@ -5,11 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import subprocess
 import shutil
+import subprocess
 import sys
 import threading
+import tomllib
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import FrozenInstanceError, fields, replace
 from pathlib import Path
 from typing import IO, Literal, cast, final, get_type_hints, override
@@ -20,7 +22,9 @@ from scripts.exact_revision_gate import (
     CommandEvidence,
     GateCommand,
     GateEvidence,
+    push_verified_bookmark,
     required_commands,
+    resolve_bookmark_revision,
     run_gate,
 )
 
@@ -57,6 +61,7 @@ class _CommandRunner:
         *results: tuple[int, bytes, bytes] | BaseException,
         events: list[str] | None = None,
     ) -> None:
+        self.environments: list[dict[str, str] | None] = []
         self._results: Iterator[tuple[int, bytes, bytes] | BaseException] = iter(results)
         self._events = events
         self.calls: list[tuple[tuple[str, ...], Path]] = []
@@ -69,7 +74,9 @@ class _CommandRunner:
         check: bool,
         stdout: IO[bytes],
         stderr: IO[bytes],
+        env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[bytes]:
+        self.environments.append(env)
         assert check is False
         if self._events is not None:
             command = next(command for command in required_commands() if command.argv == argv)
@@ -734,7 +741,7 @@ def test_invalid_expected_revision_is_rejected_before_side_effects(
 @pytest.mark.parametrize(
     "unsupported_args",
     [
-        pytest.param(("push",), id="unsupported-command"),
+        pytest.param(("unknown-operation",), id="unsupported-command"),
         pytest.param(
             (
                 "verify",
@@ -818,3 +825,717 @@ def test_cli_reports_artifact_io_error_without_traceback(tmp_path: Path) -> None
     assert completed.returncode == 1
     assert "exact-revision gate: could not write artifacts:" in completed.stderr
     assert "Traceback" not in completed.stderr
+
+
+def test_resolve_bookmark_revision_uses_one_exact_jj_query(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[tuple[str, ...], Path]] = []
+
+    def completed_run(
+        argv: tuple[str, ...],
+        *,
+        cwd: Path,
+        check: bool,
+        capture_output: bool,
+        text: bool,
+    ) -> subprocess.CompletedProcess[str]:
+        assert check is False
+        assert capture_output is True
+        assert text is True
+        calls.append((argv, cwd))
+        return subprocess.CompletedProcess(argv, 0, stdout=f"{_REVISION}\n", stderr="")
+
+    monkeypatch.setattr(gate_module.subprocess, "run", completed_run)
+
+    assert resolve_bookmark_revision(_REPOSITORY_ROOT, "cumulative-mpc-learning") == _REVISION
+    assert calls == [
+        (
+            (
+                "jj",
+                "--no-pager",
+                "log",
+                "--no-graph",
+                "-r",
+                "cumulative-mpc-learning",
+                "-T",
+                'commit_id ++ "\\n"',
+            ),
+            _REPOSITORY_ROOT,
+        )
+    ]
+
+
+class _PushRunner(_CommandRunner):
+    def __init__(
+        self,
+        *results: tuple[int, bytes, bytes] | BaseException,
+        push_exit_code: int = 0,
+        events: list[str] | None = None,
+    ) -> None:
+        super().__init__(*results, events=events)
+        self.push_exit_code = push_exit_code
+        self.push_calls: list[tuple[tuple[str, ...], Path]] = []
+
+    @override
+    def __call__(self, argv: tuple[str, ...], *, cwd: Path, check: bool, **kwargs: object) -> subprocess.CompletedProcess:
+        if argv[:3] == ("jj", "git", "push"):
+            assert check is False
+            assert kwargs == {"capture_output": True, "text": True}
+            self.push_calls.append((argv, cwd))
+            return subprocess.CompletedProcess(argv, self.push_exit_code, stdout="", stderr="push failed")
+        stdout = kwargs.get("stdout")
+        stderr = kwargs.get("stderr")
+        assert hasattr(stdout, "write")
+        assert hasattr(stderr, "write")
+        return super().__call__(
+            argv,
+            cwd=cwd,
+            check=check,
+            stdout=cast(IO[bytes], stdout),
+            stderr=cast(IO[bytes], stderr),
+            env=cast(dict[str, str] | None, kwargs.get("env")),
+        )
+
+
+def _bookmark_resolver(
+    monkeypatch: pytest.MonkeyPatch,
+    revisions: dict[str, list[str]],
+) -> list[str]:
+    calls: list[str] = []
+
+    def resolve(_root: Path, bookmark: str) -> str:
+        calls.append(bookmark)
+        return revisions[bookmark].pop(0)
+
+    monkeypatch.setattr(gate_module, "resolve_bookmark_revision", resolve)
+    @contextmanager
+    def no_live_runtime(_root: Path) -> Iterator[None]:
+        yield
+
+    monkeypatch.setattr(gate_module, "_isolated_live_pifire", no_live_runtime, raising=False)
+    return calls
+
+
+
+def test_only_playwright_receives_the_live_runtime_datastore_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_db = str(tmp_path / "live" / "pifire.db")
+    live_logs = str(tmp_path / "live" / "logs")
+    monkeypatch.setenv("PIFIRE_GATE_LIVE_DB_PATH", live_db)
+    monkeypatch.setenv("PIFIRE_GATE_LIVE_LOG_DIR", live_logs)
+    monkeypatch.setenv("PIFIRE_DB_PATH", str(tmp_path / "pytest" / "pifire.db"))
+    monkeypatch.setenv("PIFIRE_LOG_DIR", str(tmp_path / "pytest" / "logs"))
+    runner = _CommandRunner(*_success_results())
+
+    evidence = run_gate(
+        root=_REPOSITORY_ROOT,
+        expected_revision=_REVISION,
+        artifact_root=tmp_path / "artifacts",
+        resolve_revision=_RevisionResolver(*([_REVISION] * 11)),
+        run_command=runner,
+    )
+
+    for command_environment in runner.environments[:4]:
+        assert command_environment is not None
+        assert "PIFIRE_GATE_LIVE_DB_PATH" not in command_environment
+        assert "PIFIRE_GATE_LIVE_LOG_DIR" not in command_environment
+        assert "PIFIRE_DB_PATH" not in command_environment
+        assert "PIFIRE_LOG_DIR" not in command_environment
+    playwright_environment = runner.environments[4]
+    assert playwright_environment is not None
+    assert playwright_environment["PIFIRE_DB_PATH"] == live_db
+    assert playwright_environment["PIFIRE_LOG_DIR"] == live_logs
+    assert os.environ["PIFIRE_DB_PATH"] == str(tmp_path / "pytest" / "pifire.db")
+    assert os.environ["PIFIRE_LOG_DIR"] == str(tmp_path / "pytest" / "logs")
+    assert "PIFIRE_GATE_LIVE_DB_PATH" not in playwright_environment
+    assert "PIFIRE_GATE_LIVE_LOG_DIR" not in playwright_environment
+
+
+def test_local_live_runtime_copies_code_but_replaces_mutable_folders(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "checkout"
+    root.mkdir()
+    _ = (root / "app.py").write_text("application = True\n", encoding="utf-8")
+    for mutable_folder in ("backups", "history", "logs"):
+        folder = root / mutable_folder
+        folder.mkdir()
+        _ = (folder / "operator-data").write_text("must not be copied\n", encoding="utf-8")
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+
+    source_root, log_dir = gate_module._prepare_isolated_source(root, runtime)
+
+    assert (source_root / "app.py").read_text(encoding="utf-8") == "application = True\n"
+    assert list((source_root / "backups").iterdir()) == []
+    assert list((source_root / "history").iterdir()) == []
+    assert (source_root / "logs").is_symlink()
+    assert (source_root / "logs").resolve() == log_dir.resolve()
+    assert list(log_dir.iterdir()) == []
+
+
+def test_local_live_runtime_clears_browser_backend_overrides_for_entire_scope_and_restores(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inherited_overrides = {
+        "PUBLIC_PIFIRE_URL": "http://real-grill.example:5000",
+        "PUBLIC_PIFIRE_TARGET": "http://other-real-grill.example:5000",
+    }
+    for name, value in inherited_overrides.items():
+        monkeypatch.setenv(name, value)
+
+    source_root = tmp_path / "source"
+    log_dir = tmp_path / "runtime-logs"
+    service_environments: list[dict[str, str]] = []
+
+    def assert_overrides_cleared(environment: dict[str, str] | None = None) -> None:
+        for name in inherited_overrides:
+            assert name not in os.environ
+            if environment is not None:
+                assert name not in environment
+
+    def prepare_source(_root: Path, _runtime: Path) -> tuple[Path, Path]:
+        assert_overrides_cleared()
+        source_root.mkdir()
+        log_dir.mkdir()
+        return source_root, log_dir
+
+    def initialize(
+        _argv: tuple[str, ...],
+        *,
+        cwd: Path,
+        check: bool,
+        capture_output: bool,
+        text: bool,
+        env: dict[str, str],
+    ) -> subprocess.CompletedProcess[str]:
+        assert cwd == source_root
+        assert check is False
+        assert capture_output is True
+        assert text is True
+        assert_overrides_cleared(env)
+        service_environments.append(env)
+        return subprocess.CompletedProcess((), 0, stdout="", stderr="")
+
+    class RunningProcess:
+        def __init__(self, _argv: tuple[str, ...], **kwargs: object) -> None:
+            environment = cast(dict[str, str], kwargs["env"])
+            assert_overrides_cleared(environment)
+            service_environments.append(environment)
+            self.returncode: int | None = None
+
+        def poll(self) -> int | None:
+            return self.returncode
+
+        def terminate(self) -> None:
+            self.returncode = 0
+
+        def kill(self) -> None:
+            self.returncode = -9
+
+        def wait(self, *, timeout: int) -> int:
+            assert timeout == 5
+            assert self.returncode is not None
+            return self.returncode
+
+    @contextmanager
+    def backend_ready(_url: str, *, timeout: int) -> Iterator[object]:
+        assert timeout == 1
+        assert_overrides_cleared()
+
+        class Response:
+            status = 200
+
+        yield Response()
+
+    monkeypatch.setattr(gate_module, "_prepare_isolated_source", prepare_source)
+    monkeypatch.setattr(gate_module, "_available_local_ports", lambda _count: (5100, 5101, 5102))
+    monkeypatch.setattr(gate_module.subprocess, "run", initialize)
+    monkeypatch.setattr(gate_module.subprocess, "Popen", RunningProcess)
+    monkeypatch.setattr(gate_module.urllib.request, "urlopen", backend_ready)
+
+    with gate_module._isolated_live_pifire(_REPOSITORY_ROOT):
+        assert_overrides_cleared()
+        playwright_environment = gate_module._command_environment(required_commands()[-1])
+        assert playwright_environment is not None
+        assert_overrides_cleared(playwright_environment)
+
+    assert service_environments
+    for name, value in inherited_overrides.items():
+        assert os.environ[name] == value
+
+
+def test_verify_bookmark_runs_gate_inside_an_isolated_live_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    _bookmark_resolver(
+        monkeypatch,
+        {
+            "cumulative-mpc-learning": [_REVISION],
+            "@": [_REVISION] * 12,
+        },
+    )
+
+    @contextmanager
+    def live_runtime(_root: Path) -> Iterator[None]:
+        events.append("runtime:start")
+        yield
+        events.append("runtime:stop")
+
+    monkeypatch.setattr(gate_module, "_isolated_live_pifire", live_runtime, raising=False)
+    runner = _PushRunner(*_success_results(), events=events)
+
+    evidence = gate_module._verify_bookmark(
+        root=_REPOSITORY_ROOT,
+        bookmark="cumulative-mpc-learning",
+        artifact_root=tmp_path / "artifacts",
+        run_command=runner,
+    )
+
+    assert evidence.status == "passed"
+    assert events == [
+        "runtime:start",
+        "run:rebuild-acados",
+        "run:python-default",
+        "run:python-slow",
+        "run:bun-workspaces",
+        "run:web-react-e2e",
+        "runtime:stop",
+    ]
+
+
+def test_push_runs_a_fresh_gate_and_only_the_authorized_push(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _bookmark_resolver(
+        monkeypatch,
+        {
+            "cumulative-mpc-learning": [_REVISION, _REVISION],
+            "@": [_REVISION] * 13,
+            "cumulative-mpc-learning@origin": [_REVISION],
+        },
+    )
+    runner = _PushRunner(*_success_results())
+
+    evidence = push_verified_bookmark(
+        root=_REPOSITORY_ROOT,
+        bookmark="cumulative-mpc-learning",
+        artifact_root=tmp_path / "artifacts",
+        run_command=runner,
+    )
+
+    assert evidence.status == "passed"
+    assert len(runner.calls) == 5
+    assert runner.push_calls == [
+        (
+            ("jj", "git", "push", "-b", "cumulative-mpc-learning"),
+            _REPOSITORY_ROOT,
+        )
+    ]
+    assert calls[:2] == ["cumulative-mpc-learning", "@"]
+    assert calls[-3:] == ["cumulative-mpc-learning", "@", "cumulative-mpc-learning@origin"]
+
+
+def test_push_owns_artifact_lock_until_remote_and_durable_evidence_are_verified(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_root = tmp_path / "artifacts"
+    _bookmark_resolver(
+        monkeypatch,
+        {
+            "cumulative-mpc-learning": [_REVISION, _REVISION],
+            "@": [_REVISION] * 13,
+            "cumulative-mpc-learning@origin": [_REVISION],
+        },
+    )
+    competing_command_started = threading.Event()
+    final_validation_started = threading.Event()
+    release_final_validation = threading.Event()
+    errors: list[BaseException] = []
+    competing_threads: list[threading.Thread] = []
+
+    class CompetingRunner(_CommandRunner):
+        @override
+        def __call__(
+            self,
+            argv: tuple[str, ...],
+            *,
+            cwd: Path,
+            check: bool,
+            stdout: IO[bytes],
+            stderr: IO[bytes],
+            env: dict[str, str] | None = None,
+        ) -> subprocess.CompletedProcess[bytes]:
+            competing_command_started.set()
+            return super().__call__(
+                argv,
+                cwd=cwd,
+                check=check,
+                stdout=stdout,
+                stderr=stderr,
+                env=env,
+            )
+
+    def run_competing_gate() -> None:
+        try:
+            _ = run_gate(
+                root=_REPOSITORY_ROOT,
+                expected_revision=_REVISION,
+                artifact_root=artifact_root,
+                resolve_revision=lambda: _REVISION,
+                run_command=CompetingRunner(*_success_results()),
+            )
+        except BaseException as error:
+            errors.append(error)
+
+    class ConcurrentPushRunner(_PushRunner):
+        @override
+        def __call__(
+            self,
+            argv: tuple[str, ...],
+            *,
+            cwd: Path,
+            check: bool,
+            **kwargs: object,
+        ) -> subprocess.CompletedProcess:
+            if argv[:3] == ("jj", "git", "push"):
+                competing_thread = threading.Thread(target=run_competing_gate)
+                competing_threads.append(competing_thread)
+                competing_thread.start()
+            return super().__call__(argv, cwd=cwd, check=check, **kwargs)
+
+    def validate_durable_evidence(*, evidence: GateEvidence, revision_dir: Path) -> None:
+        assert evidence.status == "passed"
+        assert revision_dir == artifact_root / _REVISION
+        final_validation_started.set()
+        assert not competing_command_started.wait(timeout=0.1)
+        assert release_final_validation.wait(timeout=2)
+
+    monkeypatch.setattr(
+        gate_module,
+        "_validate_durable_pass_evidence",
+        validate_durable_evidence,
+        raising=False,
+    )
+    runner = ConcurrentPushRunner(*_success_results())
+
+    def invoke_push() -> None:
+        try:
+            _ = push_verified_bookmark(
+                root=_REPOSITORY_ROOT,
+                bookmark="cumulative-mpc-learning",
+                artifact_root=artifact_root,
+                run_command=runner,
+            )
+        except BaseException as error:
+            errors.append(error)
+
+    push_thread = threading.Thread(target=invoke_push)
+    push_thread.start()
+    assert final_validation_started.wait(timeout=2)
+    assert not competing_command_started.is_set()
+    release_final_validation.set()
+    push_thread.join(timeout=2)
+    for competing_thread in competing_threads:
+        competing_thread.join(timeout=2)
+
+    assert not push_thread.is_alive()
+    assert competing_threads
+    assert all(not thread.is_alive() for thread in competing_threads)
+    assert not errors
+    assert competing_command_started.is_set()
+    assert len(runner.push_calls) == 1
+
+
+def test_push_rejects_every_other_bookmark_before_resolving_or_running(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unexpected_resolve(_root: Path, _bookmark: str) -> str:
+        pytest.fail("an unauthorized bookmark must not be resolved")
+
+    monkeypatch.setattr(gate_module, "resolve_bookmark_revision", unexpected_resolve)
+    runner = _PushRunner(*_success_results())
+
+    with pytest.raises(ValueError, match="restricted to bookmark 'cumulative-mpc-learning'"):
+        push_verified_bookmark(
+            root=_REPOSITORY_ROOT,
+            bookmark="some-other-bookmark",
+            artifact_root=tmp_path / "artifacts",
+            run_command=runner,
+        )
+
+    assert runner.calls == []
+    assert runner.push_calls == []
+
+
+def test_push_is_not_invoked_when_local_bookmark_differs_from_current_revision(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _bookmark_resolver(
+        monkeypatch,
+        {
+            "cumulative-mpc-learning": [_REVISION],
+            "@": [_OTHER_REVISION],
+        },
+    )
+    runner = _PushRunner(*_success_results())
+
+    with pytest.raises(RuntimeError, match="does not equal the current revision"):
+        push_verified_bookmark(
+            root=_REPOSITORY_ROOT,
+            bookmark="cumulative-mpc-learning",
+            artifact_root=tmp_path / "artifacts",
+            run_command=runner,
+        )
+
+    assert runner.calls == []
+    assert runner.push_calls == []
+    assert not (tmp_path / "artifacts").exists()
+
+
+def test_push_is_not_invoked_when_fresh_gate_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _bookmark_resolver(
+        monkeypatch,
+        {
+            "cumulative-mpc-learning": [_REVISION],
+            "@": [_REVISION] * 3,
+        },
+    )
+    runner = _PushRunner((1, b"", b"failed\n"))
+
+    evidence = push_verified_bookmark(
+        root=_REPOSITORY_ROOT,
+        bookmark="cumulative-mpc-learning",
+        artifact_root=tmp_path / "artifacts",
+        run_command=runner,
+    )
+
+    assert evidence.status == "failed"
+    assert evidence.commands[0].status == "failed"
+    assert runner.push_calls == []
+
+
+@pytest.mark.parametrize("drifting_identity", ["bookmark", "current"])
+def test_push_is_not_invoked_when_revision_drifts_after_the_gate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    drifting_identity: str,
+) -> None:
+    bookmark_revisions = [_REVISION, _REVISION]
+    current_revisions = [_REVISION] * 13
+    if drifting_identity == "bookmark":
+        bookmark_revisions[-1] = _OTHER_REVISION
+    else:
+        current_revisions[-1] = _OTHER_REVISION
+    _bookmark_resolver(
+        monkeypatch,
+        {
+            "cumulative-mpc-learning": bookmark_revisions,
+            "@": current_revisions,
+        },
+    )
+    runner = _PushRunner(*_success_results())
+
+    with pytest.raises(RuntimeError, match="changed after the gate"):
+        push_verified_bookmark(
+            root=_REPOSITORY_ROOT,
+            bookmark="cumulative-mpc-learning",
+            artifact_root=tmp_path / "artifacts",
+            run_command=runner,
+        )
+
+    assert len(runner.calls) == 5
+    assert runner.push_calls == []
+
+
+def test_post_push_remote_mismatch_fails_after_exactly_one_push(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _bookmark_resolver(
+        monkeypatch,
+        {
+            "cumulative-mpc-learning": [_REVISION, _REVISION],
+            "@": [_REVISION] * 13,
+            "cumulative-mpc-learning@origin": [_OTHER_REVISION],
+        },
+    )
+    runner = _PushRunner(*_success_results())
+
+    with pytest.raises(RuntimeError, match="remote-tracking bookmark"):
+        push_verified_bookmark(
+            root=_REPOSITORY_ROOT,
+            bookmark="cumulative-mpc-learning",
+            artifact_root=tmp_path / "artifacts",
+            run_command=runner,
+        )
+
+    assert runner.push_calls == [
+        (
+            ("jj", "git", "push", "-b", "cumulative-mpc-learning"),
+            _REPOSITORY_ROOT,
+        )
+    ]
+
+
+def test_push_fails_if_durable_evidence_changes_before_final_revalidation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_root = tmp_path / "artifacts"
+    resolver_calls: list[str] = []
+
+    def resolve(_root: Path, bookmark: str) -> str:
+        resolver_calls.append(bookmark)
+        if bookmark == "cumulative-mpc-learning@origin":
+            evidence_path = artifact_root / _REVISION / "evidence.json"
+            _ = evidence_path.write_text('{"status": "passed"}\n', encoding="utf-8")
+        return _REVISION
+
+    monkeypatch.setattr(gate_module, "resolve_bookmark_revision", resolve)
+
+    @contextmanager
+    def no_live_runtime(_root: Path) -> Iterator[None]:
+        yield
+
+    monkeypatch.setattr(gate_module, "_isolated_live_pifire", no_live_runtime)
+    runner = _PushRunner(*_success_results())
+
+    with pytest.raises(RuntimeError, match="durable evidence"):
+        push_verified_bookmark(
+            root=_REPOSITORY_ROOT,
+            bookmark="cumulative-mpc-learning",
+            artifact_root=artifact_root,
+            run_command=runner,
+        )
+
+    assert resolver_calls[-1] == "cumulative-mpc-learning@origin"
+    assert len(runner.push_calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("environment", "message"),
+    [
+        pytest.param({}, "CI=true", id="ci-absent"),
+        pytest.param({"CI": "false", "GITHUB_SHA": _REVISION}, "CI=true", id="ci-not-true"),
+        pytest.param({"CI": "true"}, "GITHUB_SHA", id="sha-absent"),
+        pytest.param({"CI": "true", "GITHUB_SHA": "short"}, "full 40-character", id="sha-not-full"),
+        pytest.param(
+            {"CI": "true", "GITHUB_SHA": _OTHER_REVISION},
+            "must exactly match",
+            id="sha-mismatch",
+        ),
+    ],
+)
+def test_verify_ci_rejects_invalid_environment_before_gate(
+    tmp_path: Path,
+    environment: dict[str, str],
+    message: str,
+) -> None:
+    clean_environment = os.environ.copy()
+    clean_environment.pop("CI", None)
+    clean_environment.pop("GITHUB_SHA", None)
+    clean_environment.update(environment)
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(_SCRIPT),
+            "verify-ci",
+            "--expected-revision",
+            _REVISION,
+        ],
+        cwd=tmp_path,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=clean_environment,
+    )
+
+    assert completed.returncode == 2
+    assert message in completed.stderr
+    assert "Traceback" not in completed.stderr
+    assert not (tmp_path / ".artifacts").exists()
+
+
+def test_prek_pre_push_hook_verifies_the_cumulative_bookmark() -> None:
+    config = tomllib.loads((_REPOSITORY_ROOT / "prek.toml").read_text(encoding="utf-8"))
+    hooks = [hook for repo in config["repos"] if repo["repo"] == "local" for hook in repo["hooks"]]
+
+    assert hooks == [
+        {
+            "id": "exact-revision-gate",
+            "name": "Exact revision integration gate",
+            "entry": (
+                "uv run python scripts/exact_revision_gate.py verify-bookmark "
+                "--bookmark cumulative-mpc-learning"
+            ),
+            "language": "system",
+            "pass_filenames": False,
+            "stages": ["pre-push"],
+        }
+    ]
+
+
+def test_integration_workflow_has_exact_revision_gate_and_safe_live_runtime() -> None:
+    workflow_path = _REPOSITORY_ROOT / ".github" / "workflows" / "integration-gate.yml"
+    workflow = cast(dict[str, object], __import__("yaml").load(workflow_path.read_text(encoding="utf-8"), Loader=__import__("yaml").BaseLoader))
+    triggers = cast(dict[str, object], workflow["on"])
+    jobs = cast(dict[str, object], workflow["jobs"])
+    job = cast(dict[str, object], jobs["integration-gate"])
+    steps = cast(list[dict[str, object]], job["steps"])
+
+    assert set(triggers) == {"pull_request", "push", "workflow_dispatch"}
+    assert cast(dict[str, object], triggers["push"])["branches"] == ["main"]
+    assert cast(dict[str, str], workflow["concurrency"])["cancel-in-progress"] == "false"
+    assert job["name"] == "Exact revision integration gate"
+
+    uses = {cast(str, step["uses"]): cast(dict[str, object], step.get("with", {})) for step in steps if "uses" in step}
+    assert uses["actions/checkout@v4"]["ref"] == "${{ github.sha }}"
+    assert uses["actions/setup-python@v5"]["python-version"] == "3.14"
+    assert "astral-sh/setup-uv@v10" in uses
+    assert "oven-sh/setup-bun@v2" in uses
+    assert "taiki-e/install-action@v2" in uses
+
+    scripts = "\n".join(cast(str, step["run"]) for step in steps if "run" in step)
+    assert "uv sync --locked --all-groups" in scripts
+    job_environment = cast(dict[str, object], job["env"])
+    assert "PIFIRE_DB_PATH" not in job_environment
+    assert "PIFIRE_LOG_DIR" not in job_environment
+    assert job_environment["PIFIRE_GATE_LIVE_DB_PATH"] == "${{ runner.temp }}/pifire-ci/pifire.db"
+    assert job_environment["PIFIRE_GATE_LIVE_LOG_DIR"] == "${{ runner.temp }}/pifire-ci/logs"
+    assert "PIFIRE_BACKEND_URL" in job_environment
+    assert scripts.count('PIFIRE_DB_PATH="${runtime}/pifire.db"') == 3
+    assert scripts.count('PIFIRE_LOG_DIR="${runtime}/logs"') == 3
+    assert "playwright install --with-deps chromium" in scripts
+    assert "history" in scripts
+    assert 'settings["platform"]["real_hw"] = False' in scripts
+    assert "uv run python control.py" in scripts
+    assert "uv run gunicorn" in scripts
+    ignore_rules = (_REPOSITORY_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert {"/history", "/logs"} <= set(ignore_rules)
+    assert "trap cleanup EXIT" in scripts
+    assert "/api/get/mode" in scripts
+    assert (
+        'uv run python scripts/exact_revision_gate.py verify-ci --expected-revision "${{ github.sha }}"'
+        in scripts
+    )
+
+    upload = next(step for step in steps if step.get("uses") == "actions/upload-artifact@v4")
+    assert upload["if"] == "always()"
+    assert upload["with"] == {
+        "name": "exact-revision-${{ github.sha }}",
+        "path": ".artifacts/exact-revision/${{ github.sha }}/",
+        "include-hidden-files": "true",
+        "if-no-files-found": "error",
+    }

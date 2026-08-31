@@ -53,13 +53,14 @@ pelletdb.json
 
 static/js/backups/
 
-/history/
+/history
 
 static/img/tmp/
 
 recipes/recipe/
 
 *.log
+/logs
 
 backups/
 

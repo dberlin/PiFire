@@ -6,3 +6,9 @@ hooks = [
   # Run the formatter.
   { id = "ruff-format", types_or = ["python", "pyi"] },
 ]
+
+[[repos]]
+repo = "local"
+hooks = [
+  { id = "exact-revision-gate", name = "Exact revision integration gate", entry = "uv run python scripts/exact_revision_gate.py verify-bookmark --bookmark cumulative-mpc-learning", language = "system", pass_filenames = false, stages = ["pre-push"] },
+]

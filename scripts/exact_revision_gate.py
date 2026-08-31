@@ -9,10 +9,15 @@ import hashlib
 import json
 import os
 import re
+import shutil
+import socket
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable
+import time
+import urllib.request
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import IO, Literal, Protocol, cast
@@ -71,6 +76,9 @@ _REQUIRED_COMMANDS = (
     GateCommand("web-react-e2e", ("bun", "run", "test:e2e"), "web-react"),
 )
 _FULL_REVISION = re.compile(r"[0-9a-f]{40}\Z")
+_VERIFIED_BOOKMARK = "cumulative-mpc-learning"
+_DEFAULT_ARTIFACT_ROOT = Path(".artifacts/exact-revision")
+_BROWSER_BACKEND_OVERRIDES = ("PUBLIC_PIFIRE_URL", "PUBLIC_PIFIRE_TARGET")
 
 
 def required_commands() -> tuple[GateCommand, ...]:
@@ -190,6 +198,24 @@ def _invalid_pass_evidence_index(
     return None
 
 
+def _command_environment(command: GateCommand) -> dict[str, str] | None:
+    database_path = os.environ.get("PIFIRE_GATE_LIVE_DB_PATH")
+    log_dir = os.environ.get("PIFIRE_GATE_LIVE_LOG_DIR")
+    if database_path is None and log_dir is None:
+        return None
+    if database_path is None or log_dir is None:
+        raise RuntimeError("live gate database and log paths must be configured together")
+    environment = dict(os.environ)
+    environment.pop("PIFIRE_GATE_LIVE_DB_PATH", None)
+    environment.pop("PIFIRE_GATE_LIVE_LOG_DIR", None)
+    environment.pop("PIFIRE_DB_PATH", None)
+    environment.pop("PIFIRE_LOG_DIR", None)
+    if command.name == "web-react-e2e":
+        environment["PIFIRE_DB_PATH"] = database_path
+        environment["PIFIRE_LOG_DIR"] = log_dir
+    return environment
+
+
 def _run_one_command(
     *,
     root: Path,
@@ -207,13 +233,16 @@ def _run_one_command(
 
     try:
         with stdout_path.open("wb") as stdout_file, stderr_path.open("wb") as stderr_file:
-            completed = run_command(
-                command.argv,
-                cwd=root / command.cwd,
-                check=False,
-                stdout=cast(IO[bytes], stdout_file),
-                stderr=cast(IO[bytes], stderr_file),
-            )
+            runner_arguments: dict[str, object] = {
+                "cwd": root / command.cwd,
+                "check": False,
+                "stdout": cast(IO[bytes], stdout_file),
+                "stderr": cast(IO[bytes], stderr_file),
+            }
+            environment = _command_environment(command)
+            if environment is not None:
+                runner_arguments["env"] = environment
+            completed = run_command(command.argv, **runner_arguments)
             returncode = completed.returncode
             if type(returncode) is not int:
                 raise TypeError("command runner returned an invalid exit code")
@@ -328,6 +357,60 @@ def _run_gate_attempt(
     return evidence
 
 
+@contextmanager
+def _artifact_lock(artifact_root: Path) -> Iterator[None]:
+    artifact_root.mkdir(parents=True, exist_ok=True)
+    with (artifact_root / ".gate.lock").open("a+b") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        yield
+
+
+def _run_gate_with_lock_held(
+    *,
+    root: Path,
+    expected_revision: str,
+    resolve_revision: _ResolveRevision,
+    artifact_root: Path,
+    run_command: _RunCommand,
+) -> GateEvidence:
+    commands = required_commands()
+    resolved_revision = _resolve_revision_safely(resolve_revision)
+    artifact_revision = (
+        resolved_revision
+        if resolved_revision is not None and _FULL_REVISION.fullmatch(resolved_revision) is not None
+        else expected_revision
+    )
+    revision_dir = artifact_root / artifact_revision
+    revision_dir.mkdir(parents=True, exist_ok=True)
+    return _run_gate_attempt(
+        root=root,
+        expected_revision=expected_revision,
+        resolved_revision=resolved_revision,
+        resolve_revision=resolve_revision,
+        revision_dir=revision_dir,
+        commands=commands,
+        run_command=run_command,
+    )
+
+
+def _validate_durable_pass_evidence(*, evidence: GateEvidence, revision_dir: Path) -> None:
+    evidence_path = revision_dir / "evidence.json"
+    try:
+        persisted = json.loads(evidence_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError("durable evidence could not be revalidated after push") from error
+
+    expected = json.loads(json.dumps(asdict(evidence)))
+    invalid_index = _invalid_pass_evidence_index(list(evidence.commands), revision_dir)
+    if (
+        evidence.status != "passed"
+        or evidence.revision != revision_dir.name
+        or persisted != expected
+        or invalid_index is not None
+    ):
+        raise RuntimeError("durable evidence could not be revalidated after push")
+
+
 def run_gate(
     *,
     root: Path,
@@ -341,30 +424,21 @@ def run_gate(
     if _FULL_REVISION.fullmatch(expected_revision) is None:
         raise ValueError("expected revision must be a full 40-character lowercase hexadecimal revision")
 
-    artifact_root.mkdir(parents=True, exist_ok=True)
-    with (artifact_root / ".gate.lock").open("a+b") as lock_file:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-        commands = required_commands()
-        resolved_revision = _resolve_revision_safely(resolve_revision)
-        artifact_revision = (
-            resolved_revision
-            if resolved_revision is not None and _FULL_REVISION.fullmatch(resolved_revision) is not None
-            else expected_revision
-        )
-        revision_dir = artifact_root / artifact_revision
-        revision_dir.mkdir(parents=True, exist_ok=True)
-        return _run_gate_attempt(
+    with _artifact_lock(artifact_root):
+        return _run_gate_with_lock_held(
             root=root,
             expected_revision=expected_revision,
-            resolved_revision=resolved_revision,
             resolve_revision=resolve_revision,
-            revision_dir=revision_dir,
-            commands=commands,
+            artifact_root=artifact_root,
             run_command=run_command,
         )
 
 
-def _resolve_current_revision(root: Path) -> str:
+def resolve_bookmark_revision(root: Path, bookmark: str) -> str:
+    """Resolve one Jujutsu bookmark or revset to its full Git revision."""
+
+    if not bookmark or bookmark != bookmark.strip():
+        raise ValueError("bookmark must be non-empty and contain no surrounding whitespace")
     completed = subprocess.run(
         (
             "jj",
@@ -372,7 +446,7 @@ def _resolve_current_revision(root: Path) -> str:
             "log",
             "--no-graph",
             "-r",
-            "@",
+            bookmark,
             "-T",
             'commit_id ++ "\\n"',
         ),
@@ -383,46 +457,414 @@ def _resolve_current_revision(root: Path) -> str:
     )
     if completed.returncode != 0:
         detail = completed.stderr.strip() or "revision resolver exited without an error message"
-        raise RuntimeError(f"could not resolve the current revision: {detail}")
-    return completed.stdout.strip()
+        raise RuntimeError(f"could not resolve {bookmark!r}: {detail}")
+    revision = completed.stdout.strip()
+    if _FULL_REVISION.fullmatch(revision) is None:
+        raise RuntimeError(f"{bookmark!r} did not resolve to exactly one full revision")
+    return revision
+
+
+def _resolve_current_revision(root: Path) -> str:
+    return resolve_bookmark_revision(root, "@")
+
+
+def _available_local_ports(count: int) -> tuple[int, ...]:
+    ports: list[int] = []
+    while len(ports) < count:
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            port = cast(tuple[str, int], listener.getsockname())[1]
+        if port not in ports:
+            ports.append(port)
+    return tuple(ports)
+
+
+def _runtime_failure_detail(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")[-4000:]
+    except OSError:
+        return "runtime exited without a readable error log"
+
+
+def _prepare_isolated_source(root: Path, runtime: Path) -> tuple[Path, Path]:
+    source_root = runtime / "source"
+    shutil.copytree(
+        root,
+        source_root,
+        ignore=shutil.ignore_patterns(
+            ".artifacts",
+            ".git",
+            ".jj",
+            ".pytest_cache",
+            ".ruff_cache",
+            ".venv",
+            "__pycache__",
+            "backups",
+            "build",
+            "history",
+            "logs",
+            "node_modules",
+            "pifire.db",
+            "pifire.db-*",
+            "test-results",
+            "*.pyc",
+        ),
+    )
+    log_dir = runtime / "logs"
+    log_dir.mkdir()
+    (source_root / "backups").mkdir()
+    (source_root / "history").mkdir()
+    (source_root / "logs").symlink_to(log_dir, target_is_directory=True)
+    return source_root, log_dir
+
+
+@contextmanager
+def _isolated_live_pifire(root: Path) -> Iterator[None]:
+    """Run a disposable non-hardware backend/controller for the local gate."""
+
+    isolated_names = (
+        "PIFIRE_BACKEND_URL",
+        "PIFIRE_GATE_LIVE_DB_PATH",
+        "PIFIRE_GATE_LIVE_LOG_DIR",
+        "PORT",
+        "DEMO_PORT",
+        "PIFIRE_DB_PATH",
+        "PIFIRE_LOG_DIR",
+        *_BROWSER_BACKEND_OVERRIDES,
+    )
+    prior_environment = {name: os.environ.get(name) for name in isolated_names}
+    for name in _BROWSER_BACKEND_OVERRIDES:
+        os.environ.pop(name, None)
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="pifire-exact-revision-") as temporary:
+            runtime = Path(temporary)
+            source_root, log_dir = _prepare_isolated_source(root, runtime)
+            backend_port, app_port, demo_port = _available_local_ports(3)
+            live_database_path = str(runtime / "pifire.db")
+            live_log_dir = str(log_dir)
+            gate_environment = {
+                "PIFIRE_BACKEND_URL": f"http://127.0.0.1:{backend_port}",
+                "PIFIRE_GATE_LIVE_DB_PATH": live_database_path,
+                "PIFIRE_GATE_LIVE_LOG_DIR": live_log_dir,
+                "PORT": str(app_port),
+                "DEMO_PORT": str(demo_port),
+            }
+            service_environment = {
+                **os.environ,
+                **gate_environment,
+                "PIFIRE_DB_PATH": live_database_path,
+                "PIFIRE_LOG_DIR": live_log_dir,
+            }
+            os.environ.update(gate_environment)
+            os.environ.pop("PIFIRE_DB_PATH", None)
+            os.environ.pop("PIFIRE_LOG_DIR", None)
+
+            control_stdout_path = log_dir / "control.stdout.log"
+            control_stderr_path = log_dir / "control.stderr.log"
+            web_stdout_path = log_dir / "web.stdout.log"
+            web_stderr_path = log_dir / "web.stderr.log"
+            processes: list[subprocess.Popen[bytes]] = []
+            try:
+                initialization = subprocess.run(
+                    (
+                        sys.executable,
+                        "-c",
+                        "from common import datastore; "
+                        "from common.persistence.runtime import read_settings, write_settings; "
+                        "datastore.init(); settings = read_settings(); "
+                        "settings['platform']['real_hw'] = False; write_settings(settings)",
+                    ),
+                    cwd=source_root,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    env=service_environment,
+                )
+                if initialization.returncode != 0:
+                    detail = initialization.stderr.strip() or "datastore initialization failed without an error message"
+                    raise RuntimeError(f"could not initialize isolated PiFire: {detail}")
+
+                with (
+                    control_stdout_path.open("wb") as control_stdout,
+                    control_stderr_path.open("wb") as control_stderr,
+                    web_stdout_path.open("wb") as web_stdout,
+                    web_stderr_path.open("wb") as web_stderr,
+                ):
+                    control = subprocess.Popen(
+                        (sys.executable, "control.py"),
+                        cwd=source_root,
+                        env=service_environment,
+                        stdout=control_stdout,
+                        stderr=control_stderr,
+                    )
+                    processes.append(control)
+                    web = subprocess.Popen(
+                        (
+                            sys.executable,
+                            "-m",
+                            "gunicorn",
+                            "-k",
+                            "gthread",
+                            "--threads",
+                            "25",
+                            "-b",
+                            f"127.0.0.1:{backend_port}",
+                            "-w",
+                            "1",
+                            "app:app",
+                        ),
+                        cwd=source_root,
+                        env=service_environment,
+                        stdout=web_stdout,
+                        stderr=web_stderr,
+                    )
+                    processes.append(web)
+
+                    deadline = time.monotonic() + 60
+                    while True:
+                        if control.poll() is not None:
+                            control_stderr.flush()
+                            raise RuntimeError(
+                                "isolated PiFire controller exited before readiness: "
+                                f"{_runtime_failure_detail(control_stderr_path)}"
+                            )
+                        if web.poll() is not None:
+                            web_stderr.flush()
+                            raise RuntimeError(
+                                "isolated PiFire backend exited before readiness: "
+                                f"{_runtime_failure_detail(web_stderr_path)}"
+                            )
+                        try:
+                            with urllib.request.urlopen(
+                                f"http://127.0.0.1:{backend_port}/api/get/mode",
+                                timeout=1,
+                            ) as response:
+                                if response.status == 200:
+                                    break
+                        except OSError:
+                            pass
+                        if time.monotonic() >= deadline:
+                            web_stderr.flush()
+                            raise RuntimeError(
+                                "isolated PiFire backend did not become ready: "
+                                f"{_runtime_failure_detail(web_stderr_path)}"
+                            )
+                        time.sleep(0.25)
+
+                    yield
+            finally:
+                for process in reversed(processes):
+                    if process.poll() is None:
+                        process.terminate()
+                for process in reversed(processes):
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        _ = process.wait(timeout=5)
+    finally:
+        for name, value in prior_environment.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+
+def _verify_bookmark(
+    *,
+    root: Path,
+    bookmark: str,
+    artifact_root: Path,
+    run_command: _RunCommand = subprocess.run,
+) -> GateEvidence:
+    bookmark_revision = resolve_bookmark_revision(root, bookmark)
+    current_revision = _resolve_current_revision(root)
+    if bookmark_revision != current_revision:
+        raise RuntimeError(
+            f"local bookmark {bookmark!r} does not equal the current revision: "
+            f"{bookmark_revision} != {current_revision}"
+        )
+    with _isolated_live_pifire(root):
+        return run_gate(
+            root=root,
+            expected_revision=bookmark_revision,
+            resolve_revision=lambda: _resolve_current_revision(root),
+            artifact_root=artifact_root,
+            run_command=run_command,
+        )
+
+
+def push_verified_bookmark(
+    *,
+    root: Path,
+    bookmark: str,
+    artifact_root: Path,
+    run_command: _RunCommand = subprocess.run,
+) -> GateEvidence:
+    """Gate and push the one authorized bookmark without reusing evidence."""
+
+    if bookmark != _VERIFIED_BOOKMARK:
+        raise ValueError(f"push is restricted to bookmark {_VERIFIED_BOOKMARK!r}")
+
+    bookmark_revision = resolve_bookmark_revision(root, bookmark)
+    current_revision = _resolve_current_revision(root)
+    if bookmark_revision != current_revision:
+        raise RuntimeError(
+            f"local bookmark {bookmark!r} does not equal the current revision: "
+            f"{bookmark_revision} != {current_revision}"
+        )
+
+    with _artifact_lock(artifact_root):
+        with _isolated_live_pifire(root):
+            evidence = _run_gate_with_lock_held(
+                root=root,
+                expected_revision=bookmark_revision,
+                resolve_revision=lambda: _resolve_current_revision(root),
+                artifact_root=artifact_root,
+                run_command=run_command,
+            )
+        if evidence.status != "passed":
+            return evidence
+
+        post_gate_bookmark = resolve_bookmark_revision(root, bookmark)
+        post_gate_current = _resolve_current_revision(root)
+        if post_gate_bookmark != evidence.revision or post_gate_current != evidence.revision:
+            raise RuntimeError(
+                "local bookmark or current revision changed after the gate: "
+                f"evidence={evidence.revision}, bookmark={post_gate_bookmark}, current={post_gate_current}"
+            )
+
+        push_argv = ("jj", "git", "push", "-b", _VERIFIED_BOOKMARK)
+        completed = run_command(
+            push_argv,
+            cwd=root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if completed.returncode != 0:
+            detail = getattr(completed, "stderr", "")
+            detail = detail.strip() if isinstance(detail, str) else ""
+            raise RuntimeError(f"push failed: {detail or 'jj exited without an error message'}")
+
+        remote_revision = resolve_bookmark_revision(root, f"{bookmark}@origin")
+        if remote_revision != evidence.revision:
+            raise RuntimeError(
+                f"remote-tracking bookmark {bookmark!r} does not equal the evidence revision after push: "
+                f"{remote_revision} != {evidence.revision}"
+            )
+        _validate_durable_pass_evidence(
+            evidence=evidence,
+            revision_dir=artifact_root / evidence.revision,
+        )
+        return evidence
 
 
 @dataclass(frozen=True, slots=True)
-class _VerifyArguments:
-    expected_revision: str
+class _Arguments:
+    operation: Literal["verify", "verify-bookmark", "push", "verify-ci"]
+    expected_revision: str | None
+    bookmark: str | None
     artifact_root: Path
 
 
-def _parse_args(argv: list[str] | None = None) -> _VerifyArguments:
+def _parse_args(argv: list[str] | None = None) -> _Arguments:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="operation", required=True)
+
     verify = subparsers.add_parser("verify", help="run the exact-revision integration gate")
     _ = verify.add_argument("--expected-revision", required=True)
     _ = verify.add_argument("--artifact-root", required=True, type=Path)
+
+    verify_bookmark = subparsers.add_parser(
+        "verify-bookmark",
+        help="gate the revision named by a local bookmark",
+    )
+    _ = verify_bookmark.add_argument("--bookmark", required=True)
+    _ = verify_bookmark.add_argument("--artifact-root", type=Path, default=_DEFAULT_ARTIFACT_ROOT)
+
+    push = subparsers.add_parser("push", help="gate and push the verified bookmark")
+    _ = push.add_argument("--bookmark", required=True)
+    _ = push.add_argument("--artifact-root", type=Path, default=_DEFAULT_ARTIFACT_ROOT)
+
+    verify_ci = subparsers.add_parser("verify-ci", help="run the gate for the exact GitHub Actions revision")
+    _ = verify_ci.add_argument("--expected-revision", required=True)
+    _ = verify_ci.add_argument("--artifact-root", type=Path, default=_DEFAULT_ARTIFACT_ROOT)
+
     values = cast(dict[str, object], vars(parser.parse_args(argv)))
+    operation = values["operation"]
     expected_revision = values.get("expected_revision")
+    bookmark = values.get("bookmark")
     artifact_root = values.get("artifact_root")
-    if not isinstance(expected_revision, str) or not isinstance(artifact_root, Path):
-        parser.error("verify requires --expected-revision and --artifact-root")
-    return _VerifyArguments(
+    if (
+        operation not in {"verify", "verify-bookmark", "push", "verify-ci"}
+        or (expected_revision is not None and not isinstance(expected_revision, str))
+        or (bookmark is not None and not isinstance(bookmark, str))
+        or not isinstance(artifact_root, Path)
+    ):
+        parser.error("invalid exact-revision gate arguments")
+    return _Arguments(
+        operation=cast(Literal["verify", "verify-bookmark", "push", "verify-ci"], operation),
         expected_revision=expected_revision,
+        bookmark=bookmark,
         artifact_root=artifact_root,
     )
+
+
+def _validate_ci_environment(expected_revision: str) -> None:
+    if os.environ.get("CI") != "true":
+        raise ValueError("verify-ci requires CI=true")
+    github_revision = os.environ.get("GITHUB_SHA")
+    if github_revision is None:
+        raise ValueError("verify-ci requires GITHUB_SHA")
+    if _FULL_REVISION.fullmatch(github_revision) is None:
+        raise ValueError("GITHUB_SHA must be a full 40-character lowercase hexadecimal revision")
+    if github_revision != expected_revision:
+        raise ValueError("GITHUB_SHA must exactly match --expected-revision")
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     root = Path.cwd()
     try:
-        evidence = run_gate(
-            root=root,
-            expected_revision=args.expected_revision,
-            artifact_root=args.artifact_root,
-            resolve_revision=lambda: _resolve_current_revision(root),
-        )
+        if args.operation == "verify-ci":
+            assert args.expected_revision is not None
+            _validate_ci_environment(args.expected_revision)
+            evidence = run_gate(
+                root=root,
+                expected_revision=args.expected_revision,
+                artifact_root=args.artifact_root,
+                resolve_revision=lambda: _resolve_current_revision(root),
+            )
+        elif args.operation == "verify":
+            assert args.expected_revision is not None
+            evidence = run_gate(
+                root=root,
+                expected_revision=args.expected_revision,
+                artifact_root=args.artifact_root,
+                resolve_revision=lambda: _resolve_current_revision(root),
+            )
+        elif args.operation == "verify-bookmark":
+            assert args.bookmark is not None
+            evidence = _verify_bookmark(
+                root=root,
+                bookmark=args.bookmark,
+                artifact_root=args.artifact_root,
+            )
+        else:
+            assert args.bookmark is not None
+            evidence = push_verified_bookmark(
+                root=root,
+                bookmark=args.bookmark,
+                artifact_root=args.artifact_root,
+            )
     except ValueError as error:
         print(f"exact-revision gate: {error}", file=sys.stderr)
         return 2
+    except RuntimeError as error:
+        print(f"exact-revision gate: {error}", file=sys.stderr)
+        return 1
     except OSError as error:
         print(f"exact-revision gate: could not write artifacts: {error}", file=sys.stderr)
         return 1
