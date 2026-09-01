@@ -55,6 +55,18 @@ function mount(comments: CookFileComment[], onChanged = rs.fn(), assets = ASSETS
 }
 
 describe("CommentList", () => {
+  it("closes the attach-media picker on Escape", async () => {
+    const user = userEvent.setup();
+    mount([comment()]);
+    await user.click(
+      screen.getByRole("button", { name: "Attach media to comment from 2026-07-20 14:05" }),
+    );
+    expect(screen.getByText("Attach media")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByText("Attach media")).not.toBeInTheDocument();
+  });
+
   it("closes the lightbox on Escape", async () => {
     const user = userEvent.setup();
     mount([comment({ assets: ["a1.png"] })]);

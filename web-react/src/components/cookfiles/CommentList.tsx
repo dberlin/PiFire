@@ -54,6 +54,8 @@ export function CommentList({ filename, parentId, comments, assets, onChanged }:
   // torn down and re-registered on every render.
   const closeLightbox = useCallback(() => setLightbox(null), []);
   useDismissOnEscape(lightbox !== null, closeLightbox);
+  const closePicker = useCallback(() => setPicking(null), []);
+  useDismissOnEscape(picking !== null, closePicker);
 
   const run = (work: Promise<unknown>, onDone?: () => void) => {
     setBusy(true);
