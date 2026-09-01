@@ -344,6 +344,20 @@ def test_check_changes_nothing(manifest):
     assert not runner.ran("jj", "describe")
 
 
+def test_check_refreshes_remote_refs_before_reporting(manifest):
+    runner = _release_runner()
+
+    assert _cut(runner, manifest, ["--check"]) == 0
+
+    fetch = runner.calls.index(["git", "fetch", "--tags", "--force"])
+    report = next(
+        index
+        for index, call in enumerate(runner.calls)
+        if call[:4] == ["git", "tag", "--sort=v:refname", "--merged"]
+    )
+    assert fetch < report
+
+
 def test_a_tag_that_version_sorts_below_an_existing_one_exits_nonzero(manifest):
     # --sort=v:refname is a VERSION sort, not creation order: a tag sorting
     # below an existing one is created, pushed, and silently ignored.

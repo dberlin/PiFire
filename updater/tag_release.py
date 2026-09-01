@@ -358,11 +358,13 @@ def main(argv=None, runner=None, vcs=None, manifest=None) -> int:
 
     bookmark = args.bookmark or vcs.resolve_bookmark()
 
-    if args.increment:
-        # Refresh before deriving or writing anything. A stale local tag set
-        # could otherwise choose a name that already exists remotely, publish
-        # the release commit, then fail only when the duplicate tag is pushed.
+    if args.increment or args.check:
+        # Refresh before deriving or reporting anything. Stale remote refs can
+        # otherwise select an existing name or misreport what a deployed
+        # checkout on the publication bookmark will show.
         runner.run("git", "fetch", "--tags", "--force")
+
+    if args.increment:
         ref = measured_against(runner, bookmark)
         current_tag = latest_merged_tag(runner, ref)
         if not current_tag:
