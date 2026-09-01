@@ -22,8 +22,8 @@
     "test:e2e": "playwright test",
     "test:e2e:fidelity": "playwright test --project=fidelity-pages --project=fidelity-chrome --project=fidelity-pellets --project=fidelity --project=reflow --project=panel",
     "baseline:capture": "PF_CAPTURE=1 playwright test --project=fidelity-pages --project=fidelity-chrome --project=fidelity-pellets --project=fidelity",
-    "lint": "biome check . && eslint .",
-    "format": "biome format --write .",
+    "lint": "oxlint && oxfmt --check .",
+    "format": "oxfmt .",
     "gen:types": "bun scripts/gen-types.ts --write",
     "gen:types:check": "bun scripts/gen-types.ts --check"
   },
@@ -39,7 +39,6 @@
     "uplot": "^1.6.32"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.11",
     "@playwright/test": "^1.62.1",
     "@rsbuild/core": "2.2.1",
     "@rsbuild/plugin-react": "2.1.0",
@@ -52,17 +51,12 @@
     "@types/node": "^26.4.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
-    "@typescript-eslint/parser": "8.68.0",
     "dom-accessibility-api": "^0.7.1",
-    "eslint": "^10.9.1",
-    "eslint-plugin-react-hooks": "^7.1.1",
-    "eslint-plugin-react-refresh": "^0.5.5",
     "jsdom": "^30.0.1",
     "json-schema-to-typescript": "^16.0.0",
     "oxfmt": "^0.65.0",
     "oxlint": "^1.80.0",
     "tailwindcss": "^4.3.3",
-    "typescript": "^5.9.3",
     "typescript7": "npm:typescript@7.0.2"
   }
 }

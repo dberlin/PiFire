@@ -146,7 +146,7 @@ export function CommentList({ filename, parentId, comments, assets, onChanged }:
                     className="pf-cf-comment-thumb"
                     src={assetThumbUrl(parentId, name)}
                     //  Not "Photo ...": screen readers already announce an
-                    //  <img> as an image, and biome's noRedundantAlt says so.
+                    //  <img> as an image, so naming the type here repeats it.
                     alt={`Attachment ${name}`}
                   />
                 </button>

@@ -1,16 +1,16 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  // The only lint config in the repo. Replaces both web-react/biome.jsonc's
-  // linter half and eslint.config.js. The React Compiler diagnostics that
-  // eslint-plugin-react-hooks used to carry alone now live in oxlint's react
-  // plugin (22 rules, shipped 2026-08-18) -- which is what retired the
-  // two-linter arrangement.
+  // The only lint config in the repo. It covers web-react/ and nothing else --
+  // packages/pifire-core and mobile/ are formatted but not linted.
+  //
+  // The `react` plugin is not optional here: it carries the React Compiler
+  // diagnostics (22 rules), including set-state-in-effect, purity and
+  // immutability -- the house render-phase-sync rules.
   "plugins": ["react", "jsx-a11y", "typescript", "unicorn", "oxc"],
-  // `correctness` only. Adding `suspicious` surfaces 97 findings that Biome's
-  // recommended preset never flagged -- unicorn/consistent-function-scoping,
-  // unicorn/no-array-sort and eslint/no-shadow, all style refactors rather
-  // than defects. This migration is a like-for-like swap, so the category
-  // stays off; enabling it is a deliberate follow-up, not a side effect.
+  // `correctness` only. `suspicious` adds 97 findings across this codebase --
+  // unicorn/consistent-function-scoping, unicorn/no-array-sort and
+  // eslint/no-shadow -- which are style refactors rather than defects. Turning
+  // it on is a deliberate decision with a cleanup attached, not a default.
   "categories": {
     "correctness": "error"
   },
@@ -23,25 +23,25 @@
     "src/helpers/settings/settingsDefaults.gen.ts"
   ],
   "rules": {
-    // Outside the enabled category (pedantic / restriction respectively), so
-    // both need enabling by name to preserve today's coverage.
+    // Both sit outside `correctness` (pedantic and restriction respectively),
+    // so they only run if named here.
     "react/rules-of-hooks": "error",
+    // allowConstantExport keeps files that pair a component with a constant
+    // from warning; a component paired with a *hook* still needs an inline
+    // disable (see AppPrefs.tsx).
     "react/only-export-components": ["warn", { "allowConstantExport": true }],
 
     // Inapplicable, not deferred: this rule is for the legacy JSX transform.
     // tsconfig.json sets "jsx": "react-jsx" (the automatic runtime), so React
-    // is injected by the compiler and does not need to be in scope. Left on,
-    // it emits 3066 false positives. Biome's recommended preset knows about
-    // the automatic runtime and never had this rule.
+    // is injected by the compiler and never needs to be in scope. Left on, it
+    // reports every JSX element in the codebase -- 3066 false positives.
     "react/react-in-jsx-scope": "off",
 
-    // a11y deferrals. The first two carry over from biome.jsonc; the rest are
-    // rules Biome did not have, deferred under the same standing house rule.
-    //
-    // All findings are on existing modal/gauge/table widgets (click-to-dismiss
-    // scrims, SVG gauge, role= attributes that want semantic tags, controls
-    // needing labels). Per house rules, a11y widget restructuring is out of
-    // scope here -- scheduled as a separate follow-up.
+    // a11y deferrals. All findings are on existing modal/gauge/table widgets
+    // (click-to-dismiss scrims, SVG gauge, role= attributes that want semantic
+    // tags, controls needing labels). Per house rules, a11y widget
+    // restructuring is out of scope for toolchain work -- scheduled as a
+    // separate follow-up.
     "jsx-a11y/click-events-have-key-events": "off",
     "jsx-a11y/no-static-element-interactions": "off",
     "jsx-a11y/prefer-tag-over-role": "off",
@@ -49,9 +49,9 @@
     "jsx-a11y/role-supports-aria-props": "off",
     "jsx-a11y/no-noninteractive-element-interactions": "off",
 
-    // 3 findings, all genuine dead code (a redundant spread and two
-    // `?? []` fallbacks inside spreads). Deferred rather than fixed to keep
-    // this migration free of source edits; cheap to clean up separately.
+    // 3 findings, all genuine dead code (a redundant spread and two `?? []`
+    // fallbacks inside spreads). Cheap to clean up, but they are source edits
+    // and belong in their own change.
     "unicorn/no-useless-spread": "off",
     "unicorn/no-useless-fallback-in-spread": "off"
   }

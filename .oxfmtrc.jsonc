@@ -1,19 +1,18 @@
 {
   "$schema": "./web-react/node_modules/oxfmt/configuration_schema.json",
   // Formats JSON everywhere outside web-react/, which has its own nested
-  // config (web-react/.oxfmtrc.json) covering its JS, TS, CSS and JSON
-  // together.
+  // config covering its JS, TS, CSS and JSON together. oxfmt resolves the
+  // NEAREST config per file and does not merge, so nothing here applies
+  // under web-react/.
   //
-  // The Biome config this replaces used an ALLOW-list ("includes":
-  // ["**/*.json", ...]), so its scope was JSON and nothing else. oxfmt only
-  // has a deny-list, so that scope has to be reconstructed by denying every
-  // other extension -- without this, oxfmt reformats 362 files it was never
-  // formatting before (all of mobile/'s TS/TSX, every README, the GitHub
-  // workflows). Widening the scope may be worth doing on purpose one day;
-  // it should not happen as a side effect of changing formatters.
+  // Scope is JSON and nothing else. oxfmt offers only a deny-list, so that
+  // scope has to be spelled out by denying every other extension -- do not
+  // "simplify" the list below. Without it this config also reformats all of
+  // mobile/'s TS/TSX, every README and the GitHub workflows: 362 files.
+  // Widening the scope may be worth doing deliberately; it should not happen
+  // by accident.
   //
-  // oxfmt reads .gitignore by default, which is what biome.jsonc's
-  // "vcs": { "useIgnoreFile": true } asked for explicitly.
+  // .gitignore is honored by default, so ignored paths need no entry here.
   "ignorePatterns": [
     "**/node_modules/**",
     "web-react/**",
@@ -22,7 +21,7 @@
     "docs/**",
     ".superpowers/**",
 
-    // Everything that is not JSON, to reproduce the old allow-list.
+    // Everything that is not JSON.
     "**/*.ts",
     "**/*.tsx",
     "**/*.js",
@@ -38,16 +37,15 @@
 
     // Listed separately because it is a landmine, not a scope choice: this is
     // QML JavaScript, and its leading `.pragma library` is not valid JS. oxfmt
-    // fails to parse it outright, which fails the whole run. Keep this
-    // exclusion even if the JS denial above is ever lifted.
+    // cannot parse it and fails the whole run. Keep this exclusion even if the
+    // JS denial above is ever lifted.
     "display/qml/**",
 
-    // Excluded because it carries a byte-level contract that a formatter
-    // breaks -- not because anyone chose its style. Digest-pinned by
+    // Carries a byte-level contract that a formatter breaks -- not a style
+    // anyone chose. Digest-pinned by
     // tests/characterization/test_process_command_golden.py.
     "tests/characterization/fixtures/**"
   ],
-  // On by default; would reorder hand-maintained package.json files, which is
-  // churn this migration did not ask for.
+  // On by default. Reordering hand-maintained package.json files is churn.
   "sortPackageJson": false
 }
