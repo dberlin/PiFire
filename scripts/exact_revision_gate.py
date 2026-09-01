@@ -695,7 +695,8 @@ def _isolated_live_pifire(root: Path) -> Iterator[None]:
                         "from common import datastore; "
                         "from common.persistence.runtime import read_settings, write_settings; "
                         "datastore.init(); settings = read_settings(); "
-                        "settings['platform']['real_hw'] = False; write_settings(settings)",
+                        "settings['platform']['real_hw'] = False; "
+                        "settings['globals']['first_time_setup'] = False; write_settings(settings)",
                     ),
                     cwd=source_root,
                     check=False,
@@ -762,7 +763,7 @@ def _isolated_live_pifire(root: Path) -> Iterator[None]:
                                 f"http://127.0.0.1:{backend_port}/api/get/mode",
                                 timeout=1,
                             ) as response:
-                                if response.status == 200:
+                                if 200 <= response.status < 300:
                                     break
                         except OSError:
                             pass

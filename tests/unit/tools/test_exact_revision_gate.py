@@ -1353,6 +1353,8 @@ def test_local_live_runtime_clears_browser_backend_overrides_for_entire_scope_an
         assert capture_output is True
         assert text is True
         assert_overrides_cleared(env)
+        assert _argv[:2] == (sys.executable, "-c")
+        assert "settings['globals']['first_time_setup'] = False" in _argv[2]
         service_environments.append(env)
         return subprocess.CompletedProcess((), 0, stdout="", stderr="")
 
@@ -1383,7 +1385,7 @@ def test_local_live_runtime_clears_browser_backend_overrides_for_entire_scope_an
         assert_overrides_cleared()
 
         class Response:
-            status = 200
+            status = 201
 
         yield Response()
 
@@ -1984,6 +1986,7 @@ def test_integration_workflow_has_exact_revision_gate_and_safe_live_runtime() ->
     assert "playwright install --with-deps chromium" in scripts
     assert "history" in scripts
     assert 'settings["platform"]["real_hw"] = False' in scripts
+    assert 'settings["globals"]["first_time_setup"] = False' in scripts
     assert "uv run python control.py" in scripts
     assert "uv run gunicorn" in scripts
     ignore_rules = (_REPOSITORY_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
