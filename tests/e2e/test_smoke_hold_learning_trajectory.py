@@ -624,6 +624,7 @@ def _fit(repository: LearningTrajectoryRepository, segment) -> GreyFitSuccess:
     return result
 
 
+@pytest.mark.slow
 def test_cold_and_smoke_started_hold_fit_stable_parameters_from_one_physical_trajectory(
     ds,
     tmp_path,
@@ -1325,6 +1326,7 @@ def _assert_real_cook_hold_smoke(
     assert restarted_report.scored_count == report_before_restart.scored_count
 
 
+@pytest.mark.slow
 def test_real_cook_mpc_chamber_stream_completes_full_hold_and_drains_learning(
     ds,
     monkeypatch,
@@ -1340,6 +1342,7 @@ def test_real_cook_mpc_chamber_stream_completes_full_hold_and_drains_learning(
     )
 
 
+@pytest.mark.slow
 def test_real_cook_pid_sp_august_28_chamber_stream_completes_full_hold_and_drains_learning(
     ds,
     monkeypatch,

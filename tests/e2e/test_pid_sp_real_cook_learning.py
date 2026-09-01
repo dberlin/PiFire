@@ -7,6 +7,8 @@ from dataclasses import dataclass, replace
 from itertools import count
 from uuid import NAMESPACE_URL, uuid5
 
+import pytest
+
 from common.control_trace import (
     ControllerType,
     ModelObservationPayload,
@@ -440,6 +442,7 @@ def test_august_28_fixture_has_one_accounted_terminal_result_per_exact_frame() -
     assert accounted == {(frame.start_s, frame.end_s) for frame in replay.actuation_frames}
 
 
+@pytest.mark.slow
 def test_august_28_raw_evidence_survives_pid_sp_stop_fit_and_cold_restart(
     ds,
     tmp_path,

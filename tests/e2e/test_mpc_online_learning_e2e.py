@@ -972,6 +972,7 @@ def _identity(snapshot: dict[str, Any]) -> tuple[str, int]:
     return digest, generation
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize(
     "database_state",
     ("fresh-v7", "upgraded-v6"),

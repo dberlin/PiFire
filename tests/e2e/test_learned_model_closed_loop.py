@@ -1131,6 +1131,7 @@ def _transplant_failure(
         runner.stop()
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("plant_type,family", [(GrillSim, "grill"), (MAKGrillSim, "mak")])
 def test_production_gates_qualify_only_on_strict_held_out_prediction(
     ds,
@@ -1190,6 +1191,7 @@ def test_production_gates_qualify_only_on_strict_held_out_prediction(
         _close_training(corpus)
 
 
+@pytest.mark.slow
 def test_transplanted_checkpoint_requires_passive_restore_revalidation(ds) -> None:
     corpus = _collect_training_corpus(MAKGrillSim, "mak")
     try:

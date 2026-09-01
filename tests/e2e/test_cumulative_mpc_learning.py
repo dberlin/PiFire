@@ -291,6 +291,7 @@ def _fit_request(
     )
 
 
+@pytest.mark.slow
 def test_two_cooks_produce_one_exact_manifest_fit_and_replay_through_cookfile_and_database(
     ds,
     tmp_path: Path,

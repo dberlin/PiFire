@@ -153,6 +153,7 @@ def test_aug29_cooks_share_compatibility_partition_inputs_without_cook_identity(
     assert replay_compatibility_digests(changed)[3] != first_digests[3]
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize(
     ("campaign_id", "expected_paths"),
     (
@@ -223,6 +224,7 @@ def test_exact_mpc_campaigns_replay_in_manifest_order_with_cold_restart_and_term
         }
 
 
+@pytest.mark.slow
 def test_duplicate_mpc_aug29_replay_is_byte_identical_across_two_fresh_baseline_copies(tmp_path: Path) -> None:
     first = run_mpc_campaign("mpc-aug29", tmp_path / "first.sqlite")
     second = run_mpc_campaign("mpc-aug29", tmp_path / "second.sqlite")
@@ -238,6 +240,7 @@ def test_duplicate_mpc_aug29_replay_is_byte_identical_across_two_fresh_baseline_
     assert len(first.primary_identities) == len(set(first.primary_identities))
 
 
+@pytest.mark.slow
 def test_applicable_failure_recovery_matrix_is_terminal_and_idempotent(tmp_path: Path) -> None:
     evicted = run_mpc_campaign(
         "mpc-aug27",
