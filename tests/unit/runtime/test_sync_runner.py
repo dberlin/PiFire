@@ -113,11 +113,22 @@ def test_sync_runner_float_output_has_no_fan():
     out = SyncControllerRunner(FloatCore()).latest_from(190.0)
     assert out.cycle_ratio == 0.25 and out.fan is None
 
-def test_sync_runner_uses_allocation_duty_and_preserves_raw_diagnostics():
+@pytest.mark.parametrize(
+    ("raw_output", "allocated_duty", "clamp_reason"),
+    [
+        pytest.param(-0.15963, 0.0, AllocationClampReason.AUGER_MIN, id="lower-bound"),
+        pytest.param(1.25, 1.0, AllocationClampReason.AUGER_MAX, id="upper-bound"),
+    ],
+)
+def test_sync_runner_uses_allocation_duty_and_preserves_raw_diagnostics(
+    raw_output,
+    allocated_duty,
+    clamp_reason,
+):
     diagnostics = PidTraceDiagnostics(
         observed_dt_seconds=5.0,
         error=1.0,
-        proportional_term=-0.15963,
+        proportional_term=raw_output,
         integral_term=0.0,
         derivative_term=0.0,
         integral_accumulator=0.0,
@@ -131,24 +142,24 @@ def test_sync_runner_uses_allocation_duty_and_preserves_raw_diagnostics():
         center=0.0,
         previous_temperature=190.0,
         previous_update_time=0.0,
-        raw_output=-0.15963,
-        final_output=0.0,
+        raw_output=raw_output,
+        final_output=allocated_duty,
     )
     allocation = AllocationResult(
-        normalized_combustion_load=0.0,
-        auger_duty=0.0,
+        normalized_combustion_load=allocated_duty,
+        auger_duty=allocated_duty,
         fan_duty=None,
         u_max=1.0,
         fan_min_pct=0.0,
         fan_max_pct=0.0,
         fan_enabled=False,
-        auger_clamp_reason=AllocationClampReason.AUGER_MIN,
+        auger_clamp_reason=clamp_reason,
         fan_clamp_reason=AllocationClampReason.NONE,
     )
 
     class AllocatedCore(_Core):
         def update(self, temp):
-            return -0.15963
+            return raw_output
 
         def trace_diagnostics(self):
             return diagnostics
@@ -158,9 +169,9 @@ def test_sync_runner_uses_allocation_duty_and_preserves_raw_diagnostics():
 
     out = SyncControllerRunner(AllocatedCore()).latest_from(190.0)
 
-    assert out.cycle_ratio == 0.0
+    assert out.cycle_ratio == allocated_duty
     assert out.diagnostics is diagnostics
-    assert out.diagnostics.raw_output == -0.15963
+    assert out.diagnostics.raw_output == raw_output
     assert out.allocation is allocation
 
 

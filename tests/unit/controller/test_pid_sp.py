@@ -1673,7 +1673,7 @@ def test_pid_sp_paces_its_guards_off_the_real_auger_frame(clock):
     ("raw_output", "expected_output", "expected_reason"),
     [
         pytest.param(1.25, 1.0, AllocationClampReason.AUGER_MAX, id="upper-bound"),
-        pytest.param(-0.25, 0.0, AllocationClampReason.AUGER_MIN, id="lower-bound"),
+        pytest.param(-0.15963, 0.0, AllocationClampReason.AUGER_MIN, id="lower-bound"),
     ],
 )
 def test_pid_sp_owns_bounded_direct_auger_allocation_after_every_update(
