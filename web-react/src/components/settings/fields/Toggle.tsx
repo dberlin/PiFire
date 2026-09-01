@@ -21,14 +21,16 @@ export function Toggle({
 }) {
   return (
     <Field label={label} hint={hint} error={error} path={path}>
-      {({ id, describedBy, invalid }) => (
+      {({ id, describedBy }) => (
         <button
           id={id}
           type="button"
           className={`pf-switch ${checked ? "on" : ""}`}
           aria-pressed={checked}
+          // No aria-invalid: role="button" does not support it, so assistive
+          // tech drops it and the error never reaches a screen reader. The
+          // error text is announced through aria-describedby instead.
           aria-describedby={describedBy}
-          aria-invalid={invalid}
           disabled={disabled}
           onClick={() => !disabled && onChange(!checked)}
         >

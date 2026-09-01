@@ -28,6 +28,24 @@ describe("Toggle", () => {
     expect(screen.getByText("My Toggle")).toBeInTheDocument();
   });
 
+  it("announces the error without an aria-invalid the button role ignores", () => {
+    const onChange = rs.fn();
+    render(
+      <Toggle
+        label="Smart start"
+        checked={false}
+        onChange={onChange}
+        error="Must be enabled first"
+        path="startup.smartstart.enabled"
+      />,
+    );
+    const button = screen.getByRole("button");
+    // aria-invalid is unsupported on role="button" and is dropped by assistive
+    // tech; the error has to reach screen readers through the description.
+    expect(button).not.toHaveAttribute("aria-invalid");
+    expect(button).toHaveAccessibleDescription(/must be enabled first/i);
+  });
+
   it("inverts the checked prop on click", () => {
     const onChange = rs.fn();
     const { rerender } = render(<Toggle label="Test" checked={true} onChange={onChange} />);
