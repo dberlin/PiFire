@@ -15,10 +15,12 @@ does the same directly (no live_server here, so no helper import).
 """
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
 from common.common import display_sleep_timeout
+from common.persistence import runtime as persistence_runtime
 from common.persistence.control import (
     execute_control_writes,
     read_control,
@@ -291,7 +293,15 @@ def _reset_settings_update_flag():
     write_control_snapshot(ctrl, origin="test")
 
 
-def test_settings_update_table_save_flag_does_not_alter_stored_settings(client):
+def test_settings_update_table_save_flag_does_not_alter_stored_settings(
+    client,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        persistence_runtime,
+        "time",
+        SimpleNamespace(time=lambda: 1_788_238_296.0),
+    )
     # A real "table" payload: the whole pwm.profiles array with one duty_cycle
     # changed -- the shape PwmTab posts, a whole-array replace (not a per-element
     # merge). 25 is within the schema's [min_duty_cycle, max_duty_cycle] band.

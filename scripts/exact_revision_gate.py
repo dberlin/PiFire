@@ -980,12 +980,13 @@ def main(argv: list[str] | None = None) -> int:
         if args.operation == "verify-ci":
             assert args.expected_revision is not None
             _validate_ci_environment(args.expected_revision)
-            evidence = run_gate(
-                root=root,
-                expected_revision=args.expected_revision,
-                artifact_root=args.artifact_root,
-                resolve_revision=lambda: _resolve_current_revision(root),
-            )
+            with _isolated_live_pifire(root):
+                evidence = run_gate(
+                    root=root,
+                    expected_revision=args.expected_revision,
+                    artifact_root=args.artifact_root,
+                    resolve_revision=lambda: _resolve_current_revision(root),
+                )
         elif args.operation == "verify":
             assert args.expected_revision is not None
             evidence = run_gate(

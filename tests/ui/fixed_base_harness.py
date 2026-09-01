@@ -7,17 +7,49 @@ neutralized because `_menu_display` can reboot or halt the host.
 
 import hashlib
 import importlib
+from pathlib import Path
 from unittest import mock
 
-from PIL import ImageFont
+from PIL import ImageFont, features
+from PIL import __version__ as PILLOW_VERSION
 
 from tests.ui._driver_helpers import block_power_actions
 
+_REFERENCE_TREBUCHET_SHA256 = "b69a5b33e997c3bc55f35dde8267cb93fe5fbdc3ecbc23b1d987602a9fd2b1f2"
+_REFERENCE_PILLOW_VERSION = "12.3.0"
+_REFERENCE_FREETYPE_VERSION = "2.14.3"
+
+
+def _is_reference_renderer(
+    font_path: Path,
+    *,
+    pillow_version: str,
+    freetype_version: str | None,
+) -> bool:
+    try:
+        font_sha256 = hashlib.sha256(font_path.read_bytes()).hexdigest()
+    except OSError:
+        return False
+    return (
+        font_sha256 == _REFERENCE_TREBUCHET_SHA256
+        and pillow_version == _REFERENCE_PILLOW_VERSION
+        and freetype_version == _REFERENCE_FREETYPE_VERSION
+    )
+
+
 try:
-    ImageFont.truetype("trebuc.ttf", 20)
+    _trebuchet = ImageFont.truetype("trebuc.ttf", 20)
+    _trebuchet_path = Path(_trebuchet.path)
     FONT_AVAILABLE = True
 except OSError:
+    _trebuchet_path = None
     FONT_AVAILABLE = False
+
+GOLDEN_ENVIRONMENT_AVAILABLE = _trebuchet_path is not None and _is_reference_renderer(
+    _trebuchet_path,
+    pillow_version=PILLOW_VERSION,
+    freetype_version=features.version_module("freetype2"),
+)
 
 
 def make_base(module, rotation=0, units="F"):

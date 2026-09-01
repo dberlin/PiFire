@@ -802,6 +802,82 @@ def test_real_repository_cursor_progresses_across_stale_queued_batches(ds) -> No
         worker.close(timeout=1.0)
 
 
+def test_queued_pre_roll_rebases_across_repository_created_successor() -> None:
+    started = threading.Event()
+    release = threading.Event()
+    source_cursor = SegmentCursor(
+        segment_id="rollover-source",
+        next_ordinal=181,
+        chain_digest=_DIGEST,
+        corpus_revision=10,
+    )
+    successor_cursor = SegmentCursor(
+        segment_id="rollover-successor",
+        next_ordinal=120,
+        chain_digest=_OTHER_DIGEST,
+        corpus_revision=11,
+    )
+    advanced_successor_cursor = SegmentCursor(
+        segment_id=successor_cursor.segment_id,
+        next_ordinal=successor_cursor.next_ordinal + 1,
+        chain_digest=_DIGEST,
+        corpus_revision=12,
+    )
+    persisted: list[TrajectoryAppendBatch] = []
+
+    def persist_batch(batch: TrajectoryAppendBatch) -> SegmentCursor:
+        persisted.append(batch)
+        if len(persisted) == 1:
+            started.set()
+            assert release.wait(timeout=1.0)
+            return successor_cursor
+        if len(persisted) == 2:
+            return advanced_successor_cursor
+        return SegmentCursor(
+            segment_id=successor_cursor.segment_id,
+            next_ordinal=advanced_successor_cursor.next_ordinal + 1,
+            chain_digest=_OTHER_DIGEST,
+            corpus_revision=13,
+        )
+
+    worker = ModelPersistenceWorker(
+        _Store(),
+        _Logger(),
+        persist_trajectory_batch=persist_batch,
+    )
+    first = worker.submit_trajectory_batch(
+        TrajectoryAppendBatch(
+            cursor=source_cursor,
+            pre_roll=(_stored_frame(181, effective_mode="Smoke"),),
+        )
+    )
+    assert started.wait(timeout=1.0)
+    stale_queued = worker.submit_trajectory_batch(
+        TrajectoryAppendBatch(
+            cursor=source_cursor,
+            pre_roll=(_stored_frame(182, effective_mode="Smoke"),),
+        )
+    )
+    second_stale_queued = worker.submit_trajectory_batch(
+        TrajectoryAppendBatch(
+            cursor=source_cursor,
+            pre_roll=(_stored_frame(183, effective_mode="Smoke"),),
+        )
+    )
+    release.set()
+    try:
+        assert first.wait(timeout=1.0)
+        assert stale_queued.wait(timeout=1.0)
+        assert second_stale_queued.wait(timeout=1.0)
+        assert len(persisted) == 3
+        assert persisted[1].cursor == successor_cursor
+        assert persisted[2].cursor == advanced_successor_cursor
+        assert not worker.failed
+    finally:
+        release.set()
+        worker.close(timeout=1.0)
+
+
 def test_interleaved_segments_rebase_cached_global_corpus_revision(ds) -> None:
     repository = LearningTrajectoryRepository()
     worker = ModelPersistenceWorker(

@@ -39,6 +39,8 @@ def checkout(tmp_path):
         git("add", "-A", cwd=origin)
         git("commit", "-qm", message, cwd=origin)
     git("clone", "-q", str(origin), str(work), cwd=tmp_path)
+    git("config", "user.email", "t@example.com", cwd=work)
+    git("config", "user.name", "Test", cwd=work)
     return work
 
 
@@ -59,6 +61,13 @@ def in_checkout(monkeypatch):
         monkeypatch.chdir(path)
 
     return enter
+
+
+def test_checkout_configures_local_tagger_identity(checkout):
+    identity = git("config", "--local", "--get", "user.email", cwd=checkout)
+
+    assert identity.returncode == 0
+    assert identity.stdout.strip() == "t@example.com"
 
 
 def test_a_branch_checkout_reports_its_branch(checkout, in_checkout):

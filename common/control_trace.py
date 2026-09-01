@@ -903,8 +903,10 @@ class EstimatorSeedTracePayload:
         if self.status in {"absent", "uncertain"} and self.pre_roll_frame_count != 0:
             raise ValueError("absent or uncertain estimator seed cannot claim pre-roll frames")
         if self.status in {"exact", "short"}:
-            if len(self.delay_states) != self.required_frame_count:
-                raise ValueError("usable estimator seed requires every delay state")
+            if self.required_frame_count > 0 and not self.delay_states:
+                raise ValueError("usable estimator seed with pre-roll requires delay states")
+            if self.required_frame_count == 0 and self.delay_states:
+                raise ValueError("zero-delay estimator seed cannot contain delay states")
         elif self.delay_states:
             raise ValueError("absent or uncertain estimator seed cannot contain delay states")
         return self

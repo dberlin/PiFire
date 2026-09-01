@@ -443,6 +443,7 @@ def test_august_28_fixture_has_one_accounted_terminal_result_per_exact_frame() -
 
 
 @pytest.mark.slow
+@pytest.mark.timeout(300)
 def test_august_28_raw_evidence_survives_pid_sp_stop_fit_and_cold_restart(
     ds,
     tmp_path,

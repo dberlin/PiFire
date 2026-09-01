@@ -1265,10 +1265,16 @@ class ModelPersistenceWorker:
         if batch.cursor is None:
             return batch
         cursor = self._segment_cursors.get(batch.cursor.segment_id, batch.cursor)
-        if batch.cursor.next_ordinal > cursor.next_ordinal:
-            raise ValueError("queued trajectory cursor is ahead of durable lineage")
-        if batch.cursor.next_ordinal == cursor.next_ordinal and batch.cursor.chain_digest != cursor.chain_digest:
-            raise ValueError("queued trajectory cursor conflicts with durable lineage")
+        if cursor.segment_id == batch.cursor.segment_id:
+            if batch.cursor.next_ordinal > cursor.next_ordinal:
+                raise ValueError("queued trajectory cursor is ahead of durable lineage")
+            if batch.cursor.next_ordinal == cursor.next_ordinal and batch.cursor.chain_digest != cursor.chain_digest:
+                raise ValueError("queued trajectory cursor conflicts with durable lineage")
+        # The repository can roll a full scored segment into a successor while
+        # later frames are already queued against the source cursor. The cache
+        # deliberately maps that source identity to the returned successor;
+        # ordinal and chain values from different segment identities are not
+        # comparable, so the queued batch continues from the durable successor.
         return TrajectoryAppendBatch(
             cursor=cursor,
             begin_segment=batch.begin_segment,
@@ -1393,13 +1399,24 @@ class ModelPersistenceWorker:
         if batch.cursor is None:
             return
         source_id = batch.cursor.segment_id
+        lineage_keys = {
+            segment_id
+            for segment_id, existing in self._segment_cursors.items()
+            if segment_id == source_id or existing.segment_id == source_id
+        }
         if batch.break_reason is not None:
-            self._segment_cursors.pop(source_id, None)
+            for segment_id in lineage_keys:
+                self._segment_cursors.pop(segment_id, None)
+                self._blocked_segments.discard(segment_id)
             self._blocked_segments.discard(source_id)
+            self._blocked_segments.discard(cursor.segment_id)
             self._segment_cursors[cursor.segment_id] = cursor
         elif batch.finalize_reason is not None:
-            self._segment_cursors.pop(source_id, None)
+            for segment_id in lineage_keys:
+                self._segment_cursors.pop(segment_id, None)
         else:
+            for segment_id in lineage_keys:
+                self._segment_cursors[segment_id] = cursor
             self._segment_cursors[source_id] = cursor
 
     def _save_checkpoint(

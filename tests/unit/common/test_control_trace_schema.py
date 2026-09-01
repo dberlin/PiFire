@@ -673,6 +673,7 @@ def test_segmented_learning_payloads_require_lowercase_sha256_digests(factory, f
         {"candidate_generation": -1},
         {"status": "unsupported"},
         {"status": "uncertain", "delay_states": (0.25,)},
+        {"delay_states": ()},
     ),
 )
 def test_estimator_seed_trace_rejects_invalid_identity_status_and_counts(replacement) -> None:
@@ -699,6 +700,16 @@ def test_estimator_seed_trace_accepts_each_truthful_status(status, pre_roll_fram
 
     assert payload.status == status
     assert payload.pre_roll_frame_count == pre_roll_frame_count
+
+
+def test_estimator_seed_trace_keeps_delay_state_dimension_independent_of_pre_roll_horizon() -> None:
+    payload = replace(
+        _estimator_seed_trace_payload(),
+        delay_states=(0.25, 0.50, 0.75),
+    )
+
+    assert payload.required_frame_count == 2
+    assert payload.delay_states == (0.25, 0.50, 0.75)
 
 
 @pytest.mark.parametrize(

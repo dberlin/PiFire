@@ -18,6 +18,7 @@ from typing import Any, cast
 import pytest
 
 import controller.runtime.model_fitting as model_fitting_module
+import controller.runtime.modes.base as base_mode_module
 import controller.runtime.modes.hold as hold_module
 import controller.runtime.runner as runner_module
 from common.common import ErrorKind
@@ -93,6 +94,7 @@ from tests.fakes.probes import FakeProbes
 _FRAME_MS = _FRAME_SECONDS * 1_000
 _WALL_OFFSET_MS = 1_700_000_000_000
 _CORPUS_START_MS = 20_000_000
+_REAL_COOK_PROCESS_MONITOR_TIMEOUT_SECONDS = 300
 
 
 def _digest(label: str) -> str:
@@ -959,6 +961,21 @@ def _assert_real_cook_hold_smoke(
         model_fitting_module.GreyFitWorker,
         "start",
         capture_grey_fit_worker_start,
+    )
+    real_process_monitor = base_mode_module.Process_Monitor
+
+    def build_real_cook_process_monitor(process, on_timeout, timeout=5):
+        assert timeout == 30
+        return real_process_monitor(
+            process,
+            on_timeout,
+            timeout=_REAL_COOK_PROCESS_MONITOR_TIMEOUT_SECONDS,
+        )
+
+    monkeypatch.setattr(
+        base_mode_module,
+        "Process_Monitor",
+        build_real_cook_process_monitor,
     )
     _seed_sqlite_store(store, settings, control)
     clock = _RealCookClock(stream, start_index=stream_start_index)

@@ -1,3 +1,4 @@
+import { Agent } from "node:http";
 import { defineConfig } from "@rsbuild/core";
 import { pluginReact } from "@rsbuild/plugin-react";
 import { pluginTailwindcss } from "@rsbuild/plugin-tailwindcss";
@@ -8,6 +9,12 @@ import { ports } from "./ports";
 // and which port this server binds, come from ./ports -- see that file for how
 // to run several checkouts at once.
 const target = ports.pifireUrl;
+// Gunicorn closes idle HTTP connections after two seconds. Node's default
+// keep-alive agent can retain one until that close races the next proxied
+// request, producing a synthetic 500/504 from http-proxy-middleware even though
+// the backend is healthy. Production is same-origin; the development proxy
+// deliberately trades connection reuse for deterministic requests.
+const backendAgent = new Agent({ keepAlive: false });
 
 // Browser targets are pinned in package.json's `browserslist`, not left to
 // Rsbuild's defaults. Two reasons, and the second is the load-bearing one:
@@ -52,15 +59,15 @@ export default defineConfig({
   server: {
     port: ports.appPort,
     proxy: {
-      "/socket.io": { target, ws: true, changeOrigin: true },
-      "/api": { target, changeOrigin: true },
+      "/socket.io": { target, ws: true, changeOrigin: true, agent: backendAgent },
+      "/api": { target, changeOrigin: true, agent: backendAgent },
       // PiFire's own static assets -- currently just the wizard's board photos
       // under /static/img/wizard/. Scoped to /static/img and NOT bare /static:
       // rsbuild emits THIS app's bundles under /static/js and /static/css (see
       // web-react/dist), so a blanket /static proxy would hand every script and
       // stylesheet to Flask. rsbuild's default asset dirs are js/css/font/wasm/
       // image/media -- "img" is not one of them, so this prefix cannot collide.
-      "/static/img": { target, changeOrigin: true },
+      "/static/img": { target, changeOrigin: true, agent: backendAgent },
     },
   },
 });

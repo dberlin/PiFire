@@ -20,15 +20,15 @@ jobs:
     timeout-minutes: 90
     env:
       CI: "true"
-      PIFIRE_BACKEND_URL: http://127.0.0.1:5000
-      PIFIRE_GATE_LIVE_DB_PATH: ${{ runner.temp }}/pifire-ci/pifire.db
-      PIFIRE_GATE_LIVE_LOG_DIR: ${{ runner.temp }}/pifire-ci/logs
+      TZ: America/New_York
+      PYTEST_XDIST_AUTO_NUM_WORKERS: "1"
     steps:
       - name: Check out the exact event revision
         uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
+          fetch-tags: true
 
       - name: Set up Python 3.14
         uses: actions/setup-python@v5
@@ -36,7 +36,7 @@ jobs:
           python-version: "3.14"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v10
+        uses: astral-sh/setup-uv@v10.0.1
         with:
           enable-cache: true
 
@@ -59,84 +59,63 @@ jobs:
           resolved="$(jj --no-pager log --no-graph -r @ -T 'commit_id ++ "\n"')"
           test "${resolved}" = "${GITHUB_SHA}"
 
+      - name: Install native build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes cabextract libegl1 libglib2.0-dev
+          font_tmp="$(mktemp -d)"
+          trap 'rm -rf "${font_tmp}"' EXIT
+          curl --fail --location --retry 3 \
+            "https://downloads.sourceforge.net/project/mscorefonts2/cabs/EUupdate.EXE" \
+            --output "${font_tmp}/EUupdate.EXE"
+          curl --fail --location --retry 3 \
+            "https://downloads.sourceforge.net/project/corefonts/the%20fonts/final/impact32.exe" \
+            --output "${font_tmp}/impact32.exe"
+          printf '%s  %s\n' \
+            "464dd2cd5f09f489f9ac86ea7790b7b8548fc4e46d9f889b68d2cdce47e09ea8" \
+            "${font_tmp}/EUupdate.EXE" | sha256sum --check -
+          printf '%s  %s\n' \
+            "6061ef3b7401d9642f5dfdb5f2b376aa14663f6275e60a51207ad4facf2fccfb" \
+            "${font_tmp}/impact32.exe" | sha256sum --check -
+          mkdir "${font_tmp}/extracted"
+          cabextract -q -d "${font_tmp}/extracted" "${font_tmp}/EUupdate.EXE"
+          cabextract -q -F Impact.TTF -d "${font_tmp}/extracted" "${font_tmp}/impact32.exe"
+          printf '%s  %s\n' \
+            "b69a5b33e997c3bc55f35dde8267cb93fe5fbdc3ecbc23b1d987602a9fd2b1f2" \
+            "${font_tmp}/extracted/trebuc.ttf" | sha256sum --check -
+          printf '%s  %s\n' \
+            "7fea7f91f1140721bd7837a36ed2b1c856215f3ac08e6d2eb29c1afe235d0900" \
+            "${font_tmp}/extracted/trebucbd.ttf" | sha256sum --check -
+          printf '%s  %s\n' \
+            "00f1fc230ac99f9b97ba1a7c214eb5b909a78660cb3826fca7d64c3af5a14848" \
+            "${font_tmp}/extracted/Impact.TTF" | sha256sum --check -
+          sudo install -d -m 0755 "/usr/local/share/fonts/pifire-reference"
+          sudo install -m 0644 \
+            "${font_tmp}/extracted/"*.ttf \
+            "/usr/local/share/fonts/pifire-reference/"
+          sudo install -m 0644 \
+            "${font_tmp}/extracted/Impact.TTF" \
+            "/usr/local/share/fonts/pifire-reference/impact.ttf"
+          sudo fc-cache -f
+
       - name: Install locked dependencies
         shell: bash
         run: |
           set -euo pipefail
           uv sync --locked --all-groups
           bun install --frozen-lockfile
+          (
+            cd web-react
+            bun run build
+          )
           bunx playwright install --with-deps chromium
 
       - name: Run the exact revision gate against an isolated live PiFire
         shell: bash
         run: |
           set -euo pipefail
-          runtime="${RUNNER_TEMP}/pifire-ci"
-          mkdir -p "${runtime}/history" "${runtime}/logs"
-          test ! -e history
-          test ! -e logs
-          ln -s "${runtime}/history" history
-          ln -s "${runtime}/logs" logs
-
-          control_pid=""
-          web_pid=""
-          cleanup() {
-            set +e
-            if [[ -n "${web_pid}" ]]; then kill "${web_pid}" 2>/dev/null; fi
-            if [[ -n "${control_pid}" ]]; then kill "${control_pid}" 2>/dev/null; fi
-            if [[ -n "${web_pid}" ]]; then wait "${web_pid}" 2>/dev/null; fi
-            if [[ -n "${control_pid}" ]]; then wait "${control_pid}" 2>/dev/null; fi
-          }
-          trap cleanup EXIT
-
-          PIFIRE_DB_PATH="${runtime}/pifire.db" \
-          PIFIRE_LOG_DIR="${runtime}/logs" \
-          uv run python - <<'PY'
-          from common import datastore
-          from common.persistence.runtime import read_settings, write_settings
-
-          datastore.init()
-          settings = read_settings()
-          settings["platform"]["real_hw"] = False
-          settings["globals"]["first_time_setup"] = False
-          write_settings(settings)
-          PY
-
-          PIFIRE_DB_PATH="${runtime}/pifire.db" \
-          PIFIRE_LOG_DIR="${runtime}/logs" \
-          uv run python control.py >"${runtime}/control.stdout.log" 2>"${runtime}/control.stderr.log" &
-          control_pid=$!
-          PIFIRE_DB_PATH="${runtime}/pifire.db" \
-          PIFIRE_LOG_DIR="${runtime}/logs" \
-          uv run gunicorn -k gthread --threads 25 -b 127.0.0.1:5000 -w 1 app:app \
-            >"${runtime}/web.stdout.log" 2>"${runtime}/web.stderr.log" &
-          web_pid=$!
-
-          ready=false
-          for _ in {1..60}; do
-            if ! kill -0 "${control_pid}" 2>/dev/null; then
-              echo "PiFire controller exited before readiness" >&2
-              cat "${runtime}/control.stderr.log" >&2
-              exit 1
-            fi
-            if ! kill -0 "${web_pid}" 2>/dev/null; then
-              echo "PiFire backend exited before readiness" >&2
-              cat "${runtime}/web.stderr.log" >&2
-              exit 1
-            fi
-            if curl --fail --silent --show-error --max-time 2 \
-              http://127.0.0.1:5000/api/get/mode >/dev/null; then
-              ready=true
-              break
-            fi
-            sleep 1
-          done
-          if [[ "${ready}" != true ]]; then
-            echo "PiFire backend did not become ready" >&2
-            cat "${runtime}/web.stderr.log" >&2
-            exit 1
-          fi
-
           uv run python scripts/exact_revision_gate.py verify-ci --expected-revision "${{ github.sha }}"
 
       - name: Upload exact-revision evidence

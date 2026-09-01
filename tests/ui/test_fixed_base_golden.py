@@ -36,9 +36,12 @@ import pathlib
 
 import pytest
 
-from tests.ui.fixed_base_harness import FONT_AVAILABLE, make_base, render
+from tests.ui.fixed_base_harness import GOLDEN_ENVIRONMENT_AVAILABLE, make_base, render
 
-pytestmark = pytest.mark.skipif(not FONT_AVAILABLE, reason="trebuc.ttf not installed")
+pytestmark = pytest.mark.skipif(
+    not GOLDEN_ENVIRONMENT_AVAILABLE,
+    reason="pixel-golden reference font or Pillow renderer not installed",
+)
 
 GOLDEN = pathlib.Path(__file__).parent / "fixtures" / "fixed_base_golden.json"
 

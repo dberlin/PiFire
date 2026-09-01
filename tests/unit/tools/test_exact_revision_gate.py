@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import IO, Literal, cast, final, get_type_hints, override
 
 import pytest
+
 from scripts import exact_revision_gate as gate_module
 from scripts.exact_revision_gate import (
     CommandEvidence,
@@ -1211,7 +1212,14 @@ class _PushRunner(_CommandRunner):
         self.push_calls: list[tuple[tuple[str, ...], Path]] = []
 
     @override
-    def __call__(self, argv: tuple[str, ...], *, cwd: Path, check: bool, **kwargs: object) -> subprocess.CompletedProcess:
+    def __call__(
+        self,
+        argv: tuple[str, ...],
+        *,
+        cwd: Path,
+        check: bool,
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess:
         if len(argv) >= 6 and argv[:2] == ("jj", "--at-operation") and argv[3:6] == ("git", "push", "-b"):
             assert check is False
             assert kwargs == {"capture_output": True, "text": True}
@@ -1890,6 +1898,51 @@ def test_push_fails_if_durable_evidence_changes_before_final_revalidation(
     assert len(runner.push_calls) == 1
 
 
+def test_verify_ci_runs_gate_inside_an_isolated_live_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    @contextmanager
+    def live_runtime(root: Path) -> Iterator[None]:
+        assert root == _REPOSITORY_ROOT
+        events.append("runtime:start")
+        yield
+        events.append("runtime:stop")
+
+    def verified_gate(**kwargs: object) -> GateEvidence:
+        assert kwargs["root"] == _REPOSITORY_ROOT
+        assert kwargs["expected_revision"] == _REVISION
+        events.append("gate")
+        return GateEvidence(
+            schema_version=2,
+            revision=_REVISION,
+            status="passed",
+            preflight=(),
+            commands=(),
+        )
+
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.setenv("GITHUB_SHA", _REVISION)
+    monkeypatch.setattr(gate_module, "_isolated_live_pifire", live_runtime)
+    monkeypatch.setattr(gate_module, "run_gate", verified_gate)
+    monkeypatch.chdir(_REPOSITORY_ROOT)
+
+    exit_code = gate_module.main(
+        [
+            "verify-ci",
+            "--expected-revision",
+            _REVISION,
+            "--artifact-root",
+            str(tmp_path / "artifacts"),
+        ]
+    )
+
+    assert exit_code == 0
+    assert events == ["runtime:start", "gate", "runtime:stop"]
+
+
 @pytest.mark.parametrize(
     ("environment", "message"),
     [
@@ -1955,7 +2008,13 @@ def test_prek_pre_push_hook_verifies_the_cumulative_bookmark() -> None:
 
 def test_integration_workflow_has_exact_revision_gate_and_safe_live_runtime() -> None:
     workflow_path = _REPOSITORY_ROOT / ".github" / "workflows" / "integration-gate.yml"
-    workflow = cast(dict[str, object], __import__("yaml").load(workflow_path.read_text(encoding="utf-8"), Loader=__import__("yaml").BaseLoader))
+    workflow = cast(
+        dict[str, object],
+        __import__("yaml").load(
+            workflow_path.read_text(encoding="utf-8"),
+            Loader=__import__("yaml").BaseLoader,
+        ),
+    )
     triggers = cast(dict[str, object], workflow["on"])
     jobs = cast(dict[str, object], workflow["jobs"])
     job = cast(dict[str, object], jobs["integration-gate"])
@@ -1968,35 +2027,80 @@ def test_integration_workflow_has_exact_revision_gate_and_safe_live_runtime() ->
 
     uses = {cast(str, step["uses"]): cast(dict[str, object], step.get("with", {})) for step in steps if "uses" in step}
     assert uses["actions/checkout@v4"]["ref"] == "${{ github.sha }}"
+    assert uses["actions/checkout@v4"]["fetch-tags"] == "true"
     assert uses["actions/setup-python@v5"]["python-version"] == "3.14"
-    assert "astral-sh/setup-uv@v10" in uses
+    assert "astral-sh/setup-uv@v10.0.1" in uses
     assert "oven-sh/setup-bun@v2" in uses
     assert "taiki-e/install-action@v2" in uses
 
     scripts = "\n".join(cast(str, step["run"]) for step in steps if "run" in step)
     assert "uv sync --locked --all-groups" in scripts
-    job_environment = cast(dict[str, object], job["env"])
-    assert "PIFIRE_DB_PATH" not in job_environment
-    assert "PIFIRE_LOG_DIR" not in job_environment
-    assert job_environment["PIFIRE_GATE_LIVE_DB_PATH"] == "${{ runner.temp }}/pifire-ci/pifire.db"
-    assert job_environment["PIFIRE_GATE_LIVE_LOG_DIR"] == "${{ runner.temp }}/pifire-ci/logs"
-    assert "PIFIRE_BACKEND_URL" in job_environment
-    assert scripts.count('PIFIRE_DB_PATH="${runtime}/pifire.db"') == 3
-    assert scripts.count('PIFIRE_LOG_DIR="${runtime}/logs"') == 3
-    assert "playwright install --with-deps chromium" in scripts
-    assert "history" in scripts
-    assert 'settings["platform"]["real_hw"] = False' in scripts
-    assert 'settings["globals"]["first_time_setup"] = False' in scripts
-    assert "uv run python control.py" in scripts
-    assert "uv run gunicorn" in scripts
-    ignore_rules = (_REPOSITORY_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
-    assert {"/history", "/logs"} <= set(ignore_rules)
-    assert "trap cleanup EXIT" in scripts
-    assert "/api/get/mode" in scripts
+    assert "sudo apt-get update" in scripts
+    reference_font_install = (
+        "sudo apt-get install --yes cabextract libegl1 libglib2.0-dev"
+    )
+    assert reference_font_install in scripts
     assert (
-        'uv run python scripts/exact_revision_gate.py verify-ci --expected-revision "${{ github.sha }}"'
+        "https://downloads.sourceforge.net/project/mscorefonts2/cabs/EUupdate.EXE"
         in scripts
     )
+    assert (
+        "464dd2cd5f09f489f9ac86ea7790b7b8548fc4e46d9f889b68d2cdce47e09ea8"
+        in scripts
+    )
+    assert (
+        "b69a5b33e997c3bc55f35dde8267cb93fe5fbdc3ecbc23b1d987602a9fd2b1f2"
+        in scripts
+    )
+    assert (
+        "7fea7f91f1140721bd7837a36ed2b1c856215f3ac08e6d2eb29c1afe235d0900"
+        in scripts
+    )
+    assert "https://downloads.sourceforge.net/project/corefonts/the%20fonts/final/impact32.exe" in scripts
+    assert (
+        "6061ef3b7401d9642f5dfdb5f2b376aa14663f6275e60a51207ad4facf2fccfb"
+        in scripts
+    )
+    assert (
+        "00f1fc230ac99f9b97ba1a7c214eb5b909a78660cb3826fca7d64c3af5a14848"
+        in scripts
+    )
+    assert 'cabextract -q -d "${font_tmp}/extracted" "${font_tmp}/EUupdate.EXE"' in scripts
+    assert "trebucbd.ttf" in scripts
+    assert "/usr/local/share/fonts/pifire-reference/impact.ttf" in scripts
+    assert '"${font_tmp}/extracted/"*.ttf' in scripts
+    assert '"/usr/local/share/fonts/pifire-reference/"' in scripts
+    assert "ttf-mscorefonts-installer" not in scripts
+    assert scripts.index(reference_font_install) < scripts.index("uv sync --locked --all-groups")
+    job_environment = cast(dict[str, object], job["env"])
+    assert job_environment["CI"] == "true"
+    assert job_environment["TZ"] == "America/New_York"
+    assert job_environment["PYTEST_XDIST_AUTO_NUM_WORKERS"] == "1"
+    for name in (
+        "PIFIRE_BACKEND_URL",
+        "PIFIRE_DB_PATH",
+        "PIFIRE_LOG_DIR",
+        "PIFIRE_GATE_LIVE_DB_PATH",
+        "PIFIRE_GATE_LIVE_LOG_DIR",
+    ):
+        assert name not in job_environment
+    gate_step = next(
+        step
+        for step in steps
+        if step.get("name") == "Run the exact revision gate against an isolated live PiFire"
+    )
+    assert "env" not in gate_step
+    assert "playwright install --with-deps chromium" in scripts
+    assert "bun run build" in scripts
+    assert "uv run python control.py" not in scripts
+    assert "uv run gunicorn" not in scripts
+    assert 'PIFIRE_DB_PATH="${runtime}/pifire.db"' not in scripts
+    assert 'PIFIRE_LOG_DIR="${runtime}/logs"' not in scripts
+    gate_command = (
+        'uv run python scripts/exact_revision_gate.py verify-ci --expected-revision "${{ github.sha }}"'
+    )
+    assert gate_command in scripts
+    assert scripts.index("bun run build") < scripts.index(gate_command)
 
     upload = next(step for step in steps if step.get("uses") == "actions/upload-artifact@v4")
     assert upload["if"] == "always()"
