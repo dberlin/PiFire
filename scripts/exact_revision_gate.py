@@ -92,6 +92,7 @@ _REQUIRED_COMMANDS = (
     GateCommand("web-react-e2e", ("bun", "run", "test:e2e"), "web-react"),
 )
 _FULL_REVISION = re.compile(r"[0-9a-f]{40}\Z")
+_FULL_OPERATION_ID = re.compile(r"[0-9a-f]{128}\Z")
 _VERIFIED_BOOKMARK = "cumulative-mpc-learning"
 _DEFAULT_ARTIFACT_ROOT = Path(".artifacts/exact-revision")
 _BROWSER_BACKEND_OVERRIDES = ("PUBLIC_PIFIRE_URL", "PUBLIC_PIFIRE_TARGET")
@@ -515,14 +516,23 @@ def run_gate(
         )
 
 
-def resolve_bookmark_revision(root: Path, bookmark: str) -> str:
+def resolve_bookmark_revision(
+    root: Path,
+    bookmark: str,
+    *,
+    operation_id: str | None = None,
+) -> str:
     """Resolve one Jujutsu bookmark or revset to its full Git revision."""
 
     if not bookmark or bookmark != bookmark.strip():
         raise ValueError("bookmark must be non-empty and contain no surrounding whitespace")
+    if operation_id is not None and _FULL_OPERATION_ID.fullmatch(operation_id) is None:
+        raise ValueError("operation ID must be a full 128-character lowercase hexadecimal ID")
+    operation_argv = () if operation_id is None else ("--at-operation", operation_id)
     completed = subprocess.run(
         (
             "jj",
+            *operation_argv,
             "--no-pager",
             "log",
             "--no-graph",
@@ -543,6 +553,37 @@ def resolve_bookmark_revision(root: Path, bookmark: str) -> str:
     if _FULL_REVISION.fullmatch(revision) is None:
         raise RuntimeError(f"{bookmark!r} did not resolve to exactly one full revision")
     return revision
+
+
+def resolve_current_operation_id(root: Path) -> str:
+    """Resolve the current Jujutsu operation to its full immutable ID."""
+
+    completed = subprocess.run(
+        (
+            "jj",
+            "--no-pager",
+            "op",
+            "log",
+            "--no-graph",
+            "--limit",
+            "1",
+            "-T",
+            'id ++ "\\n"',
+        ),
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or "operation resolver exited without an error message"
+        raise RuntimeError(f"could not resolve current operation: {detail}")
+    operation_id = completed.stdout.strip()
+    if _FULL_OPERATION_ID.fullmatch(operation_id) is None:
+        raise RuntimeError(
+            "current operation did not resolve to one full 128-character lowercase hexadecimal ID"
+        )
+    return operation_id
 
 
 def _resolve_current_revision(root: Path) -> str:
@@ -782,6 +823,7 @@ def push_verified_bookmark(
     bookmark: str,
     artifact_root: Path,
     run_command: _RunCommand = subprocess.run,
+    resolve_operation: Callable[[], str] | None = None,
 ) -> GateEvidence:
     """Gate and push the one authorized bookmark without reusing evidence."""
 
@@ -808,15 +850,40 @@ def push_verified_bookmark(
         if evidence.status != "passed":
             return evidence
 
-        post_gate_bookmark = resolve_bookmark_revision(root, bookmark)
-        post_gate_current = _resolve_current_revision(root)
+        operation_id = (
+            resolve_current_operation_id(root)
+            if resolve_operation is None
+            else resolve_operation()
+        )
+        if _FULL_OPERATION_ID.fullmatch(operation_id) is None:
+            raise RuntimeError(
+                "current operation did not resolve to one full 128-character lowercase hexadecimal ID"
+            )
+        post_gate_current = resolve_bookmark_revision(
+            root,
+            "@",
+            operation_id=operation_id,
+        )
+        post_gate_bookmark = resolve_bookmark_revision(
+            root,
+            bookmark,
+            operation_id=operation_id,
+        )
         if post_gate_bookmark != evidence.revision or post_gate_current != evidence.revision:
             raise RuntimeError(
                 "local bookmark or current revision changed after the gate: "
                 f"evidence={evidence.revision}, bookmark={post_gate_bookmark}, current={post_gate_current}"
             )
 
-        push_argv = ("jj", "git", "push", "-b", _VERIFIED_BOOKMARK)
+        push_argv = (
+            "jj",
+            "--at-operation",
+            operation_id,
+            "git",
+            "push",
+            "-b",
+            bookmark,
+        )
         completed = run_command(
             push_argv,
             cwd=root,

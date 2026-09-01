@@ -26,6 +26,7 @@ from scripts.exact_revision_gate import (
     push_verified_bookmark,
     required_commands,
     resolve_bookmark_revision,
+    resolve_current_operation_id,
     run_gate,
 )
 
@@ -33,6 +34,8 @@ _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 _SCRIPT = _REPOSITORY_ROOT / "scripts" / "exact_revision_gate.py"
 _REVISION = "0123456789abcdef0123456789abcdef01234567"
 _OTHER_REVISION = "f" * 40
+_OPERATION_ID = "a" * 128
+_SHORT_OPERATION_ID = "a" * 64
 
 
 @final
@@ -1094,6 +1097,108 @@ def test_resolve_bookmark_revision_uses_one_exact_jj_query(monkeypatch: pytest.M
     ]
 
 
+def test_resolve_current_operation_id_uses_one_exact_jj_query(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[tuple[str, ...], Path]] = []
+
+    def completed_run(
+        argv: tuple[str, ...],
+        *,
+        cwd: Path,
+        check: bool,
+        capture_output: bool,
+        text: bool,
+    ) -> subprocess.CompletedProcess[str]:
+        assert check is False
+        assert capture_output is True
+        assert text is True
+        calls.append((argv, cwd))
+        return subprocess.CompletedProcess(argv, 0, stdout=f"{_OPERATION_ID}\n", stderr="")
+
+    monkeypatch.setattr(gate_module.subprocess, "run", completed_run)
+
+    assert resolve_current_operation_id(_REPOSITORY_ROOT) == _OPERATION_ID
+    assert calls == [
+        (
+            (
+                "jj",
+                "--no-pager",
+                "op",
+                "log",
+                "--no-graph",
+                "--limit",
+                "1",
+                "-T",
+                'id ++ "\\n"',
+            ),
+            _REPOSITORY_ROOT,
+        )
+    ]
+
+
+def test_resolve_bookmark_revision_can_pin_query_to_exact_operation(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[tuple[str, ...], Path]] = []
+
+    def completed_run(
+        argv: tuple[str, ...],
+        *,
+        cwd: Path,
+        check: bool,
+        capture_output: bool,
+        text: bool,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append((argv, cwd))
+        return subprocess.CompletedProcess(argv, 0, stdout=f"{_REVISION}\n", stderr="")
+
+    monkeypatch.setattr(gate_module.subprocess, "run", completed_run)
+
+    assert (
+        resolve_bookmark_revision(
+            _REPOSITORY_ROOT,
+            "@",
+            operation_id=_OPERATION_ID,
+        )
+        == _REVISION
+    )
+    assert calls == [
+        (
+            (
+                "jj",
+                "--at-operation",
+                _OPERATION_ID,
+                "--no-pager",
+                "log",
+                "--no-graph",
+                "-r",
+                "@",
+                "-T",
+                'commit_id ++ "\\n"',
+            ),
+            _REPOSITORY_ROOT,
+        )
+    ]
+
+
+def test_resolve_bookmark_revision_rejects_short_operation_prefix_before_jj_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, ...]] = []
+
+    def completed_run(argv: tuple[str, ...], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout=f"{_REVISION}\n", stderr="")
+
+    monkeypatch.setattr(gate_module.subprocess, "run", completed_run)
+
+    with pytest.raises(ValueError, match="full 128-character lowercase hexadecimal"):
+        _ = resolve_bookmark_revision(
+            _REPOSITORY_ROOT,
+            "@",
+            operation_id=_SHORT_OPERATION_ID,
+        )
+
+    assert calls == []
+
+
 class _PushRunner(_CommandRunner):
     def __init__(
         self,
@@ -1107,7 +1212,7 @@ class _PushRunner(_CommandRunner):
 
     @override
     def __call__(self, argv: tuple[str, ...], *, cwd: Path, check: bool, **kwargs: object) -> subprocess.CompletedProcess:
-        if argv[:3] == ("jj", "git", "push"):
+        if len(argv) >= 6 and argv[:2] == ("jj", "--at-operation") and argv[3:6] == ("git", "push", "-b"):
             assert check is False
             assert kwargs == {"capture_output": True, "text": True}
             self.push_calls.append((argv, cwd))
@@ -1132,7 +1237,8 @@ def _bookmark_resolver(
 ) -> list[str]:
     calls: list[str] = []
 
-    def resolve(_root: Path, bookmark: str) -> str:
+    def resolve(_root: Path, bookmark: str, *, operation_id: str | None = None) -> str:
+        assert operation_id is None or operation_id == _OPERATION_ID
         calls.append(bookmark)
         return revisions[bookmark].pop(0)
 
@@ -1359,18 +1465,83 @@ def test_push_runs_a_fresh_gate_and_only_the_authorized_push(
         bookmark="cumulative-mpc-learning",
         artifact_root=tmp_path / "artifacts",
         run_command=runner,
+        resolve_operation=lambda: _OPERATION_ID,
     )
 
     assert evidence.status == "passed"
     assert len(runner.calls) == 6
     assert runner.push_calls == [
         (
-            ("jj", "git", "push", "-b", "cumulative-mpc-learning"),
+            ("jj", "--at-operation", _OPERATION_ID, "git", "push", "-b", "cumulative-mpc-learning"),
             _REPOSITORY_ROOT,
         )
     ]
     assert calls[:2] == ["cumulative-mpc-learning", "@"]
-    assert calls[-3:] == ["cumulative-mpc-learning", "@", "cumulative-mpc-learning@origin"]
+    assert calls[-3:] == ["@", "cumulative-mpc-learning", "cumulative-mpc-learning@origin"]
+
+def test_push_stays_pinned_when_live_bookmark_moves_before_command_execution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_bookmark = {"revision": _REVISION}
+    race_events: list[str] = []
+
+    def resolve(root: Path, bookmark: str, *, operation_id: str | None = None) -> str:
+        assert root == _REPOSITORY_ROOT
+        if bookmark == "cumulative-mpc-learning@origin":
+            return _REVISION
+        if operation_id is not None:
+            assert operation_id == _OPERATION_ID
+            race_events.append(f"pinned:{bookmark}")
+            return _REVISION
+        if bookmark == "@":
+            return _REVISION
+        return live_bookmark["revision"]
+
+    monkeypatch.setattr(gate_module, "resolve_bookmark_revision", resolve)
+
+    @contextmanager
+    def no_live_runtime(_root: Path) -> Iterator[None]:
+        yield
+
+    monkeypatch.setattr(gate_module, "_isolated_live_pifire", no_live_runtime)
+
+    class BookmarkRaceRunner(_PushRunner):
+        @override
+        def __call__(
+            self,
+            argv: tuple[str, ...],
+            *,
+            cwd: Path,
+            check: bool,
+            **kwargs: object,
+        ) -> subprocess.CompletedProcess:
+            if len(argv) >= 6 and argv[:2] == ("jj", "--at-operation") and argv[3:5] == ("git", "push"):
+                assert race_events == ["pinned:@", "pinned:cumulative-mpc-learning"]
+                live_bookmark["revision"] = _OTHER_REVISION
+                race_events.append("live-bookmark:moved")
+            return super().__call__(argv, cwd=cwd, check=check, **kwargs)
+
+    runner = BookmarkRaceRunner(*_success_results())
+
+    evidence = push_verified_bookmark(
+        root=_REPOSITORY_ROOT,
+        bookmark="cumulative-mpc-learning",
+        artifact_root=tmp_path / "artifacts",
+        run_command=runner,
+        resolve_operation=lambda: _OPERATION_ID,
+    )
+
+    assert evidence.status == "passed"
+    assert live_bookmark["revision"] == _OTHER_REVISION
+    assert race_events == ["pinned:@", "pinned:cumulative-mpc-learning", "live-bookmark:moved"]
+    assert runner.push_calls == [
+        (
+            ("jj", "--at-operation", _OPERATION_ID, "git", "push", "-b", "cumulative-mpc-learning"),
+            _REPOSITORY_ROOT,
+        )
+    ]
+
 
 
 def test_push_owns_artifact_lock_until_remote_and_durable_evidence_are_verified(
@@ -1436,7 +1607,7 @@ def test_push_owns_artifact_lock_until_remote_and_durable_evidence_are_verified(
             check: bool,
             **kwargs: object,
         ) -> subprocess.CompletedProcess:
-            if argv[:3] == ("jj", "git", "push"):
+            if len(argv) >= 6 and argv[:2] == ("jj", "--at-operation") and argv[3:5] == ("git", "push"):
                 competing_thread = threading.Thread(target=run_competing_gate)
                 competing_threads.append(competing_thread)
                 competing_thread.start()
@@ -1464,6 +1635,7 @@ def test_push_owns_artifact_lock_until_remote_and_durable_evidence_are_verified(
                 bookmark="cumulative-mpc-learning",
                 artifact_root=artifact_root,
                 run_command=runner,
+                resolve_operation=lambda: _OPERATION_ID,
             )
         except BaseException as error:
             errors.append(error)
@@ -1559,6 +1731,61 @@ def test_push_is_not_invoked_when_fresh_gate_fails(
     assert runner.push_calls == []
 
 
+@pytest.mark.parametrize(
+    ("completed", "message"),
+    [
+        pytest.param(
+            subprocess.CompletedProcess((), 0, stdout="not-a-full-operation-id\n", stderr=""),
+            "full 128-character",
+            id="invalid",
+        ),
+        pytest.param(
+            subprocess.CompletedProcess((), 0, stdout=f"{_SHORT_OPERATION_ID}\n", stderr=""),
+            "full 128-character",
+            id="shortened-prefix",
+        ),
+        pytest.param(
+            subprocess.CompletedProcess((), 1, stdout="", stderr="operation resolver failed\n"),
+            "operation resolver failed",
+            id="failed",
+        ),
+    ],
+)
+def test_push_is_not_invoked_when_operation_resolution_is_invalid_or_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    completed: subprocess.CompletedProcess[str],
+    message: str,
+) -> None:
+    _bookmark_resolver(
+        monkeypatch,
+        {
+            "cumulative-mpc-learning": [_REVISION],
+            "@": [_REVISION] * 14,
+        },
+    )
+
+    def resolve_operation(
+        _argv: tuple[str, ...],
+        **_kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        return completed
+
+    monkeypatch.setattr(gate_module.subprocess, "run", resolve_operation)
+    runner = _PushRunner(*_success_results())
+
+    with pytest.raises(RuntimeError, match=message):
+        push_verified_bookmark(
+            root=_REPOSITORY_ROOT,
+            bookmark="cumulative-mpc-learning",
+            artifact_root=tmp_path / "artifacts",
+            run_command=runner,
+        )
+
+    assert len(runner.calls) == 6
+    assert runner.push_calls == []
+
+
 @pytest.mark.parametrize("drifting_identity", ["bookmark", "current"])
 def test_push_is_not_invoked_when_revision_drifts_after_the_gate(
     tmp_path: Path,
@@ -1586,6 +1813,7 @@ def test_push_is_not_invoked_when_revision_drifts_after_the_gate(
             bookmark="cumulative-mpc-learning",
             artifact_root=tmp_path / "artifacts",
             run_command=runner,
+            resolve_operation=lambda: _OPERATION_ID,
         )
 
     assert len(runner.calls) == 6
@@ -1612,11 +1840,12 @@ def test_post_push_remote_mismatch_fails_after_exactly_one_push(
             bookmark="cumulative-mpc-learning",
             artifact_root=tmp_path / "artifacts",
             run_command=runner,
+            resolve_operation=lambda: _OPERATION_ID,
         )
 
     assert runner.push_calls == [
         (
-            ("jj", "git", "push", "-b", "cumulative-mpc-learning"),
+            ("jj", "--at-operation", _OPERATION_ID, "git", "push", "-b", "cumulative-mpc-learning"),
             _REPOSITORY_ROOT,
         )
     ]
@@ -1629,7 +1858,8 @@ def test_push_fails_if_durable_evidence_changes_before_final_revalidation(
     artifact_root = tmp_path / "artifacts"
     resolver_calls: list[str] = []
 
-    def resolve(_root: Path, bookmark: str) -> str:
+    def resolve(_root: Path, bookmark: str, *, operation_id: str | None = None) -> str:
+        assert operation_id is None or operation_id == _OPERATION_ID
         resolver_calls.append(bookmark)
         if bookmark == "cumulative-mpc-learning@origin":
             evidence_path = artifact_root / _REVISION / "evidence.json"
@@ -1651,6 +1881,7 @@ def test_push_fails_if_durable_evidence_changes_before_final_revalidation(
             bookmark="cumulative-mpc-learning",
             artifact_root=artifact_root,
             run_command=runner,
+            resolve_operation=lambda: _OPERATION_ID,
         )
 
     assert resolver_calls[-1] == "cumulative-mpc-learning@origin"
