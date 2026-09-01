@@ -10,6 +10,14 @@ function box(): HTMLInputElement {
 }
 
 describe("SetpointEntry", () => {
+  it("calls onCancel on Escape", async () => {
+    const user = userEvent.setup();
+    const onCancel = rs.fn();
+    render(<SetpointEntry open initial={225} units="F" onSubmit={rs.fn()} onCancel={onCancel} />);
+    await user.keyboard("{Escape}");
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
   it("renders the initial value clamped into range", () => {
     render(<SetpointEntry open initial={1000} units="F" onSubmit={rs.fn()} onCancel={rs.fn()} />);
     expect(box().value).toBe("500");

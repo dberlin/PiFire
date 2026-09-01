@@ -1,6 +1,7 @@
 import type { PelletDbSchema } from "@pifire/core/contracts/control";
 import { describe, expect, it, rs } from "@rstest/core";
 import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import { CurrentLoadCard } from "../../../../src/components/pellets/CurrentLoadCard";
 
@@ -99,6 +100,16 @@ describe("CurrentLoadCard", () => {
     fireEvent.change(picker, { target: { value: "p2" } });
     fireEvent.click(screen.getByRole("button", { name: "Load Profile" }));
     expect(props.onLoadProfile).toHaveBeenCalledWith("p2");
+  });
+
+  it("closes the profile picker on Escape", async () => {
+    const user = userEvent.setup();
+    renderCard();
+    fireEvent.click(screen.getByRole("button", { name: "Load New Pellets" }));
+    expect(screen.getByLabelText("Profile to load")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByLabelText("Profile to load")).not.toBeInTheDocument();
   });
 
   it("disables both buttons while busy", () => {

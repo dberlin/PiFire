@@ -1,5 +1,7 @@
 import { useState } from "react";
 
+import { useDismissOnEscape } from "../../helpers/useDismissOnEscape";
+
 interface Props {
   open: boolean;
   initial: number;
@@ -24,6 +26,8 @@ export function PwmEntry({ open, initial, onSubmit, onCancel }: Props) {
     setPrevSeedKey(seedKey);
     if (open) setDuty(clampDuty(initial));
   }
+  useDismissOnEscape(open, onCancel);
+
   if (!open) return null;
 
   return (

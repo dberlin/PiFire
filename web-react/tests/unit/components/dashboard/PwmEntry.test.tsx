@@ -1,11 +1,20 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import { PwmEntry } from "../../../../src/components/dashboard/PwmEntry";
 
 afterEach(cleanup);
 
 describe("PwmEntry", () => {
+  it("calls onCancel on Escape", async () => {
+    const user = userEvent.setup();
+    const onCancel = rs.fn();
+    render(<PwmEntry open initial={40} onSubmit={rs.fn()} onCancel={onCancel} />);
+    await user.keyboard("{Escape}");
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
   it("renders nothing when closed", () => {
     const { container } = render(
       <PwmEntry open={false} initial={50} onSubmit={rs.fn()} onCancel={rs.fn()} />,

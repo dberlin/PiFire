@@ -37,16 +37,25 @@
     // reports every JSX element in the codebase -- 3066 false positives.
     "react/react-in-jsx-scope": "off",
 
-    // a11y deferrals. All findings are on existing modal/gauge/table widgets
-    // (click-to-dismiss scrims, SVG gauge, role= attributes that want semantic
-    // tags, controls needing labels). Per house rules, a11y widget
-    // restructuring is out of scope for toolchain work -- scheduled as a
-    // separate follow-up.
+    // Scrims are a mouse affordance. Making the backdrop <div> keyboard-
+    // operable would add a focus stop that does nothing visible; the keyboard
+    // path is Escape, which every overlay handles via useDismissOnEscape and
+    // which each overlay's own tests assert. These are off because the
+    // accessible behavior is covered elsewhere, not because it is missing.
     "jsx-a11y/click-events-have-key-events": "off",
     "jsx-a11y/no-static-element-interactions": "off",
-    "jsx-a11y/prefer-tag-over-role": "off",
-    "jsx-a11y/control-has-associated-label": "off",
     "jsx-a11y/no-noninteractive-element-interactions": "off",
+
+    // Cosmetic here: it wants <output> over role="status" and <img> over
+    // role="img". Screen readers already announce the role correctly, so the
+    // 24 findings are a refactor with no user-visible effect.
+    "jsx-a11y/prefer-tag-over-role": "off",
+
+    // Mostly false positives on this codebase: empty spacer cells
+    // (<th className="pf-cf-thumb-col"> </th> for thumbnail and action
+    // columns) and controls labelled through the Field wrapper's
+    // id/describedBy contract, which the rule cannot follow.
+    "jsx-a11y/control-has-associated-label": "off",
 
     // 3 findings, all genuine dead code (a redundant spread and two `?? []`
     // fallbacks inside spreads). Cheap to clean up, but they are source edits

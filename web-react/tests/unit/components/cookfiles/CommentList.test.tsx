@@ -55,6 +55,16 @@ function mount(comments: CookFileComment[], onChanged = rs.fn(), assets = ASSETS
 }
 
 describe("CommentList", () => {
+  it("closes the lightbox on Escape", async () => {
+    const user = userEvent.setup();
+    mount([comment({ assets: ["a1.png"] })]);
+    await user.click(screen.getByRole("button", { name: "Attachment a1.png" }));
+    expect(screen.getByRole("button", { name: "Previous photo" })).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("button", { name: "Previous photo" })).not.toBeInTheDocument();
+  });
+
   beforeEach(() => {
     for (const mock of [
       addCookFileCommentMock,

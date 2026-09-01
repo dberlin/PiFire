@@ -55,6 +55,9 @@ export function LearningDialog({
 
     wasOpen.current = true;
     closeButton.current?.focus();
+    // Not useDismissOnEscape: Escape and the Tab focus trap share one listener
+    // here, and this Escape also preventDefaults. Splitting them would mean two
+    // window listeners for one keyboard contract.
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();

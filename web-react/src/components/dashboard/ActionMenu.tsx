@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useDismissOnEscape } from "../../helpers/useDismissOnEscape";
 
 export interface MenuItem {
   label: string;
@@ -20,16 +20,7 @@ interface Props {
 // language, and not a native <select>, which is unusable on the 800x480
 // touchscreen this design targets.
 export function ActionMenu({ open, title, items, onPick, onCancel }: Props) {
-  // Escape closes. This is a side effect on the document, not derived state, so
-  // an effect is the right tool here.
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onCancel]);
+  useDismissOnEscape(open, onCancel);
 
   if (!open) return null;
   return (

@@ -1,6 +1,8 @@
 import { setpointRange } from "@pifire/core/dashboard/health";
 import { useState } from "react";
 
+import { useDismissOnEscape } from "../../helpers/useDismissOnEscape";
+
 interface Props {
   open: boolean;
   initial: number;
@@ -64,6 +66,8 @@ export function SetpointEntry({
       setDraft(null);
     }
   }
+  useDismissOnEscape(open, onCancel);
+
   if (!open) return null;
   const step = units === "F" ? 5 : 3;
   const set = (t: number) => {

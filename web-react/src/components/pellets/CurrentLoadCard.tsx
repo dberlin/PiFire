@@ -1,7 +1,8 @@
 import type { PelletDbSchema, PelletProfile } from "@pifire/core/contracts/control";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 
 import { formatUsage } from "../../helpers/pellets/usage";
+import { useDismissOnEscape } from "../../helpers/useDismissOnEscape";
 import { Select } from "../settings/fields/Select";
 import { Rating } from "./Rating";
 
@@ -35,6 +36,10 @@ export function CurrentLoadCard({
   const loaded: PelletProfile | undefined = db.archive[db.current.pelletid];
   const usage = formatUsage(db.current.est_usage);
   const [picking, setPicking] = useState(false);
+  // useCallback keeps the dismiss handler stable so the key listener is not
+  // torn down and re-registered on every render.
+  const closePicker = useCallback(() => setPicking(false), []);
+  useDismissOnEscape(picking, closePicker);
 
   const ids = Object.keys(db.archive).sort();
   const firstId = ids[0] ?? "";

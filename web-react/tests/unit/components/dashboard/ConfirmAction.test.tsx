@@ -5,6 +5,24 @@ import userEvent from "@testing-library/user-event";
 import { ConfirmAction } from "../../../../src/components/dashboard/ConfirmAction";
 
 describe("ConfirmAction", () => {
+  it("calls onCancel on Escape", async () => {
+    const user = userEvent.setup();
+    const onCancel = rs.fn();
+    render(<ConfirmAction open title="Stop the cook?" onConfirm={rs.fn()} onCancel={onCancel} />);
+    await user.keyboard("{Escape}");
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores Escape while closed", async () => {
+    const user = userEvent.setup();
+    const onCancel = rs.fn();
+    render(
+      <ConfirmAction open={false} title="Stop the cook?" onConfirm={rs.fn()} onCancel={onCancel} />,
+    );
+    await user.keyboard("{Escape}");
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
   it("renders the title when open", () => {
     render(<ConfirmAction open title="Stop the cook?" onConfirm={rs.fn()} onCancel={rs.fn()} />);
     expect(screen.getByText("Stop the cook?")).toBeInTheDocument();

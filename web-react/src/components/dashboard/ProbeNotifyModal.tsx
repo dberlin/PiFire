@@ -8,6 +8,7 @@ import {
   type TargetEdit,
   targetRange,
 } from "../../helpers/notify/notifyState";
+import { useDismissOnEscape } from "../../helpers/useDismissOnEscape";
 
 interface Props {
   open: boolean;
@@ -85,6 +86,8 @@ export function ProbeNotifyModal({
       setInvalid(null);
     }
   }
+  useDismissOnEscape(open, onCancel);
+
   if (!open) return null;
 
   const { min, max } = targetRange(isPrimary, units);

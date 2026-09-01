@@ -1,5 +1,5 @@
 import type { CookFileAsset, CookFileComment } from "@pifire/core/contracts/content";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 
 import {
   addCookFileComment,
@@ -9,6 +9,7 @@ import {
   setCommentAssets,
   updateCookFileComment,
 } from "../../helpers/files/cookfileApi";
+import { useDismissOnEscape } from "../../helpers/useDismissOnEscape";
 import { ConfirmAction } from "../dashboard/ConfirmAction";
 
 // Comments, their attached photos, and a lightbox.
@@ -48,6 +49,11 @@ export function CommentList({ filename, parentId, comments, assets, onChanged }:
   const [lightbox, setLightbox] = useState<Lightbox | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // useCallback keeps the dismiss handler stable so the key listener is not
+  // torn down and re-registered on every render.
+  const closeLightbox = useCallback(() => setLightbox(null), []);
+  useDismissOnEscape(lightbox !== null, closeLightbox);
 
   const run = (work: Promise<unknown>, onDone?: () => void) => {
     setBusy(true);

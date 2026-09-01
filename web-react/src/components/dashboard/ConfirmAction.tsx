@@ -1,3 +1,5 @@
+import { useDismissOnEscape } from "../../helpers/useDismissOnEscape";
+
 interface Props {
   open: boolean;
   /** Escape a positioned, overflow-clipped owner and cover the viewport. */
@@ -27,6 +29,8 @@ export function ConfirmAction({
   onConfirm,
   onCancel,
 }: Props) {
+  useDismissOnEscape(open, onCancel);
+
   if (!open) return null;
   return (
     <div className={`pf-modal-scrim${viewport ? " pf-modal-scrim-fixed" : ""}`} onClick={onCancel}>

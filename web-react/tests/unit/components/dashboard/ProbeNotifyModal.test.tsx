@@ -36,6 +36,13 @@ const highSlider = () => screen.getByRole("slider", { name: /^high limit tempera
 const lowNumber = () => screen.getByRole("spinbutton", { name: /^low limit/i });
 
 describe("ProbeNotifyModal", () => {
+  it("calls onCancel on Escape", async () => {
+    const user = userEvent.setup();
+    const { props } = renderModal();
+    await user.keyboard("{Escape}");
+    expect(props.onCancel).toHaveBeenCalledTimes(1);
+  });
+
   it("renders nothing when closed", () => {
     const { container } = renderModal({ open: false });
     expect(container).toBeEmptyDOMElement();
