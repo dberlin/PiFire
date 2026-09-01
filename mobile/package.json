@@ -26,6 +26,7 @@
     "@types/react": "~19.2.2",
     "jest": "~29.7.0",
     "jest-expo": "^57.0.5",
+    "oxfmt": "^0.65.0",
     "typescript": "~6.0.3"
   },
   "scripts": {
@@ -34,6 +35,8 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "test": "jest",
+    "lint": "oxfmt --check .",
+    "format": "oxfmt .",
     "typecheck": "tsc --noEmit"
   }
 }

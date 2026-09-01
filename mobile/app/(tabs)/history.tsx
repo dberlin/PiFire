@@ -1,7 +1,15 @@
-import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import type { HistoryChartData } from "@pifire/core/contracts/content";
 import { hasPlottableHistory, toChartInput } from "@pifire/core/history/historyAdapter";
+import { useCallback, useEffect, useState } from "react";
+import {
+  ActivityIndicator,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+
 import { HistoryChart, type HistorySeriesInput } from "../../src/components/HistoryChart";
 import { THEME } from "../../src/theme";
 import { useLiveContext, usePrefsContext } from "../_layout";
@@ -23,22 +31,24 @@ const DEFAULT_MINUTES = 120;
 // the shared adapter.
 function toPointSeries(data: HistoryChartData): HistorySeriesInput[] {
   const { times, series } = toChartInput(data);
-  return series
-    // Temperatures only. This chart has ONE y-axis, and duty is a 0-100%
-    // control signal -- plotted against degrees it would sit as a flat line on
-    // the floor of a 225-degree scale. Filtered explicitly rather than left to
-    // chance so a duty series added server-side can never silently appear here
-    // mis-scaled; giving this chart a second axis is what would lift it.
-    .filter((s) => s.axis === "temp")
-    // `visible: false` is the shared adapter's way of saying "off, but
-    // reachable from the chart's controls". This chart has no controls, so
-    // off means not drawn.
-    .filter((s) => s.visible)
-    .map((s) => ({
-    label: s.label,
-    color: s.color,
-    points: times.map((t, i) => [t, s.values[i] ?? null] as [number, number | null]),
-  }));
+  return (
+    series
+      // Temperatures only. This chart has ONE y-axis, and duty is a 0-100%
+      // control signal -- plotted against degrees it would sit as a flat line on
+      // the floor of a 225-degree scale. Filtered explicitly rather than left to
+      // chance so a duty series added server-side can never silently appear here
+      // mis-scaled; giving this chart a second axis is what would lift it.
+      .filter((s) => s.axis === "temp")
+      // `visible: false` is the shared adapter's way of saying "off, but
+      // reachable from the chart's controls". This chart has no controls, so
+      // off means not drawn.
+      .filter((s) => s.visible)
+      .map((s) => ({
+        label: s.label,
+        color: s.color,
+        points: times.map((t, i) => [t, s.values[i] ?? null] as [number, number | null]),
+      }))
+  );
 }
 
 export default function History() {
@@ -93,15 +103,15 @@ export default function History() {
         <ActivityIndicator color={tokens.accent} style={styles.spinner} />
       ) : null}
 
-      {error !== null ? <Text style={[styles.error, { color: tokens.danger }]}>{error}</Text> : null}
+      {error !== null ? (
+        <Text style={[styles.error, { color: tokens.danger }]}>{error}</Text>
+      ) : null}
 
       {data !== null && hasPlottableHistory(data) ? (
         <HistoryChart series={toPointSeries(data)} />
       ) : null}
 
-      {data !== null && !hasPlottableHistory(data) ? (
-        <HistoryChart series={[]} />
-      ) : null}
+      {data !== null && !hasPlottableHistory(data) ? <HistoryChart series={[]} /> : null}
     </ScrollView>
   );
 }

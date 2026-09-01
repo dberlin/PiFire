@@ -1,5 +1,6 @@
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
 import { FIXTURE_DASH } from "@pifire/core/fixture";
+
 import { alertsFor } from "../src/alerts";
 import { wireHealth } from "./healthFixture";
 
@@ -41,7 +42,11 @@ function withError(dash: DashSocketPayload, code: string): DashSocketPayload {
 // unarmed -- withProbeTemp's fixture (which leaves targetReq true forever)
 // cannot produce this shape, and alertsFor must not require the NEXT
 // payload to still be armed.
-function withProbeCrossingAndCleared(dash: DashSocketPayload, name: string, temp: number): DashSocketPayload {
+function withProbeCrossingAndCleared(
+  dash: DashSocketPayload,
+  name: string,
+  temp: number,
+): DashSocketPayload {
   const clone = withProbeTemp(dash, name, temp);
   const probe = clone.foodProbes.find((p) => p.label === name);
   if (!probe) throw new Error(`withProbeCrossingAndCleared: no probe named ${name}`);
@@ -137,7 +142,11 @@ describe("thermocouple health alerts", () => {
 
   it.each([
     ["the first real frame", null, withHealth(FIXTURE_DASH, notifyOnly)],
-    ["a suspected transition", withHealth(FIXTURE_DASH, healthy), withHealth(FIXTURE_DASH, suspected)],
+    [
+      "a suspected transition",
+      withHealth(FIXTURE_DASH, healthy),
+      withHealth(FIXTURE_DASH, suspected),
+    ],
     ["recovery", withHealth(FIXTURE_DASH, notifyOnly), withHealth(FIXTURE_DASH, healthy)],
     [
       "a repeated confirmed frame",
@@ -185,45 +194,50 @@ describe("thermocouple health alerts", () => {
       outcome: "stopped",
     });
 
-    expect(alertsFor(withHealth(FIXTURE_DASH, healthy), withHealth(FIXTURE_DASH, stopped))).toEqual([
-      {
-        id: "thermocouple:mcp9601:TC0:Grill",
-        title: "Control probe unavailable",
-        body: "PiFire stopped heating because the control temperature is unavailable.",
-      },
-    ]);
+    expect(alertsFor(withHealth(FIXTURE_DASH, healthy), withHealth(FIXTURE_DASH, stopped))).toEqual(
+      [
+        {
+          id: "thermocouple:mcp9601:TC0:Grill",
+          title: "Control probe unavailable",
+          body: "PiFire stopped heating because the control temperature is unavailable.",
+        },
+      ],
+    );
   });
 
-  it.each(["Food", "Aux"] as const)("uses projected cause and control outcome for a confirmed %s probe", (role) => {
-    const secondaryHealthy = wireHealth({
-      port: "TC1",
-      label: role === "Food" ? "Probe1" : "Stack",
-      displayName: role === "Food" ? "Brisket" : "Stack",
-      role,
-    });
-    const secondaryConfirmed = wireHealth({
-      ...secondaryHealthy,
-      report: {
-        state: "confirmed",
-        faults: ["open"],
-        evidence: ["hardware"],
-        temperatureValid: false,
-      },
-      detector: { source: "hardware", policy: "observe" },
-      outcome: "unavailable",
-    });
+  it.each(["Food", "Aux"] as const)(
+    "uses projected cause and control outcome for a confirmed %s probe",
+    (role) => {
+      const secondaryHealthy = wireHealth({
+        port: "TC1",
+        label: role === "Food" ? "Probe1" : "Stack",
+        displayName: role === "Food" ? "Brisket" : "Stack",
+        role,
+      });
+      const secondaryConfirmed = wireHealth({
+        ...secondaryHealthy,
+        report: {
+          state: "confirmed",
+          faults: ["open"],
+          evidence: ["hardware"],
+          temperatureValid: false,
+        },
+        detector: { source: "hardware", policy: "observe" },
+        outcome: "unavailable",
+      });
 
-    expect(
-      alertsFor(
-        withHealth(FIXTURE_DASH, secondaryHealthy),
-        withHealth(FIXTURE_DASH, secondaryConfirmed),
-      ),
-    ).toEqual([
-      {
-        id: `thermocouple:mcp9601:TC1:${secondaryConfirmed.label}`,
-        title: `${secondaryConfirmed.displayName} probe unavailable`,
-        body: "Hardware reported an open circuit. Grill control continues.",
-      },
-    ]);
-  });
+      expect(
+        alertsFor(
+          withHealth(FIXTURE_DASH, secondaryHealthy),
+          withHealth(FIXTURE_DASH, secondaryConfirmed),
+        ),
+      ).toEqual([
+        {
+          id: `thermocouple:mcp9601:TC1:${secondaryConfirmed.label}`,
+          title: `${secondaryConfirmed.displayName} probe unavailable`,
+          body: "Hardware reported an open circuit. Grill control continues.",
+        },
+      ]);
+    },
+  );
 });

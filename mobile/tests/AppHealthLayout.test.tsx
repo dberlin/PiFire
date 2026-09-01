@@ -1,7 +1,8 @@
-import { render, waitFor } from "@testing-library/react-native";
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
-import type { LiveResult } from "../src/useLive";
 import { FIXTURE_DASH } from "@pifire/core/fixture";
+import { render, waitFor } from "@testing-library/react-native";
+
+import type { LiveResult } from "../src/useLive";
 import { wireHealth } from "./healthFixture";
 
 const mockRequestPermissionsAsync = jest.fn();
@@ -94,11 +95,7 @@ it("retains a current confirmed banner after disconnect, qualified as Last repor
 });
 
 it("ages a current confirmed banner to Last reported after a silent live socket stall", async () => {
-  mockLiveState.current = liveResult(
-    [CONFIRMED_PRIMARY_CURRENT],
-    "live",
-    Date.now() - 31_000,
-  );
+  mockLiveState.current = liveResult([CONFIRMED_PRIMARY_CURRENT], "live", Date.now() - 31_000);
   const screen = await render(<RootLayout />);
 
   await waitFor(() => expect(screen.getByText("Stale · 31s ago")).toBeTruthy());

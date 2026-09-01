@@ -1,5 +1,6 @@
 import { StyleSheet, Text, View } from "react-native";
 import Svg, { Path } from "react-native-svg";
+
 import { THEME } from "../theme";
 
 const tokens = THEME.ember;

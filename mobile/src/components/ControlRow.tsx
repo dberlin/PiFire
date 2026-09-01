@@ -1,5 +1,3 @@
-import { useState } from "react";
-import { Alert, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import type { CommandClient, CommandResult } from "@pifire/core/command";
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
 import {
@@ -8,7 +6,17 @@ import {
   buttonsForMode,
 } from "@pifire/core/dashboard/buttonsForMode";
 import { SCALE } from "@pifire/core/dashboard/scale";
-import { BODY_TEXT_COLOR, INSET_COLOR, ON_ACCENT_INK, THEME, withAlpha, type AccentName } from "../theme";
+import { useState } from "react";
+import { Alert, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+
+import {
+  BODY_TEXT_COLOR,
+  INSET_COLOR,
+  ON_ACCENT_INK,
+  THEME,
+  withAlpha,
+  type AccentName,
+} from "../theme";
 import { SetpointModal } from "./SetpointModal";
 
 // text/surface/danger are identical across all three accents (see theme.ts's
@@ -34,14 +42,22 @@ const SAFETY_LABELS = new Set(["Stop", "Shutdown"]);
 function variantStyle(accent: AccentName) {
   const accentColor = THEME[accent].accent;
   return {
-    accent: { borderColor: accentColor, backgroundColor: withAlpha(accentColor, 0.16), color: BODY_TEXT_COLOR },
+    accent: {
+      borderColor: accentColor,
+      backgroundColor: withAlpha(accentColor, 0.16),
+      color: BODY_TEXT_COLOR,
+    },
     primary: { borderColor: "transparent", backgroundColor: accentColor, color: ON_ACCENT_INK },
     danger: {
       borderColor: THEME[accent].danger,
       backgroundColor: withAlpha(THEME[accent].danger, 0.14),
       color: THEME[accent].danger,
     },
-    plain: { borderColor: "rgba(255,255,255,0.14)", backgroundColor: INSET_COLOR, color: BODY_TEXT_COLOR },
+    plain: {
+      borderColor: "rgba(255,255,255,0.14)",
+      backgroundColor: INSET_COLOR,
+      color: BODY_TEXT_COLOR,
+    },
   } as const;
 }
 

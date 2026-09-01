@@ -1,0 +1,24 @@
+{
+  "$schema": "../web-react/node_modules/oxfmt/configuration_schema.json",
+  // Owns everything in mobile/ -- the Expo app's JS/TS/TSX and its JSON.
+  //
+  // oxfmt resolves the nearest config per file and does not merge, so this
+  // file governs mobile/** entirely and the repo-root config never applies
+  // here. That is why the root config's blanket denial of TS/TSX does not
+  // keep this tree unformatted.
+  //
+  // .gitignore is honored by default, so .expo/ and native build output need
+  // no entry here.
+  "ignorePatterns": [
+    "node_modules/**",
+    // Markdown and TOML are not formatted anywhere else in this repo; keeping
+    // that consistent matters more than formatting two more files.
+    "**/*.md",
+    "**/*.toml",
+  ],
+  // Matches web-react, so the two clients do not drift into different import
+  // conventions while sharing @pifire/core.
+  "sortImports": {},
+  // On by default. Reordering hand-maintained package.json files is churn.
+  "sortPackageJson": false,
+}

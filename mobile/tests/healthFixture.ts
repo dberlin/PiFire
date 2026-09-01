@@ -30,6 +30,5 @@ export function wireHealth(
   };
 }
 
-export const projectedHealth = (
-  over?: Parameters<typeof wireHealth>[0],
-) => projectProbeHealth(wireHealth(over));
+export const projectedHealth = (over?: Parameters<typeof wireHealth>[0]) =>
+  projectProbeHealth(wireHealth(over));

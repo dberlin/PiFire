@@ -3,6 +3,7 @@ jest.mock("@react-native-async-storage/async-storage", () =>
 );
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
+
 import { defaultPrefs, loadPrefs, mergePrefs, savePrefs } from "../src/prefs";
 
 // The mock's storage is a module-level singleton shared across every test in

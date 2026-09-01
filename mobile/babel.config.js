@@ -48,7 +48,10 @@ module.exports = function (api) {
     // not relative to mobile/ or babel-preset-expo/. Functionally identical
     // transform, reached through a path that actually resolves.
     presets: [
-      [require.resolve("expo/internal/babel-preset"), { enableBabelRuntime: false, worklets: false }],
+      [
+        require.resolve("expo/internal/babel-preset"),
+        { enableBabelRuntime: false, worklets: false },
+      ],
     ],
   };
 };

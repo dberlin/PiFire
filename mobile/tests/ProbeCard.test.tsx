@@ -1,6 +1,7 @@
-import { render } from "@testing-library/react-native";
 import { deriveView } from "@pifire/core/dashboard/deriveView";
 import { FIXTURE_DASH } from "@pifire/core/fixture";
+import { render } from "@testing-library/react-native";
+
 import { ProbeCard } from "../src/components/ProbeCard";
 import { projectedHealth } from "./healthFixture";
 
@@ -150,7 +151,13 @@ it("does not show a target for a stored-but-disarmed target", async () => {
   expect(p.targetStr).toBe("AMBIENT"); // stored-but-unarmed target must not render as armed
 
   const { getByText, queryByText } = await render(
-    <ProbeCard name={p.name} temp={p.tempInt} targetStr={p.targetStr} units={p.unit} stale={p.stale} />,
+    <ProbeCard
+      name={p.name}
+      temp={p.tempInt}
+      targetStr={p.targetStr}
+      units={p.unit}
+      stale={p.stale}
+    />,
   );
   expect(getByText("AMBIENT")).toBeTruthy();
   expect(queryByText(/203/)).toBeNull();

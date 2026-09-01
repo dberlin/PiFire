@@ -1,13 +1,7 @@
 import type { ProbeHealthSummary, ProbeHealthView } from "@pifire/core/dashboard/probeHealth";
 import { StyleSheet, Text, View } from "react-native";
-import {
-  BODY_TEXT_COLOR,
-  DANGER,
-  PROBE_LABEL_COLOR,
-  THEME,
-  WARN_COLOR,
-  withAlpha,
-} from "../theme";
+
+import { BODY_TEXT_COLOR, DANGER, PROBE_LABEL_COLOR, THEME, WARN_COLOR, withAlpha } from "../theme";
 
 interface HealthProps {
   health: ProbeHealthView | null;
@@ -51,7 +45,9 @@ function HealthCopy({
   return (
     <View style={styles.copy}>
       <View style={styles.headlineRow}>
-        <Text style={[styles.headline, { color: health.severity === "danger" ? DANGER : WARN_COLOR }]}>
+        <Text
+          style={[styles.headline, { color: health.severity === "danger" ? DANGER : WARN_COLOR }]}
+        >
           {health.headline}
         </Text>
         {additionalCopy ? <Text style={styles.additional}>{additionalCopy}</Text> : null}
@@ -59,7 +55,9 @@ function HealthCopy({
       {health.impactCopy ? <Text style={styles.body}>{health.impactCopy}</Text> : null}
       {health.causeCopy ? <Text style={styles.cause}>{health.causeCopy}</Text> : null}
       {health.freshnessQualifier ? (
-        <Text style={[styles.freshness, { color: health.severity === "danger" ? DANGER : WARN_COLOR }]}>
+        <Text
+          style={[styles.freshness, { color: health.severity === "danger" ? DANGER : WARN_COLOR }]}
+        >
           {health.freshnessQualifier}
         </Text>
       ) : null}

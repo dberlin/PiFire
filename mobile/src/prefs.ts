@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+
 import { THEME, type AccentName } from "./theme";
 
 export interface Prefs {
@@ -28,7 +29,8 @@ function isAccentName(value: unknown): value is AccentName {
 // must not render `THEME[undefined]` -- it falls back to defaultPrefs.accent
 // instead of propagating whatever a previous, incompatible version wrote.
 export function mergePrefs(stored: unknown): Prefs {
-  const s = typeof stored === "object" && stored !== null ? (stored as Record<string, unknown>) : {};
+  const s =
+    typeof stored === "object" && stored !== null ? (stored as Record<string, unknown>) : {};
   return {
     host: typeof s.host === "string" ? s.host : defaultPrefs.host,
     accent: isAccentName(s.accent) ? s.accent : defaultPrefs.accent,

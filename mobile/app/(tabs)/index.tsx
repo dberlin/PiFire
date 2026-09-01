@@ -1,6 +1,7 @@
-import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { deriveView } from "@pifire/core/dashboard/deriveView";
 import { PROBE_GAP, SCALE, probeGrid } from "@pifire/core/dashboard/scale";
+import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+
 import { ControlRow } from "../../src/components/ControlRow";
 import { GrillGauge } from "../../src/components/GrillGauge";
 import { HealthSummary } from "../../src/components/HealthBanner";
@@ -98,10 +99,14 @@ export default function Dashboard() {
           The "Manager" shortcut into /pellets (dashboard.css's
           .pf-dash-hopper-link) is left out -- this app has no pellet-manager
           route to link to yet. */}
-      <View style={[styles.hopper, { backgroundColor: tokens.surface, borderColor: CARD_BORDER_COLOR }]}>
+      <View
+        style={[styles.hopper, { backgroundColor: tokens.surface, borderColor: CARD_BORDER_COLOR }]}
+      >
         <View style={styles.hopperHead}>
           <Text style={styles.hopperCaption}>Hopper</Text>
-          <Text style={[styles.hopperVal, { color: CSS_VAR_COLOR[view.hopper.color] ?? tokens.accent }]}>
+          <Text
+            style={[styles.hopperVal, { color: CSS_VAR_COLOR[view.hopper.color] ?? tokens.accent }]}
+          >
             {view.hopper.pct}%
           </Text>
         </View>
@@ -117,7 +122,12 @@ export default function Dashboard() {
             ]}
           />
         </View>
-        <Text style={[styles.hopperLabel, { color: CSS_VAR_COLOR[view.hopper.labelColor] ?? tokens.text }]}>
+        <Text
+          style={[
+            styles.hopperLabel,
+            { color: CSS_VAR_COLOR[view.hopper.labelColor] ?? tokens.text },
+          ]}
+        >
           {view.hopper.label}
         </Text>
       </View>

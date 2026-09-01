@@ -1,9 +1,10 @@
-import { render } from "@testing-library/react-native";
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
+import { PROBE_GAP, probeGrid } from "@pifire/core/dashboard/scale";
+import { FIXTURE_DASH } from "@pifire/core/fixture";
+import { render } from "@testing-library/react-native";
+
 import type { LiveResult } from "../src/useLive";
 import { qualifyRetainedHealth } from "../src/useLive";
-import { FIXTURE_DASH } from "@pifire/core/fixture";
-import { PROBE_GAP, probeGrid } from "@pifire/core/dashboard/scale";
 import { wireHealth } from "./healthFixture";
 
 // The screen reads its connection and preferences through the root layout's
@@ -157,14 +158,17 @@ describe("transport-retained probe health", () => {
   it.each([
     ["a disconnected socket", "unreachable" as const, 100_000],
     ["a silent live socket", "live" as const, 69_000],
-  ])("qualifies the gauge, food card, and Aux summary after %s", async (_case, phase, lastPayloadAt) => {
-    live.dash = qualifiedDash(phase, lastPayloadAt);
+  ])(
+    "qualifies the gauge, food card, and Aux summary after %s",
+    async (_case, phase, lastPayloadAt) => {
+      live.dash = qualifiedDash(phase, lastPayloadAt);
 
-    const screen = await render(<Dashboard />);
+      const screen = await render(<Dashboard />);
 
-    expect(screen.getAllByText("Last reported")).toHaveLength(3);
-    expect(screen.getByRole("summary").props.accessibilityLabel).toContain("Last reported");
-  });
+      expect(screen.getAllByText("Last reported")).toHaveLength(3);
+      expect(screen.getByRole("summary").props.accessibilityLabel).toContain("Last reported");
+    },
+  );
 
   it("keeps current live health unqualified", async () => {
     live.dash = qualifiedDash("live", 100_000);
@@ -228,9 +232,7 @@ describe("probe health layering", () => {
   it("matches an Aux-only live region to dynamic appearance and escalation", async () => {
     live.dash = {
       ...FIXTURE_DASH,
-      thermocoupleHealth: [
-        wireHealth({ role: "Aux", label: "Stack", displayName: "Stack" }),
-      ],
+      thermocoupleHealth: [wireHealth({ role: "Aux", label: "Stack", displayName: "Stack" })],
     };
     const screen = await render(<Dashboard />);
     expect(screen.queryByTestId("health-summary")).toBeNull();
@@ -337,9 +339,7 @@ describe("probe health layering", () => {
 
     live.dash = {
       ...FIXTURE_DASH,
-      thermocoupleHealth: [
-        wireHealth({ role: "Aux", label: "Stack", displayName: "Stack" }),
-      ],
+      thermocoupleHealth: [wireHealth({ role: "Aux", label: "Stack", displayName: "Stack" })],
     };
     await screen.rerender(<Dashboard />);
 

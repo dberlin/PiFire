@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+
 import { THEME } from "../../src/theme";
 import { useLiveContext, usePrefsContext } from "../_layout";
 
@@ -77,17 +85,19 @@ export default function Events() {
           tell me" actually looks. Also stated on the preferences screen
           (settings.tsx), next to the alerts toggle it's really about. */}
       <Text style={[styles.notice, { color: tokens.text }]}>
-        Alerts on this screen only fire while PiFire is open on this phone. For
-        notifications that reach you while it's closed, set up PiFire's
-        server-side notification services (Apprise, Pushover, Pushbullet, or
-        IFTTT) in the grill's own settings -- those remain the reliable path.
+        Alerts on this screen only fire while PiFire is open on this phone. For notifications that
+        reach you while it's closed, set up PiFire's server-side notification services (Apprise,
+        Pushover, Pushbullet, or IFTTT) in the grill's own settings -- those remain the reliable
+        path.
       </Text>
 
       {lines === null && error === null ? (
         <ActivityIndicator color={tokens.accent} style={styles.spinner} />
       ) : null}
 
-      {error !== null ? <Text style={[styles.error, { color: tokens.danger }]}>{error}</Text> : null}
+      {error !== null ? (
+        <Text style={[styles.error, { color: tokens.danger }]}>{error}</Text>
+      ) : null}
 
       {lines !== null && lines.length === 0 ? (
         <Text style={[styles.empty, { color: tokens.text }]}>No events yet.</Text>

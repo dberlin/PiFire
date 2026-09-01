@@ -1,5 +1,6 @@
-import { AppState } from "react-native";
 import { act, renderHook } from "@testing-library/react-native";
+import { AppState } from "react-native";
+
 import { useLive } from "../src/useLive";
 
 jest.mock("@pifire/core/liveConnection", () => ({

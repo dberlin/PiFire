@@ -1,6 +1,7 @@
+import { setpointRange } from "@pifire/core/dashboard/health";
 import { useEffect, useState } from "react";
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
-import { setpointRange } from "@pifire/core/dashboard/health";
+
 import { THEME } from "../theme";
 
 // This modal is mobile's ONE setpoint entry, opened by the plain "Hold"
@@ -92,13 +93,19 @@ export function SetpointModal({
               }}
               onBlur={() => setDraft(null)}
             />
-            <Text style={styles.unit}>{"°"}{units}</Text>
+            <Text style={styles.unit}>
+              {"°"}
+              {units}
+            </Text>
             <Pressable style={styles.step} onPress={() => bump(step)} accessibilityLabel="increase">
               <Text style={styles.stepText}>+</Text>
             </Pressable>
           </View>
           <Text style={styles.range}>
-            {lo}{"°"} – {hi}{"°"}{units}
+            {lo}
+            {"°"} – {hi}
+            {"°"}
+            {units}
           </Text>
           <View style={styles.actions}>
             <Pressable style={styles.button} onPress={onCancel}>

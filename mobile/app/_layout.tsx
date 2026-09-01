@@ -1,11 +1,20 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { Platform, StyleSheet, Text, View } from "react-native";
-import { Stack, useRouter, usePathname } from "expo-router";
-import * as Notifications from "expo-notifications";
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
 import { projectProbeHealth } from "@pifire/core/dashboard/probeHealth";
-import { HealthBanner } from "../src/components/HealthBanner";
+import * as Notifications from "expo-notifications";
+import { Stack, useRouter, usePathname } from "expo-router";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { Platform, StyleSheet, Text, View } from "react-native";
+
 import { alertsFor } from "../src/alerts";
+import { HealthBanner } from "../src/components/HealthBanner";
 import { loadHosts } from "../src/host";
 import { defaultPrefs, loadPrefs, savePrefs, type Prefs } from "../src/prefs";
 import { THEME } from "../src/theme";

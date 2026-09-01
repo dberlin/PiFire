@@ -1,5 +1,6 @@
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { useRouter } from "expo-router";
+import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
+
 import { THEME, type AccentName } from "../../src/theme";
 import { usePrefsContext } from "../_layout";
 
@@ -38,8 +39,8 @@ export default function Settings() {
           <Text style={[styles.buttonText, { color: tokens.background }]}>Change grill</Text>
         </Pressable>
         <Text style={[styles.note, { color: tokens.text }]}>
-          Grill configuration -- probes, PID tuning, GPIO pins, and the rest --
-          lives in PiFire's web UI, not here.
+          Grill configuration -- probes, PID tuning, GPIO pins, and the rest -- lives in PiFire's
+          web UI, not here.
         </Text>
       </View>
 
@@ -83,10 +84,10 @@ export default function Settings() {
             here because this is the screen where the toggle it describes
             lives. */}
         <Text style={[styles.note, { color: tokens.text }]}>
-          Local alerts only fire while PiFire is open on this phone. For
-          notifications that reach you while it's closed, set up PiFire's
-          server-side notification services (Apprise, Pushover, Pushbullet, or
-          IFTTT) in the grill's own settings -- those remain the reliable path.
+          Local alerts only fire while PiFire is open on this phone. For notifications that reach
+          you while it's closed, set up PiFire's server-side notification services (Apprise,
+          Pushover, Pushbullet, or IFTTT) in the grill's own settings -- those remain the reliable
+          path.
         </Text>
       </View>
     </ScrollView>

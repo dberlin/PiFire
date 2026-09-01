@@ -1,7 +1,8 @@
+import type { DashSocketPayload } from "@pifire/core/contracts/core";
+import { FIXTURE_DASH } from "@pifire/core/fixture";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { Alert } from "react-native";
-import { FIXTURE_DASH } from "@pifire/core/fixture";
-import type { DashSocketPayload } from "@pifire/core/contracts/core";
+
 import { ControlRow } from "../src/components/ControlRow";
 
 // FIXTURE_DASH is a real captured socket_dash_data payload (@pifire/core/fixture).

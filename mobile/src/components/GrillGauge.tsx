@@ -1,6 +1,8 @@
+import type { ProbeHealthView } from "@pifire/core/dashboard/probeHealth";
+import { SCALE, gaugeModeBadge } from "@pifire/core/dashboard/scale";
+import { arcLength, describeArc, polarToCartesian, valueAngle } from "@pifire/core/gaugeMath";
 import { useEffect } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import Svg, { Circle, Defs, Line, LinearGradient, Path, RadialGradient, Stop } from "react-native-svg";
 import Animated, {
   Easing,
   cancelAnimation,
@@ -10,10 +12,16 @@ import Animated, {
   withSequence,
   withTiming,
 } from "react-native-reanimated";
-import { arcLength, describeArc, polarToCartesian, valueAngle } from "@pifire/core/gaugeMath";
-import { SCALE, gaugeModeBadge } from "@pifire/core/dashboard/scale";
-import type { ProbeHealthView } from "@pifire/core/dashboard/probeHealth";
-import { ProbeHealthInline } from "./HealthBanner";
+import Svg, {
+  Circle,
+  Defs,
+  Line,
+  LinearGradient,
+  Path,
+  RadialGradient,
+  Stop,
+} from "react-native-svg";
+
 import {
   GAUGE_ACCENT,
   SETPOINT_COLOR,
@@ -27,6 +35,7 @@ import {
   withAlpha,
   type AccentName,
 } from "../theme";
+import { ProbeHealthInline } from "./HealthBanner";
 
 // react-native-svg's Path/Circle need wrapping to accept Reanimated's
 // `animatedProps` (the SVG attribute equivalent of `useAnimatedStyle`).
@@ -135,8 +144,14 @@ export function GrillGauge({
     if (cooking && animate) {
       glowOpacity.value = withRepeat(
         withSequence(
-          withTiming(GLOW_MAX_OPACITY, { duration: GLOW_HALF_CYCLE_MS, easing: Easing.inOut(Easing.ease) }),
-          withTiming(GLOW_MIN_OPACITY, { duration: GLOW_HALF_CYCLE_MS, easing: Easing.inOut(Easing.ease) }),
+          withTiming(GLOW_MAX_OPACITY, {
+            duration: GLOW_HALF_CYCLE_MS,
+            easing: Easing.inOut(Easing.ease),
+          }),
+          withTiming(GLOW_MIN_OPACITY, {
+            duration: GLOW_HALF_CYCLE_MS,
+            easing: Easing.inOut(Easing.ease),
+          }),
         ),
         -1,
         false,
@@ -164,85 +179,85 @@ export function GrillGauge({
   return (
     <View style={styles.container} testID="gauge">
       <View style={styles.card}>
-      <Svg width={GAUGE_SIZE} height={GAUGE_SIZE} viewBox={`0 0 ${VIEWBOX} ${VIEWBOX}`}>
-        <Defs>
-          <LinearGradient id="pfGauge" x1="0" y1="1" x2="1" y2="0">
-            <Stop offset="0" stopColor={gaugeAccent.arcStop0} />
-            <Stop offset="0.55" stopColor={gaugeAccent.arcStop1} />
-            <Stop offset="1" stopColor={gaugeAccent.arcStop2} />
-          </LinearGradient>
-          {/* dashboard.css's .pf-dash-gauge-glow: radial-gradient(closest-side,
+        <Svg width={GAUGE_SIZE} height={GAUGE_SIZE} viewBox={`0 0 ${VIEWBOX} ${VIEWBOX}`}>
+          <Defs>
+            <LinearGradient id="pfGauge" x1="0" y1="1" x2="1" y2="0">
+              <Stop offset="0" stopColor={gaugeAccent.arcStop0} />
+              <Stop offset="0.55" stopColor={gaugeAccent.arcStop1} />
+              <Stop offset="1" stopColor={gaugeAccent.arcStop2} />
+            </LinearGradient>
+            {/* dashboard.css's .pf-dash-gauge-glow: radial-gradient(closest-side,
               var(--accent), transparent 68%) -- opaque at the center, straight
               to fully transparent by 68% of the radius, held transparent past
               that. CSS's `filter: blur(6px)` on top of it has no RN
               equivalent; the gradient's own linear fade from opaque to
               transparent is the approximation for the blur, not an extra
               effect layered on it. */}
-          <RadialGradient id="pfGaugeGlow" cx="0.5" cy="0.5" r="0.5">
-            <Stop offset="0" stopColor={gaugeAccent.glow} stopOpacity="1" />
-            <Stop offset="0.68" stopColor={gaugeAccent.glow} stopOpacity="0" />
-          </RadialGradient>
-        </Defs>
-        {/* Behind the track/arc, same as .pf-dash-gauge-glow sitting behind
+            <RadialGradient id="pfGaugeGlow" cx="0.5" cy="0.5" r="0.5">
+              <Stop offset="0" stopColor={gaugeAccent.glow} stopOpacity="1" />
+              <Stop offset="0.68" stopColor={gaugeAccent.glow} stopOpacity="0" />
+            </RadialGradient>
+          </Defs>
+          {/* Behind the track/arc, same as .pf-dash-gauge-glow sitting behind
             .pf-dash-gauge-svg in the DOM. A filled circle with fill="none"'s
             opposite -- radial-gradient fill, not a flat color -- is what keeps
             this a soft ring rather than the solid disc the earlier flat View
             painted. */}
-        <AnimatedCircle
-          cx={CX}
-          cy={CY}
-          r={GLOW_RADIUS}
-          fill="url(#pfGaugeGlow)"
-          animatedProps={glowAnimatedProps}
-          testID="gauge-glow"
-        />
-        <Path d={TRACK} fill="none" stroke={TRACK_COLOR} strokeWidth={16} strokeLinecap="round" />
-        <AnimatedPath
-          d={TRACK}
-          fill="none"
-          stroke="url(#pfGauge)"
-          strokeWidth={16}
-          strokeLinecap="round"
-          strokeDasharray={LEN}
-          animatedProps={arcAnimatedProps}
-        />
-        {hasSetpoint && (
-          <Line
-            x1={inner.x}
-            y1={inner.y}
-            x2={outer.x}
-            y2={outer.y}
-            stroke={SETPOINT_COLOR}
-            strokeWidth={4}
-            strokeLinecap="round"
+          <AnimatedCircle
+            cx={CX}
+            cy={CY}
+            r={GLOW_RADIUS}
+            fill="url(#pfGaugeGlow)"
+            animatedProps={glowAnimatedProps}
+            testID="gauge-glow"
           />
-        )}
-      </Svg>
-      <View style={styles.overlay} pointerEvents="none">
-        <Text style={styles.caption}>Grill</Text>
-        <View style={styles.num}>
-          <Text style={styles.temp}>{temp === null ? "—" : temp}</Text>
-          {temp === null ? null : <Text style={styles.unit}>{`°${units}`}</Text>}
-        </View>
-        {stale && <Text style={styles.stale}>{stale}</Text>}
-        {hasSetpoint && <Text style={styles.set}>{`SET ${Math.round(setpoint)}°`}</Text>}
-        {/* dashboard.css's .pf-dash-gauge-mode: a small pill BADGE (14%-alpha
+          <Path d={TRACK} fill="none" stroke={TRACK_COLOR} strokeWidth={16} strokeLinecap="round" />
+          <AnimatedPath
+            d={TRACK}
+            fill="none"
+            stroke="url(#pfGauge)"
+            strokeWidth={16}
+            strokeLinecap="round"
+            strokeDasharray={LEN}
+            animatedProps={arcAnimatedProps}
+          />
+          {hasSetpoint && (
+            <Line
+              x1={inner.x}
+              y1={inner.y}
+              x2={outer.x}
+              y2={outer.y}
+              stroke={SETPOINT_COLOR}
+              strokeWidth={4}
+              strokeLinecap="round"
+            />
+          )}
+        </Svg>
+        <View style={styles.overlay} pointerEvents="none">
+          <Text style={styles.caption}>Grill</Text>
+          <View style={styles.num}>
+            <Text style={styles.temp}>{temp === null ? "—" : temp}</Text>
+            {temp === null ? null : <Text style={styles.unit}>{`°${units}`}</Text>}
+          </View>
+          {stale && <Text style={styles.stale}>{stale}</Text>}
+          {hasSetpoint && <Text style={styles.set}>{`SET ${Math.round(setpoint)}°`}</Text>}
+          {/* dashboard.css's .pf-dash-gauge-mode: a small pill BADGE (14%-alpha
             fill, 55%-alpha border, uppercase, letter-spaced), not a large
             primary block -- it names the current mode, it isn't the headline. */}
-        <Text
-          style={[
-            styles.mode,
-            MODE_BADGE,
-            {
-              backgroundColor: withAlpha(accentColor, 0.14),
-              borderColor: withAlpha(accentColor, 0.55),
-              color: accentColor,
-            },
-          ]}
-        >
-          {modeLabel}
-        </Text>
-      </View>
+          <Text
+            style={[
+              styles.mode,
+              MODE_BADGE,
+              {
+                backgroundColor: withAlpha(accentColor, 0.14),
+                borderColor: withAlpha(accentColor, 0.55),
+                color: accentColor,
+              },
+            ]}
+          >
+            {modeLabel}
+          </Text>
+        </View>
       </View>
       <ProbeHealthInline health={health} />
     </View>

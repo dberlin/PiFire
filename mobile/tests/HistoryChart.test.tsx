@@ -1,12 +1,25 @@
 import { render } from "@testing-library/react-native";
+
 import { HistoryChart } from "../src/components/HistoryChart";
 
 it("renders one line per series", async () => {
   const { getAllByTestId } = await render(
     <HistoryChart
       series={[
-        { label: "Grill", points: [[0, 200], [60, 225]] },
-        { label: "Brisket", points: [[0, 40], [60, 55]] },
+        {
+          label: "Grill",
+          points: [
+            [0, 200],
+            [60, 225],
+          ],
+        },
+        {
+          label: "Brisket",
+          points: [
+            [0, 40],
+            [60, 55],
+          ],
+        },
       ]}
     />,
   );
@@ -28,7 +41,16 @@ it("does not crash on a single point (zero-width time range)", async () => {
 it("does not crash when every value is identical (zero-height range)", async () => {
   const { getAllByTestId } = await render(
     <HistoryChart
-      series={[{ label: "Grill", points: [[0, 200], [30, 200], [60, 200]] }]}
+      series={[
+        {
+          label: "Grill",
+          points: [
+            [0, 200],
+            [30, 200],
+            [60, 200],
+          ],
+        },
+      ]}
     />,
   );
   const lines = getAllByTestId("history-line");
@@ -40,7 +62,16 @@ it("does not crash when every value is identical (zero-height range)", async () 
 it("skips gaps (null readings) without crashing", async () => {
   const { getAllByTestId } = await render(
     <HistoryChart
-      series={[{ label: "Grill", points: [[0, 200], [30, null], [60, 210]] }]}
+      series={[
+        {
+          label: "Grill",
+          points: [
+            [0, 200],
+            [30, null],
+            [60, 210],
+          ],
+        },
+      ]}
     />,
   );
   const lines = getAllByTestId("history-line");

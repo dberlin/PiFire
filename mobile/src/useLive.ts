@@ -1,5 +1,3 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { AppState } from "react-native";
 import { type CommandClient, createCommand } from "@pifire/core/command";
 import type { PelletSocketPayload } from "@pifire/core/contracts/control";
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
@@ -10,6 +8,8 @@ import {
   type LiveConnection,
   createLiveConnection,
 } from "@pifire/core/liveConnection";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AppState } from "react-native";
 
 export type { ConnectionPhase };
 
@@ -36,9 +36,7 @@ export function qualifyRetainedHealth(result: LiveResult, now: number): LiveResu
   const payloadAgeMs =
     result.lastPayloadAt === null ? null : Math.max(0, now - result.lastPayloadAt);
   const retained =
-    result.phase !== "live" ||
-    payloadAgeMs === null ||
-    payloadAgeMs > LIVE_STALE_AFTER_MS;
+    result.phase !== "live" || payloadAgeMs === null || payloadAgeMs > LIVE_STALE_AFTER_MS;
   if (!retained || !result.live.thermocoupleHealth?.length) {
     return result;
   }

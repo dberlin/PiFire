@@ -1,5 +1,6 @@
 import { cleanup, render } from "@testing-library/react-native";
 import { processColor } from "react-native";
+
 import { TabIcon, tabIconTestID, type TabIconName } from "../src/components/TabIcon";
 import { TAB_SCREENS } from "../src/tabs";
 
@@ -15,9 +16,8 @@ function shapes(node: unknown): Record<string, unknown>[] {
     return [];
   }
   const el = node as Rendered;
-  const own = el.type?.startsWith("RNSVG") && el.type !== "RNSVGSvgView" && el.props
-    ? [el.props]
-    : [];
+  const own =
+    el.type?.startsWith("RNSVG") && el.type !== "RNSVGSvgView" && el.props ? [el.props] : [];
   const kids = Array.isArray(el.children) ? el.children.flatMap(shapes) : [];
   return [...own, ...kids];
 }
