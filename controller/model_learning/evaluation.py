@@ -195,6 +195,12 @@ class EvaluationDecision:
     blockers: tuple[str, ...]
     completed_origins: tuple[CompletedForecastOrigin, ...] = ()
 
+    @property
+    def completed_horizons(self) -> tuple[int, ...]:
+        """Horizons backed by observations in this complete causal round."""
+
+        return tuple(score.horizon_steps for score in self.scores if score.sample_count > 0)
+
 
 class CausalForecastEvaluator:
     """Join frozen forecasts to exact future frames without owning either model."""

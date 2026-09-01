@@ -8,7 +8,7 @@ from probes.thermocouple_health import (
 from probes.thermocouple_inference import ThermocoupleInferencePolicy
 
 
-class _HealthDevice:
+class _HealthDevice(ProbeInterface):
     applies_kalman = False
 
     def __init__(self, health):

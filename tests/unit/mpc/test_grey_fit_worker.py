@@ -1,15 +1,24 @@
-"""RED contracts for the isolated, single-request grey fitting process."""
+"""Contracts for the isolated, single-request segmented grey fitting process."""
 
 from __future__ import annotations
 
+import hashlib
 import math
 import os
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
+from types import SimpleNamespace
 
+import numpy as np
 import pytest
+from scipy import optimize
 
+from common.learning_trajectory import (
+    FitCorpusIdentity,
+    FitCorpusSlice,
+    canonical_fit_corpus_digest,
+)
 from controller.acados.contracts import GreyBoxMPCConfig
-from controller.model_learning.contracts import CandidateOrigin, FitRequest, FitWindowIdentity, FrameObservation
+from controller.model_learning.contracts import CandidateOrigin, FitRequest
 from controller.runtime.model_fitting import (
     FIT_LOG_BOUNDS,
     FITTED_PARAMETERS,
@@ -18,9 +27,10 @@ from controller.runtime.model_fitting import (
     FitSubmission,
     GreyFitError,
     GreyFitJob,
+    GreyFitSegmentArrays,
     GreyFitSuccess,
     GreyFitWorker,
-    _fit_grey_job,
+    fit_segmented_grey,
 )
 
 _DIGEST_A = "a" * 64
@@ -34,70 +44,109 @@ _THREAD_VARIABLES = (
 )
 
 
-def _frame(sequence: int) -> FrameObservation:
-    realized = (0.2, 0.8, 0.5)[sequence % 3]
-    return FrameObservation(
-        frame_start_s=sequence * 25.0,
-        frame_end_s=(sequence + 1) * 25.0,
-        temp_c=80.0 + 0.3 * sequence,
-        setpoint_c=120.0,
-        ambient_c=20.0,
-        requested_q=realized,
-        realized_q=realized,
-        requested_auger_duty=realized,
-        delivered_on_s=realized * 25.0,
-        requested_fan_duty=0.5,
-        actual_fan_duty=0.5,
-        result_revision=sequence + 1,
-        output_source="controller",
-        lid_open=False,
-        safety_inhibited=False,
-        manual_override=False,
-        stale=False,
-        skipped=False,
-        reset=False,
-        continuous=True,
-        role_generation=4,
-        observation_sequence=sequence,
-    )
-
-
-def _request(*, first: int = 0, last: int = 11) -> FitRequest:
+def _request(
+    *,
+    first: int,
+    last: int,
+    corpus: FitCorpusIdentity,
+) -> FitRequest:
     return FitRequest(
         request_id=f"fit-{first}-{last}",
         origin=CandidateOrigin.PASSIVE_ONLINE,
-        window=FitWindowIdentity(
-            session_id="session-a",
-            cook_id="cook-a",
-            first_observation_sequence=first,
-            last_observation_sequence=last,
-            configuration_digest=_DIGEST_A,
-            incumbent_digest=_DIGEST_B,
-            role_generation=4,
-        ),
+        fit_corpus=corpus,
+        configuration_digest=_DIGEST_A,
+        parent_incumbent_digest=_DIGEST_B,
+        parent_incumbent_generation=4,
         candidate_generation=9,
     )
 
 
-def _job(*, count: int = 12) -> GreyFitJob:
+def _segment(*, first: int, count: int) -> GreyFitSegmentArrays:
+    loads = tuple((0.2, 0.8, 0.5)[index % 3] for index in range(count))
+    return GreyFitSegmentArrays(
+        segment_id=f"segment-{first}",
+        cook_id="cook-a",
+        through_ordinal=count - 1,
+        prefix_digest=hashlib.sha256(f"segment-{first}".encode()).hexdigest(),
+        segment_content_digest=hashlib.sha256(f"segment-content-{first}".encode()).hexdigest(),
+        fit_partition_digest=_DIGEST_A,
+        observation_sequences=tuple(range(first, first + count)),
+        initial_load=loads[0],
+        pre_roll_duration_s=(),
+        pre_roll_load=(),
+        pre_roll_temperature_c=(),
+        hold_anchor_c=80.0,
+        scored_duration_s=(20.0,) * count,
+        scored_load=loads,
+        scored_ambient_c=(20.0,) * count,
+        scored_temperature_c=tuple(80.3 + 0.3 * index for index in range(count)),
+        calibration_origin=(False,) * count,
+    )
+
+
+def _corpus(segment: GreyFitSegmentArrays) -> FitCorpusIdentity:
+    corpus_slice = FitCorpusSlice(
+        segment_id=segment.segment_id,
+        through_ordinal=segment.through_ordinal,
+        prefix_digest=segment.prefix_digest,
+        segment_content_digest=segment.segment_content_digest,
+        pre_roll_count=0,
+        scored_count=len(segment.scored_load),
+    )
+    return FitCorpusIdentity(
+        schema_version=2,
+        corpus_revision=1,
+        fit_partition_digest=_DIGEST_A,
+        slices=(corpus_slice,),
+        corpus_digest=canonical_fit_corpus_digest(
+            schema_version=2,
+            corpus_revision=1,
+            fit_partition_digest=_DIGEST_A,
+            slices=(corpus_slice,),
+        ),
+    )
+
+
+def _job(
+    *,
+    first: int = 0,
+    count: int = 12,
+    config: GreyBoxMPCConfig | None = None,
+) -> GreyFitJob:
+    segment = _segment(first=first, count=count)
+    resolved = (
+        GreyBoxMPCConfig(
+            horizon_steps=12,
+            temperature_weight=7.0,
+            terminal_weight=9.0,
+            move_weight=0.03,
+        )
+        if config is None
+        else config
+    )
+    corpus = _corpus(segment)
     return GreyFitJob(
-        request=_request(last=count - 1),
-        observations=tuple(_frame(index) for index in range(count)),
-        config=GreyBoxMPCConfig(horizon_steps=12, temperature_weight=7.0, terminal_weight=9.0, move_weight=0.03),
+        request=_request(
+            first=first,
+            last=first + count - 1,
+            corpus=corpus,
+        ),
+        corpus=corpus,
+        segments=(segment,),
+        config=resolved,
     )
 
 
 def _successful_kernel(job: GreyFitJob) -> GreyFitSuccess:
-    values = {name: getattr(job.config, name) for name in job.config.__dataclass_fields__}
-    values.update(C_c=900.0, K_Q=700.0, theta=75.0)
+    temperatures = np.concatenate([segment.scored_temperature_c for segment in job.segments])
     return GreyFitSuccess(
         request=job.request,
-        config=GreyBoxMPCConfig(**values),
+        config=replace(job.config, C_c=900.0, K_Q=700.0, theta=75.0),
         rmse_c=1.25,
         max_error_c=2.5,
         identifiability=1.1,
-        sample_count=len(job.observations),
-        temperature_band_c=(job.observations[0].temp_c, job.observations[-1].temp_c),
+        sample_count=sum(len(segment.scored_load) for segment in job.segments),
+        temperature_band_c=(float(np.min(temperatures)), float(np.max(temperatures))),
         nfev=17,
     )
 
@@ -119,20 +168,20 @@ def test_fit_contract_is_bounded_log_space_for_only_the_three_identifiable_param
     }
 
 
-def test_job_owns_an_immutable_bounded_snapshot() -> None:
-    source = [_frame(index) for index in range(12)]
-    job = GreyFitJob(request=_request(), observations=source, config=GreyBoxMPCConfig(horizon_steps=12))
-    source.clear()
-    assert len(job.observations) == 12
-    assert isinstance(job.observations, tuple)
+def test_job_owns_read_only_compact_arrays_and_is_bounded() -> None:
+    job = _job()
+    segment = job.segments[0]
+
+    assert isinstance(job.segments, tuple)
+    assert segment.scored_load.flags.owndata is True
+    assert segment.scored_load.flags.writeable is False
+    assert not hasattr(job, "observations")
+    with pytest.raises(ValueError):
+        segment.scored_load[0] = 1.0
     with pytest.raises(FrozenInstanceError):
         job.config = GreyBoxMPCConfig()  # type: ignore[misc]
     with pytest.raises(ValueError, match="bounded"):
-        GreyFitJob(
-            request=_request(last=MAX_FIT_OBSERVATIONS),
-            observations=tuple(_frame(index) for index in range(MAX_FIT_OBSERVATIONS + 1)),
-            config=GreyBoxMPCConfig(),
-        )
+        _job(count=MAX_FIT_OBSERVATIONS + 1)
 
 
 def test_success_changes_only_free_physics_and_preserves_fixed_structure_and_weights() -> None:
@@ -158,21 +207,20 @@ def test_success_changes_only_free_physics_and_preserves_fixed_structure_and_wei
         "max_iterations",
     ):
         assert getattr(success.config, fixed) == getattr(job.config, fixed)
-    assert success.config.delay_states == 8
-    assert success.config.timestep_s == 25.0
 
 
 def test_worker_is_spawned_single_process_single_request_and_restores_parent_thread_environment(monkeypatch) -> None:
+    job = _job()
     for index, name in enumerate(_THREAD_VARIABLES, start=2):
         monkeypatch.setenv(name, str(index))
     with GreyFitWorker(kernel=_successful_kernel) as worker:
         assert worker.start_method == "spawn"
         assert worker.process_count == 1
-        assert worker.submit(_job()) is FitSubmission.ACCEPTED
+        assert worker.submit(job) is FitSubmission.ACCEPTED
         assert worker.submit(_job()) is FitSubmission.BUSY
         message = worker.receive(timeout_s=10.0)
     assert isinstance(message.outcome, GreyFitSuccess)
-    assert message.request == _request()
+    assert message.request == job.request
     assert message.worker_start_method == "spawn"
     assert dict(message.worker_thread_environment) == {name: "1" for name in _THREAD_VARIABLES}
     assert worker.alive is False
@@ -182,32 +230,30 @@ def test_worker_is_spawned_single_process_single_request_and_restores_parent_thr
 
 
 def test_worker_exception_is_a_typed_error_with_the_exact_request_and_never_escapes() -> None:
+    job = _job()
     with GreyFitWorker(kernel=_raising_kernel) as worker:
-        assert worker.submit(_job()) is FitSubmission.ACCEPTED
+        assert worker.submit(job) is FitSubmission.ACCEPTED
         message = worker.receive(timeout_s=10.0)
     assert isinstance(message.outcome, GreyFitError)
-    assert message.outcome.request == _request()
+    assert message.outcome.request == job.request
     assert message.outcome.code is FitErrorCode.FIT_EXCEPTION
     assert message.outcome.error_type == "FloatingPointError"
     assert message.outcome.detail == "non-finite residual"
 
 
 def test_blocking_receive_returns_typed_process_exit_when_child_dies() -> None:
+    job = _job()
     with GreyFitWorker(kernel=_exiting_kernel) as worker:
-        assert worker.submit(_job()) is FitSubmission.ACCEPTED
+        assert worker.submit(job) is FitSubmission.ACCEPTED
         message = worker.receive()
     assert isinstance(message.outcome, GreyFitError)
     assert message.outcome.code is FitErrorCode.PROCESS_EXIT
-    assert message.outcome.request == _request()
+    assert message.outcome.request == job.request
 
 
 def test_result_identity_is_lossless_and_next_request_waits_for_result_drain() -> None:
     first = _job()
-    second = GreyFitJob(
-        request=_request(first=12, last=23),
-        observations=tuple(_frame(index) for index in range(12, 24)),
-        config=first.config,
-    )
+    second = _job(first=12, config=first.config)
     with GreyFitWorker(kernel=_successful_kernel) as worker:
         assert worker.submit(first) is FitSubmission.ACCEPTED
         first_message = worker.receive(timeout_s=10.0)
@@ -215,31 +261,24 @@ def test_result_identity_is_lossless_and_next_request_waits_for_result_drain() -
         assert worker.submit(second) is FitSubmission.ACCEPTED
         second_message = worker.receive(timeout_s=10.0)
     assert second_message.outcome.request == second.request
-    assert second_message.outcome.request.window == second.request.window
+    assert second_message.outcome.request.fit_corpus == second.request.fit_corpus
 
 
-def test_fit_aligns_each_end_temperature_interval_with_the_following_frame_load(monkeypatch) -> None:
-    captured = {}
-
-    def fit_params(t, temp, q, **kwargs):
-        captured.update(t=tuple(t), temp=tuple(temp), q=tuple(q), kwargs=kwargs)
-        return {
-            "C_c": 900.0,
-            "h_amb": kwargs["init"]["h_amb"],
-            "K_Q": 700.0,
-            "theta": 75.0,
-            "sigma": kwargs["sigma"],
-            "n_delay": kwargs["n_delay"],
-            "T_amb": kwargs["T_amb"],
-            "converged": True,
-            "nfev": 4,
-        }
-
-    monkeypatch.setattr("controller.update_mpc.fit_params", fit_params)
-    monkeypatch.setattr("controller.update_mpc.fit_quality", lambda *_args, **_kwargs: (1.0, 2.0))
-    monkeypatch.setattr("controller.update_mpc.identifiability", lambda *_args, **_kwargs: 1.0)
+def test_default_segmented_kernel_keeps_fixed_residual_shape_and_uses_no_continuous_job_path(
+    monkeypatch,
+) -> None:
     job = _job()
-    _fit_grey_job(job)
-    expected = tuple(frame.realized_q for frame in job.observations[1:]) + (job.observations[-1].realized_q,)
-    assert captured["q"] == expected
-    assert captured["t"][0] == 0.0
+    point = np.log(np.asarray([getattr(job.config, key) for key in FITTED_PARAMETERS]))
+    residual_lengths = []
+
+    def fixed(residual, _x0, *args, **kwargs):
+        residual_lengths.append(len(residual(point)))
+        return SimpleNamespace(x=point, status=1, nfev=1, success=True)
+
+    monkeypatch.setattr(optimize, "least_squares", fixed)
+    outcome = fit_segmented_grey(job)
+
+    assert isinstance(outcome, GreyFitSuccess)
+    assert residual_lengths == [12, 12]
+    assert outcome.optimizer_residual_count == 12
+    assert not hasattr(job, "observations")

@@ -55,6 +55,27 @@ function generatedArtifacts(): Array<{ schema: string; typescript: string }> {
   }));
 }
 
+function generatedContractExports(filename: string): Set<string> {
+  const program = ts.createProgram([filename], {
+    module: ts.ModuleKind.ESNext,
+    moduleResolution: ts.ModuleResolutionKind.Bundler,
+    noEmit: true,
+    skipLibCheck: true,
+    target: ts.ScriptTarget.ESNext,
+  });
+  const source = program.getSourceFile(filename);
+  if (source === undefined) throw new Error(`Generated contract is absent: ${filename}`);
+  const moduleSymbol = program.getTypeChecker().getSymbolAtLocation(source);
+  if (moduleSymbol === undefined)
+    throw new Error(`Generated contract is not a module: ${filename}`);
+  return new Set(
+    program
+      .getTypeChecker()
+      .getExportsOfModule(moduleSymbol)
+      .map(({ name }) => name),
+  );
+}
+
 function memberNames(members: ts.NodeArray<ts.TypeElement>): Set<string> {
   const names = new Set<string>();
   for (const member of members) {
@@ -262,6 +283,67 @@ describe("generated web contract ownership", () => {
       .map(([name, paths]) => `${name}: ${paths.join(", ")}`)
       .sort();
     expect(duplicates).toEqual([]);
+  });
+
+  it("does not export the retired manual MPC activation wire contracts", () => {
+    const learning = generatedArtifacts().find(({ schema }) =>
+      schema.endsWith("learning.schema.json"),
+    );
+    if (learning === undefined) throw new Error("Learning contract is absent from the manifest");
+
+    const exports = generatedContractExports(learning.typescript);
+    expect(exports.has("ModelActivationRequest")).toBe(false);
+    expect(exports.has("ModelActivationAccepted")).toBe(false);
+    expect(exports.has("ModelActivationAcknowledgement")).toBe(false);
+  });
+
+  it("publishes the complete PID-SP schema-2 learning contract and nullable unavailable basin", () => {
+    const schema = JSON.parse(
+      readFileSync(join(WEB_ROOT, "schema/contracts/learning.schema.json"), "utf8"),
+    ) as {
+      $defs: Record<
+        string,
+        {
+          required?: string[];
+          properties?: Record<string, unknown>;
+          anyOf?: Array<{ $ref?: string }>;
+        }
+      >;
+    };
+    const report = schema.$defs.PidSpLearningReport;
+    expect([...(report?.required ?? [])].sort()).toEqual(
+      [
+        "schema_version",
+        "controller",
+        "status",
+        "live",
+        "revision",
+        "gates",
+        "confirmation",
+        "identifier",
+        "predictor",
+        "checkpoint",
+        "comparison",
+        "active_model",
+        "delay_evidence",
+        "failure",
+      ].sort(),
+    );
+    expect(schema.$defs.PidSpCheckpointModel?.required).toEqual([
+      "schema_version",
+      "revision",
+      "provenance",
+      "selected",
+    ]);
+    expect(schema.$defs.PidSpCheckpointParameters?.anyOf?.map((item) => item.$ref)).toEqual([
+      "#/$defs/IpdtPidSpParameters",
+      "#/$defs/FopdtPidSpParameters",
+      "#/$defs/SopdtPidSpParameters",
+    ]);
+    expect(schema.$defs.SopdtPidSpParameters?.required).toEqual(["K", "tau_1", "tau_2", "theta"]);
+    expect(
+      JSON.stringify(schema.$defs.PidSpFormComparisonReport?.properties?.basin_lower_s),
+    ).toContain('"null"');
   });
 
   it("keeps migrated helpers free of Python-owned interface and type declarations", () => {

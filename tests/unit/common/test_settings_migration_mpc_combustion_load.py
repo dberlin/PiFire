@@ -33,15 +33,15 @@ def test_later_schema_versions_preserve_the_v5_affine_load_cutover():
 
     assert _apply_shape_migrations(settings, SETTINGS_SCHEMA_VERSION) is True
 
-    assert SETTINGS_SCHEMA_VERSION == 11
+    assert SETTINGS_SCHEMA_VERSION == 12
     assert settings == {
-        "schema_version": 11,
+        "schema_version": 12,
         "controller": {
             "selected": "mpc",
             "config": {
                 "mpc": dict(FITTED_PASTE),
                 "pid": {"PB": 60.0, "cycle": 17},
-                "pid_sp": {"PB": 51.0, "cycle": 23},
+                "pid_sp": {"PB": 51.0, "cycle": 23, "enable_identification": True},
             },
         },
         "cycle_data": {"u_min": 0.1, "u_max": 0.9},

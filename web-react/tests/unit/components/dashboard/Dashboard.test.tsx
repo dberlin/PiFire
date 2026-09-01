@@ -45,7 +45,7 @@ function dashboardLearningReport(
   const activeDigest = `${roleGeneration}`.padEnd(64, "a");
   const candidateDigest = `${roleGeneration + 1}`.padEnd(64, "b");
   return {
-    schema_version: 2,
+    schema_version: 3,
     status,
     mode: "passive-online",
     decision_id: `decision-${roleGeneration}`,
@@ -58,22 +58,16 @@ function dashboardLearningReport(
     fit: {
       status: "idle",
       request_id: null,
-      window_id: null,
+      fit_corpus_digest: null,
       error: null,
     },
-    cook_refit: {
-      status: "idle",
-      latest: null,
-      final_status: "idle",
-      authorization: "blocked",
-      next_cook: false,
-    },
-    window: null,
     checks: {},
     candidate: {
+      challenger_id: `challenger-${roleGeneration}`,
+      phase: status === "active" ? "qualified" : "evaluating",
       digest: candidateDigest,
       origin: "passive-online",
-      policy: "passive-auto",
+      policy: "causal-auto",
       role_generation: roleGeneration,
       candidate_generation: roleGeneration + 1,
       parameters: null,
@@ -81,11 +75,37 @@ function dashboardLearningReport(
       fit_quality: null,
       identifiability: null,
       assessment: null,
+      lineage: {
+        request_id: `fit-${roleGeneration}`,
+        parent_incumbent_digest: activeDigest,
+        parent_incumbent_generation: roleGeneration,
+        candidate_generation: roleGeneration + 1,
+        fit_corpus_digest: "c".repeat(64),
+        trigger_origin: "passive-online",
+        result_status: "succeeded",
+        candidate_digest: candidateDigest,
+      },
+    },
+    evaluation: null,
+    corpus: {
+      digest: "c".repeat(64),
+      revision: roleGeneration,
+      fit_partition_digest: "d".repeat(64),
+      slices: [
+        {
+          segment_id: `segment-${roleGeneration}`,
+          through_ordinal: 0,
+          prefix_digest: "f".repeat(64),
+          segment_content_digest: "a".repeat(64),
+          pre_roll_count: 0,
+          scored_count: 1,
+        },
+      ],
     },
     activation: {
       phase: status === "active" ? "active" : "aborted",
       origin: "passive-online",
-      policy: "passive-auto",
+      policy: "causal-auto",
       reason: null,
       pending_persistence: false,
       pending_frame_boundary_swap: false,
@@ -126,6 +146,9 @@ const DASHBOARD_PID_SP_REPORT: PidSpLearningReport = {
   identifier: null,
   predictor: null,
   checkpoint: null,
+  comparison: null,
+  active_model: null,
+  delay_evidence: null,
   failure: null,
 };
 

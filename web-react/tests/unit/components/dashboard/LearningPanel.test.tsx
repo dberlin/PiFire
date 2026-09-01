@@ -11,7 +11,7 @@ import { testQueryClient } from "../../test-utils";
 
 function mpcReport(status: ModelEvidenceStatus, revision: string): ModelEvidenceReport {
   return {
-    schema_version: 2,
+    schema_version: 3,
     status,
     mode: "passive-online",
     decision_id: `decision-${revision}`,
@@ -21,32 +21,20 @@ function mpcReport(status: ModelEvidenceStatus, revision: string): ModelEvidence
       high_water: null,
       retired_excluded: 0,
     },
-    fit: { status: "idle", request_id: null, window_id: null, error: null },
-    cook_refit: {
-      status: "idle",
-      latest: null,
-      final_status: "idle",
-      authorization: "blocked",
-      next_cook: false,
-    },
-    window: null,
+    fit: { status: "idle", request_id: null, fit_corpus_digest: null, error: null },
     checks: {},
-    candidate: {
+    candidate: null,
+    evaluation: null,
+    corpus: {
       digest: null,
-      origin: "passive-online",
-      policy: "passive-auto",
-      role_generation: null,
-      candidate_generation: null,
-      parameters: null,
-      parameter_deltas: null,
-      fit_quality: null,
-      identifiability: null,
-      assessment: null,
+      revision: null,
+      fit_partition_digest: null,
+      slices: [],
     },
     activation: {
       phase: status === "active" ? "active" : "aborted",
       origin: "passive-online",
-      policy: "passive-auto",
+      policy: "causal-auto",
       reason: null,
       pending_persistence: false,
       pending_frame_boundary_swap: false,
@@ -85,6 +73,9 @@ function pidSpReport(revision: string): PidSpLearningReport {
     identifier: null,
     predictor: null,
     checkpoint: null,
+    comparison: null,
+    active_model: null,
+    delay_evidence: null,
     failure: null,
   };
 }

@@ -194,7 +194,7 @@ type ProbeProfiles = ProbeProfile[];
 type ProbesUnits2 = string;
 
 export interface PiFireWizardWebContracts {
-  [k: string]: unknown | undefined;
+  [k: string]: unknown;
 }
 /**
  * This interface was referenced by `PiFireWizardWebContracts`'s JSON-Schema

@@ -18,6 +18,7 @@ from controller.runtime.runner import SyncControllerRunner
 from controller.runtime.state import WorkCycleState
 from tests.characterization.fixtures import base_control, base_pellet_db, base_settings
 from tests.characterization.harness import make_ctx
+from tests.fakes.learning_trajectory import bind_exact_learning_inputs
 from tests.fakes.probes import FakeProbes
 
 
@@ -35,6 +36,7 @@ def main() -> int:
         base_pellet_db(),
         FakeProbes().script([180.0] * 100),
     )
+    bind_exact_learning_inputs(context, control, cook_id="smoke-acados-hold")
 
     persisted: dict[str, object] = {}
     source = Controller(mpc_config, "F", settings["cycle_data"])
@@ -102,22 +104,22 @@ def main() -> int:
             raise RuntimeError("Hold did not deliver a completed framed observation")
         if not any(name == "auger_on" for name, _args in grill.calls):
             raise RuntimeError("Hold never commanded heat below setpoint")
-        history = core.cook_history()
-        if not history:
+        controller_status = core.get_status()
+        if "applied_combustion_load" not in controller_status:
             raise RuntimeError("acados solve/applied-output feedback did not reach the controller")
 
         mode.teardown(180.0)
         torn_down = True
         checkpoint = model_store.load("mpc")
-        if checkpoint is None or checkpoint.get("cook_refit", {}).get("latest") != "insufficient":
-            raise RuntimeError(f"final teardown checkpoint did not record the bounded refit outcome: {checkpoint!r}")
+        if checkpoint is None:
+            raise RuntimeError("final teardown lost the durable model checkpoint")
         if not core.active_control_pair.core.close_complete:
             raise RuntimeError("native controller resources remained open after teardown")
         print(
             "acados Hold smoke passed: "
-            f"frames={completed_frames} samples={len(history)} "
+            f"frames={completed_frames} "
             f"target_f={control['primary_setpoint']} "
-            f"refit={checkpoint['cook_refit']['latest']} revision={checkpoint['revision']}"
+            f"revision={checkpoint['revision']}"
         )
         return 0
     finally:

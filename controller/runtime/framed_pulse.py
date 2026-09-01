@@ -468,7 +468,7 @@ class FramedPulseRuntime:
             baseline_combustion_load=controller.pulse_baseline_combustion_load,
             requested_auger_duty=controller.pulse_requested_duty,
             requested_fan_duty=controller.pulse_requested_fan_duty,
-            applied_fan_duty=controller.fan_duty if controller.controls_fan else None,
+            applied_fan_duty=controller.fan_duty,
             maximum_duty=controller.pulse_maximum_duty,
             stale_command=controller.pulse_stale_command,
             allocator_revision=controller.pulse_allocator_revision,

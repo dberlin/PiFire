@@ -2,8 +2,9 @@ import time
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from enum import IntEnum
-from math import isfinite
-from typing import Literal, cast
+from hashlib import sha256
+from math import ceil, isfinite
+from typing import TYPE_CHECKING, Literal, Protocol, cast, runtime_checkable
 
 import controller.runtime.runner as _runner_mod
 from common.control_trace import (
@@ -17,7 +18,10 @@ from common.control_trace import (
     TraceEventKind,
 )
 from common.controller_model_state import ControllerModelStore
+from common.learning_trajectory import TrajectoryBreakReason
 from common.modes import Mode
+from common.persistence.learning_trajectory import LearningTrajectoryRepository
+from common.persistence.model_evidence import read_model_evidence
 from common.persistence.protocols import JsonValue
 from controller.applied_output import (
     AppliedOutput,
@@ -27,6 +31,7 @@ from controller.applied_output import (
     seed_output,
 )
 from controller.base import MpcTraceDiagnostics
+from controller.model_learning.grey_runtime import GreyLearningProcessOwner
 from controller.model_learning.migration import migrate_mpc_learning_authority
 from controller.model_promotion import ReachabilityState
 from controller.mpc_calibration import CalibrationCommand
@@ -39,6 +44,7 @@ from controller.runtime.control_trace_session import (
     TraceOutputContext,
     TraceSafetyContext,
     TraceSessionContext,
+    TraceSessionIdentity,
     TraceUpdateContext,
 )
 from controller.runtime.framed_pulse import (
@@ -59,6 +65,22 @@ from controller.runtime.modes.hold_learning import (
     HoldLearningRuntime,
     parse_model_lifecycle_payload,
 )
+
+if TYPE_CHECKING:
+    from controller.mpc_model import EstimatorSeed
+
+
+@runtime_checkable
+class _EstimatorSeedSource(Protocol):
+    def estimator_seed_anchor(self) -> tuple[int, float] | None: ...
+
+    def seed_for(
+        self,
+        theta: float,
+        n_delay: int,
+        at_ms: int,
+        measured_temp_c: float,
+    ) -> "EstimatorSeed": ...  # noqa: UP037
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,6 +242,19 @@ class HoldMode(ControlMode):
     _calibration_command_high_water: int = 0
     _last_target: float | None = None
     _safety_ceiling_fault: str | None = None
+    _estimator_seeded: bool = False
+    _estimator_seed_status: str | None = None
+    _estimator_seed_digest: str | None = None
+    _estimator_seed_pre_roll_frames: int = 0
+    _estimator_seed_required_frames: int = 0
+    _first_solve_temperature: float | None = None
+    _initial_seed_output_pending: bool = False
+    _seed_output_start_time: float | None = None
+    _manual_seed_output_start_time: float | None = None
+    _deferred_seed_output: AppliedOutput | None = None
+    _deferred_seed_output_dispatch: bool = True
+    _deferred_seed_output_revision: int = 0
+    _first_solve_pending: bool = False
 
     def _observe_reachability_advisory(self, diagnostics: MpcTraceDiagnostics) -> None:
         report = diagnostics.feasibility
@@ -495,11 +530,57 @@ class HoldMode(ControlMode):
     def _trace_warning(self, message: str) -> None:
         self.ctx.control_log.warning(message)
 
+    def _bind_trajectory_trace(
+        self,
+        identity: TraceSessionIdentity | None,
+    ) -> bool:
+        trajectory = self.ctx.learning_trajectory
+        if trajectory is None or self._controller_name not in (
+            ControllerType.MPC.value,
+            ControllerType.PID_SP.value,
+        ):
+            return True
+        trace = self._control_trace
+        if identity is None or trace is None:
+            trajectory.mark_trace_unavailable("control-trace-session-unavailable")
+            if self._hold_learning is not None:
+                self._hold_learning.mark_evidence_unavailable()
+            return False
+        try:
+            publish_segment = trace.trajectory_segment_publisher(identity)
+
+            def learning_failed(_reason: str) -> None:
+                if self._hold_learning is not None:
+                    self._hold_learning.mark_evidence_unavailable()
+
+            bound = bool(
+                trajectory.bind_trace_session(
+                    identity.session_id,
+                    identity.cook_id,
+                    publish_segment,
+                    failure_handler=learning_failed,
+                )
+            )
+        except Exception as error:
+            self._trace_warning(f"Learning trajectory trace binding failed: {error}")
+            bound = False
+        if not bound:
+            trajectory.mark_trace_unavailable("control-trace-session-binding-failed")
+            if self._hold_learning is not None:
+                self._hold_learning.mark_evidence_unavailable()
+        return bound
+
     def _trace_type(self) -> ControllerType | None:
         try:
             return ControllerType(self._controller_name)
         except TypeError, ValueError:
             return None
+
+    @staticmethod
+    def _actual_fan_duty(status: _HoldOutputStatus) -> float:
+        if not status.fan:
+            return 0.0
+        return 100.0 if status.pwm is None else float(status.pwm)
 
     def _configure_fan_authority(self) -> None:
         """Grant fan ownership only when the configured controller can drive it."""
@@ -513,6 +594,10 @@ class HoldMode(ControlMode):
                 "the controller will be ignored; the non-controller fan paths stay active."
             )
         self.state.controller.controls_fan = wants_fan and has_authority
+        if not self.state.controller.controls_fan:
+            self.state.controller.fan_duty = self._actual_fan_duty(
+                self._hold_output_status(self.grill.get_output_status())
+            )
 
     def on_cook_identity_rotated(self, previous_cook_id, cook_id, now) -> None:
         """Close old cook evidence authority before opening the replacement session."""
@@ -530,6 +615,7 @@ class HoldMode(ControlMode):
         trace.rotate(runner_snapshot_fallback_safe=not runner.runs_async())
         context = self._trace_session_context()
         identity = None if context is None else trace.ensure_open(context, timestamp_ms=int(now * 1_000))
+        self._bind_trajectory_trace(identity)
         if identity is not None:
             learning.bind_generation(generation)
         learning.reconcile_outcomes(now)
@@ -538,6 +624,7 @@ class HoldMode(ControlMode):
         trace = self._control_trace
         runner = self._runner
         runtime = self._framed_pulse
+        learning = self._hold_learning
         scheduler = None if runtime is None else runtime.scheduler
         controller = self._trace_type()
         cook_id = self.control.get("cook_id")
@@ -561,6 +648,7 @@ class HoldMode(ControlMode):
         ambient_celsius = float(config.get("T_amb", 0.0))
         ambient = ambient_celsius * 9.0 / 5.0 + 32.0 if temperature_unit == "F" else ambient_celsius
         fallback_safe = not runner.runs_async()
+        submitted_model = None if learning is None else learning.submitted_restore_authority
         fallback_model: TraceModelAuthority | None = None
         if trace.model_authority is None and fallback_safe:
             snapshot = runner.get_model_snapshot()
@@ -577,6 +665,7 @@ class HoldMode(ControlMode):
             temperature_unit=temperature_unit,
             control_period_seconds=float(runner.control_period() or scheduler.timing.frame_s),
             fallback_model=fallback_model,
+            submitted_model=submitted_model,
             runner_snapshot_fallback_safe=fallback_safe,
             pulse_slot_seconds=float(scheduler.timing.pulse_s),
             pulse_frame_seconds=float(scheduler.timing.frame_s),
@@ -618,7 +707,12 @@ class HoldMode(ControlMode):
             self._runner_configuration_revision = generation
             context = self._trace_session_context()
             identity = (
-                None if trace is None or context is None else trace.ensure_open(context, timestamp_ms=int(now * 1_000))
+                None
+                if trace is None or context is None
+                else trace.ensure_open(
+                    context,
+                    timestamp_ms=int(now * 1_000),
+                )
             )
             if identity is not None:
                 learning.bind_generation(generation)
@@ -685,6 +779,38 @@ class HoldMode(ControlMode):
         return self.state.cycle.realized_ratio
 
     name = Mode.HOLD
+
+    def _resolve_fit_partition_digest(self) -> str | None:
+        """Resolve and retain the current segment's compatible corpus partition."""
+        repository = getattr(self, "_trajectory_repository", None)
+        trajectory = getattr(self.ctx, "learning_trajectory", None)
+        if repository is None or trajectory is None:
+            return self._fit_partition_digest_cache
+        try:
+            segment_id = trajectory.status().segment_id
+            if segment_id is not None:
+                self._fit_segment_id_cache = segment_id
+            cached_segment_id = self._fit_segment_id_cache
+            segment = None if cached_segment_id is None else repository.read_segment(cached_segment_id)
+            if segment is None:
+                cook_id = self.control.get("cook_id")
+                if isinstance(cook_id, str) and cook_id:
+                    segment = next(
+                        (
+                            candidate
+                            for candidate in reversed(repository.read_cook_segments(cook_id))
+                            if candidate.scored_hold_frames
+                        ),
+                        None,
+                    )
+                    if segment is not None:
+                        self._fit_segment_id_cache = segment.segment_id
+            if segment is not None:
+                self._fit_partition_digest_cache = segment.fit_partition_digest
+        except Exception:
+            return self._fit_partition_digest_cache
+        return self._fit_partition_digest_cache
+
     _model_store = None
 
     def setup(self):
@@ -694,11 +820,28 @@ class HoldMode(ControlMode):
         self._hold_learning = None
         self._runner = None
         self._persistence_worker = None
+        self._trajectory_repository = None
+        self._fit_partition_digest_cache = None
+        self._fit_segment_id_cache = None
         learning_evidence_available = True
         self._reachability_advisory_key = None
         self._framed_pulse = FramedPulseRuntime()
         self._last_tick_s = None
         self._last_ptemp = None
+        self._last_target = None
+        self._estimator_seeded = False
+        self._estimator_seed_status = None
+        self._estimator_seed_digest = None
+        self._estimator_seed_pre_roll_frames = 0
+        self._estimator_seed_required_frames = 0
+        self._first_solve_temperature = None
+        self._initial_seed_output_pending = False
+        self._seed_output_start_time = None
+        self._manual_seed_output_start_time = None
+        self._deferred_seed_output = None
+        self._deferred_seed_output_dispatch = True
+        self._deferred_seed_output_revision = 0
+        self._first_solve_pending = False
         recorder: ControlTraceRecorder | None = None
         try:
             recorder = ControlTraceRecorder(warning=self._trace_warning)
@@ -722,21 +865,53 @@ class HoldMode(ControlMode):
             conditional_writer=self.ctx.store.save_model_checkpoint,
         )
         self._model_store = None
+        trajectory_repository = getattr(self.ctx, "trajectory_repository", None)
+        persistence_worker = getattr(self.ctx, "model_persistence", None)
+        grey_learning_process = getattr(
+            self.ctx,
+            "grey_learning_process",
+            None,
+        )
+        if grey_learning_process is None:
+            grey_learning_process = GreyLearningProcessOwner()
+            self.ctx.grey_learning_process = grey_learning_process
         try:
-            persistence_worker = ModelPersistenceWorker(
-                model_store,
-                self.ctx.event_log,
-            )
+            if trajectory_repository is None:
+                trajectory_repository = LearningTrajectoryRepository()
+                self.ctx.trajectory_repository = trajectory_repository
+            if persistence_worker is None:
+                persistence_worker = ModelPersistenceWorker(
+                    model_store,
+                    self.ctx.event_log,
+                    trajectory_repository=trajectory_repository,
+                )
+                bind_evidence_reader = getattr(
+                    persistence_worker,
+                    "bind_evidence_reader",
+                    None,
+                )
+                if callable(bind_evidence_reader):
+                    bind_evidence_reader(read_model_evidence)
+                self.ctx.model_persistence = persistence_worker
             self._persistence_worker = persistence_worker
         except Exception as error:
             learning_evidence_available = False
             persistence_worker = None
+            trajectory_repository = None
             self._trace_warning(f"Model persistence unavailable: {error}")
+        self._trajectory_repository = trajectory_repository
         self._controller_name = self.settings["controller"]["selected"]
 
         # Load Controller Module (i.e. PID)
         self._runner, self._controller_status = _runner_mod.build_runner(
-            self.settings, self.control, logger=self.ctx.control_log, event_logger=self.ctx.event_log
+            self.settings,
+            self.control,
+            logger=self.ctx.control_log,
+            event_logger=self.ctx.event_log,
+            model_persistence=persistence_worker,
+            trajectory_repository=trajectory_repository,
+            fit_partition_digest=self._resolve_fit_partition_digest,
+            grey_learning_process=grey_learning_process,
         )
         actual_type = getattr(self._runner, "controller_type", lambda: None)() if self._runner is not None else None
         if isinstance(actual_type, ControllerType):
@@ -746,14 +921,17 @@ class HoldMode(ControlMode):
             runner=self._runner,
             model_store=model_store,
             persistence=persistence_worker,
+            trajectory_repository=trajectory_repository,
             trace=self._control_trace,
             controller_name=self._controller_name,
             logger=self.ctx.event_log,
             initial_generation=self._runner_configuration_revision,
+            learning_trajectory=self.ctx.learning_trajectory,
         )
         if not learning_evidence_available:
             self._hold_learning.mark_evidence_unavailable()
 
+        self._configure_fan_authority()
         if self._runner is not None:
             self._framed_pulse.configure(
                 self._runner.actuation_mode(),
@@ -779,7 +957,6 @@ class HoldMode(ControlMode):
                     self._trace_warning(f"Model authority migration failed: {error}")
             self._hold_learning.restore_model(timestamp_ms=int(self.ctx.clock.now() * 1_000))
             self._hold_learning.reconcile_activation()
-        self._configure_fan_authority()
 
         self.ctx.event_log.debug(
             "On Time = "
@@ -796,7 +973,11 @@ class HoldMode(ControlMode):
         # set self.state.timers.start_time (that happens after setup_safety,
         # later in the shared pre-loop).
         self.state.controller.cycle_start = self.ctx.clock.now()
-        if self._runner is not None:
+        self._seed_output_start_time = max(
+            0.0,
+            self.state.controller.cycle_start,
+        )
+        if self._runner is not None and self._controller_name != ControllerType.MPC.value:
             initial_output = seed_output(
                 self.state.cycle.ratio,
                 self.state.controller.cycle_start,
@@ -813,8 +994,238 @@ class HoldMode(ControlMode):
         # failed to build (controller module load error), skip the work loop.
         return "Inactive" if self._controller_status == "Inactive" else "Active"
 
+    def _hold_temperature_c(self, temperature: float) -> float:
+        units = self.settings.get("globals", {}).get("units", "C")
+        measured = float(temperature)
+        if units == "C":
+            return measured
+        if units == "F":
+            return (measured - 32.0) * 5.0 / 9.0
+        raise ValueError("grill temperature units must be Celsius or Fahrenheit")
+
+    def _estimator_seed_requirements(
+        self,
+        runner: _runner_mod.ControllerRunner,
+    ) -> tuple[float, int]:
+        requirements = runner.estimator_seed_requirements()
+        if (
+            isinstance(requirements, tuple)
+            and len(requirements) == 2
+            and isinstance(requirements[0], (int, float))
+            and not isinstance(requirements[0], bool)
+            and isfinite(float(requirements[0]))
+            and float(requirements[0]) > 0.0
+            and isinstance(requirements[1], int)
+            and not isinstance(requirements[1], bool)
+            and requirements[1] >= 0
+        ):
+            return float(requirements[0]), requirements[1]
+
+        from controller.mpc_config import DEFAULT_MPC_CONFIG
+
+        configured = self.settings.get("controller", {}).get("config", {}).get("mpc", {})
+        values = dict(DEFAULT_MPC_CONFIG)
+        if isinstance(configured, Mapping):
+            values.update(configured)
+        return float(values["theta"]), int(values["n_delay"])
+
+    def _estimator_seed_generations(
+        self,
+        runner: _runner_mod.ControllerRunner,
+    ) -> tuple[int, int]:
+        status = self._runner_status()
+        role_generation = self._model_role_generation(status)
+        candidate_generation = 0
+        for source in (
+            status.get("activation"),
+            status.get("adaptation"),
+            status,
+        ):
+            if not isinstance(source, Mapping):
+                continue
+            value = source.get("candidate_generation")
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                candidate_generation = value
+                break
+        try:
+            snapshot = runner.get_model_snapshot()
+        except Exception:
+            snapshot = None
+        active_pair = snapshot.get("active_pair") if isinstance(snapshot, Mapping) else None
+        if isinstance(active_pair, Mapping):
+            active_role = active_pair.get("role_generation")
+            active_candidate = active_pair.get("candidate_generation")
+            if isinstance(active_role, int) and not isinstance(active_role, bool) and active_role >= 0:
+                role_generation = active_role
+            if isinstance(active_candidate, int) and not isinstance(active_candidate, bool) and active_candidate >= 0:
+                candidate_generation = active_candidate
+        return role_generation, candidate_generation
+
+    def _seed_runner_before_first_solve(
+        self,
+        context: _HoldTickContext,
+        source: _EstimatorSeedSource | None,
+    ) -> None:
+        if self._estimator_seeded or self._runner is None:
+            return
+        if self._controller_name != ControllerType.MPC.value:
+            self._estimator_seeded = True
+            return
+
+        from controller.mpc_model import EstimatorSeed
+
+        runner = cast(_runner_mod.ControllerRunner, self._runner)
+        theta, n_delay = self._estimator_seed_requirements(runner)
+        required = 0 if n_delay == 0 else min(180, ceil((3.0 * theta) / 20.0))
+        try:
+            measured_c = self._hold_temperature_c(context.ptemp)
+        except ValueError as error:
+            if self._hold_learning is not None:
+                self._hold_learning.mark_evidence_unavailable()
+            self._estimator_seed_status = "uncertain"
+            self._estimator_seed_digest = None
+            self._estimator_seed_pre_roll_frames = 0
+            self._estimator_seed_required_frames = required
+            self._estimator_seeded = True
+            self._trace_warning(f"Trajectory estimator seed unavailable: {error}")
+            return
+        seed_error: Exception | None = None
+        if source is not None:
+
+            def source_anchor() -> tuple[int, float]:
+                recorded = source.estimator_seed_anchor()
+                if (
+                    isinstance(recorded, tuple)
+                    and len(recorded) == 2
+                    and isinstance(recorded[0], int)
+                    and not isinstance(recorded[0], bool)
+                    and isinstance(recorded[1], (int, float))
+                    and isfinite(float(recorded[1]))
+                ):
+                    return recorded[0], float(recorded[1])
+                return int(context.now * 1_000), measured_c
+
+            def candidate_seed(
+                candidate_theta: float,
+                candidate_n_delay: int,
+            ):
+                candidate_at_ms, candidate_temperature_c = source_anchor()
+                return source.seed_for(
+                    theta=candidate_theta,
+                    n_delay=candidate_n_delay,
+                    at_ms=candidate_at_ms,
+                    measured_temp_c=candidate_temperature_c,
+                )
+
+            try:
+                runner.bind_estimator_seed_source(candidate_seed)
+            except Exception as error:
+                self._trace_warning(f"Candidate trajectory seed source unavailable: {error}")
+            try:
+                anchor_ms, anchor_temperature_c = source_anchor()
+                seed = source.seed_for(
+                    theta=theta,
+                    n_delay=n_delay,
+                    at_ms=anchor_ms,
+                    measured_temp_c=anchor_temperature_c,
+                )
+                if not isinstance(seed, EstimatorSeed):
+                    raise TypeError("trajectory seed source returned an invalid seed")
+            except Exception as error:
+                seed_error = error
+                seed = None
+        else:
+            seed = None
+
+        if seed is None:
+            status: Literal["absent", "uncertain"] = "uncertain" if seed_error is not None else "absent"
+            digest = sha256(
+                (f"mpc-estimator-seed-v1:{theta!r}:{n_delay}:{status}:no-compatible-pre-roll").encode()
+            ).hexdigest()
+            seed = EstimatorSeed(
+                delay_states=(),
+                chamber_temperature_c=measured_c,
+                disturbance=0.0,
+                segment_id="no-compatible-pre-roll",
+                pre_roll_digest=digest,
+                pre_roll_frame_count=0,
+                required_frame_count=required,
+                status=status,
+            )
+            if seed_error is not None:
+                self._trace_warning(f"Trajectory estimator seed unavailable: {seed_error}")
+
+        learning = self._hold_learning
+        try:
+            runner.seed_operating_state(seed)
+        except Exception as error:
+            if learning is not None:
+                learning.mark_evidence_unavailable()
+            self._trace_warning(f"MPC trajectory seed failed; selecting cold start: {error}")
+            cold_digest = sha256(f"mpc-estimator-seed-v1:{theta!r}:{n_delay}:absent:cold-start".encode()).hexdigest()
+            cold_seed = EstimatorSeed(
+                delay_states=(),
+                chamber_temperature_c=measured_c,
+                disturbance=0.0,
+                segment_id="no-compatible-pre-roll",
+                pre_roll_digest=cold_digest,
+                pre_roll_frame_count=0,
+                required_frame_count=required,
+                status="absent",
+            )
+            try:
+                runner.seed_operating_state(cold_seed)
+            except Exception as cold_error:
+                self._trace_warning(f"MPC estimator cold-start seed failed closed: {cold_error}")
+                self._estimator_seed_status = "uncertain"
+                self._estimator_seed_digest = cold_digest
+                self._estimator_seed_pre_roll_frames = 0
+                self._estimator_seed_required_frames = required
+                return
+            seed = cold_seed
+
+        self._estimator_seed_status = seed.status
+        self._estimator_seed_digest = seed.pre_roll_digest
+        self._estimator_seed_pre_roll_frames = seed.pre_roll_frame_count
+        self._estimator_seed_required_frames = seed.required_frame_count
+        units = self.settings.get("globals", {}).get("units", "C")
+        self._first_solve_temperature = (
+            seed.chamber_temperature_c if units == "C" else seed.chamber_temperature_c * 9.0 / 5.0 + 32.0
+        )
+        self._initial_seed_output_pending = True
+        self._first_solve_pending = True
+        if learning is not None:
+            if seed.status == "short":
+                learning.set_seed_warmup_remaining(seed.required_frame_count - seed.pre_roll_frame_count)
+            elif seed.status in {"absent", "uncertain"}:
+                learning.mark_evidence_unavailable()
+        self._estimator_seeded = True
+        role_generation, candidate_generation = self._estimator_seed_generations(runner)
+        trace = self._control_trace
+        try:
+            recorded = trace is not None and trace.record_estimator_seed(
+                seed,
+                role_generation=role_generation,
+                candidate_generation=candidate_generation,
+                timestamp_ms=int(context.now * 1_000),
+            )
+        except Exception as error:
+            self._trace_warning(f"Estimator seed trace failed: {error}")
+            recorded = False
+        if not recorded:
+            if learning is not None:
+                learning.mark_evidence_unavailable()
+            trajectory = self.ctx.learning_trajectory
+            if trajectory is not None:
+                trajectory.mark_trace_unavailable("estimator-seed-trace-publication-failed")
+
     def _adopt_runner_configuration(self, now, current_output_status):
         """Adopt one actually installed runner generation exactly once."""
+        self._emit_trajectory_boundary(
+            TrajectoryBreakReason.RESET,
+            now,
+            "controller-update-reset",
+        )
         runner = cast(_runner_mod.ControllerRunner, self._runner)
 
         retiring_generation = self._runner_configuration_revision
@@ -889,20 +1300,34 @@ class HoldMode(ControlMode):
         identity = (
             None if trace is None or context is None else trace.ensure_open(context, timestamp_ms=int(now * 1_000))
         )
+        self._bind_trajectory_trace(identity)
         if identity is not None:
             learning.bind_generation(installed_generation)
         learning.reconcile_outcomes(now)
-        self._set_output(
-            seed_output(
+        self._estimator_seeded = False
+        self._estimator_seed_status = None
+        self._estimator_seed_digest = None
+        self._estimator_seed_pre_roll_frames = 0
+        self._estimator_seed_required_frames = 0
+        self._first_solve_temperature = None
+        self._initial_seed_output_pending = False
+        self._seed_output_start_time = now
+        self._manual_seed_output_start_time = None
+        self._deferred_seed_output = None
+        self._deferred_seed_output_dispatch = True
+        self._deferred_seed_output_revision = 0
+        self._first_solve_pending = False
+        self._last_target = None
+        if self._controller_name != ControllerType.MPC.value:
+            initial_output = seed_output(
                 self.state.cycle.ratio,
                 now,
                 lid_open=self.state.lid.open_detected,
                 manual_override_active=self.state.manual_override["auger"] > now,
                 auger_output=False,
-            ),
-            now,
-        )
-        self._runner_configuration_revision = installed_generation
+            )
+            self._set_output(initial_output, now)
+            self._seed_output_start_time = None
 
     def _retarget_running_controller(self) -> None:
         """Give a new setpoint to the controller that is already running.
@@ -913,14 +1338,14 @@ class HoldMode(ControlMode):
         set_target resets anyway; for the MPC it costs the state estimator, the
         online learner and any calibration run in progress.
 
-        The first tick only records the target: build_runner already applied it.
+        The first tick applies the target after trajectory seeding is complete.
         """
         try:
             target = float(self.control["primary_setpoint"])
         except KeyError, TypeError, ValueError:
             return
         previous, self._last_target = self._last_target, target
-        if previous is None or previous == target or self._runner is None:
+        if previous == target or self._runner is None:
             return
         self._runner.set_target(target)
 
@@ -1206,6 +1631,12 @@ class HoldMode(ControlMode):
             or action not in {"pause", "stop", "reset-progress"}
         ):
             return False
+        if action == "reset-progress":
+            self._emit_trajectory_boundary(
+                TrajectoryBreakReason.RESET,
+                now,
+                "operator-reset-progress",
+            )
         return self._cancel_active_framed_calibration(
             f"operator_{action}",
             now=now,
@@ -1274,11 +1705,23 @@ class HoldMode(ControlMode):
         current_output_status: Mapping[str, bool | int | float],
     ) -> None:
         self._last_tick_s = now
+        seed_source: _EstimatorSeedSource | None = None
+        if self._runner is not None:
+            trajectory = self.ctx.learning_trajectory
+            if trajectory is not None and not isinstance(
+                trajectory,
+                _EstimatorSeedSource,
+            ):
+                raise TypeError("learning trajectory is missing the estimator seed capability")
+            seed_source = trajectory
         context = self._adopt_tick_configuration_and_session(
             now,
             ptemp,
             current_output_status,
         )
+        self._seed_runner_before_first_solve(context, seed_source)
+        if self._controller_name == ControllerType.MPC.value and not self._estimator_seeded:
+            return
         context = self._release_expired_manual_auger(context)
         calibration_handled = self._publish_safety_ceiling_and_consume_calibration(context)
         context = replace(
@@ -1293,6 +1736,30 @@ class HoldMode(ControlMode):
             inhibition,
         )
         self._command_grill_hardware(framed_pulse)
+        if self._deferred_seed_output is not None:
+            deferred = self._deferred_seed_output
+            self._set_output(
+                deferred,
+                deferred.timestamp,
+                producing_revision=self._deferred_seed_output_revision,
+                producing_calibration_revision=0,
+                producing_calibration_action="none",
+                producing_calibration_generation=0,
+                sample_complete=False,
+                dispatch=self._deferred_seed_output_dispatch,
+            )
+            if not self._deferred_seed_output_dispatch and context.trace is not None:
+                context.trace.record_applied_interval(
+                    TraceAppliedIntervalContext(
+                        timestamp_ms=int(context.now * 1_000),
+                        sample_complete=True,
+                        realized_combustion_load=deferred.ratio,
+                        controls_fan=self.state.controller.controls_fan,
+                    )
+                )
+            self._deferred_seed_output = None
+            self._deferred_seed_output_dispatch = True
+            self._deferred_seed_output_revision = 0
         self._dispatch_framed_trace_and_feedback(context, framed_pulse)
         self._apply_hold_lid_fan_hardware_and_state(context, inhibition.lid_will_open)
         self._flush_tick_trace(context.trace)
@@ -1330,12 +1797,20 @@ class HoldMode(ControlMode):
             if trace is None or session_context is None
             else trace.ensure_open(session_context, timestamp_ms=int(now * 1_000))
         )
+        self._bind_trajectory_trace(identity)
         learning = self._hold_learning
         if previous_identity is None and identity is not None and learning is not None:
             learning.bind_generation(self._runner_configuration_revision)
         if learning is not None:
             learning.reconcile_activation()
             learning.drain_activation_events()
+            controller_status = self._runner_status()
+            activation_status = controller_status.get("activation")
+            seed_refresh_status = (
+                activation_status.get("seed_refresh_status") if isinstance(activation_status, Mapping) else None
+            )
+            if seed_refresh_status in {"short", "absent", "uncertain"}:
+                learning.mark_evidence_unavailable()
         active_calibration_reset = False
 
         if control["controller_update"]:
@@ -1435,12 +1910,16 @@ class HoldMode(ControlMode):
         # to solve; for the synchronous runner this just stores the latest temp,
         # so the value read at the gate below is unchanged.
         runner = cast(_runner_mod.ControllerRunner, self._runner)
-        runner.submit(context.ptemp)
+        submitted_temperature = (
+            context.ptemp if self._first_solve_temperature is None else self._first_solve_temperature
+        )
+        self._first_solve_temperature = None
+        runner.submit(submitted_temperature)
         learning = cast(HoldLearningRuntime, self._hold_learning)
         learning.reconcile_outcomes(context.now)
         runtime = cast(FramedPulseRuntime, self._framed_pulse)
         controller_interval = runner.control_period() or runtime.frame_seconds
-        if (context.now - self.state.controller.cycle_start) <= controller_interval:
+        if not self._first_solve_pending and (context.now - self.state.controller.cycle_start) <= controller_interval:
             return _HoldRunnerResult(
                 result=None,
                 calibration_pending=context.calibration_handled,
@@ -1449,7 +1928,65 @@ class HoldMode(ControlMode):
                 calibration=None,
                 calibration_handled=context.calibration_handled,
             )
+        waiting_for_first_solve = self._first_solve_pending
         result = runner.latest()
+        incomplete_first_solve = result is not None and (
+            result.revision <= 0
+            or result.solve_start_monotonic is None
+            or result.solve_end_monotonic is None
+            or result.solve_duration_seconds is None
+            or result.completed_wall_time is None
+        )
+        if result is None or (waiting_for_first_solve and incomplete_first_solve):
+            return _HoldRunnerResult(
+                result=None,
+                calibration_pending=context.calibration_handled,
+                controller_interval=controller_interval,
+                cancellation_reason=None,
+                calibration=None,
+                calibration_handled=context.calibration_handled,
+            )
+        if waiting_for_first_solve:
+            self._first_solve_pending = False
+        if self._initial_seed_output_pending:
+            manual_override_active = self.state.manual_override["auger"] > context.now
+            if manual_override_active:
+                applied_state = None if context.trace is None else context.trace.applied_state
+                if self._manual_seed_output_start_time is not None:
+                    manual_start_ms = int(self._manual_seed_output_start_time * 1_000)
+                elif self._seed_output_start_time is not None:
+                    manual_start_ms = int(self._seed_output_start_time * 1_000)
+                elif (
+                    applied_state is not None
+                    and applied_state.output_source is OutputSource.MANUAL_OVERRIDE
+                    and applied_state.interval_start_ms is not None
+                ):
+                    manual_start_ms = applied_state.interval_start_ms
+                else:
+                    manual_start_ms = int(context.now * 1_000)
+                initial_output = seed_output(
+                    1.0 if context.output_status.auger else 0.0,
+                    max(0, manual_start_ms) / 1_000,
+                    lid_open=self.state.lid.open_detected,
+                    manual_override_active=True,
+                    auger_output=context.output_status.auger,
+                )
+                self._deferred_seed_output_dispatch = False
+                self._deferred_seed_output_revision = max(1, result.revision)
+            else:
+                initial_output = seed_output(
+                    self.state.cycle.ratio,
+                    0.0,
+                    lid_open=self.state.lid.open_detected,
+                    manual_override_active=False,
+                    auger_output=context.output_status.auger,
+                )
+                self._deferred_seed_output_dispatch = True
+                self._deferred_seed_output_revision = 0
+            self._deferred_seed_output = initial_output
+            self._initial_seed_output_pending = False
+            self._seed_output_start_time = None
+            self._manual_seed_output_start_time = None
         learning.drain_activation_events()
         cancellation: _CalibrationCancellation | None = None
         matched_cancelled_identity = self._result_matches_cancelled_frame(
@@ -1596,9 +2133,11 @@ class HoldMode(ControlMode):
         inhibition: _HoldInhibitionDecision,
     ) -> _HoldFramedPulse:
         result = runner_result.result
+        controller = self.state.controller
+        if not controller.controls_fan:
+            controller.fan_duty = self._actual_fan_duty(context.output_status)
         learning = self._hold_learning
         if result is not None:
-            controller = self.state.controller
             control = self.control
             if (
                 controller.pulse_stale_command
@@ -1732,6 +2271,11 @@ class HoldMode(ControlMode):
             self.state.target_temp_achieved = True
 
         if lid_will_open:
+            self._emit_trajectory_boundary(
+                TrajectoryBreakReason.LID_OPEN,
+                now,
+                "lid-open-detected",
+            )
             self.state.lid.open_detected = True
             if trace is not None:
                 trace.record_applied_interval(
@@ -1873,6 +2417,10 @@ class HoldMode(ControlMode):
     def _on_manual_output(self, name, output):
         if name != "auger" or self._runner is None:
             return
+        if (
+            not self._estimator_seeded or self._initial_seed_output_pending
+        ) and self._manual_seed_output_start_time is None:
+            self._manual_seed_output_start_time = max(0.0, self._last_now)
         trace = self._control_trace
         if trace is not None:
             trace.record_applied_interval(
@@ -1981,6 +2529,7 @@ class HoldMode(ControlMode):
             identity = (
                 None if trace is None or context is None else trace.ensure_open(context, timestamp_ms=int(now * 1_000))
             )
+            self._bind_trajectory_trace(identity)
             learning = self._hold_learning
             if previous_identity is None and identity is not None and learning is not None:
                 learning.bind_generation(self._runner_configuration_revision)
@@ -2016,6 +2565,14 @@ class HoldMode(ControlMode):
         learning_runtime = self._hold_learning
         if learning_runtime is not None:
             status.update(learning_runtime.status_fragment())
+        if self._estimator_seed_status is not None:
+            status["estimator_seed"] = {
+                "status": self._estimator_seed_status,
+                "pre_roll_digest": self._estimator_seed_digest,
+                "pre_roll_frame_count": self._estimator_seed_pre_roll_frames,
+                "required_frame_count": self._estimator_seed_required_frames,
+                "warmup_remaining": (0 if learning_runtime is None else learning_runtime.seed_warmup_remaining),
+            }
         runtime = self._framed_pulse
         scheduler = None if runtime is None else runtime.scheduler
         if scheduler is not None:
@@ -2123,20 +2680,33 @@ class HoldMode(ControlMode):
         try:
             if runner is not None:
                 try:
-                    stopped = runner.stop_for_refit()
+                    stopped = runner.stop_and_retain_for_teardown()
                 except Exception as error:
                     stop_error = error
                 if stop_error is None:
                     if stopped is False:
-                        self._trace_warning("Controller worker did not stop; final checkpoint was not queued")
-                    elif learning is not None:
-                        refit = learning.refit_once(cast(Mapping[str, JsonValue], self.settings))
-                        learning.publish_final_checkpoint_once(
-                            refit,
-                            timestamp_ms=int(self.ctx.clock.now() * 1_000),
-                        )
-                if stop_error is None:
+                        self._trace_warning("Controller worker did not stop; corpus fit was not scheduled")
                     self._rotate_evidence_sessions_for_reserved_runner_generations(self.ctx.clock.now())
+            self._resolve_fit_partition_digest()
+            self._emit_trajectory_boundary(
+                TrajectoryBreakReason.STOP,
+                now,
+                "hold-stop",
+            )
+            drained = (
+                True
+                if learning is None
+                else learning.barrier_for_teardown(generation=self._runner_configuration_revision)
+            )
+            if drained:
+                self._resolve_fit_partition_digest()
+            if stop_error is None and stopped is not False and drained and learning is not None:
+                learning.schedule_stop_fit(cast(Mapping[str, JsonValue], self.settings))
+            elif stop_error is None and stopped is not False and not drained and learning is not None:
+                learning.record_stop_fit_failure(
+                    cast(Mapping[str, JsonValue], self.settings),
+                    "corpus-barrier-failed: teardown persistence barrier did not become durable",
+                )
         finally:
             try:
                 if trace is not None and not trace.status.closed:
@@ -2152,19 +2722,19 @@ class HoldMode(ControlMode):
                 if learning is not None:
                     learning.finish_teardown(generation=self._runner_configuration_revision)
                 else:
-                    persistence = self._persistence_worker
-                    if persistence is not None:
-                        try:
-                            persistence.flush_and_stop()
-                        except Exception as error:
-                            self._trace_warning(f"Model persistence close failed: {error}")
-                    if trace is not None:
-                        trace.close()
                     if runner is not None:
                         try:
                             runner.finish_teardown()
                         except Exception as error:
                             self._trace_warning(f"Controller teardown close failed: {error}")
+                    persistence = self._persistence_worker
+                    if persistence is not None:
+                        try:
+                            persistence.barrier(timeout=2.0)
+                        except Exception as error:
+                            self._trace_warning(f"Model persistence barrier failed: {error}")
+                    if trace is not None:
+                        trace.close()
                 teardown.phase = _TeardownPhase.FINISHED
         if stop_error is not None:
             raise stop_error

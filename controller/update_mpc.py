@@ -20,6 +20,7 @@ Usage: python -m controller.update_mpc (--cook COOK_ID | --session SESSION_ID)
 """
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -27,13 +28,10 @@ import sqlite3
 import sys
 
 import numpy as np
-from scipy.optimize import least_squares
 
 from common.persistence.control_trace import read_control_trace_cook, read_control_trace_session
-from controller.acados.contracts import GREY_MIN_DELAY_S
 from controller.model_learning.trace import TraceSelectionError, calibration_samples
 from controller.model_promotion import T_FLOOR_C, T_HAZARD_C, effective_tau, steady_state_at_full_fire
-from controller.mpc_model import simulate_grey_box
 
 # Keys the controller reads back out of a fitted result.
 CONFIG_KEYS = ("C_c", "h_amb", "T_amb", "theta", "n_delay", "K_Q", "sigma")
@@ -72,30 +70,7 @@ CONFIG_KEYS = ("C_c", "h_amb", "T_amb", "theta", "n_delay", "K_Q", "sigma")
 # identifiable on every record measured including the real 1240 s cook, and the
 # largest single lever on both dead time and coast.
 _FREE = ("K_Q", "C_c", "theta")
-
-_SIM_KEYS = ("C_c", "h_amb", "K_Q", "sigma", "theta", "n_delay")
-
-# Parameters a caller supplies a starting value for. `_FREE` selects which of
-# these the solve moves; the rest are held at the value they came in with.
-_FIT_KEYS = ("C_c", "h_amb", "K_Q", "sigma", "theta")
-
-# Strictly positive: theta divides the lag time constant, and every other free
-# parameter is a capacitance or a conductance. The solve works in log space
-# (see `fit_params`), so this is expressed as a floor on the logarithm and the
-# positivity itself is structural rather than a constraint the solver enforces.
-_LOWER_BOUND = 1e-9
-
-# Evaluations the solve is allowed. Not enough to converge on every log -- see
-# `fit_params`, which reports whether it did rather than presenting an
-# exhausted solve as a finished one.
-_MAX_NFEV = 2000
-
-# The per-sample residual reported for a parameter set the model cannot be
-# simulated at. 1e4 degrees C is far outside anything a cook contains, so the
-# solve treats such a point as very bad, which is what it is; what matters is
-# that it is a NUMBER, because a NaN residual is not comparable to anything and
-# a trust region cannot step away from what it cannot compare.
-_DIVERGED = 1e4
+_TIMESTAMP_TOLERANCE_S = 1e-9
 
 
 def _load_trace_calibration(
@@ -155,221 +130,251 @@ _NOT_CONVERGED = (
 )
 
 
-def _sim_kwargs(params):
-    return {k: params[k] for k in _SIM_KEYS}
+def _canonical_digest(document):
+    encoded = json.dumps(
+        document,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
-def _log_or_floor(value, floor):
-    """log(value), or `floor` when there is no logarithm to take."""
-    value = float(value)
-    return math.log(value) if value > 0.0 and math.isfinite(value) else floor
+def trace_fit_job(t, temp, Q, *, T_amb, init, sigma, n_delay, initial_load=None):
+    """Build one explicit-anchor segmented job from a canonical typed trace."""
 
+    from common.learning_trajectory import (
+        FitCorpusIdentity,
+        FitCorpusSlice,
+        canonical_fit_corpus_digest,
+    )
+    from controller.acados.contracts import GreyBoxMPCConfig
+    from controller.model_learning.contracts import CandidateOrigin, FitRequest
+    from controller.runtime.model_fitting import (
+        FIT_CADENCE_S,
+        GreyFitJob,
+        GreyFitSegmentArrays,
+        grey_config_digest,
+    )
 
-def fit_params(t, temp, Q, *, T_amb, init, sigma=0.0, n_delay=0, log_bounds=None):
-    """Fit the free grey-box parameters to a logged temperature series.
+    times = np.asarray(t, dtype=float)
+    temperatures = np.asarray(temp, dtype=float)
+    loads = np.asarray(Q, dtype=float)
+    if times.ndim != 1 or temperatures.ndim != 1 or loads.ndim != 1:
+        raise ValueError("trace fit arrays must be one-dimensional")
+    if len(times) < 2 or len(times) != len(temperatures) or len(times) != len(loads):
+        raise ValueError("trace fit arrays must have the same length and at least two rows")
+    if not (np.all(np.isfinite(times)) and np.all(np.isfinite(temperatures)) and np.all(np.isfinite(loads))):
+        raise ValueError("trace fit arrays must contain only finite values")
+    durations = np.diff(times)
+    if np.any(durations <= 0.0):
+        raise ValueError("trace fit times must be strictly increasing")
+    source_cadence_s = float(np.median(durations))
+    if source_cadence_s > FIT_CADENCE_S + _TIMESTAMP_TOLERANCE_S:
+        raise ValueError(f"trace fit cadence must not exceed the nominal {FIT_CADENCE_S:g}-second cadence")
+    compatible_gap_s = min(FIT_CADENCE_S, 1.5 * source_cadence_s)
+    if np.any((loads < 0.0) | (loads > 1.0)):
+        raise ValueError("trace loads must be normalized to [0, 1]")
 
-    `sigma` is a starting value like every other in `init`, and gets the same
-    treatment: moved if `_FREE` names it, returned exactly as passed if not. It
-    is a separate argument only because every caller has it to hand apart from
-    the parameters it is fitting.
-
-    THE SOLVE IS IN LOG SPACE. Every free parameter is a strictly positive
-    scale -- a capacitance, a gain, a duration -- so what a step of the solve
-    should mean is a RATIO, not a difference. scipy's finite-difference step is
-    eps**0.5 * max(1, |x|), whose max(1, ...) makes that step absolute rather
-    than relative for anything below 1, so parameters decades apart in size
-    would otherwise be probed with wildly different effective precision.
-    Optimising log(parameter) makes every step a true relative one at every
-    point of the solve rather than only at the starting point, and makes the
-    positivity structural instead of a bound the solver has to respect.
-
-    It also decides the answer on the record this model most has to fit. The
-    chamber equation is close to invariant under scaling C_c and K_Q together
-    -- the loss terms shrink against them, and the limit is a pure integrator
-    that describes a heat-up ramp nearly as well as the real model does. That
-    is a straight line in the parameters and a curve in their logarithms, so a
-    solve in the raw parameters slides down it: from the shipped starting point
-    the real 1240 s MAK cook in tests/unit/mpc/fixtures ends at C_c 1.4e9 and
-    an RMSE of 11.98 C, while the same solve in log space reaches the actual
-    minimum, C_c 3558 and 2.55 C, in ten evaluations. On the eight synthetic
-    scenarios across both plants in controller/grill_sim.py, where no such
-    escape is open, the two agree to three decimals on every one.
-
-    The result carries `converged` alongside the parameters. A least-squares
-    solve that runs out of evaluations still returns its best point so far, and
-    that point can look entirely reasonable -- it simply has not been shown to
-    be a minimum. A caller deciding whether to put this model on a live grill
-    needs to tell the two apart, so the answer travels with the parameters
-    rather than being something the caller must think to ask for.
-    """
-    temp = np.asarray(temp, dtype=float)
-    init = dict(init, sigma=sigma)
-    # Everything the solve does not move stays where the caller put it. Which
-    # parameters those are is `_FREE`'s business alone, so shrinking that set
-    # holds the parameters it drops rather than dropping them from the model.
-    held = {k: float(init[k]) for k in _FIT_KEYS if k not in _FREE}
-    lo = math.log(_LOWER_BOUND)
-    if log_bounds is None:
-        lower = np.array(
-            [math.log(GREY_MIN_DELAY_S) if key == "theta" else lo for key in _FREE],
-            dtype=float,
+    elapsed_s = times - times[0]
+    scored_count = math.floor((float(elapsed_s[-1]) + _TIMESTAMP_TOLERANCE_S) / FIT_CADENCE_S)
+    if scored_count == 0:
+        raise ValueError("trace fit requires at least one complete scored interval")
+    scored_boundaries_s = FIT_CADENCE_S * np.arange(
+        1,
+        scored_count + 1,
+        dtype=float,
+    )
+    scored_interval_mask = elapsed_s[:-1] < (float(scored_boundaries_s[-1]) - _TIMESTAMP_TOLERANCE_S)
+    if np.any(durations[scored_interval_mask] > compatible_gap_s + _TIMESTAMP_TOLERANCE_S):
+        raise ValueError("trace fit times contain an incompatible sampling gap")
+    cumulative_load_time = np.concatenate(
+        (
+            np.asarray([0.0]),
+            np.cumsum(loads[:-1] * durations),
         )
-        upper = np.full(len(_FREE), np.inf, dtype=float)
-    else:
-        if set(log_bounds) != set(_FREE):
-            raise ValueError(f"log_bounds must contain exactly {tuple(sorted(_FREE))}")
-        pairs = tuple(log_bounds[key] for key in _FREE)
-        if any(
-            len(pair) != 2 or not all(math.isfinite(float(value)) for value in pair) or float(pair[0]) >= float(pair[1])
-            for pair in pairs
+    )
+    boundary_load_time: list[float] = []
+    boundary_temperature_c: list[float] = []
+    for boundary_s in scored_boundaries_s:
+        right_index = int(
+            np.searchsorted(
+                elapsed_s,
+                boundary_s - _TIMESTAMP_TOLERANCE_S,
+                side="left",
+            )
+        )
+        if right_index >= len(times):
+            raise ValueError("trace fit has no sample bracketing a scored boundary")
+        if math.isclose(
+            float(elapsed_s[right_index]),
+            float(boundary_s),
+            rel_tol=0.0,
+            abs_tol=_TIMESTAMP_TOLERANCE_S,
         ):
-            raise ValueError("each log bound must be a finite increasing pair")
-        lower = np.array([float(pair[0]) for pair in pairs], dtype=float)
-        upper = np.array([float(pair[1]) for pair in pairs], dtype=float)
-    # A non-positive or non-finite starting value has no logarithm to start
-    # from, so it starts at the floor rather than taking the solve down with it.
-    x0 = np.array([_log_or_floor(init[k], lower[index]) for index, k in enumerate(_FREE)], dtype=float)
-    x0 = np.clip(x0, lower, upper)
+            boundary_load_time.append(float(cumulative_load_time[right_index]))
+            boundary_temperature_c.append(float(temperatures[right_index]))
+            continue
+        left_index = right_index - 1
+        if left_index < 0:
+            raise ValueError("trace fit has no sample bracketing a scored boundary")
+        bracket_s = float(elapsed_s[right_index] - elapsed_s[left_index])
+        if bracket_s > compatible_gap_s + _TIMESTAMP_TOLERANCE_S:
+            raise ValueError("trace fit times contain an incompatible sampling gap")
+        offset_s = float(boundary_s - elapsed_s[left_index])
+        boundary_load_time.append(float(cumulative_load_time[left_index]) + float(loads[left_index]) * offset_s)
+        fraction = offset_s / bracket_s
+        boundary_temperature_c.append(
+            float(temperatures[left_index]) + fraction * float(temperatures[right_index] - temperatures[left_index])
+        )
+    scored_load = np.diff(np.asarray([0.0, *boundary_load_time], dtype=float)) / FIT_CADENCE_S
+    scored_load = np.clip(scored_load, 0.0, 1.0)
+    scored_duration_s = np.full(scored_count, FIT_CADENCE_S, dtype=float)
+    scored_temperature_c = np.asarray(boundary_temperature_c, dtype=float)
+    pre_roll_count = 0
+    pre_roll_duration_s = np.asarray((), dtype=float)
+    pre_roll_load = np.asarray((), dtype=float)
+    pre_roll_temperature_c = np.asarray((), dtype=float)
+    hold_anchor_c = float(temperatures[0])
 
-    def simulate(z):
-        """The trajectory at `z`, or None where the model cannot be simulated.
-
-        A parameter set the solve is only trying out can drive the chamber
-        integration away, and it does so in either of two shapes. The chamber
-        state is a Python float, so its radiative term raises OverflowError
-        past about 1e77 -- an exception out of the middle of a fit, not a
-        number -- while an intermediate that goes through numpy instead
-        produces inf and NaN. Both are the same event and both are caught
-        here, because a caller that has to remember which one a given
-        parameter set produces has not been given a guard.
-        """
-        params = dict(held)
-        params.update(zip(_FREE, (math.exp(v) for v in z)))
-        params.update(n_delay=n_delay)
-        try:
-            y = simulate_grey_box(t, Q, T_amb=T_amb, T0=float(temp[0]), **_sim_kwargs(params))
-        except OverflowError:
-            return None
-        return y if np.all(np.isfinite(y)) else None
-
-    def residual(z):
-        y = simulate(z)
-        # NaN reaching least_squares is not a large residual -- every
-        # comparison against it is False, so the step that produced it is
-        # neither accepted nor rejected on its merits and the solve wanders
-        # from there. `_DIVERGED` is finite, so such a point is simply a very
-        # bad one and the trust region shrinks away from it.
-        if y is None:
-            return np.full_like(temp, _DIVERGED)
-        return y - temp
-
-    res = least_squares(residual, x0, method="trf", bounds=(lower, upper), max_nfev=_MAX_NFEV)
-    out = dict(held)
-    out.update(zip(_FREE, (math.exp(float(v)) for v in res.x)))
-    # status 0 is scipy's "the evaluation budget ran out"; every other
-    # non-negative status is one of its convergence criteria being met. A point
-    # the model cannot even be simulated at is not a fit whatever scipy makes
-    # of the residuals around it, so the finite check is ANDed in rather than
-    # left to the caller: this result is about to be offered to a live grill.
-    out.update(converged=bool(res.status > 0) and simulate(res.x) is not None, nfev=int(res.nfev))
-    out.update(n_delay=int(n_delay), T_amb=float(T_amb))
-    return out
-
-
-def fit_quality(t, temp, Q, fitted, *, T_amb):
-    """(RMSE, max absolute error) in degrees C between the fit and the log.
-
-    Infinite in both where the model cannot be simulated at `fitted` at all,
-    in either of the two shapes `fit_params.simulate` describes -- a raised
-    OverflowError out of the chamber's float arithmetic and a quiet NaN out of
-    numpy. Neither is a large error; both are the absence of a trajectory to
-    take an error against.
-
-    Infinity rather than an exception because the caller comparing two models
-    is the one that owns the judgement. `model_promotion.evaluate` refuses a
-    non-finite RMSE and its reason names WHICH of the two models could not be
-    scored, while an exception raised here arrives at `Controller.
-    refit_from_cook` -- whose `try` catches ValueError and FloatingPointError
-    only, so the raised shape would leave it altogether, into a grill teardown
-    that has a cool-down fan to start.
-    """
-    temp = np.asarray(temp, dtype=float)
-    params = dict(fitted)
-    params["T_amb"] = T_amb
-    try:
-        sim = simulate_grey_box(t, Q, T_amb=T_amb, T0=float(temp[0]), **_sim_kwargs(params))
-    except OverflowError:
-        return math.inf, math.inf
-    if not np.all(np.isfinite(sim)):
-        return math.inf, math.inf
-    err = sim - temp
-    return float(np.sqrt(np.mean(err**2))), float(np.max(np.abs(err)))
-
-
-# One part in a thousand of a log, for the central differences below. The solve
-# itself works in log space, so this probes the parameters in the space they are
-# identified in; small enough that the model is linear across the step and large
-# enough to stay well clear of the simulator's own resolution.
-_IDENT_STEP = 1e-3
-
-
-def identifiability(t, Q, fitted, *, T_amb, T0):
-    """How well this record pins down the free parameters, in C RMS per e-fold.
-
-    The smallest singular value of the prediction's Jacobian with respect to
-    `_FREE` in log space, normalised per sample. Its units are degrees C RMS per
-    e-fold of the orthonormal parameter direction this record constrains least,
-    so it answers: how far can this record's best-fitting parameters be moved,
-    in the direction it pins down worst, before the prediction moves at all? A
-    record that leaves some direction free scores near zero, and the model it
-    produces is determined by the starting point rather than by the cook.
-
-    NO MEASURED TEMPERATURE ENTERS THIS BEYOND `T0`, and the signature is the
-    guarantee: the record's temperature series is not an argument, so there is
-    no channel through which the fit residual could reach the arithmetic below.
-    What is read is `t`, `Q`, the starting temperature and the fitted point --
-    what the record ASKED the grill to do, not how well the fit turned out.
-
-    That is what lets this stand beside a residual statistic and say something
-    the residual cannot. An in-sample RMSE is minimised just as neatly on a
-    record that determines nothing -- more neatly, in fact, since there is less
-    for the model to disagree with -- so the two rank records in opposite
-    orders, and only this one ranks them the way the risk runs.
-
-    `None` where no such measurement exists: a free parameter that is not a
-    positive finite scale has no logarithm to perturb, and a simulation that
-    leaves the reals says nothing about the record. Both shapes of the latter
-    are caught -- a raised OverflowError out of the chamber's float arithmetic
-    and a quiet NaN out of numpy -- for the reason `fit_params.simulate` states.
-    The raised shape is the one that matters to the caller: `Controller.
-    refit_from_cook` runs this inside a `try` that catches ValueError and
-    FloatingPointError only, so an OverflowError leaving here would leave
-    `refit_from_cook` altogether, into a grill teardown that has a cool-down
-    fan to start.
-    """
-    cols = []
-    for key in _FREE:
-        base = float(fitted[key])
-        if not (base > 0.0 and math.isfinite(base)):
-            return None
-        try:
-            up = _sim_at(t, Q, fitted, key, base * math.exp(_IDENT_STEP), T_amb=T_amb, T0=T0)
-            dn = _sim_at(t, Q, fitted, key, base * math.exp(-_IDENT_STEP), T_amb=T_amb, T0=T0)
-        except OverflowError:
-            return None
-        if not (np.all(np.isfinite(up)) and np.all(np.isfinite(dn))):
-            return None
-        cols.append((up - dn) / (2.0 * _IDENT_STEP))
-    jacobian = np.column_stack(cols) / math.sqrt(len(t))
-    svals = np.linalg.svd(jacobian, compute_uv=False)
-    return float(svals[-1])
+    delay_initial_load = float(loads[0]) if initial_load is None else float(initial_load)
+    if not math.isfinite(delay_initial_load) or not 0.0 <= delay_initial_load <= 1.0:
+        raise ValueError("trace initial load must be finite and normalized to [0, 1]")
+    config = GreyBoxMPCConfig(
+        C_c=float(init["C_c"]),
+        h_amb=float(init["h_amb"]),
+        T_amb=float(T_amb),
+        theta=float(init["theta"]),
+        K_Q=float(init["K_Q"]),
+        sigma=float(sigma),
+    )
+    if int(n_delay) != config.delay_states:
+        raise ValueError(f"segmented grey fitting requires n_delay={config.delay_states}")
+    partition_digest = _canonical_digest(
+        {
+            "schema_version": 1,
+            "cadence_s": FIT_CADENCE_S,
+            "n_delay": config.delay_states,
+            "h_amb": config.h_amb,
+            "sigma": config.sigma,
+            "ambient_semantics": "per-frame-canonical-celsius",
+        }
+    )
+    segment_id = "typed-trace-calibration"
+    cook_id = "typed-trace-calibration"
+    sequences = tuple(range(1, scored_count + 1))
+    prefix_digest = _canonical_digest(
+        {
+            "schema_version": 1,
+            "segment_id": segment_id,
+            "observation_sequences": list(sequences),
+            "initial_load": delay_initial_load,
+            "pre_roll_duration_s": pre_roll_duration_s.tolist(),
+            "pre_roll_load": pre_roll_load.tolist(),
+            "pre_roll_temperature_c": pre_roll_temperature_c.tolist(),
+            "hold_anchor_c": hold_anchor_c,
+            "scored_duration_s": scored_duration_s.tolist(),
+            "scored_load": scored_load.tolist(),
+            "scored_ambient_c": [float(T_amb)] * scored_count,
+            "scored_temperature_c": scored_temperature_c.tolist(),
+        }
+    )
+    segment = GreyFitSegmentArrays(
+        segment_id=segment_id,
+        cook_id=cook_id,
+        through_ordinal=pre_roll_count + scored_count - 1,
+        prefix_digest=prefix_digest,
+        segment_content_digest=prefix_digest,
+        fit_partition_digest=partition_digest,
+        observation_sequences=sequences,
+        initial_load=delay_initial_load,
+        pre_roll_duration_s=pre_roll_duration_s,
+        pre_roll_load=pre_roll_load,
+        pre_roll_temperature_c=pre_roll_temperature_c,
+        hold_anchor_c=hold_anchor_c,
+        scored_duration_s=scored_duration_s,
+        scored_load=scored_load,
+        scored_ambient_c=np.full(scored_count, float(T_amb), dtype=float),
+        scored_temperature_c=scored_temperature_c,
+        calibration_origin=np.ones(scored_count, dtype=bool),
+    )
+    corpus_slice = FitCorpusSlice(
+        segment_id=segment.segment_id,
+        through_ordinal=segment.through_ordinal,
+        prefix_digest=segment.prefix_digest,
+        segment_content_digest=segment.segment_content_digest,
+        pre_roll_count=pre_roll_count,
+        scored_count=scored_count,
+    )
+    corpus = FitCorpusIdentity(
+        schema_version=2,
+        corpus_revision=0,
+        fit_partition_digest=partition_digest,
+        slices=(corpus_slice,),
+        corpus_digest=canonical_fit_corpus_digest(
+            schema_version=2,
+            corpus_revision=0,
+            fit_partition_digest=partition_digest,
+            slices=(corpus_slice,),
+        ),
+    )
+    request_id = _canonical_digest(
+        {
+            "origin": CandidateOrigin.OPERATOR_CALIBRATION.value,
+            "corpus_digest": corpus.corpus_digest,
+            "incumbent": {key: getattr(config, key) for key in _FREE},
+        }
+    )
+    incumbent_digest = grey_config_digest(config)
+    request = FitRequest(
+        request_id=request_id,
+        origin=CandidateOrigin.OPERATOR_CALIBRATION,
+        fit_corpus=corpus,
+        configuration_digest=incumbent_digest,
+        parent_incumbent_digest=incumbent_digest,
+        parent_incumbent_generation=0,
+        candidate_generation=0,
+    )
+    return GreyFitJob(
+        request=request,
+        corpus=corpus,
+        segments=(segment,),
+        config=config,
+    )
 
 
-def _sim_at(t, Q, fitted, key, value, *, T_amb, T0):
-    """The model's trajectory with one parameter moved off the fitted point."""
-    params = dict(fitted)
-    params[key] = value
-    return simulate_grey_box(t, Q, T_amb=T_amb, T0=float(T0), **_sim_kwargs(params))
+def _fit_trace_segmented(t, temp, Q, *, T_amb, init, sigma, n_delay):
+    from controller.runtime.model_fitting import fit_segmented_grey
+
+    return fit_segmented_grey(
+        trace_fit_job(
+            t,
+            temp,
+            Q,
+            T_amb=T_amb,
+            init=init,
+            sigma=sigma,
+            n_delay=n_delay,
+        )
+    )
+
+
+def _fit_mapping(outcome, *, T_amb, init, sigma, n_delay):
+    from controller.runtime.model_fitting import GreyFitSuccess
+
+    source = outcome.config if isinstance(outcome, GreyFitSuccess) else None
+    fitted = {
+        "C_c": float(source.C_c if source is not None else init["C_c"]),
+        "h_amb": float(source.h_amb if source is not None else init["h_amb"]),
+        "K_Q": float(source.K_Q if source is not None else init["K_Q"]),
+        "sigma": float(source.sigma if source is not None else sigma),
+        "theta": float(source.theta if source is not None else init["theta"]),
+        "n_delay": int(n_delay),
+        "T_amb": float(T_amb),
+        "converged": source is not None,
+        "nfev": int(outcome.nfev if source is not None else 0),
+    }
+    return fitted
 
 
 def _dump_json(document):
@@ -408,16 +413,33 @@ def main():
     if args.t_amb is not None and not math.isclose(args.t_amb, T_amb, rel_tol=0.0, abs_tol=1e-9):
         ap.error("--t-amb must match the trace's recorded ambient temperature")
     init = {k: float(DEFAULT_MPC_CONFIG[k]) for k in ("C_c", "h_amb", "K_Q", "theta")}
-    fitted = fit_params(
+    sigma = float(DEFAULT_MPC_CONFIG["sigma"])
+    n_delay = int(DEFAULT_MPC_CONFIG["n_delay"])
+    outcome = _fit_trace_segmented(
         t,
         temp,
         Q,
         T_amb=T_amb,
         init=init,
-        sigma=float(DEFAULT_MPC_CONFIG["sigma"]),
-        n_delay=int(DEFAULT_MPC_CONFIG["n_delay"]),
+        sigma=sigma,
+        n_delay=n_delay,
+    )
+    fitted = _fit_mapping(
+        outcome,
+        T_amb=T_amb,
+        init=init,
+        sigma=sigma,
+        n_delay=n_delay,
     )
     payload = {k: fitted[k] for k in CONFIG_KEYS}
+    from controller.runtime.model_fitting import GreyFitSuccess
+
+    if isinstance(outcome, GreyFitSuccess) and outcome.metrics is not None:
+        rmse = outcome.metrics.pooled.rmse_c
+        max_err = outcome.metrics.pooled.max_error_c
+    else:
+        rmse = math.inf
+        max_err = math.inf
 
     if args.json:
         # The config keys stay in their own object so they can still be pasted
@@ -429,12 +451,11 @@ def main():
         #
         # The two errors go through `optional_float`, so a model the grey box
         # cannot be simulated at reports `null` rather than the infinities
-        # `fit_quality` returns for it -- the same encoding controller/mpc.py's
-        # snapshot uses for an RMSE nobody could measure, so a consumer meets
-        # one convention across both. The keys stay present: dropped, they
+        # the segmented outcome reports for an unmeasurable model -- the same
+        # encoding controller/mpc.py's snapshot uses for an RMSE nobody could
+        # measure, so a consumer meets one convention across both. The keys stay present: dropped, they
         # would be indistinguishable from an older build of this utility, and
         # "unmeasurable" is exactly what the reader needs told.
-        rmse, max_err = fit_quality(t, temp, Q, fitted, T_amb=T_amb)
         print(
             _dump_json(
                 {
@@ -452,7 +473,6 @@ def main():
             print(_NOT_CONVERGED.format(nfev=fitted["nfev"]), file=sys.stderr)
         return
 
-    rmse, max_err = fit_quality(t, temp, Q, fitted, T_amb=T_amb)
     print(f"Fit quality: RMSE {rmse:.2f} C, max error {max_err:.2f} C")
     if not fitted["converged"]:
         print(_NOT_CONVERGED.format(nfev=fitted["nfev"]))

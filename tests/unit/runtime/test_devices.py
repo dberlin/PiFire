@@ -23,47 +23,7 @@ from common import datastore
 from common.common import ErrorKind
 from common.persistence.control import read_control
 from common.persistence.runtime import read_errors, read_pellet_db, write_errors
-
-
-def _settings(**overrides):
-    settings = {
-        "modules": {"grillplat": "prototype", "dist": "prototype", "display": "none"},
-        "platform": {
-            "devices": {},
-            "buttonslevel": "HIGH",
-            "outputs": {"auger": 14, "dc_fan": 26, "fan": 15, "igniter": 18, "power": 4, "pwm": 13},
-            "inputs": {"selector": 17, "shutdown": 17},
-            "dc_fan": False,
-            "standalone": True,
-        },
-        "pelletlevel": {"empty": 22, "full": 4},
-        "globals": {"units": "F", "debug_mode": False},
-        "pwm": {"frequency": 100},
-        "probe_settings": {"probe_map": {"probe_info": [], "probe_devices": []}},
-        "thermocouple_health": {"inference_policy": "observe"},
-        "display": {"config": {"none": {}}},
-    }
-    settings.update(overrides)
-    return settings
-
-
-class _RecordingLogger:
-    """Fake event/control logger that records what was logged, instead of a
-    silent no-op, so tests can assert *which* failure path actually ran."""
-
-    def __init__(self):
-        self.infos = []
-        self.errors = []
-        self.exceptions = []
-
-    def info(self, msg, *a, **k):
-        self.infos.append(msg)
-
-    def error(self, msg, *a, **k):
-        self.errors.append(msg)
-
-    def exception(self, msg, *a, **k):
-        self.exceptions.append(msg)
+from tests.unit.runtime._device_helpers import _RecordingLogger, _settings
 
 
 class _FakeModule:
@@ -108,6 +68,13 @@ def _selective_import(overrides):
     return _fake
 
 
+def _assert_delivered_platform(platform):
+    from controller.runtime.actuation_delivery import DeliveredGrillPlatform
+
+    assert isinstance(platform, DeliveredGrillPlatform)
+    assert platform.auger_timing() is not None
+
+
 # ---------------------------------------------------------------------------
 # build_devices(): happy path
 # ---------------------------------------------------------------------------
@@ -120,7 +87,7 @@ def test_build_devices_prototype_success_random_hopper_and_probe_info_written(ds
     devices, errors = build_devices(settings, errors=[], event_log=_RecordingLogger(), control_log=_RecordingLogger())
 
     assert errors == []
-    assert type(devices.grill_platform).__module__ == "grillplat.prototype"
+    _assert_delivered_platform(devices.grill_platform)
     assert devices.probe_complex.disable is False
     # Both modules == "prototype" selects the random-reading branch (lines
     # 241-249): distance.prototype.HopperLevel records the `random` flag and
@@ -190,7 +157,7 @@ def test_build_devices_grillplat_import_failure_falls_back_to_prototype(ds, monk
     assert "nonexistent_grillplat_xyz" in errors[0]
     assert control_log.exceptions and control_log.errors
     assert read_control()["critical_error"] is True
-    assert type(devices.grill_platform).__module__ == "grillplat.prototype"
+    _assert_delivered_platform(devices.grill_platform)
 
 
 def test_build_devices_grillplat_import_failure_falls_back_to_prototype_in_debug_mode(ds, monkeypatch):
@@ -212,7 +179,7 @@ def test_build_devices_grillplat_import_failure_falls_back_to_prototype_in_debug
 
     assert len(errors) == 1
     assert "nonexistent_grillplat_xyz" in errors[0]
-    assert type(devices.grill_platform).__module__ == "grillplat.prototype"
+    _assert_delivered_platform(devices.grill_platform)
     assert read_control()["critical_error"] is True
 
 
@@ -230,7 +197,7 @@ def test_build_devices_grillplat_configure_failure_falls_back_to_prototype(ds, m
 
     assert len(errors) == 1
     assert read_control()["critical_error"] is True
-    assert type(devices.grill_platform).__module__ == "grillplat.prototype"
+    _assert_delivered_platform(devices.grill_platform)
 
 
 def test_build_devices_grillplat_configure_failure_falls_back_to_prototype_in_debug_mode(ds, monkeypatch):
@@ -250,7 +217,7 @@ def test_build_devices_grillplat_configure_failure_falls_back_to_prototype_in_de
     devices, errors = build_devices(settings, errors=[], event_log=_RecordingLogger(), control_log=_RecordingLogger())
 
     assert len(errors) == 1
-    assert type(devices.grill_platform).__module__ == "grillplat.prototype"
+    _assert_delivered_platform(devices.grill_platform)
     assert read_control()["critical_error"] is True
 
 

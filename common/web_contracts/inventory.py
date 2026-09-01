@@ -72,8 +72,6 @@ from .core import (
     WebUiBuildResponse,
 )
 from .learning import (
-    ModelActivationAcknowledgement,
-    ModelActivationRequest,
     ModelEvidenceReport,
     ModelRollbackAcknowledgement,
     ModelRollbackRequest,
@@ -208,12 +206,6 @@ JSON_WEB_CONTRACT_INVENTORY: tuple[JsonWebContract, ...] = (
     # Learning reports and revision-fenced actions.
     _http("GET /api/model-evidence/report", ModelEvidenceReport, "learning"),
     _http("GET /api/pid-sp-learning/report", PidSpLearningReport, "learning"),
-    _http(
-        "POST /api/model-evidence/activate",
-        ModelActivationAcknowledgement,
-        "learning",
-        ModelActivationRequest,
-    ),
     _http(
         "POST /api/model-evidence/rollback",
         ModelRollbackAcknowledgement,

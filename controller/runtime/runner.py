@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import collections
 import importlib
+import logging
 import math
 import threading
 import time
@@ -29,7 +30,7 @@ from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Protocol, TypeAlias, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from common.control_trace import ActuationMode, ControllerType, ResultStaleState
 from common.model_evidence import (
@@ -48,19 +49,25 @@ from controller.base import (
     MpcTraceDiagnostics,
     normalize_controller_output,
 )
+from controller.model_learning.contracts import CandidateOrigin
 from controller.mpc_allocator import AllocationResult
-from controller.runtime.model_fitting import TeardownRefitOutcome
 from controller.runtime.model_lifecycle import ModelLifecycleRunner
-from controller.runtime.model_persistence import DurableActivationReceipt
+from controller.runtime.model_persistence import (
+    DurableActivationReceipt,
+    ModelPersistenceWorker,
+)
 
 if TYPE_CHECKING:
+    from common.persistence.learning_trajectory import LearningTrajectoryRepository
     from controller.model_learning.calibration import CalibrationDecision
     from controller.model_learning.contracts import FrameObservation
+    from controller.model_learning.grey_runtime import GreyLearningProcessOwner
     from controller.mpc_calibration import CalibrationCommand
+    from controller.mpc_model import EstimatorSeed
 
 
-StatusScalar: TypeAlias = None | bool | int | float | str
-StatusValue: TypeAlias = StatusScalar | Mapping[str, "StatusValue"] | tuple["StatusValue", ...]
+type StatusScalar = None | bool | int | float | str
+type StatusValue = StatusScalar | Mapping[str, StatusValue] | tuple[StatusValue, ...]
 
 
 @runtime_checkable
@@ -91,8 +98,182 @@ class _ActivationCore(Protocol):
 
 
 @runtime_checkable
-class _RefitFinalizer(Protocol):
-    def finalize_cook_refit(self, outcome: TeardownRefitOutcome) -> bool: ...
+class _FrameLearningCore(Protocol):
+    def observe_frame(self, observation: FrameObservation) -> object: ...
+
+    def observation_failure(
+        self,
+        observation: FrameObservation,
+        error: BaseException,
+    ) -> object: ...
+
+
+@runtime_checkable
+class _ControllerCorpusLearningCore(Protocol):
+    def bind_learning_identity(
+        self,
+        session_id: str,
+        cook_id: str | None,
+        role_generation: int,
+    ) -> None: ...
+
+    def poll_learning_off_path(
+        self,
+        *,
+        live_origin: CandidateOrigin | None = None,
+    ) -> object: ...
+
+    def schedule_corpus_fit(self, origin: CandidateOrigin) -> bool: ...
+
+    def _schedule_corpus_fit_ticket(
+        self,
+        origin: CandidateOrigin,
+    ) -> str | None: ...
+
+    def _consume_terminal_corpus_fit_ticket(
+        self,
+        ticket: str,
+        origin: CandidateOrigin,
+    ) -> bool: ...
+
+    def fail_corpus_fit(
+        self,
+        ticket: str,
+        error: BaseException | str,
+    ) -> None: ...
+
+    def get_learning_diagnostics(self) -> ControllerLearningDiagnostics: ...
+
+
+@runtime_checkable
+class _CorpusFitDisabledCore(Protocol):
+    def record_corpus_fit_disabled(
+        self,
+        origin: CandidateOrigin,
+        reason: str,
+    ) -> bool: ...
+
+
+@runtime_checkable
+class _CorpusFitFailureCore(Protocol):
+    def record_corpus_fit_failed(
+        self,
+        origin: CandidateOrigin,
+        reason: str,
+    ) -> bool: ...
+
+
+@runtime_checkable
+class _MpcLearningCore(Protocol):
+    """MPC-only estimator seeding, separate from controller corpus learning."""
+
+    def estimator_seed_requirements(self) -> tuple[float, int]: ...
+
+    def bind_estimator_seed_source(
+        self,
+        source: Callable[[float, int], object] | None,
+    ) -> None: ...
+
+
+class _ControllerCoreCompatibilityAdapter:
+    """Own legacy optional projections while delegating required operations."""
+
+    __slots__ = ("_core",)
+
+    def __init__(self, core) -> None:
+        self._core = core
+
+    def __getattr__(self, name):
+        return getattr(self._core, name)
+
+    def capture_status(self) -> ControllerStatusCapture:
+        capture_status = getattr(self._core, "capture_status", None)
+        if callable(capture_status):
+            captured = capture_status()
+            if not isinstance(captured, ControllerStatusCapture):
+                raise TypeError("controller capture_status() must return ControllerStatusCapture")
+            return captured
+        learning = getattr(
+            self._core,
+            "get_learning_diagnostics",
+            lambda: None,
+        )()
+        if learning is not None and not isinstance(
+            learning,
+            ControllerLearningDiagnostics,
+        ):
+            raise TypeError("controller learning diagnostics must be ControllerLearningDiagnostics or None")
+        return ControllerStatusCapture(
+            status=self.get_status(),
+            learning=learning,
+        )
+
+    def get_status(self):
+        return getattr(self._core, "get_status", lambda: None)()
+
+    def trace_diagnostics(self) -> ControllerTraceDiagnostics | None:
+        return getattr(self._core, "trace_diagnostics", lambda: None)()
+
+    def trace_allocation(self) -> AllocationResult | None:
+        return getattr(self._core, "trace_allocation", lambda: None)()
+
+    def trace_baseline_allocation(self) -> AllocationResult | None:
+        return getattr(
+            self._core,
+            "trace_baseline_allocation",
+            lambda: None,
+        )()
+
+    def trace_calibration(self) -> CalibrationDecision | None:
+        return getattr(self._core, "trace_calibration", lambda: None)()
+
+    def register_calibration_result(self, result) -> None:
+        register = getattr(self._core, "register_calibration_result", None)
+        if callable(register):
+            register(result)
+
+    def close(self) -> None:
+        close = getattr(self._core, "close", None)
+        if callable(close):
+            close()
+
+
+def _adapt_controller_core(core) -> _ControllerCoreCompatibilityAdapter:
+    if isinstance(core, _ControllerCoreCompatibilityAdapter):
+        return core
+    return _ControllerCoreCompatibilityAdapter(core)
+
+
+def _activation_core_for(core) -> _ActivationCore | None:
+    delegated = core._core if isinstance(core, _ControllerCoreCompatibilityAdapter) else core
+    return delegated if isinstance(delegated, _ActivationCore) else None
+
+
+def _frame_learning_core_for(core) -> _FrameLearningCore | None:
+    delegated = core._core if isinstance(core, _ControllerCoreCompatibilityAdapter) else core
+    return delegated if isinstance(delegated, _FrameLearningCore) else None
+
+
+def _controller_corpus_learning_core_for(
+    core,
+) -> _ControllerCorpusLearningCore | None:
+    delegated = core._core if isinstance(core, _ControllerCoreCompatibilityAdapter) else core
+    return delegated if isinstance(delegated, _ControllerCorpusLearningCore) else None
+
+
+def _corpus_fit_disabled_core_for(core) -> _CorpusFitDisabledCore | None:
+    delegated = core._core if isinstance(core, _ControllerCoreCompatibilityAdapter) else core
+    return delegated if isinstance(delegated, _CorpusFitDisabledCore) else None
+
+
+def _corpus_fit_failure_core_for(core) -> _CorpusFitFailureCore | None:
+    delegated = core._core if isinstance(core, _ControllerCoreCompatibilityAdapter) else core
+    return delegated if isinstance(delegated, _CorpusFitFailureCore) else None
+
+
+def _mpc_learning_core_for(core) -> _MpcLearningCore | None:
+    delegated = core._core if isinstance(core, _ControllerCoreCompatibilityAdapter) else core
+    return delegated if isinstance(delegated, _MpcLearningCore) else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,11 +297,49 @@ class ObservationTerminalDrop:
     reason: str
 
 
+@dataclass(slots=True)
+class _CorpusFitPlan:
+    origin: CandidateOrigin
+    before_schedule: Callable[[], bool] | None
+    ticket: str | None = None
+    scheduled: bool = False
+
+
 @dataclass(frozen=True, slots=True)
 class ObservationSubmission:
     submission_sequence: int
     configuration_generation: int
     evicted_sequence: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ModelRestoreOutcome:
+    restore_token: str | None
+    accepted: bool
+    effective_authority: Mapping[str, object] | None
+    staged_for_revalidation: bool = False
+    pending: bool = False
+
+    def __post_init__(self) -> None:
+        if self.restore_token is not None and (
+            not isinstance(self.restore_token, str) or not self.restore_token.strip()
+        ):
+            raise ValueError("restore_token must be non-blank when present")
+        if not isinstance(self.accepted, bool):
+            raise TypeError("accepted must be a bool")
+        if self.effective_authority is not None and not isinstance(
+            self.effective_authority,
+            Mapping,
+        ):
+            raise TypeError("effective_authority must be a mapping when present")
+        if not isinstance(self.staged_for_revalidation, bool):
+            raise TypeError("staged_for_revalidation must be a bool")
+        if not isinstance(self.pending, bool):
+            raise TypeError("pending must be a bool")
+        if self.pending and (not self.accepted or self.effective_authority is not None or self.staged_for_revalidation):
+            raise ValueError("a pending restore must be accepted without effective authority")
+        if self.staged_for_revalidation and not self.accepted:
+            raise ValueError("only an accepted restore can remain staged for revalidation")
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,7 +487,7 @@ def _freeze_status(status: Mapping[str, object]) -> Mapping[str, StatusValue]:
     return MappingProxyType({key: _freeze_status_value(value) for key, value in status.items()})
 
 
-MutableStatusValue: TypeAlias = StatusScalar | dict[str, "MutableStatusValue"] | list["MutableStatusValue"]
+type MutableStatusValue = StatusScalar | dict[str, MutableStatusValue] | list[MutableStatusValue]
 
 
 def _thaw_status_value(value: object) -> MutableStatusValue:
@@ -465,26 +684,19 @@ def _with_result_quality(result: ControllerUpdateResult) -> ControllerUpdateResu
 
 
 def _capture_completed_result(core, temp, revision, *, monotonic_clock, wall_clock):
+    core = _adapt_controller_core(core)
     solve_start = monotonic_clock()
     raw = core.update(temp)
     solve_end = monotonic_clock()
-    capture_status = getattr(core, "capture_status", None)
-    if callable(capture_status):
-        captured = capture_status()
-        if not isinstance(captured, ControllerStatusCapture):
-            raise TypeError("controller capture_status() must return ControllerStatusCapture")
-        learning = captured.learning
-        status = captured.status
-    else:
-        learning = getattr(core, "get_learning_diagnostics", lambda: None)()
-        if learning is not None and not isinstance(learning, ControllerLearningDiagnostics):
-            raise TypeError("controller learning diagnostics must be ControllerLearningDiagnostics or None")
-        status = getattr(core, "get_status", lambda: None)()
-    cycle_ratio, fan = normalize_controller_output(raw)
-    diagnostics = getattr(core, "trace_diagnostics", lambda: None)()
-    allocation = getattr(core, "trace_allocation", lambda: None)()
-    baseline_allocation = getattr(core, "trace_baseline_allocation", lambda: None)()
-    calibration = getattr(core, "trace_calibration", lambda: None)()
+    captured = core.capture_status()
+    learning = captured.learning
+    status = captured.status
+    public_cycle_ratio, fan = normalize_controller_output(raw)
+    diagnostics = core.trace_diagnostics()
+    allocation = core.trace_allocation()
+    cycle_ratio = allocation.auger_duty if allocation is not None else public_cycle_ratio
+    baseline_allocation = core.trace_baseline_allocation()
+    calibration = core.trace_calibration()
     result = ControllerUpdateResult(
         cycle_ratio=cycle_ratio,
         fan=fan,
@@ -501,15 +713,24 @@ def _capture_completed_result(core, temp, revision, *, monotonic_clock, wall_clo
         solve_duration_seconds=solve_end - solve_start,
         completed_wall_time=wall_clock(),
     )
-    register = getattr(core, "register_calibration_result", None)
-    if callable(register):
-        register(result)
+    core.register_calibration_result(result)
     return result
 
 
 class ControllerRunner(ABC, ModelLifecycleRunner):
     @abstractmethod
     def set_target(self, setpoint): ...
+    @abstractmethod
+    def seed_operating_state(self, seed: EstimatorSeed) -> None: ...
+
+    def estimator_seed_requirements(self) -> tuple[float, int] | None:
+        return None
+
+    def bind_estimator_seed_source(
+        self,
+        source: Callable[[float, int], object] | None,
+    ) -> None:
+        del source
 
     @abstractmethod
     def set_safety_ceiling_c(self, ceiling_c): ...
@@ -554,9 +775,28 @@ class ControllerRunner(ABC, ModelLifecycleRunner):
     @abstractmethod
     def drain_observation_outcomes(self) -> ObservationOutcomeDrain: ...
     @abstractmethod
-    def restore_model(self, snapshot): ...
+    def restore_model(
+        self,
+        snapshot,
+        *,
+        restore_token: str | None = None,
+    ) -> ModelRestoreOutcome: ...
     @abstractmethod
-    def refit_from_cook(self): ...
+    def schedule_corpus_fit(self, origin: CandidateOrigin) -> bool: ...
+    def record_corpus_fit_disabled(
+        self,
+        origin: CandidateOrigin,
+        reason: str,
+    ) -> bool:
+        return False
+
+    def record_corpus_fit_failed(
+        self,
+        origin: CandidateOrigin,
+        reason: str,
+    ) -> bool:
+        return False
+
     @abstractmethod
     def controller_state(self) -> dict[str, object]: ...
     def restore_activation(
@@ -581,24 +821,24 @@ class ControllerRunner(ABC, ModelLifecycleRunner):
     ) -> DurableActivationReceipt | None:
         return None
 
-    def drain_restore_outcome(self) -> bool | None:
-        """Whether the worker adopted a queued snapshot, reported once.
+    def drain_restore_outcome(self) -> ModelRestoreOutcome | None:
+        """Return the completed worker outcome for one pending restore.
 
-        A runner that adopts inside `restore_model` has already answered
-        its caller and has nothing to report here.
+        Synchronous runners return their completed outcome directly. Threaded
+        runners return a pending submission first and publish its effective
+        authority here after the core has ruled.
         """
         return None
 
-    def stop_for_refit(self) -> bool | None:
-        """Stop control ownership while retaining the joined core for teardown fitting."""
+    def stop_and_retain_for_teardown(self) -> bool | None:
+        """Stop control ownership while retaining the joined core for teardown."""
         self.stop()
         return None
 
-    def finalize_cook_refit(self, outcome: TeardownRefitOutcome) -> bool:
-        return False
-
-    def finish_teardown(self) -> None:
-        """Release resources retained by stop_for_refit()."""
+    def finish_teardown(self, finalizer: Callable[[], None] | None = None) -> None:
+        """Run ``finalizer`` after terminal fit work and before core close."""
+        if finalizer is not None:
+            finalizer()
 
     @abstractmethod
     def stop(self): ...
@@ -610,6 +850,10 @@ class SyncControllerRunner(ControllerRunner):
         core,
         *,
         controller_type: ControllerType | None = None,
+        model_persistence: ModelPersistenceWorker | None = None,
+        trajectory_repository: LearningTrajectoryRepository | None = None,
+        fit_partition_digest: Callable[[], str | None] | None = None,
+        grey_learning_process: GreyLearningProcessOwner | None = None,
         monotonic_clock: Callable[[], float] = time.monotonic,
         wall_clock: Callable[[], float] = time.time,
         warning_callback: Callable[[ResultStaleState], None] | None = None,
@@ -617,8 +861,10 @@ class SyncControllerRunner(ControllerRunner):
         from controller.runtime.observation_buffer import ObservationOutcomeBuffer
 
         self._core = core
-        self._activation_core = core if isinstance(core, _ActivationCore) else None
-        self._refit_finalizer = core if isinstance(core, _RefitFinalizer) else None
+        self._activation_core = _activation_core_for(core)
+        self._learning_core: _ControllerCorpusLearningCore | None = _controller_corpus_learning_core_for(core)
+        self._mpc_learning_core: _MpcLearningCore | None = _mpc_learning_core_for(core)
+        self._frame_learning_core: _FrameLearningCore | None = _frame_learning_core_for(core)
         self._temp = None
         self._revision = 0
         self._latest_result = None
@@ -627,15 +873,32 @@ class SyncControllerRunner(ControllerRunner):
         self._wall_clock = wall_clock
         self._warning_callback = warning_callback
         self._controller_type = controller_type
+        self._model_persistence = model_persistence
+        self._trajectory_repository = trajectory_repository
+        self._fit_partition_digest = fit_partition_digest
+        self._grey_learning_process = grey_learning_process
         self._observation_sequence = 0
         self._configuration_revision = 0
         period = getattr(core, "get_control_period", lambda: None)()
         self._quality = _ResultQualityTracker(_control_period_seconds(period))
         self._stopped = False
-        self._retained_for_refit = False
+        self._retained_for_teardown = False
 
     def set_target(self, setpoint):
         self._core.set_target(setpoint)
+
+    def seed_operating_state(self, seed: EstimatorSeed) -> None:
+        self._core.seed_from_trajectory(seed)
+
+    def estimator_seed_requirements(self) -> tuple[float, int] | None:
+        return None if self._mpc_learning_core is None else self._mpc_learning_core.estimator_seed_requirements()
+
+    def bind_estimator_seed_source(
+        self,
+        source: Callable[[float, int], object] | None,
+    ) -> None:
+        if self._mpc_learning_core is not None:
+            self._mpc_learning_core.bind_estimator_seed_source(source)
 
     def set_safety_ceiling_c(self, ceiling_c):
         self._core.set_safety_ceiling_c(ceiling_c)
@@ -648,9 +911,8 @@ class SyncControllerRunner(ControllerRunner):
 
     def bind_evidence_context(self, generation: int, session_id: str, cook_id: str | None) -> None:
         self._observation_buffer.bind_context(generation, session_id, cook_id)
-        bind = getattr(self._core, "bind_learning_identity", None)
-        if callable(bind):
-            bind(session_id, cook_id, generation)
+        if self._learning_core is not None:
+            self._learning_core.bind_learning_identity(session_id, cook_id, generation)
 
     def retire_evidence_context(self, generation: int) -> None:
         self._observation_buffer.retire_context(generation)
@@ -701,12 +963,26 @@ class SyncControllerRunner(ControllerRunner):
         return self.latest()
 
     def reconfigure(self, settings, control, logger=None):
-        core, status = _build_core(settings, control, logger=logger)
+        core, status = _build_core(
+            settings,
+            control,
+            logger=logger,
+            model_persistence=self._model_persistence,
+            trajectory_repository=self._trajectory_repository,
+            fit_partition_digest=self._fit_partition_digest,
+            grey_learning_process=self._grey_learning_process,
+        )
         if status == "Active":
             retired = self._core
+            activation_core = _activation_core_for(core)
+            learning_core = _controller_corpus_learning_core_for(core)
+            mpc_learning_core = _mpc_learning_core_for(core)
+            frame_learning_core = _frame_learning_core_for(core)
             self._core = core
-            self._activation_core = core if isinstance(core, _ActivationCore) else None
-            self._refit_finalizer = core if isinstance(core, _RefitFinalizer) else None
+            self._activation_core = activation_core
+            self._learning_core = learning_core
+            self._mpc_learning_core = mpc_learning_core
+            self._frame_learning_core = frame_learning_core
             self._controller_type = _controller_type_for(_selected_controller(settings))
             self._configuration_revision += 1
             self._quality.control_period = _control_period_seconds(core.get_control_period())
@@ -736,22 +1012,28 @@ class SyncControllerRunner(ControllerRunner):
     def runs_async(self) -> bool:
         return False
 
-    def stop_for_refit(self) -> bool | None:
+    def stop_and_retain_for_teardown(self) -> bool | None:
         if self._stopped:
-            return self._retained_for_refit
+            return self._retained_for_teardown
         self._stopped = True
-        self._retained_for_refit = True
+        self._retained_for_teardown = True
         return True
 
-    def finish_teardown(self) -> None:
-        if not self._retained_for_refit:
+    def finish_teardown(self, finalizer: Callable[[], None] | None = None) -> None:
+        if not self._retained_for_teardown:
             return
-        self._retained_for_refit = False
-        _close_core(self._core)
+        self._retained_for_teardown = False
+        try:
+            if finalizer is not None:
+                finalizer()
+        except Exception:  # noqa: S110 - teardown callback failure must not block core close
+            pass
+        finally:
+            _close_core(self._core)
 
     def stop(self):
         if self._stopped:
-            if self._retained_for_refit:
+            if self._retained_for_teardown:
                 self.finish_teardown()
             return
         self._stopped = True
@@ -764,8 +1046,14 @@ class SyncControllerRunner(ControllerRunner):
         self._observation_sequence += 1
         sequence = self._observation_sequence
         generation = self._configuration_revision
-        observe = getattr(self._core, "observe_frame", None)
-        outcome = observe(observation) if observe is not None else None
+        frame_learning_core = self._frame_learning_core
+        if frame_learning_core is None:
+            outcome = None
+        else:
+            try:
+                outcome = frame_learning_core.observe_frame(observation)
+            except Exception as error:
+                outcome = frame_learning_core.observation_failure(observation, error)
         if outcome is None:
             self._observation_buffer.append_terminal_drop(
                 ObservationTerminalDrop(sequence, generation, observation, "runner-no-observation-outcome")
@@ -786,20 +1074,47 @@ class SyncControllerRunner(ControllerRunner):
     def get_model_snapshot(self):
         return self._core.get_model_snapshot()
 
-    def restore_model(self, snapshot):
-        return self._core.restore_model(snapshot)
+    def restore_model(
+        self,
+        snapshot,
+        *,
+        restore_token: str | None = None,
+    ) -> ModelRestoreOutcome:
+        return _completed_restore_outcome(
+            self._core,
+            _owned_model_snapshot(snapshot),
+            restore_token=restore_token,
+        )
 
-    def refit_from_cook(self):
-        """Ask the core to learn from the cook that just ended, if it can.
+    def schedule_corpus_fit(self, origin: CandidateOrigin) -> bool:
+        return self._schedule_corpus_fit_after_barrier(origin, None)
 
-        A controller with no identification of its own simply has nothing to
-        refit, which is None rather than an error.
-        """
-        fn = getattr(self._core, "refit_from_cook", None)
-        return fn() if fn is not None else None
+    def record_corpus_fit_disabled(
+        self,
+        origin: CandidateOrigin,
+        reason: str,
+    ) -> bool:
+        core = _corpus_fit_disabled_core_for(self._core)
+        return False if core is None else bool(core.record_corpus_fit_disabled(origin, reason))
 
-    def finalize_cook_refit(self, outcome: TeardownRefitOutcome) -> bool:
-        return False if self._refit_finalizer is None else self._refit_finalizer.finalize_cook_refit(outcome)
+    def record_corpus_fit_failed(
+        self,
+        origin: CandidateOrigin,
+        reason: str,
+    ) -> bool:
+        core = _corpus_fit_failure_core_for(self._core)
+        return False if core is None else bool(core.record_corpus_fit_failed(origin, reason))
+
+    def _schedule_corpus_fit_after_barrier(
+        self,
+        origin: CandidateOrigin,
+        before_schedule: Callable[[], bool] | None,
+    ) -> bool:
+        if self._learning_core is None:
+            return False
+        if before_schedule is not None and not before_schedule():
+            return False
+        return bool(self._learning_core.schedule_corpus_fit(origin))
 
     def controller_state(self):
         """A mutable, JSON-safe copy of the current status snapshot."""
@@ -836,6 +1151,25 @@ def _owned_model_snapshot(snapshot):
     return None if snapshot is None else deepcopy(snapshot)
 
 
+def _completed_restore_outcome(
+    core,
+    snapshot,
+    *,
+    restore_token: str | None,
+) -> ModelRestoreOutcome:
+    prior_authority = _owned_model_snapshot(core.get_model_snapshot())
+    accepted = bool(core.restore_model(snapshot))
+    restored_state = _owned_model_snapshot(core.get_model_snapshot())
+    staged_for_revalidation = accepted and restored_state != snapshot
+    effective_authority = prior_authority if staged_for_revalidation else restored_state
+    return ModelRestoreOutcome(
+        restore_token=restore_token,
+        accepted=accepted,
+        effective_authority=effective_authority,
+        staged_for_revalidation=staged_for_revalidation,
+    )
+
+
 def _safe_initial_status(core):
     """core.get_status() called here runs before the core has proven itself
     with a successful update() -- outside the try/except _build_core uses
@@ -849,9 +1183,7 @@ def _safe_initial_status(core):
 
 
 def _close_core(core) -> None:
-    close = getattr(core, "close", None)
-    if callable(close):
-        close()
+    _adapt_controller_core(core).close()
 
 
 class ThreadedControllerRunner(ControllerRunner):
@@ -864,6 +1196,10 @@ class ThreadedControllerRunner(ControllerRunner):
         core,
         *,
         controller_type: ControllerType | None = None,
+        model_persistence: ModelPersistenceWorker | None = None,
+        trajectory_repository: LearningTrajectoryRepository | None = None,
+        fit_partition_digest: Callable[[], str | None] | None = None,
+        grey_learning_process: GreyLearningProcessOwner | None = None,
         monotonic_clock: Callable[[], float] = time.monotonic,
         wall_clock: Callable[[], float] = time.time,
         warning_callback: Callable[[ResultStaleState], None] | None = None,
@@ -871,10 +1207,13 @@ class ThreadedControllerRunner(ControllerRunner):
     ):
         from controller.runtime.observation_buffer import ObservationOutcomeBuffer
 
-        self._core = core
-        self._activation_core = core if isinstance(core, _ActivationCore) else None
-        self._refit_finalizer = core if isinstance(core, _RefitFinalizer) else None
         self._lock = threading.Lock()
+        with self._lock:
+            self._core = core
+            self._activation_core = _activation_core_for(core)
+            self._learning_core: _ControllerCorpusLearningCore | None = _controller_corpus_learning_core_for(core)
+            self._mpc_learning_core: _MpcLearningCore | None = _mpc_learning_core_for(core)
+            self._frame_learning_core: _FrameLearningCore | None = _frame_learning_core_for(core)
         self._temp = None
         self._output = ControllerUpdateResult(
             cycle_ratio=0.0,
@@ -891,17 +1230,22 @@ class ThreadedControllerRunner(ControllerRunner):
         )
         self._revision = 0
         self._pending_target = _UNSET
+        self._pending_seed = _UNSET
+        self._pending_seed_source = _UNSET
+        self._seed_pending_for_solve = False
+        self._seed_failure: str | None = None
         self._pending_safety_ceiling_c = _UNSET
         self._pending_core = None
+        self._pending_learning_identities: collections.deque[tuple[int, str, str | None]] = collections.deque()
         self._pending_controller_type = None
         self._configuration_revision = 0
         self._pending_dispatches: collections.deque[tuple[str, object]] = collections.deque()
         self._latest_delivered_output = None
         self._pending_dropped = 0
         self._pending_restore = None
-        #: The worker owns adoption, so its verdict is the only place a
-        #: refused restore exists. Held until a caller drains it.
-        self._restore_outcome: bool | None = None
+        #: The worker owns the completed restore verdict and effective control
+        #: authority. Held until a caller drains it.
+        self._restore_outcome: ModelRestoreOutcome | None = None
         self._pending_calibrations: collections.deque[tuple[str, object]] = collections.deque()
         self._pending_observations: list[tuple[int, int, FrameObservation]] = []
 
@@ -918,6 +1262,10 @@ class ThreadedControllerRunner(ControllerRunner):
         self._commands_fan = core.commands_fan()
         self._actuation_mode = _actuation_mode_for(core)
         self._controller_type = controller_type
+        self._model_persistence = model_persistence
+        self._trajectory_repository = trajectory_repository
+        self._fit_partition_digest = fit_partition_digest
+        self._grey_learning_process = grey_learning_process
         self._quality = _ResultQualityTracker(_control_period_seconds(self._control_period))
         self._monotonic_clock = monotonic_clock
         self._wall_clock = wall_clock
@@ -926,25 +1274,44 @@ class ThreadedControllerRunner(ControllerRunner):
         self._learning_stop_event = threading.Event()
         self._learning_condition = threading.Condition(self._lock)
         self._learning_poll_core = None
-        self._wait_for_period = self._stop_event.wait if wait_for_period is None else wait_for_period
-        self._retain_core_for_refit = False
+        self._learning_poll_failure: str | None = None
+        self._work_event = threading.Event()
+        if wait_for_period is None:
+
+            def wait_for_work(period: float) -> None:
+                self._work_event.wait(period)
+                self._work_event.clear()
+
+            self._wait_for_period = wait_for_work
+        else:
+            self._wait_for_period = wait_for_period
+        self._retain_core_for_teardown = False
         self._final_core_closed = False
+        self._final_core_closing = False
+        self._teardown_finalizer: Callable[[], None] | None = None
+        self._teardown_finalizer_ran = False
+        self._corpus_fit_thread: threading.Thread | None = None
+        self._corpus_fit_plans: collections.deque[_CorpusFitPlan] = collections.deque()
+        self._close_final_core_when_idle = False
+        self._controller_worker_finished = False
         self._learning_thread = threading.Thread(target=self._learning_loop, daemon=True)
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._learning_thread.start()
         self._thread.start()
 
     def bind_evidence_context(self, generation: int, session_id: str, cook_id: str | None) -> None:
+        learning_core: _ControllerCorpusLearningCore | None = None
         with self._lock:
             self._observation_buffer.bind_context(generation, session_id, cook_id)
-            target = (
-                self._pending_core
-                if self._pending_core is not None and generation == self._configuration_revision + 1
-                else self._core
-            )
-        bind = getattr(target, "bind_learning_identity", None)
-        if callable(bind):
-            bind(session_id, cook_id, generation)
+            pending_generation = self._configuration_revision + 1
+            if self._pending_core is not None and generation == pending_generation:
+                self._pending_learning_identities.append(
+                    (generation, session_id, cook_id),
+                )
+            else:
+                learning_core = self._learning_core
+        if learning_core is not None:
+            learning_core.bind_learning_identity(session_id, cook_id, generation)
 
     def retire_evidence_context(self, generation: int) -> None:
         with self._lock:
@@ -978,15 +1345,90 @@ class ThreadedControllerRunner(ControllerRunner):
         while not self._learning_stop_event.is_set():
             with self._learning_condition:
                 core = self._core
+                learning_core = self._learning_core
                 self._learning_poll_core = core
+            plan: _CorpusFitPlan | None = None
             try:
-                poll = getattr(core, "poll_learning_off_path", None)
-                if callable(poll):
-                    poll()
-            except Exception:
-                # Learning is optional control evidence. A failed drain must not
-                # kill either the lifecycle dispatcher or the live controller.
-                pass
+                if learning_core is not None:
+                    with self._lock:
+                        plan = self._corpus_fit_plans[0] if self._corpus_fit_plans else None
+                    if plan is not None and not plan.scheduled:
+                        barrier_ready = False
+                        try:
+                            barrier_ready = plan.before_schedule is None or bool(plan.before_schedule())
+                        except Exception as error:
+                            self._fail_scheduled_corpus_fit(
+                                "corpus-barrier-failed",
+                                f"{type(error).__name__}: {error}",
+                                origin=plan.origin,
+                                learning_core=learning_core,
+                            )
+                            with self._lock:
+                                self._corpus_fit_plans.clear()
+                            plan = None
+                        if plan is not None:
+                            if not barrier_ready:
+                                self._fail_scheduled_corpus_fit(
+                                    "corpus-barrier-failed",
+                                    "trajectory persistence barrier did not become durable",
+                                    origin=plan.origin,
+                                    learning_core=learning_core,
+                                )
+                                with self._lock:
+                                    self._corpus_fit_plans.clear()
+                                plan = None
+                            else:
+                                try:
+                                    ticket = learning_core._schedule_corpus_fit_ticket(
+                                        plan.origin,
+                                    )
+                                except Exception as error:
+                                    self._fail_scheduled_corpus_fit(
+                                        "fit-submission-failed",
+                                        f"{type(error).__name__}: {error}",
+                                        learning_core=learning_core,
+                                    )
+                                    with self._lock:
+                                        self._corpus_fit_plans.clear()
+                                    plan = None
+                                else:
+                                    if not isinstance(ticket, str) or not ticket:
+                                        self._fail_scheduled_corpus_fit(
+                                            "fit-submission-failed",
+                                            "core rejected corpus fit scheduling",
+                                            learning_core=learning_core,
+                                        )
+                                        with self._lock:
+                                            self._corpus_fit_plans.clear()
+                                        plan = None
+                                    else:
+                                        with self._lock:
+                                            plan.ticket = ticket
+                                            plan.scheduled = True
+                    learning_core.poll_learning_off_path()
+                    ticket_terminal = (
+                        plan is not None
+                        and plan.ticket is not None
+                        and learning_core._consume_terminal_corpus_fit_ticket(
+                            plan.ticket,
+                            plan.origin,
+                        )
+                    )
+                    if plan is not None and ticket_terminal:
+                        with self._lock:
+                            if self._corpus_fit_plans and self._corpus_fit_plans[0] is plan:
+                                self._corpus_fit_plans.popleft()
+            except Exception as error:
+                # Learning is optional control evidence. Fail its corpus
+                # lifecycle closed without killing the dispatcher or controller.
+                self._fail_scheduled_corpus_fit(
+                    "fit-poll-failed",
+                    error,
+                    learning_core=learning_core,
+                )
+                with self._lock:
+                    self._corpus_fit_plans.clear()
+                    self._learning_poll_failure = f"{type(error).__name__}: {error}"
             finally:
                 with self._learning_condition:
                     if self._learning_poll_core is core:
@@ -1006,11 +1448,43 @@ class ThreadedControllerRunner(ControllerRunner):
 
     def _close_final_core(self) -> None:
         with self._lock:
-            if self._final_core_closed:
+            if self._final_core_closed or self._final_core_closing:
                 return
-            self._final_core_closed = True
+            self._final_core_closing = True
             core = self._core
-        _close_core(core)
+            finalizer = None if self._teardown_finalizer_ran else self._teardown_finalizer
+            if finalizer is not None:
+                self._teardown_finalizer_ran = True
+        try:
+            if finalizer is not None:
+                try:
+                    finalizer()
+                except Exception:  # noqa: S110 - teardown callback failure must not block core close
+                    pass
+            _close_core(core)
+        finally:
+            late_finalizer = None
+            with self._lock:
+                self._final_core_closed = True
+                self._final_core_closing = False
+                if not self._teardown_finalizer_ran and self._teardown_finalizer is not None:
+                    self._teardown_finalizer_ran = True
+                    late_finalizer = self._teardown_finalizer
+            if late_finalizer is not None:
+                try:
+                    late_finalizer()
+                except Exception:  # noqa: S110 - teardown callback failure must not block core close
+                    pass
+
+    def _controller_worker_exiting(self) -> None:
+        with self._lock:
+            self._controller_worker_finished = True
+            if not self._retain_core_for_teardown:
+                self._close_final_core_when_idle = True
+            fit_pending = self._corpus_fit_thread is not None
+            should_close = self._close_final_core_when_idle and not fit_pending
+        if should_close:
+            self._close_final_core()
 
     def _advance_pair_activation(self) -> bool:
         """Delegate the nonblocking boundary to the sole activation state owner."""
@@ -1020,11 +1494,24 @@ class ThreadedControllerRunner(ControllerRunner):
         while True:
             stopping = self._stop_event.is_set()
             with self._lock:
+                mpc_learning_core = self._mpc_learning_core
+                frame_learning_core = self._frame_learning_core
                 target = self._pending_target
                 self._pending_target = _UNSET
+                seed = self._pending_seed
+                self._pending_seed = _UNSET
+                if self._pending_core is None:
+                    seed_source = self._pending_seed_source
+                    self._pending_seed_source = _UNSET
+                else:
+                    seed_source = _UNSET
                 safety_ceiling_c = self._pending_safety_ceiling_c
                 self._pending_safety_ceiling_c = _UNSET
                 new_core = None
+                new_learning_core = None
+                new_mpc_learning_core = None
+                new_frame_learning_core = None
+                pending_learning_identities = ()
                 handoff_output = None
                 new_controller_type = None
                 retired_core = None
@@ -1038,9 +1525,32 @@ class ThreadedControllerRunner(ControllerRunner):
             # A pending core is installed only after the old core has drained
             # the returned generation bound to the consuming core.
             if restore is not None:
-                adopted = self._core.restore_model(restore)
+                restore_token, restore_snapshot = restore
+                restore_outcome = _completed_restore_outcome(
+                    self._core,
+                    restore_snapshot,
+                    restore_token=restore_token,
+                )
                 with self._lock:
-                    self._restore_outcome = bool(adopted)
+                    self._restore_outcome = restore_outcome
+                    self._model_snapshot = _owned_model_snapshot(
+                        restore_outcome.effective_authority,
+                    )
+            if seed_source is not _UNSET and mpc_learning_core is not None:
+                mpc_learning_core.bind_estimator_seed_source(seed_source)
+            if seed is not _UNSET:
+                seed_value, seed_ack, seed_outcome = seed
+                seed_failure: str | None = None
+                try:
+                    self._core.seed_from_trajectory(seed_value)
+                except Exception as error:
+                    seed_failure = f"{type(error).__name__}: {error}"
+                with self._lock:
+                    self._seed_failure = seed_failure
+                    if seed_failure is None and self._pending_seed is _UNSET:
+                        self._seed_pending_for_solve = False
+                seed_outcome.append(seed_failure)
+                seed_ack.set()
             if safety_ceiling_c is not _UNSET:
                 self._core.set_safety_ceiling_c(safety_ceiling_c)
             if target is not _UNSET:
@@ -1074,12 +1584,16 @@ class ThreadedControllerRunner(ControllerRunner):
                 self._core.set_output(applied)
                 with self._lock:
                     self._latest_delivered_output = applied
-                observe = getattr(self._core, "observe_frame", None)
-                try:
-                    outcome = None if observe is None else observe(observation)
-                except Exception as error:
-                    reject = getattr(self._core, "observation_failure", None)
-                    outcome = reject(observation, error) if callable(reject) else None
+                if frame_learning_core is None:
+                    outcome = None
+                else:
+                    try:
+                        outcome = frame_learning_core.observe_frame(observation)
+                    except Exception as error:
+                        outcome = frame_learning_core.observation_failure(
+                            observation,
+                            error,
+                        )
                 with self._lock:
                     if outcome is None:
                         self._terminalize_observation_locked(sequence, "runner-no-observation-outcome")
@@ -1112,40 +1626,47 @@ class ThreadedControllerRunner(ControllerRunner):
                             self._observations_discontinuous.discard(generation)
                         for sequence, _, _ in pending_observations:
                             self._inflight_observations.add(sequence)
-                        update_temp = _UNSET if pending_observations else self._temp
+                        update_temp = _UNSET if pending_observations or self._seed_pending_for_solve else self._temp
                     else:
                         pending_observations = []
                         handoff_batch = False
-                        update_temp = self._temp
+                        update_temp = _UNSET if self._seed_pending_for_solve else self._temp
                 if pending_observations:
-                    observe = getattr(self._core, "observe_frame", None)
-                    for sequence, generation, observation in pending_observations:
-                        if observe is None:
+                    if frame_learning_core is None:
+                        for sequence, _, _ in pending_observations:
                             with self._lock:
-                                self._terminalize_observation_locked(sequence, "runner-no-observation-learner")
-                            continue
-                        try:
-                            outcome = observe(observation)
-                        except Exception as error:
-                            with self._lock:
-                                self._observations_discontinuous.add(generation)
-                            reject = getattr(self._core, "observation_failure", None)
-                            if callable(reject):
+                                self._terminalize_observation_locked(
+                                    sequence,
+                                    "runner-no-observation-learner",
+                                )
+                    else:
+                        for sequence, generation, observation in pending_observations:
+                            try:
+                                outcome = frame_learning_core.observe_frame(observation)
+                            except Exception as error:
+                                with self._lock:
+                                    self._observations_discontinuous.add(generation)
                                 try:
-                                    outcome = reject(observation, error)
+                                    outcome = frame_learning_core.observation_failure(
+                                        observation,
+                                        error,
+                                    )
                                 except Exception:
                                     outcome = None
-                            else:
-                                outcome = None
-                            if outcome is None:
-                                outcome = {
-                                    "role_generation": observation.role_generation,
-                                    "eligible": False,
-                                    "rejection_reasons": ("learner-exception",),
-                                    "learner_error": f"{type(error).__name__}: {error}",
-                                }
-                        with self._lock:
-                            self._complete_observation_locked(sequence, generation, observation, outcome)
+                                if outcome is None:
+                                    outcome = {
+                                        "role_generation": observation.role_generation,
+                                        "eligible": False,
+                                        "rejection_reasons": ("learner-exception",),
+                                        "learner_error": f"{type(error).__name__}: {error}",
+                                    }
+                            with self._lock:
+                                self._complete_observation_locked(
+                                    sequence,
+                                    generation,
+                                    observation,
+                                    outcome,
+                                )
                     if handoff_batch:
                         break
                     continue
@@ -1153,21 +1674,38 @@ class ThreadedControllerRunner(ControllerRunner):
             with self._lock:
                 if self._pending_core is not None:
                     new_core = self._pending_core
+                    new_learning_core = _controller_corpus_learning_core_for(new_core)
+                    new_mpc_learning_core = _mpc_learning_core_for(new_core)
+                    new_frame_learning_core = _frame_learning_core_for(new_core)
                     new_controller_type = self._pending_controller_type
                     self._pending_core = None
                     self._pending_controller_type = None
                     retired_core = self._core
                     self._core = new_core
-                    self._activation_core = new_core if isinstance(new_core, _ActivationCore) else None
-                    self._refit_finalizer = new_core if isinstance(new_core, _RefitFinalizer) else None
+                    self._activation_core = _activation_core_for(new_core)
+                    self._learning_core = new_learning_core
+                    self._mpc_learning_core = new_mpc_learning_core
+                    self._frame_learning_core = new_frame_learning_core
                     self._control_period = new_core.get_control_period()
                     self._commands_fan = new_core.commands_fan()
                     self._actuation_mode = _actuation_mode_for(new_core)
                     self._controller_type = new_controller_type
+                    if new_controller_type is ControllerType.MPC:
+                        self._seed_pending_for_solve = True
+                        self._seed_failure = None
                     self._quality.control_period = _control_period_seconds(self._control_period)
                     self._configuration_revision += 1
+                    pending_learning_identities = tuple(self._pending_learning_identities)
+                    self._pending_learning_identities.clear()
                     handoff_output = self._latest_delivered_output
             if new_core is not None:
+                if new_learning_core is not None:
+                    for generation, session_id, cook_id in pending_learning_identities:
+                        new_learning_core.bind_learning_identity(
+                            session_id,
+                            cook_id,
+                            generation,
+                        )
                 # The replacement owns every operation that raced with its
                 # installation, before its first physical handoff and solve.
                 for operation, payload in pending_calibrations:
@@ -1183,10 +1721,7 @@ class ThreadedControllerRunner(ControllerRunner):
             if not self._advance_pair_activation():
                 if stopping:
                     self._learning_thread.join()
-                    with self._lock:
-                        retain_core = self._retain_core_for_refit
-                    if not retain_core:
-                        self._close_final_core()
+                    self._controller_worker_exiting()
                     return
                 self._wait_for_period(self._control_period or 1.0)
                 continue
@@ -1220,16 +1755,40 @@ class ThreadedControllerRunner(ControllerRunner):
                 with self._lock:
                     if self._pending_observations:
                         continue
-                    retain_core = self._retain_core_for_refit
                 self._learning_thread.join()
-                if not retain_core:
-                    self._close_final_core()
+                self._controller_worker_exiting()
                 return
             self._wait_for_period(self._control_period or 1.0)
 
     def set_target(self, setpoint):
         with self._lock:
             self._pending_target = setpoint
+
+    def seed_operating_state(self, seed: EstimatorSeed) -> None:
+        acknowledgement = threading.Event()
+        outcome: list[str | None] = []
+        with self._lock:
+            self._pending_seed = (seed, acknowledgement, outcome)
+            self._seed_pending_for_solve = True
+            self._seed_failure = None
+            timeout = max(2.0, 2.0 * float(self._control_period or 1.0))
+        self._work_event.set()
+        if not acknowledgement.wait(timeout):
+            raise TimeoutError("threaded MPC estimator seed acknowledgement timed out")
+        if outcome[0] is not None:
+            raise RuntimeError(f"threaded MPC estimator seed failed: {outcome[0]}")
+
+    def estimator_seed_requirements(self) -> tuple[float, int] | None:
+        with self._lock:
+            learning_core = self._mpc_learning_core
+            return None if learning_core is None else learning_core.estimator_seed_requirements()
+
+    def bind_estimator_seed_source(
+        self,
+        source: Callable[[float, int], object] | None,
+    ) -> None:
+        with self._lock:
+            self._pending_seed_source = source
 
     def set_safety_ceiling_c(self, ceiling_c):
         with self._lock:
@@ -1290,6 +1849,9 @@ class ThreadedControllerRunner(ControllerRunner):
     def submit(self, temp):
         with self._lock:
             self._temp = temp
+            wake_first_solve = self._revision == 0
+        if wake_first_solve:
+            self._work_event.set()
 
     def latest(self) -> ControllerUpdateResult:
         with self._lock:
@@ -1305,13 +1867,23 @@ class ThreadedControllerRunner(ControllerRunner):
         return result
 
     def reconfigure(self, settings, control, logger=None):
-        core, status = _build_core(settings, control, logger=logger)
+        core, status = _build_core(
+            settings,
+            control,
+            logger=logger,
+            model_persistence=self._model_persistence,
+            trajectory_repository=self._trajectory_repository,
+            fit_partition_digest=self._fit_partition_digest,
+            grey_learning_process=self._grey_learning_process,
+        )
         retired_pending = None
         if status == "Active":
             with self._lock:
                 retired_pending = self._pending_core
                 self._pending_core = core
-                self._pending_controller_type = _controller_type_for(_selected_controller(settings))
+                self._pending_controller_type = _controller_type_for(
+                    _selected_controller(settings),
+                )
             _close_core(retired_pending)
         else:
             report_reconfigure_failure(settings, logger=logger)
@@ -1429,79 +2001,251 @@ class ThreadedControllerRunner(ControllerRunner):
         with self._lock:
             return self._observation_buffer.drain()
 
-    def drain_restore_outcome(self) -> bool | None:
+    def drain_restore_outcome(self) -> ModelRestoreOutcome | None:
         with self._lock:
             outcome = self._restore_outcome
             self._restore_outcome = None
         return outcome
 
-    def restore_model(self, snapshot):
-        """Queue a snapshot for the worker to attempt to adopt.
-
-        True means accepted for restore, not adopted: the core is mutated only
-        on the worker thread, so whether the snapshot was actually adopted is
-        not knowable from here.
-        """
+    def restore_model(
+        self,
+        snapshot,
+        *,
+        restore_token: str | None = None,
+    ) -> ModelRestoreOutcome:
+        """Queue a snapshot while leaving effective authority worker-owned."""
         if snapshot is None:
-            return False
+            with self._lock:
+                effective_authority = _owned_model_snapshot(self._model_snapshot)
+            return ModelRestoreOutcome(
+                restore_token=restore_token,
+                accepted=False,
+                effective_authority=effective_authority,
+            )
         with self._lock:
             # A snapshot queued before the worker gets to the previous one
             # supersedes it -- only the most recent restore request matters,
             # since an older one describes a model the caller has moved past.
-            self._pending_restore = _owned_model_snapshot(snapshot)
+            self._pending_restore = (
+                restore_token,
+                _owned_model_snapshot(snapshot),
+            )
+        return ModelRestoreOutcome(
+            restore_token=restore_token,
+            accepted=True,
+            effective_authority=None,
+            pending=True,
+        )
+
+    def schedule_corpus_fit(self, origin: CandidateOrigin) -> bool:
+        return self._schedule_corpus_fit_after_barrier(origin, None)
+
+    def record_corpus_fit_disabled(
+        self,
+        origin: CandidateOrigin,
+        reason: str,
+    ) -> bool:
+        with self._lock:
+            core = _corpus_fit_disabled_core_for(self._core)
+        return False if core is None else bool(core.record_corpus_fit_disabled(origin, reason))
+
+    def record_corpus_fit_failed(
+        self,
+        origin: CandidateOrigin,
+        reason: str,
+    ) -> bool:
+        with self._lock:
+            core = _corpus_fit_failure_core_for(self._core)
+        return False if core is None else bool(core.record_corpus_fit_failed(origin, reason))
+
+    def _schedule_corpus_fit_after_barrier(
+        self,
+        origin: CandidateOrigin,
+        before_schedule: Callable[[], bool] | None,
+    ) -> bool:
+        with self._lock:
+            if self._learning_core is None:
+                return False
+            live_dispatcher = not self._learning_stop_event.is_set() and not self._controller_worker_finished
+            self._corpus_fit_plans.append(
+                _CorpusFitPlan(origin, before_schedule),
+            )
+            if live_dispatcher or self._corpus_fit_thread is not None:
+                return True
+            thread = threading.Thread(
+                target=self._drain_scheduled_corpus_fit,
+                daemon=True,
+            )
+            self._corpus_fit_thread = thread
+        thread.start()
         return True
 
-    def refit_from_cook(self):
-        """Refit the core's model from the cook that just ended.
-
-        Runs synchronously on the CALLER's thread, which is why teardown asks
-        for it only after `stop()`: a refit takes seconds and mutates the
-        core's config, so it must never overlap a solve.
-
-        `stop()` joins with a timeout and so cannot promise the worker is
-        gone. A worker still running would overwrite the republish below on
-        its next pass and the cook's learning would vanish without a trace, so
-        that case raises instead -- losing a refit is acceptable, losing it
-        silently is not.
-
-        The worker is what normally republishes the model snapshot, and it has
-        stopped by now, so this republishes it directly: otherwise an adopted
-        model would exist in the core and be invisible to the
-        `get_model_snapshot()` the caller persists it through.
-        """
-        if self._thread.is_alive():
-            raise RuntimeError("the controller worker did not stop; refusing to refit behind it")
-        fn = getattr(self._core, "refit_from_cook", None)
-        if fn is None:
-            return None
-        refit_error = None
+    def _fail_scheduled_corpus_fit(
+        self,
+        code: str,
+        error: BaseException | str,
+        *,
+        learning_core: _ControllerCorpusLearningCore | None = None,
+        origin: CandidateOrigin | None = None,
+    ) -> None:
+        if learning_core is None:
+            with self._lock:
+                learning_core = self._learning_core
+        if learning_core is None:
+            return
+        detail = error if isinstance(error, str) else f"{type(error).__name__}: {error}"
         try:
-            return fn()
-        except BaseException as error:
-            refit_error = error
-            raise
-        finally:
-            try:
-                model = _owned_model_snapshot(self._core.get_model_snapshot())
-                with self._lock:
-                    self._model_snapshot = model
-            except Exception:
-                if refit_error is None:
-                    raise
+            if (
+                origin is not None
+                and isinstance(learning_core, _CorpusFitFailureCore)
+                and learning_core.record_corpus_fit_failed(
+                    origin,
+                    f"{code}: {detail}",
+                )
+            ):
+                return
+            learning_core.fail_corpus_fit(code, error)
+        except Exception as failure_error:
+            with self._lock:
+                self._learning_poll_failure = f"{type(failure_error).__name__}: {failure_error}"
 
-    def finalize_cook_refit(self, outcome: TeardownRefitOutcome) -> bool:
-        if self._thread.is_alive():
-            raise RuntimeError("the controller worker did not stop; refusing to finalize behind it")
-        finalized = False if self._refit_finalizer is None else self._refit_finalizer.finalize_cook_refit(outcome)
-        model = _owned_model_snapshot(self._core.get_model_snapshot())
-        with self._lock:
-            self._model_snapshot = model
-        return finalized
+    def _drain_scheduled_corpus_fit(self) -> None:
+        try:
+            with self._lock:
+                learning_core = self._learning_core
+            if learning_core is None:
+                with self._lock:
+                    self._corpus_fit_plans.clear()
+                return
+            while True:
+                with self._lock:
+                    if not self._corpus_fit_plans:
+                        return
+                    plan = self._corpus_fit_plans[0]
+                if not plan.scheduled:
+                    try:
+                        barrier_ready = plan.before_schedule is None or bool(
+                            plan.before_schedule(),
+                        )
+                    except Exception as error:
+                        self._fail_scheduled_corpus_fit(
+                            "corpus-barrier-failed",
+                            error,
+                            origin=plan.origin,
+                            learning_core=learning_core,
+                        )
+                        with self._lock:
+                            self._corpus_fit_plans.clear()
+                        return
+                    if not barrier_ready:
+                        self._fail_scheduled_corpus_fit(
+                            "corpus-barrier-failed",
+                            "trajectory persistence barrier did not become durable",
+                            origin=plan.origin,
+                            learning_core=learning_core,
+                        )
+                        with self._lock:
+                            self._corpus_fit_plans.clear()
+                        return
+                    try:
+                        ticket = learning_core._schedule_corpus_fit_ticket(
+                            plan.origin,
+                        )
+                    except Exception as error:
+                        self._fail_scheduled_corpus_fit(
+                            "fit-submission-failed",
+                            error,
+                            learning_core=learning_core,
+                        )
+                        with self._lock:
+                            self._corpus_fit_plans.clear()
+                        return
+                    if not isinstance(ticket, str) or not ticket:
+                        if plan.origin is CandidateOrigin.PASSIVE_ONLINE:
+                            with self._lock:
+                                if self._corpus_fit_plans and self._corpus_fit_plans[0] is plan:
+                                    self._corpus_fit_plans.popleft()
+                            continue
+                        self._fail_scheduled_corpus_fit(
+                            "fit-submission-failed",
+                            "core rejected corpus fit scheduling",
+                            learning_core=learning_core,
+                        )
+                        with self._lock:
+                            self._corpus_fit_plans.clear()
+                        return
+                    with self._lock:
+                        plan.ticket = ticket
+                        plan.scheduled = True
+                try:
+                    learning_core.poll_learning_off_path()
+                except Exception as error:
+                    self._fail_scheduled_corpus_fit(
+                        "fit-poll-failed",
+                        error,
+                        learning_core=learning_core,
+                    )
+                    with self._lock:
+                        self._learning_poll_failure = f"{type(error).__name__}: {error}"
+                        self._corpus_fit_plans.clear()
+                    return
+                ticket_terminal = plan.ticket is not None and learning_core._consume_terminal_corpus_fit_ticket(
+                    plan.ticket,
+                    plan.origin,
+                )
+                if ticket_terminal:
+                    with self._lock:
+                        if self._corpus_fit_plans and self._corpus_fit_plans[0] is plan:
+                            self._corpus_fit_plans.popleft()
+                    continue
+                try:
+                    state = getattr(
+                        learning_core.get_learning_diagnostics(),
+                        "state",
+                        None,
+                    )
+                except Exception as error:
+                    self._fail_scheduled_corpus_fit(
+                        "fit-poll-failed",
+                        error,
+                        learning_core=learning_core,
+                    )
+                    with self._lock:
+                        self._corpus_fit_plans.clear()
+                    return
+                if isinstance(state, Mapping) and state.get("failure") is not None:
+                    with self._lock:
+                        self._corpus_fit_plans.clear()
+                    return
+                time.sleep(0.02)
+        finally:
+            with self._lock:
+                successor = None
+                if self._corpus_fit_plans:
+                    successor = threading.Thread(
+                        target=self._drain_scheduled_corpus_fit,
+                        daemon=True,
+                    )
+                    self._corpus_fit_thread = successor
+                should_close = (
+                    successor is None and self._close_final_core_when_idle and self._controller_worker_finished
+                )
+                if successor is None and not should_close:
+                    self._corpus_fit_thread = None
+            if successor is not None:
+                successor.start()
+            elif should_close:
+                try:
+                    self._close_final_core()
+                finally:
+                    with self._lock:
+                        self._corpus_fit_thread = None
 
     def _stop_and_join(self) -> None:
         with self._lock:
             self._stop_event.set()
             self._learning_stop_event.set()
+            self._work_event.set()
             self._accept_observations = False
         close_wait = getattr(self._wait_for_period, "close", None)
         if callable(close_wait):
@@ -1518,24 +2262,44 @@ class ThreadedControllerRunner(ControllerRunner):
                 for sequence in tuple(self._accepted_observations):
                     self._terminalize_observation_locked(sequence, "runner-stop-timeout")
 
-    def stop_for_refit(self) -> bool | None:
+    def stop_and_retain_for_teardown(self) -> bool | None:
         with self._lock:
-            self._retain_core_for_refit = True
+            self._retain_core_for_teardown = True
+            self._close_final_core_when_idle = False
         self._stop_and_join()
-        return not self._thread.is_alive()
-
-    def finish_teardown(self) -> None:
         with self._lock:
-            self._retain_core_for_refit = False
-            worker_alive = self._thread.is_alive()
-        if not worker_alive:
+            return self._controller_worker_finished
+
+    def finish_teardown(
+        self,
+        finalizer: Callable[[], None] | None = None,
+    ) -> None:
+        with self._lock:
+            self._retain_core_for_teardown = False
+            self._close_final_core_when_idle = True
+            immediate_finalizer = None
+            if finalizer is not None and self._teardown_finalizer is None and not self._teardown_finalizer_ran:
+                self._teardown_finalizer = finalizer
+                if self._final_core_closed:
+                    self._teardown_finalizer_ran = True
+                    immediate_finalizer = finalizer
+            should_close = self._controller_worker_finished and self._corpus_fit_thread is None
+        if immediate_finalizer is not None:
+            try:
+                immediate_finalizer()
+            except Exception:  # noqa: S110 - teardown callback failure must not block core close
+                pass
+        elif should_close:
             self._close_final_core()
 
     def stop(self):
         with self._lock:
-            self._retain_core_for_refit = False
+            self._retain_core_for_teardown = False
+            self._close_final_core_when_idle = True
         self._stop_and_join()
-        if not self._thread.is_alive():
+        with self._lock:
+            should_close = self._controller_worker_finished and self._corpus_fit_thread is None
+        if should_close:
             self._close_final_core()
 
 
@@ -1569,12 +2333,12 @@ def _raise_banner(text, logger=None):
         errors.append(text)
         write_errors(ErrorKind.CONTROL, errors)
     except Exception:
-        pass
+        logging.getLogger(__name__).exception("Could not persist controller failure banner")
     if logger is not None:
         try:
             logger.error(text)
         except Exception:
-            pass
+            logging.getLogger(__name__).exception("Configured controller logger rejected failure banner")
 
 
 def _dependency_hint(controller_type, settings):
@@ -1598,7 +2362,17 @@ def _dependency_hint(controller_type, settings):
     )
 
 
-def _build_core(settings, control, logger=None, controller_type=None, event_logger=None):
+def _build_core(
+    settings,
+    control,
+    logger=None,
+    controller_type=None,
+    event_logger=None,
+    model_persistence: ModelPersistenceWorker | None = None,
+    trajectory_repository: LearningTrajectoryRepository | None = None,
+    fit_partition_digest: Callable[[], str | None] | None = None,
+    grey_learning_process: GreyLearningProcessOwner | None = None,
+):
     """Construct the selected controller core without leaking import or startup failures.
 
     MPC construction also validates the published acados native release. A
@@ -1613,30 +2387,94 @@ def _build_core(settings, control, logger=None, controller_type=None, event_logg
             logger.exception("Error occurred loading controller module. Trace dump: ")
         return None, "Inactive"
     try:
+        controller_kwargs = {"logger": event_logger}
+        if controller_type in {"mpc", "pid_sp"}:
+            controller_kwargs["trajectory_repository"] = trajectory_repository
+            controller_kwargs["fit_partition_digest"] = fit_partition_digest
+        if controller_type == "mpc":
+            controller_kwargs["activation_persistence"] = model_persistence
+            controller_kwargs["grey_learning_process"] = grey_learning_process
+        elif controller_type == "pid_sp":
+            controller_kwargs["model_persistence"] = model_persistence
         core = module.Controller(
             settings["controller"]["config"][controller_type],
             settings["globals"]["units"],
             settings["cycle_data"],
-            logger=event_logger,
+            **controller_kwargs,
         )
-        core.set_target(control["primary_setpoint"])
+        if controller_type != "mpc":
+            core.set_target(control["primary_setpoint"])
     except Exception:
         if logger is not None:
             logger.exception(f"Error occurred building the [{controller_type}] controller. Trace dump: ")
         return None, "Inactive"
-    return core, "Active"
+    corpus_learning_controller = controller_type in {"mpc", "pid_sp"}
+    missing_required_learning = (
+        corpus_learning_controller
+        and (not isinstance(core, _ControllerCorpusLearningCore) or not isinstance(core, _FrameLearningCore))
+    ) or (controller_type == "mpc" and not isinstance(core, _MpcLearningCore))
+    if missing_required_learning:
+        try:
+            _close_core(core)
+        except Exception:
+            logging.getLogger(__name__).exception("Could not close a controller missing required learning capability")
+        if logger is not None:
+            capability = "MPC learning capability" if controller_type == "mpc" else "PID-SP learning capability"
+            logger.exception(
+                f"Error occurred building the [{controller_type}] controller: "
+                f"missing required {capability}. Trace dump: "
+            )
+        return None, "Inactive"
+    return _adapt_controller_core(core), "Active"
 
 
-def _wrap(core, status, controller_type):
+def _wrap(
+    core,
+    status,
+    controller_type,
+    model_persistence: ModelPersistenceWorker | None = None,
+    trajectory_repository: LearningTrajectoryRepository | None = None,
+    fit_partition_digest: Callable[[], str | None] | None = None,
+    grey_learning_process: GreyLearningProcessOwner | None = None,
+):
     if core is None:
         return None, status
     actual_type = _controller_type_for(controller_type)
     if core.wants_async():
-        return ThreadedControllerRunner(core, controller_type=actual_type), status
-    return SyncControllerRunner(core, controller_type=actual_type), status
+        return (
+            ThreadedControllerRunner(
+                core,
+                controller_type=actual_type,
+                model_persistence=model_persistence,
+                trajectory_repository=trajectory_repository,
+                fit_partition_digest=fit_partition_digest,
+                grey_learning_process=grey_learning_process,
+            ),
+            status,
+        )
+    return (
+        SyncControllerRunner(
+            core,
+            controller_type=actual_type,
+            model_persistence=model_persistence,
+            trajectory_repository=trajectory_repository,
+            fit_partition_digest=fit_partition_digest,
+            grey_learning_process=grey_learning_process,
+        ),
+        status,
+    )
 
 
-def build_runner(settings, control, logger=None, event_logger=None):
+def build_runner(
+    settings,
+    control,
+    logger=None,
+    event_logger=None,
+    model_persistence: ModelPersistenceWorker | None = None,
+    trajectory_repository: LearningTrajectoryRepository | None = None,
+    fit_partition_digest: Callable[[], str | None] | None = None,
+    grey_learning_process: GreyLearningProcessOwner | None = None,
+):
     """Build the runner for a work cycle, substituting the default controller if
     the selected one will not build.
 
@@ -1652,9 +2490,26 @@ def build_runner(settings, control, logger=None, event_logger=None):
     Nothing is written back to settings: the user's choice is preserved so that
     re-saving it (once the missing package is installed) just works.
     """
-    core, status = _build_core(settings, control, logger=logger, event_logger=event_logger)
+    core, status = _build_core(
+        settings,
+        control,
+        logger=logger,
+        event_logger=event_logger,
+        model_persistence=model_persistence,
+        trajectory_repository=trajectory_repository,
+        fit_partition_digest=fit_partition_digest,
+        grey_learning_process=grey_learning_process,
+    )
     if core is not None:
-        return _wrap(core, status, _selected_controller(settings))
+        return _wrap(
+            core,
+            status,
+            _selected_controller(settings),
+            model_persistence=model_persistence,
+            trajectory_repository=trajectory_repository,
+            fit_partition_digest=fit_partition_digest,
+            grey_learning_process=grey_learning_process,
+        )
 
     selected = _selected_controller(settings)
     if selected == FALLBACK_CONTROLLER:
@@ -1667,7 +2522,15 @@ def build_runner(settings, control, logger=None, event_logger=None):
 
     hint = _dependency_hint(selected, settings)
     core, status = _build_core(
-        settings, control, logger=logger, controller_type=FALLBACK_CONTROLLER, event_logger=event_logger
+        settings,
+        control,
+        logger=logger,
+        controller_type=FALLBACK_CONTROLLER,
+        event_logger=event_logger,
+        model_persistence=model_persistence,
+        trajectory_repository=trajectory_repository,
+        fit_partition_digest=fit_partition_digest,
+        grey_learning_process=grey_learning_process,
     )
     if core is None:
         _raise_banner(
@@ -1684,7 +2547,15 @@ def build_runner(settings, control, logger=None, event_logger=None):
         f"Your controller selection has not been changed.",
         logger=logger,
     )
-    return _wrap(core, status, FALLBACK_CONTROLLER)
+    return _wrap(
+        core,
+        status,
+        FALLBACK_CONTROLLER,
+        model_persistence=model_persistence,
+        trajectory_repository=trajectory_repository,
+        fit_partition_digest=fit_partition_digest,
+        grey_learning_process=grey_learning_process,
+    )
 
 
 def report_reconfigure_failure(settings, logger=None):

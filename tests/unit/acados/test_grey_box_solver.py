@@ -2,12 +2,8 @@ from __future__ import annotations
 
 import ctypes
 import gc
-import hashlib
-import json
-import shutil
 import threading
 import weakref
-from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -16,7 +12,6 @@ import numpy as np
 import pytest
 
 import controller.acados.grey_box as grey_box_module
-import controller.acados._library as library_module
 from controller.acados import (
     AcadosGreyBoxMPC,
     GreyBoxMPCConfig,
@@ -24,48 +19,6 @@ from controller.acados import (
     SolverError,
     _ffi,
 )
-
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-
-
-@pytest.fixture
-def built_native_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
-    built_library = PROJECT_ROOT / "build" / "acados-configure" / "native-output" / library_module._library_filename()
-    if not built_library.is_file():
-        pytest.fail(
-            f"Built native library is missing at {built_library}. "
-            "Run `cmake --build build/acados-configure -j2 "
-            "--target acados_pifire` before this focused gate.",
-            pytrace=False,
-        )
-
-    package = tmp_path / "checkout" / "controller" / "acados"
-    package.mkdir(parents=True)
-    with built_library.open("rb") as stream:
-        library_digest = hashlib.file_digest(stream, "sha256").hexdigest()
-    build_digest = hashlib.sha256(library_digest.encode("ascii")).hexdigest()
-    release = package.parent / "_native" / "releases" / build_digest
-    release.mkdir(parents=True)
-    library_path = release / library_module._library_filename()
-    shutil.copy2(built_library, library_path)
-    (release / "build-manifest.json").write_text(
-        json.dumps(
-            {
-                "build_digest": build_digest,
-                "library_sha256": library_digest,
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    (release.parent.parent / "current").symlink_to(release, target_is_directory=True)
-
-    monkeypatch.setattr(library_module, "__file__", str(package / "_library.py"))
-    _ffi.load_grey_api.cache_clear()
-    library_module.load_native.cache_clear()
-    yield library_path
-    _ffi.load_grey_api.cache_clear()
-    library_module.load_native.cache_clear()
 
 
 def _state(temperature_c: float = 100.0, disturbance: float = 0.0) -> np.ndarray:

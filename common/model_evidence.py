@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass as std_dataclass
 from enum import StrEnum
-from typing import Annotated, ClassVar, Literal, TypeAlias
+from typing import Annotated, ClassVar, Literal
 
 from pydantic import (
     BaseModel,
@@ -21,15 +21,16 @@ from pydantic.dataclasses import dataclass
 
 from common.control_trace import AllocationClampReason, AmbientSource
 
-MODEL_EVIDENCE_SCHEMA_VERSION = 3
+MODEL_EVIDENCE_SCHEMA_VERSION = 4
 
-FiniteFloat: TypeAlias = Annotated[float, Field(allow_inf_nan=False, strict=True)]
-NonNegativeFloat: TypeAlias = Annotated[FiniteFloat, Field(ge=0)]
-NonNegativeInt: TypeAlias = Annotated[int, Field(ge=0, strict=True)]
-PositiveInt: TypeAlias = Annotated[int, Field(gt=0, strict=True)]
-NonBlankString: TypeAlias = Annotated[str, StringConstraints(strict=True, strip_whitespace=True, min_length=1)]
-Digest: TypeAlias = Annotated[str, StringConstraints(strict=True, pattern=r"^[0-9a-f]{64}$")]
+type FiniteFloat = Annotated[float, Field(allow_inf_nan=False, strict=True)]
+type NonNegativeFloat = Annotated[FiniteFloat, Field(ge=0)]
+type NonNegativeInt = Annotated[int, Field(ge=0, strict=True)]
+type PositiveInt = Annotated[int, Field(gt=0, strict=True)]
+type NonBlankString = Annotated[str, StringConstraints(strict=True, strip_whitespace=True, min_length=1)]
+type Digest = Annotated[str, StringConstraints(strict=True, pattern=r"^[0-9a-f]{64}$")]
 _DATACLASS_CONFIG = ConfigDict(extra="forbid", strict=True, validate_default=True)
+_CURRENT_DIGEST_ADAPTER: TypeAdapter[Digest] = TypeAdapter(Digest)
 
 
 class EvidenceKind(StrEnum):
@@ -43,11 +44,13 @@ class EvidenceKind(StrEnum):
     LEARNING_FAILURE = "learning_failure"
     TIMING_DISTRIBUTION = "timing_distribution"
     CONFIDENCE_DECISION = "confidence_decision"
+    PID_SP_FIT_DECISION = "pid_sp_fit_decision"
     ACTIVATION = "activation"
     ROLLBACK = "rollback"
     FALLBACK = "fallback"
     RECORDER_GAP = "recorder_gap"
     SCHEMA_INVALIDATION = "schema_invalidation"
+    CHALLENGER_ROUND = "challenger_round"
 
 
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
@@ -214,8 +217,8 @@ class FitLifecycleEvidence:
     request_id: NonBlankString
     status: Literal["queued", "running", "succeeded", "failed", "stale"]
     origin: Literal["passive-online", "operator-calibration", "cook-refit"]
-    policy: Literal["passive-auto", "operator-reviewed", "cook-refit"] | None
-    window_id: NonBlankString
+    policy: Literal["causal-auto", "passive-auto", "operator-reviewed", "cook-refit"] | None
+    fit_corpus_digest: NonBlankString
     error: NonBlankString | None = None
     payload_type: Literal["fit_lifecycle"] = "fit_lifecycle"
 
@@ -230,7 +233,7 @@ class FitLifecycleEvidence:
 class CandidateAssessmentEvidence:
     decision_id: NonBlankString
     origin: Literal["passive-online", "operator-calibration", "cook-refit"]
-    policy: Literal["passive-auto", "operator-reviewed", "cook-refit"]
+    policy: Literal["causal-auto", "passive-auto", "operator-reviewed", "cook-refit"]
     fit_accepted: bool
     identifiability_accepted: bool
     native_build: Literal["not-run", "pending", "passed", "failed"]
@@ -260,7 +263,7 @@ class ActivationLifecycleEvidence:
     decision_id: NonBlankString
     phase: Literal["prepared", "active", "aborted"]
     origin: Literal["passive-online", "operator-calibration", "cook-refit"]
-    policy: Literal["passive-auto", "operator-reviewed", "cook-refit"]
+    policy: Literal["causal-auto", "passive-auto", "operator-reviewed", "cook-refit"]
     reason: NonBlankString | None = None
     payload_type: Literal["activation_lifecycle"] = "activation_lifecycle"
 
@@ -331,6 +334,99 @@ class ConfidenceDecisionEvidence:
 
 
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
+class PidSpFitDecisionEvidence:
+    """One terminal PID-SP corpus-fit decision with complete immutable lineage."""
+
+    request_id: NonBlankString
+    controller: Literal["pid_sp"]
+    origin: Literal["passive-online", "operator-calibration"]
+    outcome: Literal[
+        "disabled",
+        "insufficient",
+        "rejected",
+        "failed",
+        "accepted-next-cook",
+        "checkpoint-failure",
+    ]
+    reason: NonBlankString
+    request_bound: bool
+    fit_corpus_digest: Digest | None
+    configuration_digest: Digest
+    selected_form: Literal["ipdt", "fopdt", "sopdt"] | None
+    candidate_digest: Digest | None
+    parent_incumbent_digest: Digest | None
+    confirmation_observed: NonNegativeInt
+    parent_incumbent_generation: NonNegativeInt | None = None
+    candidate_generation: NonNegativeInt | None = None
+    confirmation_candidate_digest: Digest | None = None
+    confirmation_required: Literal[20] = 20
+    episode_ids: tuple[NonBlankString, ...] = ()
+    payload_type: Literal["pid_sp_fit_decision"] = "pid_sp_fit_decision"
+
+    @model_validator(mode="after")
+    def validate_decision(self) -> PidSpFitDecisionEvidence:
+        if self.confirmation_observed > self.confirmation_required:
+            raise ValueError("PID-SP confirmation exceeds its fixed window")
+        if self.request_bound != (self.fit_corpus_digest is not None):
+            raise ValueError("PID-SP request binding must match corpus attribution availability")
+        if not self.request_bound and self.outcome not in {
+            "disabled",
+            "failed",
+            "insufficient",
+        }:
+            raise ValueError("only pre-request PID-SP terminal outcomes may omit corpus attribution")
+        generations_complete = self.parent_incumbent_generation is not None and self.candidate_generation is not None
+        if self.request_bound != generations_complete:
+            raise ValueError("PID-SP request-bound evidence requires complete generation lineage")
+        if generations_complete and (self.candidate_generation != self.parent_incumbent_generation + 1):
+            raise ValueError("PID-SP candidate generation must follow its parent")
+        selected_identity_complete = self.selected_form is not None and self.candidate_digest is not None
+        if selected_identity_complete != (self.selected_form is not None or self.candidate_digest is not None):
+            raise ValueError("PID-SP selected form and candidate digest must be paired")
+        if selected_identity_complete != (self.confirmation_candidate_digest is not None):
+            raise ValueError("PID-SP selected candidate requires its confirmation identity")
+        if self.outcome == "accepted-next-cook" and (
+            not selected_identity_complete or self.confirmation_observed != self.confirmation_required
+        ):
+            raise ValueError("accepted PID-SP candidate must be fully confirmed")
+        if self.outcome in {"disabled", "insufficient", "failed"} and (
+            selected_identity_complete or self.confirmation_observed != 0
+        ):
+            raise ValueError("non-candidate PID-SP outcome cannot carry confirmation")
+        if len(set(self.episode_ids)) != len(self.episode_ids):
+            raise ValueError("PID-SP episode identities must be unique")
+        return self
+
+
+@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
+class ChallengerRoundEvidence:
+    """One complete all-horizon causal decision for a durable challenger."""
+
+    challenger_id: NonBlankString
+    evaluation_epoch: NonNegativeInt
+    evaluation_round: PositiveInt
+    decision_id: NonBlankString
+    accepted: bool
+    required_horizons: tuple[PositiveInt, ...]
+    completed_horizons: tuple[PositiveInt, ...]
+    incumbent_digest: Digest
+    candidate_digest: Digest
+    payload_type: Literal["challenger_round"] = "challenger_round"
+
+    @model_validator(mode="after")
+    def validate_complete_round(self) -> ChallengerRoundEvidence:
+        if not self.required_horizons:
+            raise ValueError("challenger round requires at least one horizon")
+        if len(set(self.required_horizons)) != len(self.required_horizons):
+            raise ValueError("challenger round horizons must be unique")
+        if tuple(sorted(self.required_horizons)) != self.required_horizons:
+            raise ValueError("challenger round horizons must be ordered")
+        if self.completed_horizons != self.required_horizons:
+            raise ValueError("challenger round must complete every required horizon")
+        return self
+
+
+@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
 class ActivationEvidence:
     decision_id: NonBlankString
     active_snapshot_json: NonBlankString
@@ -385,7 +481,7 @@ class SchemaInvalidationEvidence:
     payload_type: Literal["schema_invalidation"] = "schema_invalidation"
 
 
-ModelEvidencePayload: TypeAlias = Annotated[
+type ModelEvidencePayload = Annotated[
     SessionSummaryEvidence
     | CalibrationSummaryEvidence
     | ForecastOriginEvidence
@@ -396,6 +492,8 @@ ModelEvidencePayload: TypeAlias = Annotated[
     | RefreshDiagnosticsEvidence
     | TimingDistributionEvidence
     | ConfidenceDecisionEvidence
+    | PidSpFitDecisionEvidence
+    | ChallengerRoundEvidence
     | ActivationEvidence
     | RollbackEvidence
     | FallbackEvidence
@@ -434,7 +532,7 @@ class ModelEvidenceRecord(BaseModel):
     role_generation: NonNegativeInt
     model_digest: Digest | None
     provenance_digest: Digest | None
-    schema_version: Literal[1, 2, 3] = MODEL_EVIDENCE_SCHEMA_VERSION
+    schema_version: Literal[1, 2, 3, 4] = MODEL_EVIDENCE_SCHEMA_VERSION
     payload: ModelEvidencePayload
 
     @model_validator(mode="after")
@@ -447,6 +545,24 @@ class ModelEvidenceRecord(BaseModel):
             RefreshDiagnosticsEvidence,
         ):
             raise ValueError("retired refresh diagnostics cannot be current grey evidence")
+        if self.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION and isinstance(
+            self.payload,
+            SchemaInvalidationEvidence,
+        ):
+            raise ValueError("retired schema invalidation cannot be current model evidence")
+        if self.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION and isinstance(
+            self.payload,
+            (FitLifecycleEvidence, CandidateAssessmentEvidence, ActivationLifecycleEvidence),
+        ):
+            if self.payload.origin not in {"passive-online", "operator-calibration"}:
+                raise ValueError("retired lifecycle origin cannot be current model evidence")
+            if self.payload.policy != "causal-auto":
+                raise ValueError("retired lifecycle policy cannot be current model evidence")
+            if isinstance(self.payload, FitLifecycleEvidence):
+                try:
+                    _CURRENT_DIGEST_ADAPTER.validate_python(self.payload.fit_corpus_digest)
+                except ValidationError as exc:
+                    raise ValueError("current fit corpus digest must be lowercase SHA-256") from exc
         if isinstance(self.payload, ForecastOriginEvidence):
             if self.cook_id is None:
                 raise ValueError("forecast evidence requires cook identity")
@@ -455,6 +571,24 @@ class ModelEvidenceRecord(BaseModel):
                 or self.provenance_digest != self.payload.incumbent_digest
             ):
                 raise ValueError("forecast envelope digests must match precommitted payload digests")
+        if isinstance(self.payload, ChallengerRoundEvidence):
+            if self.schema_version != MODEL_EVIDENCE_SCHEMA_VERSION:
+                raise ValueError("challenger round evidence requires the current schema")
+            if (
+                self.model_digest != self.payload.candidate_digest
+                or self.provenance_digest != self.payload.incumbent_digest
+            ):
+                raise ValueError("challenger round envelope digests must match its causal payload")
+        if isinstance(self.payload, PidSpFitDecisionEvidence):
+            if self.schema_version != MODEL_EVIDENCE_SCHEMA_VERSION:
+                raise ValueError("PID-SP fit decision requires the current schema")
+            expected_model_digest = (
+                self.payload.candidate_digest
+                if self.payload.candidate_digest is not None
+                else self.payload.parent_incumbent_digest
+            )
+            if self.model_digest != expected_model_digest or self.provenance_digest != self.payload.fit_corpus_digest:
+                raise ValueError("PID-SP decision envelope digests must match its exact lineage")
         if (
             self.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION
             and isinstance(self.payload, TimingDistributionEvidence)
@@ -464,6 +598,7 @@ class ModelEvidenceRecord(BaseModel):
         return self
 
     def to_db_row(self) -> ModelEvidenceDbRow:
+        self.validate_kind()
         return ModelEvidenceDbRow(
             evidence_id=self.evidence_id,
             session_id=self.session_id,
@@ -485,6 +620,15 @@ class ModelEvidenceRecord(BaseModel):
             payload = _JSON_VALUE_ADAPTER.validate_json(row.payload)
         except ValidationError as exc:
             raise ValueError("model evidence payload column is invalid JSON") from exc
+        if (
+            row.schema_version in {1, 2, 3}
+            and isinstance(payload, dict)
+            and payload.get("payload_type") == "fit_lifecycle"
+            and "window_id" in payload
+            and "fit_corpus_digest" not in payload
+        ):
+            payload = dict(payload)
+            payload["fit_corpus_digest"] = payload.pop("window_id")
         if (
             row.schema_version == 1
             and isinstance(payload, dict)

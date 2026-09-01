@@ -448,6 +448,24 @@ def _add_mcp2221_selector(settings):
     return True
 
 
+def _add_pid_sp_identification_default(settings):
+    """Seed PID-SP learning only when the persisted choice is absent."""
+
+    controller = settings.get("controller")
+    if not isinstance(controller, MutableMapping):
+        return False
+    config = controller.get("config")
+    if not isinstance(config, MutableMapping):
+        return False
+    pid_sp = config.get("pid_sp")
+    if not isinstance(pid_sp, MutableMapping):
+        return False
+    if "enable_identification" in pid_sp:
+        return False
+    pid_sp["enable_identification"] = True
+    return True
+
+
 def _acknowledge_thermocouple_health_settings(_settings):
     """Record the modeled settings addition; normalization supplies the default."""
     return False
@@ -469,6 +487,7 @@ _SHAPE_MIGRATIONS = [
     (9, _migrate_acados_mpc_settings),
     (10, _reset_uncalibrated_mpc_parameters),
     (11, _acknowledge_thermocouple_health_settings),
+    (12, _add_pid_sp_identification_default),
 ]
 
 

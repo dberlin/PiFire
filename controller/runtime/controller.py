@@ -20,7 +20,9 @@ can monkeypatch them.
 """
 
 import copy
+from collections.abc import Callable
 from os.path import exists
+from typing import ClassVar
 
 from common.common import ErrorKind
 from common.defaults import default_control
@@ -85,6 +87,7 @@ class Controller:
         # Last time the hopper level was written to pelletdb, by either the
         # automatic refresh or an explicit hopper_check. setup() re-stamps it.
         self._hopper_refresh_time = ctx.clock.now()
+        self._cleanup_complete = False
 
     # --- work-cycle dispatch helpers ---
 
@@ -165,7 +168,16 @@ class Controller:
             control["updated"] = False  # Clear Updated Flag if Set
             ctx.store.write_control_snapshot(control, origin="control")
             # 4b. Start the recipe step work cycle
-            self.work_cycle(recipe["steps"][step_num]["mode"])
+            next_effective_mode = (
+                recipe["steps"][step_num + 1]["mode"]
+                if step_num + 1 < num_steps
+                else Mode.STOP
+            )
+            self.ctx.trajectory_next_effective_mode = next_effective_mode
+            try:
+                self.work_cycle(recipe["steps"][step_num]["mode"])
+            finally:
+                self.ctx.trajectory_next_effective_mode = None
 
             # 4c. If reignite is required, run a reignite cycle and retry current step
             ctx.store.execute_control_writes()
@@ -211,10 +223,60 @@ class Controller:
     # --- lifecycle ---
 
     def cleanup(self):
-        """atexit handler: log and clean up the grill platform on process exit."""
-        self.eventLogger.info("Control Script Exiting.")
-        self.controlLogger.info("Control Script Exiting.")
-        self.grill_platform.cleanup()
+        """Close process-owned persistence and hardware exactly once."""
+        if self._cleanup_complete:
+            return
+        self._cleanup_complete = True
+        for logger in (self.eventLogger, self.controlLogger):
+            try:
+                logger.info("Control Script Exiting.")
+            except Exception:  # noqa: S110 -- exit logging cannot preempt owner cleanup
+                pass
+        grey_learning = getattr(self.ctx, "grey_learning_process", None)
+        if grey_learning is not None:
+            try:
+                grey_learning.close()
+            except Exception as error:
+                error_log = getattr(self.eventLogger, "error", None)
+                if callable(error_log):
+                    try:
+                        error_log(
+                            f"Grey learning process shutdown failed: {error}"
+                        )
+                    except Exception:  # noqa: S110 -- cleanup must continue after logging failure
+                        pass
+        trajectory = getattr(self.ctx, "learning_trajectory", None)
+        persistence = getattr(self.ctx, "model_persistence", None)
+        owner = trajectory if trajectory is not None else persistence
+        if owner is not None:
+            try:
+                closed = (
+                    owner.close()
+                    if trajectory is not None
+                    else owner.close(timeout=2.0)
+                )
+                if closed is False:
+                    error_log = getattr(self.eventLogger, "error", None)
+                    if callable(error_log):
+                        error_log("Learning persistence process shutdown timed out")
+            except Exception as error:
+                error_log = getattr(self.eventLogger, "error", None)
+                if callable(error_log):
+                    try:
+                        error_log(
+                            f"Learning persistence process shutdown failed: {error}"
+                        )
+                    except Exception:  # noqa: S110 -- cleanup must continue after logging failure
+                        pass
+        try:
+            self.grill_platform.cleanup()
+        except Exception as error:
+            error_log = getattr(self.eventLogger, "error", None)
+            if callable(error_log):
+                try:
+                    error_log(f"Grill platform cleanup failed: {error}")
+                except Exception:  # noqa: S110 -- no logger failure may escape atexit
+                    pass
 
     def setup(self):
         """One-time initialization run before the main loop starts."""
@@ -700,7 +762,7 @@ class Controller:
         self.work_cycle(Mode.REIGNITE)
         self.next_mode(self.control["next_mode"], setpoint=setpoint)
 
-    _MODE_DISPATCH = {
+    _MODE_DISPATCH: ClassVar[dict[Mode, Callable[[Controller], None]]] = {
         Mode.PRIME: _dispatch_prime,
         Mode.STARTUP: _dispatch_startup,
         Mode.SMOKE: _dispatch_smoke,

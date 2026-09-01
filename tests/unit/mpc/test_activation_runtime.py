@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from hashlib import sha256
+from math import ceil
 from types import SimpleNamespace
 
 import pytest
@@ -15,6 +17,7 @@ from common.model_evidence import (
     ModelEvidenceRecord,
 )
 from controller.acados import GreyBoxMPCConfig
+from controller.applied_output import AppliedOutput, OutputSource
 from controller.model_learning.activation import (
     ActivationPhase,
     GreyControlPairDescriptor,
@@ -26,6 +29,7 @@ from controller.model_learning.contracts import ActivationPolicy, CandidateOrigi
 from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.mpc_core import MpcCore
 from controller.mpc_factory import MpcPairFactory, OwnedMpcPair
+from controller.mpc_model import EstimatorSeed
 from controller.runtime.model_persistence import (
     DurableActivationReceipt,
     EvidenceSubmission,
@@ -97,8 +101,8 @@ class _Persistence(ModelPersistenceWorker):
         self.evidence_records.append(record)
         return EvidenceSubmission(accepted=not self.reject_evidence)
 
-    def flush_and_stop(self, *, timeout: float = 0.1) -> bool:
-        self.events.append("flush")
+    def close(self, timeout: float = 2.0) -> bool:
+        self.events.append("close")
         self.close_count += 1
         return True
 
@@ -126,17 +130,45 @@ def _descriptor(theta: float, *, candidate_generation: int, role_generation: int
     )
 
 
+def _activation_seed(
+    descriptor: GreyControlPairDescriptor,
+    *,
+    status: str = "exact",
+    delay_states: tuple[float, ...] | None = None,
+) -> EstimatorSeed:
+    theta = float(descriptor.configuration["parameters"]["theta"])
+    required = ceil(3 * theta / 20.0)
+    if delay_states is None:
+        base = theta / 1_000.0
+        delay_states = tuple(base + index / 100.0 for index in range(8))
+    frame_count = required if status == "exact" else max(0, required - 1)
+    if status in {"absent", "uncertain"}:
+        delay_states = ()
+        frame_count = 0
+    return EstimatorSeed(
+        delay_states=delay_states,
+        chamber_temperature_c=110.0,
+        disturbance=0.0,
+        segment_id="segment-activation",
+        pre_roll_digest=sha256(f"segment-activation:{descriptor.model_digest}:{status}".encode()).hexdigest(),
+        pre_roll_frame_count=frame_count,
+        required_frame_count=required,
+        status=status,
+    )
+
+
 def _pair(descriptor: GreyControlPairDescriptor) -> OwnedMpcPair:
     native = GreyBoxMPCConfig()
-    return OwnedMpcPair(
-        MpcCore(
-            _config(),
-            "C",
-            dict(CYCLE),
-            components=(_Estimator(), _Solver(native)),
-        ),
-        descriptor,
+    theta = float(descriptor.configuration["parameters"]["theta"])
+    n_delay = int(descriptor.configuration["n_delay"])
+    core = MpcCore(
+        _config(theta=theta, n_delay=n_delay),
+        "C",
+        dict(CYCLE),
+        components=(_Estimator(), _Solver(native)),
     )
+    core.seed_from_trajectory(_activation_seed(descriptor))
+    return OwnedMpcPair(core, descriptor)
 
 
 def _factory() -> MpcPairFactory:
@@ -151,7 +183,9 @@ def _factory() -> MpcPairFactory:
 
 
 def _runtime(
-    *, receipt_timeout: float = 2.0
+    *,
+    receipt_timeout: float = 2.0,
+    owns_persistence: bool = False,
 ) -> tuple[
     ActivationRuntime,
     OwnedMpcPair,
@@ -167,7 +201,7 @@ def _runtime(
         incumbent=incumbent.descriptor,
         candidate=candidate.descriptor,
         origin=CandidateOrigin.PASSIVE_ONLINE,
-        policy=ActivationPolicy.PASSIVE_AUTO,
+        policy=ActivationPolicy.CAUSAL_AUTO,
         decision_id="decision-runtime",
     )
     factory = _factory()
@@ -176,6 +210,7 @@ def _runtime(
         factory,
         incumbent,
         persistence,
+        owns_persistence=owns_persistence,
         clock_ms=lambda: 2_000,
         receipt_timeout=receipt_timeout,
     )
@@ -278,7 +313,7 @@ def _assessment(evidence_id: str = "assessment-runtime") -> ModelEvidenceRecord:
         payload=CandidateAssessmentEvidence(
             decision_id="decision-runtime",
             origin="passive-online",
-            policy="passive-auto",
+            policy="causal-auto",
             fit_accepted=True,
             identifiability_accepted=True,
             native_build="passed",
@@ -428,7 +463,7 @@ def test_stale_generation_digest_and_descriptor_mismatches_are_rejected() -> Non
         incumbent=incumbent.descriptor,
         candidate=stale_pair.descriptor,
         origin=CandidateOrigin.PASSIVE_ONLINE,
-        policy=ActivationPolicy.PASSIVE_AUTO,
+        policy=ActivationPolicy.CAUSAL_AUTO,
         decision_id="stale",
     )
     assert not runtime.queue_prepared_activation(stale, stale_pair, _durable())
@@ -441,7 +476,7 @@ def test_stale_generation_digest_and_descriptor_mismatches_are_rejected() -> Non
         incumbent=mismatch.descriptor,
         candidate=candidate.descriptor,
         origin=CandidateOrigin.PASSIVE_ONLINE,
-        policy=ActivationPolicy.PASSIVE_AUTO,
+        policy=ActivationPolicy.CAUSAL_AUTO,
         decision_id="wrong-incumbent",
     )
     assert not runtime.queue_prepared_activation(wrong_incumbent, candidate, _durable())
@@ -499,14 +534,67 @@ def test_pending_candidate_and_every_retained_pair_close_exactly_once() -> None:
     runtime.close()
     assert incumbent.closed
     assert candidate.closed
-    assert persistence.close_count == 1
+    assert persistence.close_count == 0
 
     runtime, incumbent, candidate, prepared, persistence = _runtime()
     _activate(runtime, candidate, prepared, persistence)
     runtime.close()
     assert incumbent.closed
     assert candidate.closed
+    assert persistence.close_count == 0
+
+
+def test_owned_activation_runtime_closes_persistence_once_on_normal_close() -> None:
+    runtime, _incumbent, _candidate, _prepared, persistence = _runtime(owns_persistence=True)
+
+    runtime.close()
+    runtime.close()
+
     assert persistence.close_count == 1
+    assert persistence.events == ["close"]
+
+
+def test_owned_activation_close_false_retries_persistence_without_reclosing_pairs(
+    monkeypatch,
+) -> None:
+    runtime, incumbent, _candidate, _prepared, persistence = _runtime(owns_persistence=True)
+    outcomes = iter((False, True))
+
+    def close_with_retry(*, timeout=2.0):
+        del timeout
+        persistence.events.append("close")
+        persistence.close_count += 1
+        return next(outcomes)
+
+    persistence.close = close_with_retry
+    pair_closes = []
+    original_close = OwnedMpcPair.close
+
+    def count_close(pair):
+        if pair is incumbent:
+            pair_closes.append(pair)
+        return original_close(pair)
+
+    monkeypatch.setattr(OwnedMpcPair, "close", count_close)
+
+    with pytest.raises(RuntimeError, match="complete activation runtime ownership"):
+        runtime.close()
+    assert incumbent.closed
+    runtime.close()
+
+    assert persistence.close_count == 2
+    assert persistence.events == ["close", "close"]
+    assert pair_closes == [incumbent]
+
+
+def test_injected_activation_runtime_never_closes_persistence_worker() -> None:
+    runtime, _incumbent, _candidate, _prepared, persistence = _runtime()
+
+    runtime.close()
+    runtime.close()
+
+    assert persistence.close_count == 0
+    assert persistence.events == []
 
 
 @pytest.mark.parametrize("first_failure", ("exception", "rejected", "non-durable"))
@@ -608,8 +696,8 @@ def test_closed_runtime_rejects_every_activation_advancement_boundary() -> None:
     candidate.close()
 
 
-def test_close_retries_pending_abort_before_persistence_flush() -> None:
-    runtime, _incumbent, candidate, prepared, persistence = _runtime()
+def test_owned_close_retries_pending_abort_before_persistence_close() -> None:
+    runtime, _incumbent, candidate, prepared, persistence = _runtime(owns_persistence=True)
     assert runtime.queue_prepared_activation(prepared, candidate, _durable())
     persistence.next_phase_error = RuntimeError("abort unavailable")
     assert not runtime.abort_prepared_activation(prepared, "lifecycle-failed")
@@ -620,13 +708,13 @@ def test_close_retries_pending_abort_before_persistence_flush() -> None:
 
     assert candidate.closed
     assert runtime.pending_abort_count == 0
-    assert persistence.events[-2:] == ["phase:aborted", "flush"]
+    assert persistence.events[-2:] == ["phase:aborted", "close"]
 
 
 def test_close_reports_permanently_unresolved_abort_after_all_owner_cleanup(
     monkeypatch,
 ) -> None:
-    runtime, incumbent, candidate, prepared, persistence = _runtime()
+    runtime, incumbent, candidate, prepared, persistence = _runtime(owns_persistence=True)
     close_calls = []
     original_close = OwnedMpcPair.close
 
@@ -649,7 +737,7 @@ def test_close_reports_permanently_unresolved_abort_after_all_owner_cleanup(
     assert close_calls == [candidate]
     assert runtime.pending_abort_count == 1
     assert persistence.close_count == 1
-    assert persistence.events[-1] == "flush"
+    assert persistence.events[-1] == "close"
 
 
 def test_public_boundary_validation_rejects_invalid_ownership_inputs() -> None:
@@ -668,13 +756,15 @@ def test_public_boundary_validation_rejects_invalid_ownership_inputs() -> None:
         ActivationRuntime(factory, incumbent, SimpleNamespace())
     with pytest.raises(ValueError):
         ActivationRuntime(factory, incumbent, persistence, receipt_timeout=-1)
+    with pytest.raises(TypeError):
+        ActivationRuntime(factory, incumbent, persistence, owns_persistence=1)
     runtime = ActivationRuntime(factory, incumbent, persistence)
     prepared = PreparedActivationRecord.prepared(
         timestamp_ms=1_000,
         incumbent=incumbent.descriptor,
         candidate=candidate.descriptor,
         origin=CandidateOrigin.PASSIVE_ONLINE,
-        policy=ActivationPolicy.PASSIVE_AUTO,
+        policy=ActivationPolicy.CAUSAL_AUTO,
         decision_id="boundary",
     )
     with pytest.raises(TypeError):
@@ -752,10 +842,10 @@ def test_replace_active_pair_closes_displaced_owners_and_closed_runtime_rejects(
     assert third.closed
 
 
-def test_close_attempts_persistence_and_all_pairs_after_collaborator_failures() -> None:
-    runtime, incumbent, candidate, prepared, persistence = _runtime()
+def test_owned_close_attempts_persistence_and_all_pairs_after_collaborator_failures() -> None:
+    runtime, incumbent, candidate, prepared, persistence = _runtime(owns_persistence=True)
     assert runtime.queue_prepared_activation(prepared, candidate, _durable())
-    persistence.flush_and_stop = lambda *, timeout=0.1: (_ for _ in ()).throw(RuntimeError("flush failed"))
+    persistence.close = lambda timeout=2.0: (_ for _ in ()).throw(RuntimeError("close failed"))
     candidate.estimator.close = lambda: (_ for _ in ()).throw(RuntimeError("close failed"))
     with pytest.raises(RuntimeError, match="complete activation runtime ownership"):
         runtime.close()
@@ -956,7 +1046,7 @@ def test_later_retiree_close_failure_never_republishes_earlier_closed_owner(
         incumbent=candidate.descriptor,
         candidate=pending.descriptor,
         origin=CandidateOrigin.PASSIVE_ONLINE,
-        policy=ActivationPolicy.PASSIVE_AUTO,
+        policy=ActivationPolicy.CAUSAL_AUTO,
         decision_id="second-prepared",
         timestamp_ms=2_000,
     )
@@ -1021,3 +1111,92 @@ def test_duplicate_transaction_disposes_distinct_same_descriptor_owner_once(
     assert close_calls == [duplicate]
     runtime.close()
     assert close_calls == [duplicate]
+
+
+def test_different_theta_candidate_keeps_its_candidate_replay_and_never_copies_incumbent_delay_state(
+    monkeypatch,
+) -> None:
+    runtime, incumbent, candidate, prepared, _persistence = _runtime()
+    incumbent_state = incumbent.core.capture_operating_state()
+    candidate_state = candidate.core.capture_operating_state()
+    assert (
+        candidate.descriptor.configuration["parameters"]["theta"]
+        != (incumbent.descriptor.configuration["parameters"]["theta"])
+    )
+    assert candidate_state.delay_states != incumbent_state.delay_states
+
+    def forbidden_copy(*_args, **_kwargs):
+        raise AssertionError("activation must not copy an incumbent delay chain")
+
+    monkeypatch.setattr(
+        incumbent.core,
+        "capture_operating_state",
+        forbidden_copy,
+    )
+    monkeypatch.setattr(
+        candidate.core,
+        "adopt_operating_state",
+        forbidden_copy,
+    )
+
+    assert runtime.install_candidate_pair_inert(candidate, prepared)
+    installed = candidate.core.capture_operating_state()
+    assert installed.delay_states == candidate_state.delay_states
+    assert installed.measured_temperature_c == pytest.approx(110.0)
+    assert runtime.active_pair is candidate
+    assert runtime.rollback_pair is incumbent
+    runtime.close()
+
+
+@pytest.mark.parametrize("status", ("short", "absent", "uncertain"))
+def test_nonexact_candidate_seed_stays_inert_and_cannot_displace_active_incumbent(
+    status: str,
+) -> None:
+    runtime, incumbent, candidate, prepared, _persistence = _runtime()
+    candidate.core.seed_from_trajectory(_activation_seed(candidate.descriptor, status=status))
+
+    assert not runtime.install_candidate_pair_inert(candidate, prepared)
+    assert runtime.active_pair is incumbent
+    assert incumbent.authorized
+    assert not candidate.authorized
+    runtime.close()
+
+
+def test_rollback_absent_seed_is_explicitly_reported_as_conservative_cold_start() -> None:
+    runtime, incumbent, _candidate, _prepared, _persistence = _runtime()
+    runtime.bind_estimator_seed_source(
+        lambda _theta, _n_delay: _activation_seed(
+            incumbent.descriptor,
+            status="absent",
+        )
+    )
+
+    assert runtime._refresh_pair_seed(incumbent)
+    assert runtime.last_seed_refresh_status == "absent"
+    assert incumbent.core.estimator_seed_status == "absent"
+    runtime.close()
+
+
+def test_rollback_cold_seed_uses_failed_pairs_current_applied_load() -> None:
+    runtime, incumbent, candidate, prepared, _persistence = _runtime()
+    assert runtime.install_candidate_pair_inert(candidate, prepared)
+    candidate.core.set_output(
+        AppliedOutput(
+            ratio=0.45,
+            source=OutputSource.CONTROLLER,
+            timestamp=2.0,
+        )
+    )
+    runtime.bind_estimator_seed_source(
+        lambda _theta, _n_delay: _activation_seed(
+            incumbent.descriptor,
+            status="absent",
+        )
+    )
+
+    assert runtime.compensate_candidate_pair(candidate, prepared, "test-cold-start")
+    state = incumbent.core.capture_operating_state()
+    assert state.applied_combustion_load == pytest.approx(0.5)
+    assert state.delay_states == pytest.approx((0.5,) * 8)
+    assert runtime.last_seed_refresh_status == "absent"
+    runtime.close()

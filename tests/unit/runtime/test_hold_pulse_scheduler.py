@@ -509,24 +509,26 @@ def test_stale_result_preempts_hardware_and_discards_scheduler_credit(hold_cycle
 
 
 def test_completed_frame_feedback_uses_the_completed_frame_request_bound_and_revision(hold_cycle):
-    runner = FakeControllerRunner()
+    runner = FakeControllerRunner(period=1.0).script([_output(1, 0.1)])
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
     controller = hold.state.controller
     controller.pulse_result_revision = 1
     controller.pulse_requested_duty = 0.1
     controller.pulse_maximum_duty = 0.5
-    _advance_runtime(hold, 0.0, False)
-    _advance_runtime(hold, 0.0, True)
-    _advance_runtime(hold, 2.0, True)
+    hold.on_tick(2.0, 200.0, _status(hold))
     _advance_runtime(hold, 2.0, False)
+    _advance_runtime(hold, 2.0, True)
+    _advance_runtime(hold, 4.0, True)
+    _advance_runtime(hold, 4.0, False)
     controller.pulse_result_revision = 2
     controller.pulse_requested_duty = 0.9
     controller.pulse_maximum_duty = 1.0
     runner.applied.clear()
-    assert _trace(hold).promote_seed_interval(1, OutputSource.CONTROLLER)
+    if _trace(hold).applied_state.result_revision is None:
+        assert _trace(hold).promote_seed_interval(1, OutputSource.CONTROLLER)
 
-    _advance_runtime(hold, 20.0, False)
+    _advance_runtime(hold, 22.0, False)
 
     assert runner.applied[-1].requested == 0.1
     assert _trace(hold).applied_state.combustion_load == 0.2

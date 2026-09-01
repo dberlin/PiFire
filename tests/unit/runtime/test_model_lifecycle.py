@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import get_type_hints
 
 from common.model_evidence import ModelEvidenceRecord
 from common.persistence.model_evidence import ModelActivationState
-from controller.runtime.model_fitting import TeardownRefitOutcome
+from controller.model_learning.contracts import CandidateOrigin
 from controller.runtime.model_lifecycle import ModelLifecycleRunner
 from controller.runtime.model_persistence import DurableActivationReceipt
 
@@ -29,9 +29,17 @@ def test_model_lifecycle_runner_publishes_exact_fixed_contract() -> None:
             {"record": ModelEvidenceRecord},
             DurableActivationReceipt | None,
         ),
-        "stop_for_refit": ({}, bool | None),
-        "finalize_cook_refit": ({"outcome": TeardownRefitOutcome}, bool),
-        "finish_teardown": ({}, type(None)),
+        "stop_and_retain_for_teardown": ({}, bool | None),
+        "schedule_corpus_fit": ({"origin": CandidateOrigin}, bool),
+        "record_corpus_fit_disabled": (
+            {"origin": CandidateOrigin, "reason": str},
+            bool,
+        ),
+        "record_corpus_fit_failed": (
+            {"origin": CandidateOrigin, "reason": str},
+            bool,
+        ),
+        "finish_teardown": ({"finalizer": Callable[[], None] | None}, type(None)),
     }
 
     methods = {

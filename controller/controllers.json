@@ -135,6 +135,17 @@
           "option_max": null,
           "option_step": 0.0001,
           "hidden": false
+        },
+        {
+          "option_name": "enable_identification",
+          "option_friendly_name": "Learn This Grill",
+          "option_description": "Fit validated PID-SP models from complete retained cook evidence for later cooks. [Default=true]",
+          "option_type": "bool",
+          "option_default": true,
+          "option_min": null,
+          "option_max": null,
+          "option_step": null,
+          "hidden": false
         }
       ]
     },

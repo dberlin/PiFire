@@ -94,7 +94,7 @@ def _qualifying(*, include_calibration: bool = False) -> tuple[ModelEvidenceReco
                 CandidateAssessmentEvidence(
                     decision_id="candidate-assessment-1",
                     origin="passive-online",
-                    policy="passive-auto",
+                    policy="causal-auto",
                     fit_accepted=True,
                     identifiability_accepted=True,
                     native_build="passed",

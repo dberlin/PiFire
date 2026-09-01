@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import copy
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -19,11 +19,23 @@ from common.model_evidence import ModelEvidenceRecord
 from common.persistence.model_evidence import ModelActivationState
 from controller import mpc_snapshot as _snapshot
 from controller.applied_output import AppliedOutput
-from controller.base import ControllerBase, ControllerLearningDiagnostics, MpcTraceDiagnostics
+from controller.base import (
+    ControllerBase,
+    ControllerLearningDiagnostics,
+    MpcTraceDiagnostics,
+)
 from controller.model_learning.activation import PreparedActivationRecord
 from controller.model_learning.activation_runtime import ActivationRuntime
 from controller.model_learning.calibration import CalibrationDecision
-from controller.model_learning.grey_runtime import GreyLearningRuntime
+from controller.model_learning.contracts import CandidateOrigin
+from controller.model_learning.grey_runtime import (
+    GreyLearningProcessOwner,
+    GreyLearningRuntime,
+)
+from controller.model_learning.installation_identity import (
+    InstallationIdentityProvider,
+    os_installation_identity,
+)
 from controller.mpc_allocator import AllocationResult
 from controller.mpc_calibration import MpcCalibrationRuntime
 from controller.mpc_config import (
@@ -42,8 +54,10 @@ from controller.runtime.model_persistence import (
 )
 
 if TYPE_CHECKING:
+    from common.persistence.learning_trajectory import LearningTrajectoryRepository
     from controller.acados import SolverDiagnostics
     from controller.mpc_calibration import CalibrationCommand, CompletedCalibrationResult
+    from controller.mpc_model import EstimatorSeed
 
 
 class Controller(ControllerBase):
@@ -54,7 +68,11 @@ class Controller(ControllerBase):
         cycle_data,
         *,
         activation_persistence: ModelPersistenceWorker | None = None,
+        trajectory_repository: LearningTrajectoryRepository | None = None,
+        fit_partition_digest: Callable[[], str | None] | None = None,
+        grey_learning_process: GreyLearningProcessOwner | None = None,
         logger=None,
+        installation_identity_provider: InstallationIdentityProvider = os_installation_identity,
     ):
         super().__init__(config, units, cycle_data, logger=logger)
 
@@ -100,6 +118,7 @@ class Controller(ControllerBase):
         initial_pair: OwnedMpcPair | None = None
         persistence: ModelPersistenceWorker | None = None
         activation_runtime: ActivationRuntime | None = None
+        owns_persistence = activation_persistence is None
         try:
             initial_pair = self._pair_factory.build(
                 self._pair_factory.configured(
@@ -121,6 +140,7 @@ class Controller(ControllerBase):
                 self._pair_factory,
                 initial_pair,
                 persistence,
+                owns_persistence=owns_persistence,
             )
             self._activation_runtime = activation_runtime
             self._sync_learning_configuration()
@@ -139,10 +159,13 @@ class Controller(ControllerBase):
                 active_components=self._active_learning_components,
                 configuration=self._learning_configuration,
                 snapshot_parameters=self._snapshot_parameters_for_learning,
-                cook_history=self._history_for_learning,
+                trajectory_repository=trajectory_repository,
+                fit_partition_digest=fit_partition_digest,
+                process_owner=grey_learning_process,
                 sync_configuration=self._synchronize_active_core,
                 append_trace=append_control_trace,
                 logger=self._logger,
+                installation_identity_provider=installation_identity_provider,
             )
             self._grey_learning_runtime = grey_runtime
         except BaseException as construction_error:
@@ -153,9 +176,9 @@ class Controller(ControllerBase):
                 except BaseException as cleanup_error:
                     cleanup_errors.append(cleanup_error)
             else:
-                if persistence is not None:
+                if persistence is not None and owns_persistence:
                     try:
-                        persistence.flush_and_stop(timeout=0.1)
+                        persistence.close(timeout=2.0)
                     except BaseException as cleanup_error:
                         cleanup_errors.append(cleanup_error)
                 if initial_pair is not None:
@@ -188,15 +211,14 @@ class Controller(ControllerBase):
     def _snapshot_parameters_for_learning(self):
         return copy.deepcopy(self.active_control_pair.core.snapshot_parameters())
 
-    def _history_for_learning(self):
-        return tuple(self.active_control_pair.core.history)
-
     def _sync_learning_configuration(self) -> None:
         self.cfg = self.active_control_pair.core.config
 
     def _synchronize_active_core(self) -> None:
         self._sync_learning_configuration()
-        self.active_control_pair.core.set_target(self.set_point)
+        core = self.active_control_pair.core
+        if core.estimator_seed_status is not None:
+            core.set_target(self.set_point)
 
     def _synchronize_activation_transition(self, *, exact: bool = False) -> None:
         self._synchronize_active_core()
@@ -216,6 +238,18 @@ class Controller(ControllerBase):
         generation_changed = runtime.role_generation != previous_generation
         pair_changed = runtime.active_pair is not previous_pair
         return generation_changed or (pair_change_is_commit and pair_changed)
+
+    def estimator_seed_requirements(self) -> tuple[float, int]:
+        return self.active_control_pair.core.estimator_seed_requirements()
+
+    def seed_from_trajectory(self, seed: EstimatorSeed) -> None:
+        self.active_control_pair.core.seed_from_trajectory(seed)
+
+    def bind_estimator_seed_source(
+        self,
+        source: Callable[[float, int], object] | None,
+    ) -> None:
+        self._activation_runtime.bind_estimator_seed_source(source)
 
     def set_target(self, set_point):
         self.set_point = set_point
@@ -435,6 +469,7 @@ class Controller(ControllerBase):
                 "role_generation": active_pair.descriptor.role_generation,
                 "failed_digest": None,
                 "failed_generation": None,
+                "seed_refresh_status": self._activation_runtime.last_seed_refresh_status,
                 "last_safe_command": finite_float(core.last_combustion_load),
                 "fallback_kind": (_snapshot.GREY_BOX_KIND if terminated_reason is not None else None),
                 "fallback_reason": terminated_reason,
@@ -461,14 +496,35 @@ class Controller(ControllerBase):
     def restore_model(self, snapshot):
         return self._grey_learning_runtime.restore_model(snapshot)
 
-    def finalize_cook_refit(self, outcome) -> bool:
-        return self._grey_learning_runtime.finalize_cook_refit(outcome)
+    def schedule_corpus_fit(self, origin: CandidateOrigin) -> bool:
+        return self._grey_learning_runtime.request_corpus_fit(
+            origin,
+            replace_owned_prepared=origin is CandidateOrigin.OPERATOR_CALIBRATION,
+        )
 
-    def cook_history(self):
-        return self._grey_learning_runtime.cook_history()
+    def _schedule_corpus_fit_ticket(self, origin: CandidateOrigin) -> str | None:
+        return self._grey_learning_runtime._request_corpus_fit_ticket(
+            origin,
+            replace_owned_prepared=origin is CandidateOrigin.OPERATOR_CALIBRATION,
+            join_pending=True,
+        )
 
-    def refit_from_cook(self, history=None):
-        return self._grey_learning_runtime.refit_from_cook(history)
+    def _consume_terminal_corpus_fit_ticket(
+        self,
+        ticket: str,
+        origin: CandidateOrigin,
+    ) -> bool:
+        return self._grey_learning_runtime._consume_terminal_fit_ticket(
+            ticket,
+            origin,
+        )
+
+    def fail_corpus_fit(
+        self,
+        code: str,
+        error: BaseException | str,
+    ) -> None:
+        self._grey_learning_runtime.fail_corpus_fit(code, error)
 
     def set_safety_ceiling_c(self, ceiling_c: float) -> None:
         self._calibration.set_safety_ceiling_c(ceiling_c)
@@ -509,7 +565,7 @@ class Controller(ControllerBase):
         return self.active_control_pair.core.native_failure_diagnostics
 
     def close(self):
-        """Stop learning, persistence, and native owners exactly once."""
+        """Stop learning and only the persistence/native owners created here."""
         if self._closed:
             return
         self._closed = True

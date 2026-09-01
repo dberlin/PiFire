@@ -11,11 +11,16 @@ Imported Modules
 ================
 """
 import datetime
+import itertools
 import json
+import math
 import os
 import pathlib
 import shutil
 import zipfile
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Literal, cast
 
 from common.common import (
     create_logger,
@@ -26,16 +31,47 @@ from common.common import (
     semantic_ver_to_list,
     unpack_history,
 )
-from common.cook_diagnostics import LearningReportProvider, collect_cook_learning_diagnostics
+from common.control_trace import (
+    AllocationPayload,
+    AppliedOutputPayload,
+    ControllerType,
+    ControlTraceRecord,
+    FramedPulseFramePayload,
+    InhibitReason,
+    ModelEventPayload,
+    ModelEventType,
+    ModelObservationPayload,
+    MpcUpdatePayload,
+    RecorderGapPayload,
+    SessionPayload,
+    TrajectorySegmentTracePayload,
+)
+from common.cook_diagnostics import (
+    CookLearningDiagnostics,
+    LearningReportProvider,
+    collect_cook_learning_diagnostics,
+)
 from common.defaults import default_probe_config
+from common.learning_trajectory import (
+    TRAJECTORY_OBSERVATION_SCHEMA_VERSION,
+    FrameDeliveryCertainty,
+    HoldEntrySample,
+    LearningTrajectoryFrame,
+    LearningTrajectorySegment,
+    TrajectoryBreakReason,
+    canonical_trajectory_digest,
+)
 from common.persistence.history import (
     flush_history,
     read_all_metrics,
     read_history,
 )
+from common.persistence.learning_trajectory import LearningTrajectoryRepository
 from common.persistence.runtime import (
     read_settings,
 )
+from controller.applied_output import OutputSource
+from controller.model_learning.trace import TraceSelectionError, learning_observations
 from file_mgmt.common import read_json_file_data, read_optional_json_file_data, update_json_file_data
 from file_mgmt.downsample import select_indices
 
@@ -88,7 +124,6 @@ def create_cookfile(*, cook_id: str | None, learning_report_provider: LearningRe
     The metrics and cook data are purged from memory, after stop mode is initiated.
     """
     # global cmdsts
-    global HISTORY_FOLDER
 
     eventLogger = create_logger(
         "events", filename="./logs/events.log", messageformat="%(asctime)s [%(levelname)s] %(message)s"
@@ -98,7 +133,7 @@ def create_cookfile(*, cook_id: str | None, learning_report_provider: LearningRe
 
     cook_file_struct = {}
 
-    now = datetime.datetime.now()
+    now = datetime.datetime.now(datetime.UTC).astimezone()
     nowstring = now.strftime("%Y-%m-%d--%H%M")
     title = nowstring + "-CookFile"
 
@@ -227,6 +262,577 @@ def read_cookfile(filename):
         )
 
     return (cook_file_struct, status)
+
+
+_EXACT_COOK_LEARNING_SCHEMA_VERSION = 7
+
+
+@dataclass(frozen=True, slots=True)
+class CookLearningImportResult:
+    """Outcome of an explicit, fail-closed cookfile trajectory import."""
+
+    outcome: Literal["imported", "idempotent", "audit-only", "non-replayable"]
+    source_schema_version: int | None
+    segment_ids: tuple[str, ...]
+
+
+class _NonReplayableCookLearning(ValueError):
+    pass
+
+
+def _raw_mpc_schema_version(raw_diagnostics: object) -> int | None:
+    if not isinstance(raw_diagnostics, Mapping):
+        return None
+    trace = raw_diagnostics.get("control_trace")
+    if not isinstance(trace, Mapping):
+        return None
+    records = trace.get("records")
+    if not isinstance(records, list):
+        return None
+    versions = {
+        record.get("schema_version")
+        for record in records
+        if isinstance(record, Mapping) and record.get("controller") == ControllerType.MPC.value
+    }
+    if len(versions) != 1:
+        return None
+    version = next(iter(versions))
+    return version if isinstance(version, int) and not isinstance(version, bool) else None
+
+
+def _migrate_learning_diagnostics_v1(
+    raw_diagnostics: object,
+) -> object:
+    if not isinstance(raw_diagnostics, Mapping):
+        return raw_diagnostics
+    if type(raw_diagnostics.get("schema_version")) is not int or raw_diagnostics.get("schema_version") != 1:
+        return raw_diagnostics
+    legacy_fields = {
+        "schema_version",
+        "cook_id",
+        "captured_at_ms",
+        "controllers",
+        "reports",
+        "control_trace",
+        "model_evidence",
+        "capture_errors",
+    }
+    if set(raw_diagnostics) != legacy_fields:
+        raise _NonReplayableCookLearning("historical cook learning diagnostics fields are invalid")
+    migrated = dict(raw_diagnostics)
+    migrated["schema_version"] = 2
+    migrated["trajectory_segments"] = []
+    migrated["trajectory_schema_versions"] = []
+    migrated["corpus"] = None
+    return migrated
+
+
+def _validated_learning_diagnostics(raw_diagnostics: object) -> CookLearningDiagnostics:
+    raw_diagnostics = _migrate_learning_diagnostics_v1(raw_diagnostics)
+    try:
+        encoded = json.dumps(
+            raw_diagnostics,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        diagnostics = CookLearningDiagnostics.model_validate_json(encoded)
+    except (TypeError, ValueError) as exc:
+        raise _NonReplayableCookLearning("invalid cook learning diagnostics") from exc
+    if diagnostics.capture_errors:
+        raise _NonReplayableCookLearning("cook learning diagnostics contain capture errors")
+    records = diagnostics.control_trace.records
+    declared_versions = tuple(diagnostics.control_trace.record_schema_versions)
+    actual_versions = tuple(sorted({record.schema_version for record in records}))
+    if declared_versions != actual_versions:
+        raise _NonReplayableCookLearning("control trace schema inventory does not match its records")
+    if diagnostics.cook_id is None:
+        raise _NonReplayableCookLearning("cook learning diagnostics omit the cook identity")
+    if any(record.cook_id != diagnostics.cook_id for record in records):
+        raise _NonReplayableCookLearning("control trace record cook provenance is inconsistent")
+    return diagnostics
+
+
+def _mpc_sessions(
+    diagnostics: CookLearningDiagnostics,
+) -> tuple[tuple[ControlTraceRecord, ...], ...]:
+    grouped: dict[str, list[ControlTraceRecord]] = {}
+    for record in diagnostics.control_trace.records:
+        if record.controller is ControllerType.MPC:
+            grouped.setdefault(record.session_id, []).append(record)
+    if not grouped:
+        raise _NonReplayableCookLearning("cook learning diagnostics contain no MPC session")
+
+    sessions: list[tuple[ControlTraceRecord, ...]] = []
+    for records_list in grouped.values():
+        records = tuple(records_list)
+        causal_records = tuple(
+            record
+            for record in records
+            if not isinstance(
+                record.payload,
+                TrajectorySegmentTracePayload,
+            )
+        )
+        if any(right.ts_ms < left.ts_ms for left, right in itertools.pairwise(causal_records)):
+            raise _NonReplayableCookLearning("MPC control rows are not ordered within their session")
+        if any(isinstance(record.payload, RecorderGapPayload) for record in records):
+            raise _NonReplayableCookLearning("MPC trace contains a recorder gap")
+        session_records = tuple(record for record in records if isinstance(record.payload, SessionPayload))
+        if (
+            len(session_records) != 1
+            or session_records[0] is not records[0]
+            or cast(
+                SessionPayload,
+                session_records[0].payload,
+            ).controller
+            is not ControllerType.MPC
+        ):
+            raise _NonReplayableCookLearning("MPC trace session does not begin with exactly one session record")
+        sessions.append(records)
+    return tuple(sessions)
+
+
+def _same_number(left: float | None, right: float | None) -> bool:
+    if left is None or right is None:
+        return left is right
+    return math.isclose(left, right, rel_tol=0.0, abs_tol=1e-9)
+
+
+def _recorded_temperature_c(value: float, unit: str) -> float:
+    normalized = unit.strip().upper()
+    if normalized == "C":
+        return float(value)
+    if normalized == "F":
+        return (float(value) - 32.0) * 5.0 / 9.0
+    raise _NonReplayableCookLearning("MPC session temperature unit is unsupported")
+
+
+def _source_digests(records: tuple[ControlTraceRecord, ...]) -> tuple[str, str]:
+    session_id = records[0].session_id
+    trace_rolling = canonical_trajectory_digest({"schema": "cookfile-control-trace-v7", "session_id": session_id})
+    row_rolling = canonical_trajectory_digest({"schema": "cookfile-control-trace-rows-v1", "session_id": session_id})
+    for ordinal, record in enumerate(records):
+        record_digest = canonical_trajectory_digest(record.model_dump(mode="json"))
+        trace_rolling = canonical_trajectory_digest({"previous": trace_rolling, "record_digest": record_digest})
+        row_rolling = canonical_trajectory_digest(
+            {
+                "previous": row_rolling,
+                "ordinal": ordinal,
+                "ts_ms": record.ts_ms,
+                "record_digest": record_digest,
+            }
+        )
+    source_trace_digest = canonical_trajectory_digest(
+        {
+            "schema": "cookfile-control-trace-v7",
+            "record_count": len(records),
+            "rolling_digest": trace_rolling,
+        }
+    )
+    source_row_digest = canonical_trajectory_digest(
+        {
+            "schema": "cookfile-control-trace-rows-v1",
+            "row_count": len(records),
+            "rolling_digest": row_rolling,
+        }
+    )
+    return source_trace_digest, source_row_digest
+
+
+def _exact_import_segment(
+    records: tuple[ControlTraceRecord, ...],
+    *,
+    cook_id: str,
+    diagnostics_schema_version: int,
+) -> LearningTrajectorySegment:
+    try:
+        selected = learning_observations(
+            records,
+            required_schema_version=_EXACT_COOK_LEARNING_SCHEMA_VERSION,
+        )
+    except (TypeError, ValueError, TraceSelectionError) as exc:
+        raise _NonReplayableCookLearning("MPC trace is not an exact schema-seven history") from exc
+
+    session_record = records[0]
+    session = cast(SessionPayload, session_record.payload)
+    observations = tuple(
+        (record, record.payload) for record in records if isinstance(record.payload, ModelObservationPayload)
+    )
+    if not observations or len(observations) != len(selected):
+        raise _NonReplayableCookLearning("MPC trace does not contain exact model observations")
+    if any(
+        current[1].observation_sequence != previous[1].observation_sequence + 1
+        for previous, current in itertools.pairwise(observations)
+    ):
+        raise _NonReplayableCookLearning("model observation sequence contains a gap")
+
+    allocations: dict[int, list[tuple[ControlTraceRecord, AllocationPayload]]] = {}
+    updates: dict[int, list[tuple[ControlTraceRecord, MpcUpdatePayload]]] = {}
+    pulse_frames: dict[int, list[tuple[ControlTraceRecord, FramedPulseFramePayload]]] = {}
+    applied_outputs: dict[int, list[tuple[ControlTraceRecord, AppliedOutputPayload]]] = {}
+    model_events: list[tuple[ControlTraceRecord, ModelEventPayload]] = []
+    for record in records:
+        payload = record.payload
+        if isinstance(payload, AllocationPayload):
+            allocations.setdefault(payload.result_revision, []).append((record, payload))
+        elif isinstance(payload, MpcUpdatePayload):
+            updates.setdefault(payload.result_revision, []).append((record, payload))
+        elif isinstance(payload, FramedPulseFramePayload):
+            pulse_frames.setdefault(payload.result_revision, []).append((record, payload))
+        elif isinstance(payload, AppliedOutputPayload):
+            applied_outputs.setdefault(payload.result_revision, []).append((record, payload))
+        elif isinstance(payload, ModelEventPayload):
+            model_events.append((record, payload))
+
+    if session.model_revision is None or session.model_provenance is None:
+        raise _NonReplayableCookLearning("MPC session omits model provenance")
+
+    first_model_digest: str | None = None
+    first_role_generation: int | None = None
+    selected_model_event: tuple[ControlTraceRecord, ModelEventPayload] | None = None
+    clock_offset_ms: int | None = None
+    trajectory_frames: list[LearningTrajectoryFrame] = []
+    config_payload = session_record.model_dump(mode="json")["payload"]
+    configuration_digest = canonical_trajectory_digest(
+        {"schema": "cookfile-mpc-session-configuration-v1", "session": config_payload}
+    )
+    settings_revision = int(configuration_digest[:16], 16)
+    session_ambient_c = _recorded_temperature_c(
+        session.ambient_temperature,
+        session.temperature_unit,
+    )
+
+    for (observation_record, observation), exact in zip(observations, selected, strict=True):
+        revision = observation.result_revision
+        if (
+            not observation.eligible
+            or not observation.probe_valid
+            or observation.probe_source is None
+            or observation.output_source is not OutputSource.CONTROLLER
+            or observation.lid_open is not False
+            or observation.safety_inhibited is not False
+            or observation.manual_override is not False
+            or observation.stale is not False
+            or observation.skipped is not False
+            or observation.reset is not False
+            or observation.continuous is not True
+            or observation.actual_fan_duty is None
+            or observation.requested_fan_duty is None
+        ):
+            raise _NonReplayableCookLearning("model observation is not an exact scoreable Hold frame")
+        if observation_record.ts_ms != observation.frame_end_ms:
+            raise _NonReplayableCookLearning("model observation timestamp does not match its frame end")
+
+        matching_allocations = allocations.get(revision, [])
+        matching_updates = updates.get(revision, [])
+        matching_frames = pulse_frames.get(revision, [])
+        matching_outputs = applied_outputs.get(revision, [])
+        if (
+            len(matching_allocations) != 1
+            or len(matching_updates) != 1
+            or len(matching_frames) != 1
+            or len(matching_outputs) != 1
+        ):
+            raise _NonReplayableCookLearning("model observation delivery join is missing or ambiguous")
+        allocation_record, allocation = matching_allocations[0]
+        update_record, update = matching_updates[0]
+        pulse_record, pulse = matching_frames[0]
+        applied_record, applied = matching_outputs[0]
+
+        if (
+            update_record.ts_ms != update.monotonic_ms
+            or update.model_revision != session.model_revision
+            or update.model_provenance != session.model_provenance
+            or update.output_source is not OutputSource.CONTROLLER
+            or update.stale
+            or allocation_record.ts_ms > observation.frame_start_ms
+            or update_record.ts_ms > observation.frame_start_ms
+            or pulse_record.ts_ms != observation.frame_end_ms
+            or applied_record.ts_ms != observation.frame_end_ms
+            or pulse.frame_start_ms != observation.frame_start_ms
+            or pulse.frame_end_ms != observation.frame_end_ms
+            or not _same_number(pulse.pulse_slot_seconds, session.pulse_slot_seconds)
+            or not _same_number(pulse.frame_seconds, session.pulse_frame_seconds)
+            or pulse.skipped
+            or pulse.stale_command
+            or pulse.inhibit_reason is not InhibitReason.NONE
+            or pulse.reset_reason is not None
+            or applied.interval_start_ms != observation.frame_start_ms
+            or applied.interval_end_ms != observation.frame_end_ms
+            or not applied.sample_complete
+            or applied.output_source is not OutputSource.CONTROLLER
+            or not _same_number(pulse.requested_combustion_load, observation.requested_combustion_load)
+            or not _same_number(pulse.requested_auger_duty, observation.requested_auger_duty)
+            or not _same_number(pulse.scheduled_on_seconds, observation.scheduled_on_seconds)
+            or not _same_number(pulse.delivered_on_seconds, observation.delivered_on_seconds)
+            or not _same_number(pulse.requested_fan_duty, observation.requested_fan_duty)
+            or not _same_number(pulse.applied_fan_duty, observation.actual_fan_duty)
+            or not _same_number(applied.realized_auger_duty, observation.realized_auger_duty)
+            or not _same_number(applied.realized_combustion_load, observation.realized_combustion_load)
+            or not _same_number(applied.actual_fan_duty, observation.actual_fan_duty)
+            or not _same_number(allocation.requested_fan_duty, observation.requested_fan_duty)
+        ):
+            raise _NonReplayableCookLearning("model observation delivery provenance is inconsistent")
+
+        if observation.model_digest is None:
+            raise _NonReplayableCookLearning("model observation omits its model digest")
+        matching_model_events = tuple(
+            (event_record, event)
+            for event_record, event in model_events
+            if event_record.ts_ms <= observation_record.ts_ms
+            and event.event in {ModelEventType.RESTORE, ModelEventType.ADOPT}
+            and event.model_revision == session.model_revision
+            and event.provenance == session.model_provenance
+            and event.role_generation == observation.role_generation
+            and event.snapshot_digest == observation.model_digest
+            and event.model_kind is not None
+            and event.model_schema is not None
+        )
+        if len(matching_model_events) != 1:
+            raise _NonReplayableCookLearning("model observation provenance is missing or ambiguous")
+        if first_model_digest is None:
+            first_model_digest = observation.model_digest
+            first_role_generation = observation.role_generation
+            selected_model_event = matching_model_events[0]
+        elif (
+            observation.model_digest != first_model_digest
+            or observation.role_generation != first_role_generation
+            or matching_model_events[0] != selected_model_event
+        ):
+            raise _NonReplayableCookLearning("one imported segment cannot cross model provenance")
+
+        current_clock_offset = update.wall_ms - update.monotonic_ms
+        if clock_offset_ms is None:
+            clock_offset_ms = current_clock_offset
+        elif current_clock_offset != clock_offset_ms:
+            raise _NonReplayableCookLearning("control trace wall-clock mapping is ambiguous")
+        wall_start_ms = observation.frame_start_ms + current_clock_offset
+        wall_end_ms = observation.frame_end_ms + current_clock_offset
+        if wall_start_ms < 0:
+            raise _NonReplayableCookLearning("control trace wall-clock mapping is invalid")
+        duration_seconds = (observation.frame_end_ms - observation.frame_start_ms) / 1_000.0
+        fan_duty = cast(float, observation.actual_fan_duty)
+        trajectory_frames.append(
+            LearningTrajectoryFrame(
+                sequence=observation.observation_sequence,
+                monotonic_start_ms=observation.frame_start_ms,
+                monotonic_end_ms=observation.frame_end_ms,
+                wall_start_ms=wall_start_ms,
+                wall_end_ms=wall_end_ms,
+                chamber_temperature_c=exact.temp_c,
+                temperature_sample_monotonic_ms=observation_record.ts_ms,
+                temperature_sample_wall_ms=wall_end_ms,
+                temperature_sample_age_ms=observation.frame_end_ms - observation_record.ts_ms,
+                temperature_sample_wall_age_ms=0,
+                temperature_sample_clock_skew_ms=0,
+                source_temperature_units="C",
+                settings_revision=settings_revision,
+                probe_valid=observation.probe_valid,
+                probe_source=observation.probe_source,
+                ambient_temperature_c=exact.ambient_c,
+                ambient_source=observation.ambient_source.value,
+                ambient_uncertainty_c=abs(exact.ambient_c - session_ambient_c),
+                delivered_auger_on_seconds=exact.delivered_on_s,
+                realized_auger_duty=cast(float, exact.realized_auger_duty),
+                normalized_combustion_load=exact.realized_q,
+                delivered_fan_on_seconds=duration_seconds if fan_duty > 0.0 else 0.0,
+                fan_duty_integral_seconds=fan_duty * duration_seconds,
+                mean_actual_fan_duty=fan_duty,
+                auger_delivery_certainty=FrameDeliveryCertainty.EXACT,
+                fan_delivery_certainty=FrameDeliveryCertainty.EXACT,
+                effective_mode="Hold",
+                recipe_step_id=None,
+                complete=True,
+                continuous=True,
+                partial=False,
+                boundary_reason=None,
+                calibration_origin=observation.calibration_fit,
+                role_generation=observation.role_generation,
+            )
+        )
+
+    if selected_model_event is None or first_model_digest is None or first_role_generation is None:
+        raise _NonReplayableCookLearning("MPC model provenance is incomplete")
+    source_trace_digest, source_row_digest = _source_digests(records)
+    model_event_payload = selected_model_event[0].model_dump(mode="json")["payload"]
+    allocation_payloads = [
+        record.model_dump(mode="json")["payload"] for record in records if isinstance(record.payload, AllocationPayload)
+    ]
+    first_frame = trajectory_frames[0]
+    last_frame = trajectory_frames[-1]
+    segment_identity = canonical_trajectory_digest(
+        {
+            "schema": "cookfile-learning-segment-v1",
+            "cook_id": cook_id,
+            "trace_session_id": records[0].session_id,
+            "source_trace_digest": source_trace_digest,
+            "source_row_digest": source_row_digest,
+        }
+    )
+    return LearningTrajectorySegment(
+        schema_version=1,
+        observation_schema_version=TRAJECTORY_OBSERVATION_SCHEMA_VERSION,
+        segment_id=f"cookfile-v7-{segment_identity}",
+        cook_id=cook_id,
+        trajectory_session_id=f"cookfile-v7-{source_trace_digest}",
+        trace_session_ids=(records[0].session_id,),
+        collection_provenance={
+            "origin": "cookfile-import",
+            "diagnostics_schema_version": diagnostics_schema_version,
+            "source_schema_version": _EXACT_COOK_LEARNING_SCHEMA_VERSION,
+            "ambient_uncertainty": observations[0][1].ambient_uncertainty.value,
+        },
+        configuration_provenance={
+            "controller": ControllerType.MPC.value,
+            "configuration_digest": configuration_digest,
+            "session": config_payload,
+            "model_event": model_event_payload,
+        },
+        cadence_digest=canonical_trajectory_digest(
+            {
+                "schema": "cookfile-import-cadence-v1",
+                "pulse_slot_seconds": session.pulse_slot_seconds,
+                "pulse_frame_seconds": session.pulse_frame_seconds,
+            }
+        ),
+        model_structure_digest=canonical_trajectory_digest(
+            {
+                "schema": "cookfile-import-model-structure-v1",
+                "model_kind": selected_model_event[1].model_kind,
+                "model_schema": selected_model_event[1].model_schema,
+                "model_digest": first_model_digest,
+            }
+        ),
+        held_physics_digest=canonical_trajectory_digest(
+            {
+                "schema": "cookfile-import-held-physics-v1",
+                "model_parameters": model_event_payload["parameters"],
+            }
+        ),
+        delay_input_mapping_digest=canonical_trajectory_digest({"schema": "normalized-combustion-load-v1"}),
+        actuation_mapping_digest=canonical_trajectory_digest(
+            {
+                "schema": "cookfile-import-framed-pulse-v1",
+                "pulse_slot_seconds": session.pulse_slot_seconds,
+                "pulse_frame_seconds": session.pulse_frame_seconds,
+                "allocations": allocation_payloads,
+            }
+        ),
+        scored_fan_regime_digest=canonical_trajectory_digest(
+            {
+                "schema": "cookfile-import-fan-regime-v1",
+                "fan_authority": session.fan_authority,
+                "fan_pwm_capable": session.fan_pwm_capable,
+                "fan_min_duty": session.fan_min_duty,
+                "fan_max_duty": session.fan_max_duty,
+            }
+        ),
+        ambient_semantics_digest=canonical_trajectory_digest(
+            {
+                "schema": "cookfile-import-ambient-v1",
+                "sources": sorted({observation.ambient_source.value for _, observation in observations}),
+                "uncertainties": sorted({observation.ambient_uncertainty.value for _, observation in observations}),
+            }
+        ),
+        pre_roll_frames=(),
+        hold_entry=HoldEntrySample(
+            monotonic_ms=first_frame.temperature_sample_monotonic_ms,
+            wall_ms=first_frame.temperature_sample_wall_ms,
+            chamber_temperature_c=first_frame.chamber_temperature_c,
+            probe_valid=first_frame.probe_valid,
+            probe_source=first_frame.probe_source,
+        ),
+        scored_hold_frames=tuple(trajectory_frames),
+        generation_audit_ranges=(
+            {
+                "start_sequence": first_frame.sequence,
+                "end_sequence": last_frame.sequence,
+                "role_generation": first_role_generation,
+            },
+        ),
+        start_monotonic_ms=first_frame.monotonic_start_ms,
+        end_monotonic_ms=last_frame.monotonic_end_ms,
+        start_wall_ms=first_frame.wall_start_ms,
+        end_wall_ms=last_frame.wall_end_ms,
+        start_sequence=first_frame.sequence,
+        end_sequence=last_frame.sequence,
+        pre_roll_end_reason=None,
+        terminal_break_reason=TrajectoryBreakReason.STOP,
+        state="finalized",
+        source_trace_digest=source_trace_digest,
+        source_schema_version=_EXACT_COOK_LEARNING_SCHEMA_VERSION,
+        source_row_digest=source_row_digest,
+        build_provenance={
+            "builder": "cookfile-learning-importer",
+            "revision": 1,
+            "software_version": session.software_version,
+            "build_version": session.build_version,
+        },
+    )
+
+
+def import_cookfile_learning_trajectory(
+    path: str | os.PathLike[str],
+    *,
+    repository: LearningTrajectoryRepository,
+) -> CookLearningImportResult:
+    """Explicitly import one exact schema-seven MPC session from a cookfile."""
+
+    raw_diagnostics: object = None
+    source_schema_version: int | None = None
+    try:
+        cookfile, status = read_cookfile(path)
+        raw_diagnostics = cookfile.get("learning_diagnostics")
+        diagnostics_schema_version = (
+            raw_diagnostics.get("schema_version") if isinstance(raw_diagnostics, Mapping) else None
+        )
+        source_schema_version = _raw_mpc_schema_version(raw_diagnostics)
+        if status != "OK":
+            raise _NonReplayableCookLearning("cookfile could not be read completely")
+        diagnostics = _validated_learning_diagnostics(raw_diagnostics)
+        if diagnostics_schema_version not in (1, 2) or isinstance(
+            diagnostics_schema_version,
+            bool,
+        ):
+            raise _NonReplayableCookLearning("cook learning diagnostics schema is invalid")
+        sessions = _mpc_sessions(diagnostics)
+        versions = {record.schema_version for records in sessions for record in records}
+        if len(versions) != 1:
+            raise _NonReplayableCookLearning("MPC sessions mix trace schema versions")
+        source_schema_version = next(iter(versions))
+        if source_schema_version == 6:
+            return CookLearningImportResult(
+                outcome="audit-only",
+                source_schema_version=6,
+                segment_ids=(),
+            )
+        if source_schema_version != _EXACT_COOK_LEARNING_SCHEMA_VERSION:
+            raise _NonReplayableCookLearning("MPC trace schema is not importable")
+        segments = tuple(
+            _exact_import_segment(
+                records,
+                cook_id=cast(str, diagnostics.cook_id),
+                diagnostics_schema_version=cast(int, diagnostics_schema_version),
+            )
+            for records in sessions
+        )
+        inserted_count = repository.import_finalized_segments(segments)
+        for segment in segments:
+            if repository.read_segment(segment.segment_id) != segment:
+                raise _NonReplayableCookLearning("imported trajectory was conflicted, corrupted, or evicted")
+        return CookLearningImportResult(
+            outcome=("idempotent" if inserted_count == 0 else "imported"),
+            source_schema_version=source_schema_version,
+            segment_ids=tuple(segment.segment_id for segment in segments),
+        )
+    except Exception:
+        return CookLearningImportResult(
+            outcome="non-replayable",
+            source_schema_version=source_schema_version,
+            segment_ids=(),
+        )
 
 
 def upgrade_cookfile(cookfilename, repair=False):

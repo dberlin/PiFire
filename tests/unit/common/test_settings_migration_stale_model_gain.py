@@ -45,8 +45,8 @@ def test_the_two_lump_heat_gain_is_returned_to_the_shipped_default():
 
     assert _apply_shape_migrations(settings, SETTINGS_SCHEMA_VERSION) is True
 
-    assert SETTINGS_SCHEMA_VERSION == 11
-    assert settings["schema_version"] == 11
+    assert SETTINGS_SCHEMA_VERSION == 12
+    assert settings["schema_version"] == 12
     assert _mpc(settings)["K_Q"] == 350.0
     assert _mpc(settings) == expected_mpc
     assert settings["controller"]["config"]["pid"] == expected_pid

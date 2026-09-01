@@ -13,7 +13,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass as std_dataclass
 from dataclasses import field as std_field
 from enum import StrEnum
-from typing import Annotated, ClassVar, Literal, TypeAlias
+from typing import Annotated, ClassVar, Literal
 
 from pydantic import (
     BaseModel,
@@ -30,19 +30,27 @@ from pydantic.dataclasses import dataclass
 
 from controller.applied_output import OutputSource
 
-COMPATIBLE_TRACE_SCHEMA_VERSIONS = (2, 3, 4, 5, 6, 7)
-TRACE_SCHEMA_VERSION = 7
+COMPATIBLE_TRACE_SCHEMA_VERSIONS = (2, 3, 4, 5, 6, 7, 8)
+TRACE_SCHEMA_VERSION = 8
 
-FiniteFloat: TypeAlias = Annotated[float, Field(allow_inf_nan=False, strict=True)]
-NonNegativeFloat: TypeAlias = Annotated[FiniteFloat, Field(ge=0)]
-PositiveFloat: TypeAlias = Annotated[FiniteFloat, Field(gt=0)]
-BoundedLoad: TypeAlias = Annotated[FiniteFloat, Field(ge=0, le=1)]
-BoundedSignedLoad: TypeAlias = Annotated[FiniteFloat, Field(ge=-1, le=1)]
-NonNegativeInt: TypeAlias = Annotated[int, Field(ge=0, strict=True)]
-PositiveInt: TypeAlias = Annotated[int, Field(gt=0, strict=True)]
-NonBlankString: TypeAlias = Annotated[str, StringConstraints(strict=True, strip_whitespace=True, min_length=1)]
-Digest: TypeAlias = Annotated[str, StringConstraints(strict=True, pattern=r"^[0-9a-f]{64}$")]
+type FiniteFloat = Annotated[float, Field(allow_inf_nan=False, strict=True)]
+type NonNegativeFloat = Annotated[FiniteFloat, Field(ge=0)]
+type PositiveFloat = Annotated[FiniteFloat, Field(gt=0)]
+type BoundedLoad = Annotated[FiniteFloat, Field(ge=0, le=1)]
+type BoundedSignedLoad = Annotated[FiniteFloat, Field(ge=-1, le=1)]
+type NonNegativeInt = Annotated[int, Field(ge=0, strict=True)]
+type PositiveInt = Annotated[int, Field(gt=0, strict=True)]
+type NonBlankString = Annotated[
+    str,
+    StringConstraints(strict=True, strip_whitespace=True, min_length=1),
+]
+type Digest = Annotated[
+    str,
+    StringConstraints(strict=True, pattern=r"^[0-9a-f]{64}$"),
+]
 type JsonValue = str | int | float | bool | None | dict[str, JsonValue] | list[JsonValue]
+
+_CURRENT_DIGEST_ADAPTER: TypeAdapter[Digest] = TypeAdapter(Digest)
 
 
 class ControllerType(StrEnum):
@@ -67,6 +75,9 @@ class TraceEventKind(StrEnum):
     CANDIDATE_ASSESSMENT = "candidate_assessment"
     ACTIVATION_LIFECYCLE = "activation_lifecycle"
     LEARNING_FAILURE = "learning_failure"
+    ESTIMATOR_SEED = "estimator_seed"
+    TRAJECTORY_SEGMENT = "trajectory_segment"
+    CHALLENGER_PROGRESS = "challenger_progress"
 
 
 class ActuationMode(StrEnum):
@@ -126,6 +137,8 @@ class SafetyEventType(StrEnum):
 class AllocationClampReason(StrEnum):
     NONE = "none"
     AUGER_MAX = "auger_max"
+    AUGER_MIN = "auger_min"
+    AUGER_NONFINITE = "auger_nonfinite"
     FAN_MIN = "fan_min"
     FAN_MAX = "fan_max"
 
@@ -717,8 +730,14 @@ def _matches_completed_rmse(errors: Sequence[float], reported: float | None) -> 
     return math.isclose(reported, expected, rel_tol=1e-12, abs_tol=1e-12)
 
 
-CompletedOriginEvidence: TypeAlias = Annotated[CompletedOriginPayload, BeforeValidator(_completed_origin_payload)]
-HorizonScoreEvidence: TypeAlias = Annotated[HorizonScorePayload, BeforeValidator(_horizon_score_payload)]
+type CompletedOriginEvidence = Annotated[
+    CompletedOriginPayload,
+    BeforeValidator(_completed_origin_payload),
+]
+type HorizonScoreEvidence = Annotated[
+    HorizonScorePayload,
+    BeforeValidator(_horizon_score_payload),
+]
 
 
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
@@ -806,8 +825,8 @@ class GreyFitLifecyclePayload:
     request_id: NonBlankString
     status: Literal["queued", "running", "succeeded", "failed", "stale"]
     origin: Literal["passive-online", "operator-calibration", "cook-refit"]
-    policy: Literal["passive-auto", "operator-reviewed", "cook-refit"] | None
-    window_id: NonBlankString
+    policy: Literal["causal-auto", "passive-auto", "operator-reviewed", "cook-refit"] | None
+    fit_corpus_digest: NonBlankString
     error: NonBlankString | None = None
     payload_type: Literal["fit_lifecycle"] = "fit_lifecycle"
 
@@ -822,7 +841,7 @@ class GreyFitLifecyclePayload:
 class GreyCandidateAssessmentPayload:
     decision_id: NonBlankString
     origin: Literal["passive-online", "operator-calibration", "cook-refit"]
-    policy: Literal["passive-auto", "operator-reviewed", "cook-refit"]
+    policy: Literal["causal-auto", "passive-auto", "operator-reviewed", "cook-refit"]
     fit_accepted: bool
     identifiability_accepted: bool
     native_build: Literal["not-run", "pending", "passed", "failed"]
@@ -838,7 +857,7 @@ class GreyActivationLifecyclePayload:
     decision_id: NonBlankString
     phase: Literal["prepared", "active", "aborted"]
     origin: Literal["passive-online", "operator-calibration", "cook-refit"]
-    policy: Literal["passive-auto", "operator-reviewed", "cook-refit"]
+    policy: Literal["causal-auto", "passive-auto", "operator-reviewed", "cook-refit"]
     reason: NonBlankString | None = None
     payload_type: Literal["activation_lifecycle"] = "activation_lifecycle"
 
@@ -855,6 +874,120 @@ class GreyLearningFailurePayload:
     detail: NonBlankString
     terminal: bool
     payload_type: Literal["learning_failure"] = "learning_failure"
+
+
+@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
+class EstimatorSeedTracePayload:
+    """Estimator state reconstructed from one trajectory segment's pre-roll."""
+
+    delay_states: tuple[FiniteFloat, ...]
+    chamber_temperature_c: FiniteFloat
+    disturbance: FiniteFloat
+    segment_id: NonBlankString
+    pre_roll_digest: Digest
+    pre_roll_frame_count: NonNegativeInt
+    required_frame_count: NonNegativeInt
+    status: Literal["exact", "short", "absent", "uncertain"]
+    role_generation: NonNegativeInt
+    candidate_generation: NonNegativeInt
+    payload_type: Literal["estimator_seed"] = "estimator_seed"
+
+    @model_validator(mode="after")
+    def validate_pre_roll(self) -> EstimatorSeedTracePayload:
+        if self.pre_roll_frame_count > self.required_frame_count:
+            raise ValueError("pre-roll frame count cannot exceed the required count")
+        if self.status == "exact" and self.pre_roll_frame_count != self.required_frame_count:
+            raise ValueError("exact estimator seed requires every pre-roll frame")
+        if self.status == "short" and not 0 < self.pre_roll_frame_count < self.required_frame_count:
+            raise ValueError("short estimator seed requires a partial non-empty pre-roll")
+        if self.status in {"absent", "uncertain"} and self.pre_roll_frame_count != 0:
+            raise ValueError("absent or uncertain estimator seed cannot claim pre-roll frames")
+        if self.status in {"exact", "short"}:
+            if len(self.delay_states) != self.required_frame_count:
+                raise ValueError("usable estimator seed requires every delay state")
+        elif self.delay_states:
+            raise ValueError("absent or uncertain estimator seed cannot contain delay states")
+        return self
+
+
+@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
+class TrajectorySegmentTracePayload:
+    """Stable identities and materialization digests for one trajectory segment."""
+
+    segment_id: NonBlankString
+    trajectory_session_id: NonBlankString
+    trace_session_ids: tuple[NonBlankString, ...]
+    cook_id: NonBlankString
+    segment_schema_version: PositiveInt
+    observation_schema_version: PositiveInt
+    state: Literal["open", "finalized", "quarantined"]
+    source_trace_digest: Digest
+    content_digest: Digest
+    fit_partition_digest: Digest
+    source_row_digest: Digest
+    pre_roll_frame_count: NonNegativeInt
+    scored_hold_frame_count: NonNegativeInt
+    terminal_break_reason: NonBlankString | None
+    payload_type: Literal["trajectory_segment"] = "trajectory_segment"
+
+    @model_validator(mode="after")
+    def validate_segment(self) -> TrajectorySegmentTracePayload:
+        if not self.trace_session_ids:
+            raise ValueError("trajectory segment requires at least one trace session")
+        if len(set(self.trace_session_ids)) != len(self.trace_session_ids):
+            raise ValueError("trajectory segment trace sessions must be unique")
+        if self.pre_roll_frame_count + self.scored_hold_frame_count == 0:
+            raise ValueError("trajectory segment requires at least one frame")
+        if (self.state == "open") != (self.terminal_break_reason is None):
+            raise ValueError("only an open trajectory segment omits its terminal break reason")
+        return self
+
+
+@dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
+class ChallengerProgressTracePayload:
+    """One immutable snapshot of durable causal challenger progress."""
+
+    challenger_id: NonBlankString
+    challenger_revision: NonNegativeInt
+    phase: Literal["built", "evaluating", "qualified", "activating", "retired"]
+    origin: Literal["passive-online", "operator-calibration"]
+    policy: Literal["causal-auto"]
+    incumbent_digest: Digest
+    incumbent_generation: NonNegativeInt
+    candidate_digest: Digest
+    candidate_generation: NonNegativeInt
+    corpus_digest: Digest
+    lineage_digest: Digest
+    result_digest: Digest
+    evaluation_epoch: NonNegativeInt
+    evaluation_round: NonNegativeInt
+    consecutive_wins: NonNegativeInt
+    required_wins: PositiveInt
+    completed_horizons: tuple[PositiveInt, ...]
+    required_horizons: tuple[PositiveInt, ...]
+    resumed_from_previous_cook: bool
+    reset_reason: NonBlankString | None
+    payload_type: Literal["challenger_progress"] = "challenger_progress"
+
+    @model_validator(mode="after")
+    def validate_progress(self) -> ChallengerProgressTracePayload:
+        if self.policy != "causal-auto":
+            raise ValueError("challenger policy must remain causal-auto")
+        if self.consecutive_wins > self.required_wins:
+            raise ValueError("challenger wins cannot exceed required wins")
+        if not self.required_horizons:
+            raise ValueError("challenger progress requires at least one horizon")
+        if tuple(sorted(self.required_horizons)) != self.required_horizons:
+            raise ValueError("required challenger horizons must be ordered")
+        if len(set(self.required_horizons)) != len(self.required_horizons):
+            raise ValueError("required challenger horizons must be unique")
+        if tuple(sorted(self.completed_horizons)) != self.completed_horizons:
+            raise ValueError("completed challenger horizons must be ordered")
+        if len(set(self.completed_horizons)) != len(self.completed_horizons):
+            raise ValueError("completed challenger horizons must be unique")
+        if not set(self.completed_horizons).issubset(self.required_horizons):
+            raise ValueError("completed challenger horizons must be required horizons")
+        return self
 
 
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
@@ -882,7 +1015,7 @@ class RecorderGapPayload:
         return self
 
 
-ControlTracePayload: TypeAlias = Annotated[
+type ControlTracePayload = Annotated[
     SessionPayload
     | PidUpdatePayload
     | PidSpUpdatePayload
@@ -899,6 +1032,9 @@ ControlTracePayload: TypeAlias = Annotated[
     | GreyCandidateAssessmentPayload
     | GreyActivationLifecyclePayload
     | GreyLearningFailurePayload
+    | EstimatorSeedTracePayload
+    | TrajectorySegmentTracePayload
+    | ChallengerProgressTracePayload
     | RecorderGapPayload,
     Field(discriminator="payload_type"),
 ]
@@ -929,7 +1065,7 @@ class ControlTraceRecord(BaseModel):
     cook_id: NonBlankString | None = None
     controller: ControllerType
     event_kind: TraceEventKind
-    schema_version: Literal[2, 3, 4, 5, 6, 7] = TRACE_SCHEMA_VERSION
+    schema_version: Literal[2, 3, 4, 5, 6, 7, 8] = TRACE_SCHEMA_VERSION
     payload: ControlTracePayload
 
     @model_validator(mode="after")
@@ -951,6 +1087,34 @@ class ControlTraceRecord(BaseModel):
             ),
         ):
             raise ValueError(f"trace schema version {self.schema_version} cannot contain grey lifecycle evidence")
+        if self.schema_version < 8 and isinstance(
+            self.payload,
+            (
+                EstimatorSeedTracePayload,
+                TrajectorySegmentTracePayload,
+                ChallengerProgressTracePayload,
+            ),
+        ):
+            raise ValueError(f"trace schema version {self.schema_version} cannot contain segmented learning evidence")
+        if self.schema_version == TRACE_SCHEMA_VERSION and isinstance(
+            self.payload,
+            (GreyFitLifecyclePayload, GreyCandidateAssessmentPayload, GreyActivationLifecyclePayload),
+        ):
+            if self.payload.origin not in {"passive-online", "operator-calibration"}:
+                raise ValueError("retired lifecycle origin cannot be current control trace")
+            if self.payload.policy != "causal-auto":
+                raise ValueError("retired lifecycle policy cannot be current control trace")
+            if isinstance(self.payload, GreyFitLifecyclePayload):
+                try:
+                    _CURRENT_DIGEST_ADAPTER.validate_python(self.payload.fit_corpus_digest)
+                except ValidationError as exc:
+                    raise ValueError("current fit corpus digest must be lowercase SHA-256") from exc
+        if (
+            self.schema_version == TRACE_SCHEMA_VERSION
+            and isinstance(self.payload, ModelEventPayload)
+            and self.payload.event is ModelEventType.SCHEMA_INVALIDATED
+        ):
+            raise ValueError("retired schema invalidation cannot be current control trace")
         if (
             self.schema_version < 6
             and isinstance(self.payload, (PidUpdatePayload, PidSpUpdatePayload, MpcUpdatePayload))
@@ -982,19 +1146,33 @@ class ControlTraceRecord(BaseModel):
             raise ValueError("controller does not match PID-SP diagnostics")
         if isinstance(self.payload, MpcUpdatePayload) and self.controller is not ControllerType.MPC:
             raise ValueError("controller does not match MPC diagnostics")
-        if isinstance(self.payload, AllocationPayload) and self.controller is not ControllerType.MPC:
-            raise ValueError("allocation records are MPC-only")
+        if isinstance(self.payload, AllocationPayload) and self.controller not in (
+            ControllerType.MPC,
+            ControllerType.PID_SP,
+        ):
+            raise ValueError("allocation records require MPC or PID-SP")
+        if isinstance(self.payload, ModelObservationPayload) and self.controller not in (
+            ControllerType.MPC,
+            ControllerType.PID_SP,
+        ):
+            raise ValueError("model observation records require MPC or PID-SP")
+        if isinstance(self.payload, TrajectorySegmentTracePayload) and self.controller not in (
+            ControllerType.MPC,
+            ControllerType.PID_SP,
+        ):
+            raise ValueError("trajectory segment records require MPC or PID-SP")
         if (
             isinstance(
                 self.payload,
                 (
                     CalibrationTracePayload,
-                    ModelObservationPayload,
                     ModelEvaluationPayload,
                     GreyFitLifecyclePayload,
                     GreyCandidateAssessmentPayload,
                     GreyActivationLifecyclePayload,
                     GreyLearningFailurePayload,
+                    EstimatorSeedTracePayload,
+                    ChallengerProgressTracePayload,
                 ),
             )
             and self.controller is not ControllerType.MPC
@@ -1004,6 +1182,7 @@ class ControlTraceRecord(BaseModel):
 
     def to_db_row(self) -> ControlTraceDbRow:
         """Serialize one validated record into the exact SQLite table columns."""
+        self.validate_payload_match()
         return ControlTraceDbRow(
             ts_ms=self.ts_ms,
             session_id=self.session_id,
@@ -1059,6 +1238,15 @@ class ControlTraceRecord(BaseModel):
         except ValidationError as exc:
             raise ValueError("control trace payload column is invalid JSON") from exc
         if (
+            schema_version in {5, 6, 7}
+            and isinstance(decoded_payload, dict)
+            and decoded_payload.get("payload_type") == "fit_lifecycle"
+            and "window_id" in decoded_payload
+            and "fit_corpus_digest" not in decoded_payload
+        ):
+            decoded_payload = dict(decoded_payload)
+            decoded_payload["fit_corpus_digest"] = decoded_payload.pop("window_id")
+        if (
             schema_version == 6
             and event_kind == TraceEventKind.MODEL_OBSERVATION.value
             and isinstance(decoded_payload, dict)
@@ -1109,4 +1297,10 @@ def _payload_event_kind(payload: ControlTracePayload) -> TraceEventKind:
         return TraceEventKind.ACTIVATION_LIFECYCLE
     if isinstance(payload, GreyLearningFailurePayload):
         return TraceEventKind.LEARNING_FAILURE
+    if isinstance(payload, EstimatorSeedTracePayload):
+        return TraceEventKind.ESTIMATOR_SEED
+    if isinstance(payload, TrajectorySegmentTracePayload):
+        return TraceEventKind.TRAJECTORY_SEGMENT
+    if isinstance(payload, ChallengerProgressTracePayload):
+        return TraceEventKind.CHALLENGER_PROGRESS
     return TraceEventKind.RECORDER_GAP

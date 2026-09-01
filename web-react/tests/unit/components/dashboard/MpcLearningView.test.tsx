@@ -1,8 +1,4 @@
-import type {
-  CookRefitOutcome,
-  ModelEvidenceReport,
-  ModelEvidenceStatus,
-} from "@pifire/core/contracts/learning";
+import type { ModelEvidenceReport } from "@pifire/core/contracts/learning";
 import { afterEach, beforeEach, describe, expect, it, type Mock, rs } from "@rstest/core";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen } from "@testing-library/react";
@@ -13,10 +9,13 @@ import { testQueryClient } from "../../test-utils";
 const ACTIVE_DIGEST = "a".repeat(64);
 const CANDIDATE_DIGEST = "b".repeat(64);
 const ROLLBACK_DIGEST = "c".repeat(64);
-const DECISION_ID = "decision-reviewed-7";
+const CORPUS_DIGEST = "d".repeat(64);
+const FIT_PARTITION_DIGEST = "e".repeat(64);
+const PREFIX_DIGEST = "1".repeat(64);
+const DECISION_ID = "causal-round-3-1";
 
 const REPORT: ModelEvidenceReport = {
-  schema_version: 2,
+  schema_version: 3,
   status: "evaluating",
   mode: "operator-calibration",
   decision_id: DECISION_ID,
@@ -29,24 +28,8 @@ const REPORT: ModelEvidenceReport = {
   fit: {
     status: "succeeded",
     request_id: "fit-request-7",
-    window_id: "fit-window-7",
+    fit_corpus_digest: CORPUS_DIGEST,
     error: null,
-  },
-  cook_refit: {
-    status: "idle",
-    latest: "ready-for-review",
-    final_status: "ready-for-review",
-    authorization: "operator-review",
-    next_cook: false,
-  },
-  window: {
-    session_id: "session-7",
-    cook_id: "cook-7",
-    first_observation_sequence: 101,
-    last_observation_sequence: 220,
-    configuration_digest: "d".repeat(64),
-    incumbent_digest: ACTIVE_DIGEST,
-    role_generation: 12,
   },
   checks: {
     identifiability: "passed",
@@ -55,9 +38,11 @@ const REPORT: ModelEvidenceReport = {
     target_timing: "passed",
   },
   candidate: {
+    challenger_id: "challenger-7",
+    phase: "evaluating",
     digest: CANDIDATE_DIGEST,
     origin: "operator-calibration",
-    policy: "operator-reviewed",
+    policy: "causal-auto",
     role_generation: 12,
     candidate_generation: 7,
     parameters: {
@@ -75,7 +60,7 @@ const REPORT: ModelEvidenceReport = {
     assessment: {
       decision_id: DECISION_ID,
       origin: "operator-calibration",
-      policy: "operator-reviewed",
+      policy: "causal-auto",
       fit_accepted: true,
       identifiability_accepted: true,
       native_build: "passed",
@@ -85,6 +70,50 @@ const REPORT: ModelEvidenceReport = {
       rejection_reasons: [],
       payload_type: "candidate_assessment",
     },
+    lineage: {
+      request_id: "fit-request-7",
+      parent_incumbent_digest: ACTIVE_DIGEST,
+      parent_incumbent_generation: 12,
+      candidate_generation: 7,
+      fit_corpus_digest: CORPUS_DIGEST,
+      trigger_origin: "operator-calibration",
+      result_status: "succeeded",
+      candidate_digest: CANDIDATE_DIGEST,
+    },
+  },
+  evaluation: {
+    epoch: 3,
+    round: 1,
+    completed_horizons: [3, 15, 45],
+    required_horizons: [3, 15, 45, 90, 180],
+    wins: 1,
+    required_wins: 2,
+    resumed_from_previous_cook: true,
+    pending_origins: [
+      {
+        origin_sequence: 221,
+        horizon_steps: 90,
+        role_generation: 12,
+        candidate_generation: 7,
+        incumbent_digest: ACTIVE_DIGEST,
+        candidate_digest: CANDIDATE_DIGEST,
+      },
+    ],
+  },
+  corpus: {
+    digest: CORPUS_DIGEST,
+    revision: 17,
+    fit_partition_digest: FIT_PARTITION_DIGEST,
+    slices: [
+      {
+        segment_id: "segment-cook-7-hold-1",
+        through_ordinal: 120,
+        prefix_digest: PREFIX_DIGEST,
+        segment_content_digest: "a".repeat(64),
+        pre_roll_count: 24,
+        scored_count: 96,
+      },
+    ],
   },
   activation: {
     phase: "prepared",
@@ -93,7 +122,7 @@ const REPORT: ModelEvidenceReport = {
     candidate_generation: 7,
     role_generation: 12,
     origin: "operator-calibration",
-    policy: "operator-reviewed",
+    policy: "causal-auto",
     reason: null,
     pending_persistence: true,
     pending_frame_boundary_swap: true,
@@ -118,7 +147,7 @@ const REPORT: ModelEvidenceReport = {
     decision_id: DECISION_ID,
     phase: "prepared",
     origin: "operator-calibration",
-    policy: "operator-reviewed",
+    policy: "causal-auto",
     reason: null,
     payload_type: "activation_lifecycle",
   },
@@ -130,7 +159,7 @@ const REPORT: ModelEvidenceReport = {
   ],
   blockers: [],
   errors: [],
-  revision: "e".repeat(64),
+  revision: "9".repeat(64),
 };
 
 const jsonResponse = (body: unknown, status = 200) =>
@@ -178,31 +207,6 @@ function renderPanel(props: Partial<React.ComponentProps<typeof MpcLearningView>
 async function openPanel() {
   await userEvent.click(await screen.findByRole("button", { name: /MPC learning:/i }));
   return screen.findByRole("dialog", { name: "MPC model learning" });
-}
-
-function passiveReport(status: ModelEvidenceStatus): ModelEvidenceReport {
-  return {
-    ...REPORT,
-    status,
-    mode: "passive-online",
-    candidate: {
-      ...REPORT.candidate,
-      origin: "passive-online",
-      policy: "passive-auto",
-      assessment: REPORT.candidate.assessment
-        ? {
-            ...REPORT.candidate.assessment,
-            origin: "passive-online",
-            policy: "passive-auto",
-          }
-        : null,
-    },
-    activation: {
-      ...REPORT.activation,
-      origin: "passive-online",
-      policy: "passive-auto",
-    },
-  };
 }
 
 describe("MpcLearningView", () => {
@@ -273,16 +277,16 @@ describe("MpcLearningView", () => {
   });
 
   it.each([
+    ["warming", "Warming"],
     ["collecting", "Collecting"],
-    ["insufficient-excitation", "Insufficient excitation"],
     ["fitting", "Fitting"],
     ["evaluating", "Evaluating"],
-    ["ready-for-review", "Ready for review"],
+    ["interrupted", "Interrupted"],
+    ["qualified", "Qualified"],
     ["activating", "Activating"],
     ["active", "Active"],
     ["fallback", "Fallback"],
     ["error", "Error"],
-    ["schema-invalidated", "Schema invalidated"],
   ] as const)(
     "projects the backend %s status into the pill and open panel",
     async (status, label) => {
@@ -314,39 +318,74 @@ describe("MpcLearningView", () => {
       renderPanel();
       await openPanel();
 
-      const fit = screen
-        .getByRole("heading", { name: "Fit and evidence window" })
-        .closest("section");
+      const fit = screen.getByRole("heading", { name: "Fit request" }).closest("section");
       expect(fit).not.toBeNull();
       expect(fit!).toHaveTextContent(`Status: ${fitStatus}`);
       if (fitStatus === "failed") expect(fit!).toHaveTextContent("native fitter failed");
     },
   );
 
-  it("renders exact unified authority, native checks, persistence, swap, provenance availability, and timing", async () => {
+  it("renders exact causal progress and candidate/corpus lineage", async () => {
     renderPanel();
     const dialog = await openPanel();
 
     expect(dialog).toHaveTextContent("Mode: operator-calibration");
+    expect(dialog).toHaveTextContent("Evaluation epoch: 3");
+    expect(dialog).toHaveTextContent("Evaluation round: 1");
+    expect(dialog).toHaveTextContent("Completed horizons: 3, 15, 45");
+    expect(dialog).toHaveTextContent("Required horizons: 3, 15, 45, 90, 180");
+    expect(dialog).toHaveTextContent("Wins: 1 / 2");
+    expect(dialog).toHaveTextContent("Resumed from previous cook: yes");
+    expect(dialog).toHaveTextContent("Origin sequence: 221");
+    expect(dialog).toHaveTextContent("Horizon: 90");
+
+    expect(dialog).toHaveTextContent("Challenger: challenger-7");
     expect(dialog).toHaveTextContent("Role generation: 12");
     expect(dialog).toHaveTextContent("Candidate generation: 7");
+    expect(dialog).toHaveTextContent("Parent incumbent generation: 12");
+    expect(dialog).toHaveTextContent("Trigger origin: operator-calibration");
+    expect(dialog).toHaveTextContent("Fit result: succeeded");
     expect(dialog).toHaveTextContent(CANDIDATE_DIGEST);
     expect(dialog).toHaveTextContent(ACTIVE_DIGEST);
     expect(dialog).toHaveTextContent("fit-request-7");
-    expect(dialog).toHaveTextContent("101–220");
+    expect(dialog).toHaveTextContent("Fit corpus:");
+
+    expect(dialog).toHaveTextContent("Corpus revision: 17");
+    expect(dialog).toHaveTextContent(CORPUS_DIGEST);
+    expect(dialog).toHaveTextContent(FIT_PARTITION_DIGEST);
+    expect(dialog).toHaveTextContent("segment-cook-7-hold-1");
+    expect(dialog).toHaveTextContent("Through ordinal: 120");
+    expect(dialog).toHaveTextContent(PREFIX_DIGEST);
+    expect(dialog).toHaveTextContent("Pre-roll: 24");
+    expect(dialog).toHaveTextContent("Scored: 96");
+
     expect(dialog).toHaveTextContent("C_c");
     expect(dialog).toHaveTextContent("4475");
     expect(dialog).toHaveTextContent("Native build: passed");
     expect(dialog).toHaveTextContent("Native dry solve: passed");
     expect(dialog).toHaveTextContent("Target timing: passed");
-    expect(dialog).toHaveTextContent("Ambient provenance: not reported by backend");
     expect(dialog).toHaveTextContent("Durable phase: prepared");
-    expect(dialog).toHaveTextContent("Persistence pending: yes");
     expect(dialog).toHaveTextContent("Frame-boundary swap pending: yes");
-    expect(dialog).toHaveTextContent("transaction-7");
     expect(dialog).toHaveTextContent("Current evidence: 8");
     expect(dialog).toHaveTextContent("Audit evidence: 10");
     expect(dialog).toHaveTextContent("Retired schema entries excluded: 2");
+  });
+
+  it("renders current corpus and fit identity without a candidate or evaluation", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        ...REPORT,
+        candidate: null,
+        evaluation: null,
+      }),
+    );
+    renderPanel();
+    const dialog = await openPanel();
+
+    expect(dialog).toHaveTextContent("No causal evaluation progress is currently reported.");
+    expect(dialog).toHaveTextContent("No challenger is currently active.");
+    expect(dialog).toHaveTextContent(`Fit corpus: ${CORPUS_DIGEST}`);
+    expect(dialog).toHaveTextContent(`Corpus digest: ${CORPUS_DIGEST}`);
   });
 
   it("gates calibration start on acknowledgements and advances from backend command high-water", async () => {
@@ -389,125 +428,72 @@ describe("MpcLearningView", () => {
     expect(await screen.findByText("Accepted command high-water: 5")).toBeVisible();
   });
 
-  it.each([
-    ["disabled", "blocked", false],
-    ["insufficient", "blocked", false],
-    ["rejected", "blocked", false],
-    ["failed", "blocked", false],
-    ["ready-for-review", "operator-review", false],
-    ["accepted-next-cook", "next-cook", true],
-    ["checkpoint-failure", "blocked", false],
-  ] as const)(
-    "renders cook-refit outcome %s with exact authorization and next-cook state",
-    async (latest, authorization, nextCook) => {
-      const cookRefit = {
-        status: "idle" as const,
-        latest: latest as CookRefitOutcome,
-        final_status: latest as CookRefitOutcome,
-        authorization,
-        next_cook: nextCook,
-      };
-      fetchMock.mockResolvedValue(jsonResponse({ ...REPORT, cook_refit: cookRefit }));
-      renderPanel();
-      await openPanel();
-
-      const section = screen.getByRole("heading", { name: "Cook refit" }).closest("section");
-      expect(section).not.toBeNull();
-      expect(section!).toHaveTextContent(`Final outcome: ${latest}`);
-      expect(section!).toHaveTextContent(`Authorization: ${authorization}`);
-      expect(section!).toHaveTextContent(`Next cook: ${nextCook ? "yes" : "no"}`);
-    },
-  );
-
-  it("reports a cook refit that has never run as not run rather than blocked", async () => {
-    // An idle cook_refit with no latest outcome has never had a refit reach it.
-    // Rendering that as "blocked" sends an operator hunting for a block that
-    // does not exist, which is what a stale checkpoint on a live grill did.
-    const cookRefit = {
-      status: "idle" as const,
-      latest: null,
-      final_status: "idle" as const,
-      authorization: "not-run" as const,
-      next_cook: false,
-    };
-    fetchMock.mockResolvedValue(jsonResponse({ ...REPORT, cook_refit: cookRefit }));
+  it("shows an interrupted causal evaluation as resumable durable progress", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        ...REPORT,
+        status: "interrupted",
+        candidate: {
+          ...REPORT.candidate!,
+          phase: "evaluating",
+        },
+        evaluation: {
+          ...REPORT.evaluation!,
+          epoch: 4,
+          round: 0,
+          completed_horizons: [],
+          wins: 1,
+          pending_origins: [],
+          resumed_from_previous_cook: true,
+        },
+      }),
+    );
     renderPanel();
-    await openPanel();
+    const dialog = await openPanel();
 
-    const section = screen.getByRole("heading", { name: "Cook refit" }).closest("section");
-    expect(section).not.toBeNull();
-    expect(section!).toHaveTextContent("Final outcome: not run yet");
-    expect(section!).toHaveTextContent("Authorization: none yet");
-    expect(section!).not.toHaveTextContent("blocked");
+    expect(dialog).toHaveTextContent("Interrupted");
+    expect(dialog).toHaveTextContent("Evaluation epoch: 4");
+    expect(dialog).toHaveTextContent("Evaluation round: 0");
+    expect(dialog).toHaveTextContent("Completed horizons: none");
+    expect(dialog).toHaveTextContent("Wins: 1 / 2");
+    expect(dialog).toHaveTextContent("Resumed from previous cook: yes");
+    expect(dialog).toHaveTextContent("Pending origins: none");
   });
 
-  it("never exposes reviewed activation controls for passive automatic authority", async () => {
-    fetchMock.mockResolvedValue(jsonResponse(passiveReport("ready-for-review")));
+  it("exposes no manual review controls, operator-review copy, or activation request", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        ...REPORT,
+        status: "qualified",
+        candidate: {
+          ...REPORT.candidate!,
+          phase: "qualified",
+        },
+        evaluation: {
+          ...REPORT.evaluation!,
+          round: 2,
+          completed_horizons: [...REPORT.evaluation!.required_horizons],
+          wins: 2,
+          pending_origins: [],
+        },
+      }),
+    );
     renderPanel();
-    await openPanel();
+    const dialog = await openPanel();
 
+    expect(dialog).toHaveTextContent("Qualified");
+    expect(dialog).toHaveTextContent("Wins: 2 / 2");
     expect(screen.queryByLabelText("Type the exact candidate digest")).not.toBeInTheDocument();
     expect(
       screen.queryByLabelText("Type the exact confidence decision ID"),
     ).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Activate exact model" })).not.toBeInTheDocument();
-  });
-
-  it("requires the exact reviewed digest and decision and posts only those serialized names", async () => {
-    const ready = { ...REPORT, status: "ready-for-review" as const };
-    const activating = {
-      ...ready,
-      status: "activating" as const,
-      activation: {
-        ...ready.activation,
-        phase: "prepared" as const,
-        pending_persistence: false,
-        pending_frame_boundary_swap: true,
-      },
-    };
-    fetchMock.mockImplementation(async (input, init) => {
-      const url = String(input);
-      if (url.endsWith("/api/model-evidence/activate")) {
-        expect(JSON.parse(String(init?.body))).toEqual({
-          candidate_digest: CANDIDATE_DIGEST,
-          decision_id: DECISION_ID,
-        });
-        return jsonResponse({
-          accepted: true,
-          phase: "prepared",
-          transaction_id: "transaction-7",
-          decision_id: DECISION_ID,
-          candidate_digest: CANDIDATE_DIGEST,
-          role_generation: 12,
-        });
-      }
-      const reportReads = fetchMock.mock.calls.filter(([request]) =>
-        String(request).endsWith("/api/model-evidence/report"),
-      ).length;
-      return jsonResponse(reportReads > 1 ? activating : ready);
-    });
-    renderPanel();
-    await openPanel();
-
-    const activate = screen.getByRole("button", {
-      name: "Activate exact model",
-    });
-    expect(activate).toBeDisabled();
-    await userEvent.type(
-      screen.getByLabelText("Type the exact candidate digest"),
-      CANDIDATE_DIGEST,
-    );
-    await userEvent.type(screen.getByLabelText("Type the exact confidence decision ID"), "wrong");
-    expect(activate).toBeDisabled();
-    await userEvent.clear(screen.getByLabelText("Type the exact confidence decision ID"));
-    await userEvent.type(
-      screen.getByLabelText("Type the exact confidence decision ID"),
-      DECISION_ID,
-    );
-    expect(activate).toBeEnabled();
-    await userEvent.click(activate);
-
-    expect(await screen.findByText("Activating", { exact: true })).toBeVisible();
+    expect(dialog).not.toHaveTextContent(/operator review|ready for review|reviewed model/i);
+    expect(
+      fetchMock.mock.calls.some(([request]) =>
+        String(request).endsWith("/api/model-evidence/activate"),
+      ),
+    ).toBe(false);
   });
 
   it("shows rollback only for an explicit active rollback owner and posts the reason", async () => {
@@ -577,9 +563,9 @@ describe("MpcLearningView", () => {
           error: "optimizer-nonconvergence",
         },
         candidate: {
-          ...REPORT.candidate,
+          ...REPORT.candidate!,
           assessment: {
-            ...REPORT.candidate.assessment!,
+            ...REPORT.candidate!.assessment!,
             fit_accepted: false,
             confidence_accepted: false,
             rejection_reasons: ["identifiability", "target-timing"],
@@ -607,7 +593,7 @@ describe("MpcLearningView", () => {
     expect(alert).toHaveTextContent("native solver crashed");
     expect(alert).toHaveTextContent("terminal");
     expect(
-      screen.getByRole("heading", { name: "Fit and evidence window" }).closest("section"),
+      screen.getByRole("heading", { name: "Fit request" }).closest("section"),
     ).toHaveTextContent("optimizer-nonconvergence");
     expect(
       screen.getByRole("heading", { name: "Readiness and rejection" }).closest("section"),
@@ -656,7 +642,7 @@ describe("MpcLearningView", () => {
   });
 
   it("keeps schema-invalidated authority absent through refresh errors until a valid report returns", async () => {
-    const reviewed = { ...REPORT, status: "ready-for-review" as const };
+    const published = REPORT;
     const restored = {
       ...REPORT,
       status: "active" as const,
@@ -664,14 +650,14 @@ describe("MpcLearningView", () => {
       revision: "2".repeat(64),
     };
     fetchMock
-      .mockResolvedValueOnce(jsonResponse(reviewed))
+      .mockResolvedValueOnce(jsonResponse(published))
       .mockResolvedValueOnce(
         jsonResponse({
-          ...reviewed,
+          ...published,
           candidate: {
-            ...reviewed.candidate,
+            ...published.candidate!,
             parameters: {
-              ...reviewed.candidate.parameters,
+              ...published.candidate!.parameters!,
               C_c: "NaN",
             },
           },
@@ -681,7 +667,7 @@ describe("MpcLearningView", () => {
       .mockResolvedValueOnce(jsonResponse(restored));
     const view = renderPanel({ modelLearningRevision: "wire-valid" });
     await openPanel();
-    expect(screen.getByRole("button", { name: "Activate exact model" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Activate exact model" })).not.toBeInTheDocument();
     expect(screen.getAllByText(CANDIDATE_DIGEST).length).toBeGreaterThan(0);
 
     view.rerender(

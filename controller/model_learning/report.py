@@ -9,7 +9,7 @@ from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, is_dataclass
 from enum import Enum
-from typing import TypeVar, cast
+from typing import cast
 
 from common.cook_diagnostics import ControllerLearningReport
 from common.model_evidence import (
@@ -25,10 +25,16 @@ from common.model_evidence import (
 from common.persistence.protocols import JsonValue
 from common.web_contracts.learning import ModelEvidenceReport
 
-from .contracts import ActivationPolicy, CandidateOrigin, CheckStatus, FitStatus, LearningStatus
+from .contracts import (
+    ActivationPolicy,
+    CandidateOrigin,
+    CheckStatus,
+    FitStatus,
+    LearningStatus,
+)
 
-REPORT_SCHEMA_VERSION = 2
-ARTIFACT_SCHEMA = "pifire-grey-learning-report/v2"
+REPORT_SCHEMA_VERSION = 3
+ARTIFACT_SCHEMA = "pifire-grey-learning-report/v3"
 _REPORT_CACHE_MAX_ENTRIES = 8
 _REPORT_CACHE: OrderedDict[str, LearningReport] = OrderedDict()
 _REPORT_CACHE_LOCK = threading.Lock()
@@ -39,12 +45,12 @@ def _json_value(value: object) -> object:
         return value.value
     if isinstance(value, ModelEvidenceRecord):
         return value.model_dump(mode="json")
-    if is_dataclass(value) and not isinstance(value, type):
-        return _json_value(asdict(value))
     if isinstance(value, Mapping):
         if not all(isinstance(key, str) for key in value):
             raise ValueError("report mappings must have string keys")
         return {key: _json_value(item) for key, item in value.items()}
+    if is_dataclass(value) and not isinstance(value, type):
+        return _json_value(asdict(value))
     if isinstance(value, (tuple, list)):
         return [_json_value(item) for item in value]
     if value is None or isinstance(value, (str, int, float, bool)):
@@ -106,15 +112,12 @@ def _superseded_invalidation(
     )
 
 
-_PayloadT = TypeVar("_PayloadT")
-
-
-def _latest_payload(
+def _latest_payload[PayloadT](
     records: Sequence[ModelEvidenceRecord],
-    payload_type: type[_PayloadT],
-) -> _PayloadT | None:
+    payload_type: type[PayloadT],
+) -> PayloadT | None:
     record = _latest(records, payload_type)
-    return None if record is None else cast(_PayloadT, record.payload)
+    return None if record is None else cast(PayloadT, record.payload)
 
 
 def _pair_digest(activation: Mapping[str, object], name: str):
@@ -139,12 +142,7 @@ def _candidate_identity(
 ) -> tuple[str, int] | None:
     digest = authority.get("candidate_digest")
     generation = authority.get("candidate_generation")
-    if (
-        not isinstance(digest, str)
-        or isinstance(generation, bool)
-        or not isinstance(generation, int)
-        or generation < 0
-    ):
+    if not isinstance(digest, str) or isinstance(generation, bool) or not isinstance(generation, int) or generation < 0:
         return None
     return digest, generation
 
@@ -153,6 +151,75 @@ def _validated_checkpoint(checkpoint: dict[str, object]) -> dict[str, object]:
     from controller.mpc_snapshot import migrate_grey_learning_snapshot
 
     return migrate_grey_learning_snapshot(checkpoint)
+
+
+def _challenger_projection(value: object) -> dict[str, object]:
+    if value is None:
+        return {}
+    from common.persistence.model_challenger import ModelChallengerState
+
+    if not isinstance(value, ModelChallengerState):
+        raise TypeError("challenger_state must be a ModelChallengerState")
+    preparation = _json_value(value.fit_preparation)
+    if not isinstance(preparation, dict):
+        raise TypeError("challenger fit preparation must be an object")
+    fit_result = preparation.get("fit_result")
+    fit_result = fit_result if isinstance(fit_result, dict) else {}
+    configuration = _json_value(value.candidate.configuration)
+    if not isinstance(configuration, dict):
+        raise TypeError("challenger candidate configuration must be an object")
+    nested_parameters = configuration.get("parameters")
+    parameter_source = nested_parameters if isinstance(nested_parameters, dict) else configuration
+    candidate_parameters = {name: parameter_source[name] for name in ("C_c", "K_Q", "T_amb", "h_amb", "sigma", "theta")}
+    candidate_parameters["n_delay"] = configuration.get(
+        "n_delay",
+        configuration.get("delay_states"),
+    )
+    corpus = value.fit_corpus
+    lineage = value.fit_lineage
+    return {
+        "challenger_id": value.challenger_id,
+        "revision": value.revision,
+        "phase": value.phase,
+        "origin": value.origin.value,
+        "policy": value.policy.value,
+        "candidate_digest": value.candidate.model_digest,
+        "candidate_generation": value.candidate.candidate_generation,
+        "role_generation": value.incumbent.role_generation,
+        "candidate_parameters": candidate_parameters,
+        "fit_quality": fit_result.get("rmse_c"),
+        "identifiability": fit_result.get("identifiability"),
+        "evaluation_epoch": value.evaluation_epoch,
+        "evaluation_round": value.evaluation_round,
+        "consecutive_wins": value.consecutive_wins,
+        "required_wins": value.required_wins,
+        "corpus": {
+            "digest": corpus.corpus_digest,
+            "revision": corpus.corpus_revision,
+            "fit_partition_digest": corpus.fit_partition_digest,
+            "slices": [
+                {
+                    "segment_id": item.segment_id,
+                    "through_ordinal": item.through_ordinal,
+                    "prefix_digest": item.prefix_digest,
+                    "segment_content_digest": item.segment_content_digest,
+                    "pre_roll_count": item.pre_roll_count,
+                    "scored_count": item.scored_count,
+                }
+                for item in corpus.slices
+            ],
+        },
+        "lineage": {
+            "request_id": lineage.request_id,
+            "parent_incumbent_digest": lineage.parent_incumbent_digest,
+            "parent_incumbent_generation": lineage.parent_incumbent_generation,
+            "candidate_generation": lineage.candidate_generation,
+            "fit_corpus_digest": lineage.fit_corpus_digest,
+            "trigger_origin": lineage.trigger_origin,
+            "result_status": lineage.result_status,
+            "candidate_digest": lineage.candidate_digest,
+        },
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,6 +253,7 @@ def build_learning_report(
     checkpoint_required: bool = False,
     calibration_command_high_water: int,
     checkpoint: object = None,
+    challenger_state: object = None,
 ) -> LearningReport:
     """Project ledger, durable authorities, live phases, and calibration once."""
 
@@ -202,15 +270,29 @@ def build_learning_report(
     current_records = tuple(record for record in records if record.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION)
 
     errors: list[str] = []
-    schema_invalidated = False
     if checkpoint_map:
         try:
             checkpoint_map = _validated_checkpoint(checkpoint_map)
         except TypeError, ValueError:
             errors.append("checkpoint-schema-invalid")
-            schema_invalidated = True
     elif checkpoint_required or (not activation and not live):
         errors.append("checkpoint-missing")
+    challenger = _challenger_projection(challenger_state)
+    if challenger.get("phase") == "retired":
+        challenger = {}
+    challenger_reference = checkpoint_map.get("challenger_authority")
+    expected_reference = (
+        None
+        if not challenger
+        else {
+            "challenger_id": challenger["challenger_id"],
+            "revision": challenger["revision"],
+        }
+    )
+    if challenger_reference != expected_reference:
+        if challenger_reference is not None or challenger:
+            errors.append("challenger-reference-mismatch")
+        challenger = {}
 
     try:
         status = _enum_value(
@@ -231,62 +313,44 @@ def build_learning_report(
         fit_status = FitStatus.FAILED.value
         errors.append("live-fit-status-invalid")
 
-    from controller.runtime.model_fitting import TeardownRefitOutcome
-
-    cook_refit_value = checkpoint_map.get("cook_refit", {"status": FitStatus.IDLE.value, "latest": None})
-    if not isinstance(cook_refit_value, Mapping) or set(cook_refit_value) != {"status", "latest"}:
-        raise ValueError("invalid cook_refit")
-    cook_refit_status = _enum_value(
-        cook_refit_value["status"],
-        FitStatus,
-        "cook_refit status",
-    )
-    cook_refit_latest_value = cook_refit_value["latest"]
-    if cook_refit_latest_value is None:
-        cook_refit_latest = None
-    else:
-        try:
-            cook_refit_latest = TeardownRefitOutcome(cook_refit_latest_value).value
-        except (TypeError, ValueError) as error:
-            raise ValueError("invalid cook_refit latest") from error
-    #: A refit that never ran is reported apart from one that ran and
-    #: authorized nothing. Both leave the next cook on the incumbent model,
-    #: but only the second is a verdict, and only it should read as one.
-    cook_refit_authorization = (
-        "not-run"
-        if cook_refit_latest is None
-        else "next-cook"
-        if cook_refit_latest == TeardownRefitOutcome.ACCEPTED_NEXT_COOK.value
-        else "operator-review"
-        if cook_refit_latest == TeardownRefitOutcome.READY_FOR_REVIEW.value
-        else "blocked"
-    )
-
     identities = checkpoint_map.get("identities")
     identities = identities if isinstance(identities, Mapping) else {}
-    checkpoint_candidate_identity = _candidate_identity(identities)
+    challenger_candidate_identity = _candidate_identity(challenger)
     live_candidate_identity = _candidate_identity(live)
     activation_candidate_identity = _candidate_identity(activation)
     current_candidate_identities = tuple(
         identity
         for identity in (
-            checkpoint_candidate_identity,
+            challenger_candidate_identity,
             live_candidate_identity,
         )
         if identity is not None
     )
-    activation_matches_candidate = (
-        activation_candidate_identity is not None
-        and all(
-            activation_candidate_identity == identity
-            for identity in current_candidate_identities
-        )
+    activation_matches_candidate = activation_candidate_identity is not None and all(
+        activation_candidate_identity == identity for identity in current_candidate_identities
     )
-    activation_authority = (
-        activation
-        if not current_candidate_identities or activation_matches_candidate
-        else {}
-    )
+    activation_authority = activation if not current_candidate_identities or activation_matches_candidate else {}
+    activation_projection = dict(activation_authority)
+    activation_origin = activation_projection.get("origin")
+    if activation_origin is not None:
+        try:
+            activation_projection["origin"] = _enum_value(
+                activation_origin,
+                CandidateOrigin,
+                "activation origin",
+            )
+        except ValueError:
+            activation_projection.pop("origin", None)
+    activation_policy = activation_projection.get("policy")
+    if activation_policy is not None:
+        try:
+            activation_projection["policy"] = _enum_value(
+                activation_policy,
+                ActivationPolicy,
+                "activation policy",
+            )
+        except ValueError:
+            activation_projection.pop("policy", None)
     phase = activation_authority.get(
         "phase",
         live.get("activation_phase", "aborted"),
@@ -296,14 +360,16 @@ def build_learning_report(
         if phase == "active"
         else _pair_digest(activation_authority, "incumbent_pair")
     )
-    incumbent_digest = activation_authority.get("incumbent_digest")
+    incumbent_digest = challenger.get("incumbent_digest")
+    if not isinstance(incumbent_digest, str):
+        incumbent_digest = activation_authority.get("incumbent_digest")
     if not isinstance(incumbent_digest, str):
         incumbent_digest = _pair_digest(activation_authority, "incumbent_pair")
     if not isinstance(incumbent_digest, str):
         incumbent_digest = identities.get("active_digest")
-    candidate_digest = activation_authority.get("candidate_digest")
+    candidate_digest = challenger.get("candidate_digest")
     if not isinstance(candidate_digest, str):
-        candidate_digest = identities.get("candidate_digest")
+        candidate_digest = activation_authority.get("candidate_digest")
     if not isinstance(candidate_digest, str):
         candidate_digest = live.get("candidate_digest")
     active_digest = (
@@ -311,13 +377,16 @@ def build_learning_report(
         if isinstance(active_pair_digest, str)
         else (candidate_digest if phase == "active" else incumbent_digest)
     )
-    role_generation = activation_authority.get(
+    role_generation = challenger.get(
         "role_generation",
-        identities.get("active_generation", live.get("role_generation")),
+        activation_authority.get(
+            "role_generation",
+            identities.get("active_generation", live.get("role_generation")),
+        ),
     )
-    candidate_generation = activation_authority.get(
+    candidate_generation = challenger.get(
         "candidate_generation",
-        identities.get(
+        activation_authority.get(
             "candidate_generation",
             live.get("candidate_generation"),
         ),
@@ -341,7 +410,7 @@ def build_learning_report(
         errors.append("live-checkpoint-digest-mismatch")
 
     live_origin = live.get("origin")
-    durable_origin = activation_authority.get("origin", checkpoint_map.get("origin"))
+    durable_origin = challenger.get("origin", activation_authority.get("origin"))
     try:
         normalized_live_origin = (
             None if live_origin is None else _enum_value(live_origin, CandidateOrigin, "live candidate origin")
@@ -360,7 +429,7 @@ def build_learning_report(
         origin = None
         errors.append("candidate-origin-invalid")
 
-    durable_policy = activation_authority.get("policy", checkpoint_map.get("policy"))
+    durable_policy = challenger.get("policy", activation_authority.get("policy"))
     try:
         candidate_policy = (
             None
@@ -390,7 +459,25 @@ def build_learning_report(
     fit_payload = _latest_payload(current_records, FitLifecycleEvidence)
     assessment_record = _latest(current_records, CandidateAssessmentEvidence)
     assessment = None if assessment_record is None else cast(CandidateAssessmentEvidence, assessment_record.payload)
-    lifecycle = _latest_payload(current_records, ActivationLifecycleEvidence)
+    lifecycle_record = _latest(current_records, ActivationLifecycleEvidence)
+    if lifecycle_record is not None:
+        lifecycle_identity_matches = (
+            isinstance(candidate_digest, str)
+            and isinstance(role_generation, int)
+            and not isinstance(role_generation, bool)
+            and lifecycle_record.model_digest == candidate_digest
+            and lifecycle_record.role_generation == role_generation
+        )
+        activation_decision_id = activation_authority.get(
+            "evidence_decision_id",
+            activation_authority.get("decision_id"),
+        )
+        lifecycle_decision_matches = (
+            not activation_authority or lifecycle_record.payload.decision_id == activation_decision_id
+        )
+        if not lifecycle_identity_matches or not lifecycle_decision_matches:
+            lifecycle_record = None
+    lifecycle = None if lifecycle_record is None else cast(ActivationLifecycleEvidence, lifecycle_record.payload)
     failure = _latest_payload(current_records, LearningFailureEvidence)
     confidence = _latest_payload(current_records, ConfidenceDecisionEvidence)
     invalidation = _latest(current_records, SchemaInvalidationEvidence)
@@ -403,6 +490,14 @@ def build_learning_report(
     pending_swap = bool(live.get("pending_swap", False)) or phase == "prepared"
     if fit_status in (FitStatus.QUEUED.value, FitStatus.RUNNING.value):
         status = LearningStatus.FITTING.value
+    challenger_phase = challenger.get("phase")
+    if challenger_phase == "qualified" and status not in {
+        LearningStatus.ACTIVATING.value,
+        LearningStatus.ACTIVE.value,
+    }:
+        status = LearningStatus.QUALIFIED.value
+    elif challenger_phase == "activating":
+        status = LearningStatus.ACTIVATING.value
     if pending_persistence or pending_swap:
         status = LearningStatus.ACTIVATING.value
     if lifecycle is not None and lifecycle.phase in ("active", "aborted") and not pending_swap:
@@ -422,20 +517,24 @@ def build_learning_report(
             errors.append(cast(str, live_failure["code"]))
         else:
             errors.append("live-failure-invalid")
+    invalidation_failure = None
     if invalidation is not None and not _superseded_invalidation(current_records, invalidation):
-        schema_invalidated = True
-    if schema_invalidated:
-        status = LearningStatus.SCHEMA_INVALIDATED.value
-    elif errors:
+        invalidation_payload = cast(SchemaInvalidationEvidence, invalidation.payload)
+        invalidation_failure = {
+            "code": "evidence-schema-invalidation",
+            "detail": (
+                f"{invalidation_payload.reason}; previous schema version {invalidation_payload.previous_schema_version}"
+            ),
+            "terminal": True,
+        }
+        errors.append("evidence-schema-invalidation")
+    if errors:
         status = LearningStatus.ERROR.value
 
-    candidate_checkpoint = checkpoint_map.get("challenger")
-    candidate_checkpoint = candidate_checkpoint if isinstance(candidate_checkpoint, Mapping) else {}
-    candidate_metadata = candidate_checkpoint.get("metadata")
-    candidate_metadata = candidate_metadata if isinstance(candidate_metadata, Mapping) else {}
-    rejection_reasons = [] if assessment is None else list(assessment.rejection_reasons)
-    assessment_policy = None
-    if assessment is not None:
+    candidate_parameters = challenger.get("candidate_parameters")
+    rejection_reasons = [] if assessment is None or not challenger else list(assessment.rejection_reasons)
+    assessment_projection = None
+    if assessment is not None and challenger:
         if (
             candidate_digest is not None
             and assessment_record is not None
@@ -445,33 +544,65 @@ def build_learning_report(
         elif origin is not None and assessment.origin != origin:
             errors.append("assessment-candidate-origin-mismatch")
         else:
-            assessment_policy = assessment.policy
-            candidate_policy = assessment_policy
-    if errors and not schema_invalidated:
+            assessment_projection = _json_value(assessment)
+            if isinstance(assessment_projection, dict):
+                assessment_projection["policy"] = candidate_policy
+    if errors:
         status = LearningStatus.ERROR.value
-    if (
-        assessment_policy == ActivationPolicy.OPERATOR_REVIEWED.value
-        and assessment is not None
-        and not assessment.rejection_reasons
-        and status
-        in {
-            LearningStatus.COLLECTING.value,
-            LearningStatus.EVALUATING.value,
-        }
-        and not errors
-        and not schema_invalidated
-        and candidate_digest is not None
-    ):
-        status = LearningStatus.READY_FOR_REVIEW.value
     blockers = list(dict.fromkeys([*rejection_reasons, *errors]))
-    decision_id = activation_authority.get(
-        "evidence_decision_id",
-        activation_authority.get("decision_id"),
-    )
+    decision_id = challenger.get("decision_id")
+    if not isinstance(decision_id, str):
+        decision_id = activation_authority.get(
+            "evidence_decision_id",
+            activation_authority.get("decision_id"),
+        )
     if not isinstance(decision_id, str) and assessment is not None:
         decision_id = assessment.decision_id
     if not isinstance(decision_id, str) and confidence is not None:
         decision_id = confidence.decision_id
+
+    corpus_projection = challenger.get(
+        "corpus",
+        {
+            "digest": None,
+            "revision": None,
+            "fit_partition_digest": None,
+            "slices": [],
+        },
+    )
+    evaluation_projection = None
+    candidate_projection = None
+    if challenger:
+        required_horizons = live.get("required_horizons", (3, 15, 45, 90, 180))
+        completed_horizons = live.get("completed_horizons", ())
+        pending_origins = live.get("pending_origins", ())
+        evaluation_projection = {
+            "epoch": challenger["evaluation_epoch"],
+            "round": challenger["evaluation_round"],
+            "completed_horizons": completed_horizons,
+            "required_horizons": required_horizons,
+            "wins": challenger["consecutive_wins"],
+            "required_wins": challenger["required_wins"],
+            "resumed_from_previous_cook": bool(live.get("resumed_from_previous_cook", False)),
+            "pending_origins": pending_origins,
+        }
+        candidate_projection = {
+            "challenger_id": challenger["challenger_id"],
+            "phase": challenger["phase"],
+            "lineage": challenger["lineage"],
+            "digest": challenger["candidate_digest"],
+            "origin": challenger["origin"],
+            "policy": challenger["policy"],
+            "role_generation": challenger["role_generation"],
+            "candidate_generation": challenger["candidate_generation"],
+            "parameters": candidate_parameters,
+            "parameter_deltas": live.get("parameter_deltas"),
+            "fit_quality": challenger.get("fit_quality"),
+            "identifiability": challenger.get("identifiability"),
+            "assessment": assessment_projection,
+        }
+
+    lifecycle_projection = None if lifecycle is None else _json_value(lifecycle)
 
     payload: dict[str, object] = {
         "schema_version": REPORT_SCHEMA_VERSION,
@@ -489,32 +620,15 @@ def build_learning_report(
         "fit": {
             "status": fit_status,
             "request_id": None if fit_payload is None else fit_payload.request_id,
-            "window_id": None if fit_payload is None else fit_payload.window_id,
+            "fit_corpus_digest": (None if fit_payload is None else fit_payload.fit_corpus_digest),
             "error": None if fit_payload is None else fit_payload.error,
         },
-        "cook_refit": {
-            "status": cook_refit_status,
-            "latest": cook_refit_latest,
-            "final_status": cook_refit_latest or cook_refit_status,
-            "authorization": cook_refit_authorization,
-            "next_cook": cook_refit_latest == TeardownRefitOutcome.ACCEPTED_NEXT_COOK.value,
-        },
-        "window": checkpoint_map.get("window"),
         "checks": checks,
-        "candidate": {
-            "digest": candidate_digest,
-            "origin": origin,
-            "policy": candidate_policy,
-            "role_generation": role_generation,
-            "candidate_generation": candidate_generation,
-            "parameters": candidate_checkpoint.get("parameters"),
-            "parameter_deltas": live.get("parameter_deltas"),
-            "fit_quality": candidate_metadata.get("rmse"),
-            "identifiability": live.get("identifiability"),
-            "assessment": None if assessment is None else _json_value(assessment),
-        },
+        "evaluation": evaluation_projection,
+        "corpus": corpus_projection,
+        "candidate": candidate_projection,
         "activation": {
-            **activation_authority,
+            **activation_projection,
             "phase": phase,
             "reason": None if lifecycle is None else lifecycle.reason,
             "pending_persistence": pending_persistence,
@@ -530,8 +644,7 @@ def build_learning_report(
             "candidate_digest": candidate_digest,
             "candidate_generation": candidate_generation,
             "rollback_digest": (
-                _pair_digest(activation_authority, "rollback_pair")
-                or identities.get("rollback_digest")
+                _pair_digest(activation_authority, "rollback_pair") or identities.get("rollback_digest")
             ),
             "rollback_generation": identities.get("rollback_generation"),
         },
@@ -539,9 +652,13 @@ def build_learning_report(
             "revision": command_high_water,
             "command_high_water": command_high_water,
         },
-        "latest_lifecycle": None if lifecycle is None else _json_value(lifecycle),
+        "latest_lifecycle": lifecycle_projection,
         "failure": (
-            _json_value(live_failure) if live_failure is not None else None if failure is None else _json_value(failure)
+            _json_value(live_failure)
+            if live_failure is not None
+            else _json_value(failure)
+            if failure is not None
+            else invalidation_failure
         ),
         "gates": [
             {
@@ -568,6 +685,7 @@ def current_learning_report(
     calibration_command_high_water: int,
     checkpoint_required: bool = False,
     checkpoint: object = None,
+    challenger_state: object = None,
 ) -> LearningReport:
     """Return the value-cached report over every authority input."""
 
@@ -576,6 +694,7 @@ def current_learning_report(
         "evidence": records,
         "activation": activation_state,
         "checkpoint": checkpoint,
+        "challenger": _challenger_projection(challenger_state),
         "live": live_status,
         "calibration_command_high_water": calibration_command_high_water,
         "checkpoint_required": checkpoint_required,
@@ -593,6 +712,7 @@ def current_learning_report(
         checkpoint_required=checkpoint_required,
         live_status=live_status,
         calibration_command_high_water=calibration_command_high_water,
+        challenger_state=challenger_state,
     )
     with _REPORT_CACHE_LOCK:
         existing = _REPORT_CACHE.get(key)
@@ -636,6 +756,7 @@ def backend_learning_report() -> tuple[LearningReport, tuple[ModelEvidenceRecord
     from common.persistence.control import (
         mpc_calibration_command_revision,
     )
+    from common.persistence.model_challenger import read_model_challenger
     from common.persistence.model_evidence import read_model_activation, read_model_evidence
     from common.persistence.runtime import (
         read_status,
@@ -649,6 +770,10 @@ def backend_learning_report() -> tuple[LearningReport, tuple[ModelEvidenceRecord
         controller = status.get("controller")
         nested = controller.get("learning") if isinstance(controller, Mapping) else None
         live = direct if isinstance(direct, Mapping) else nested
+    try:
+        challenger = read_model_challenger()
+    except ValueError:
+        challenger = None
     report = current_learning_report(
         records,
         activation_state=read_model_activation(),
@@ -656,6 +781,7 @@ def backend_learning_report() -> tuple[LearningReport, tuple[ModelEvidenceRecord
         checkpoint_required=True,
         live_status=live,
         calibration_command_high_water=mpc_calibration_command_revision(),
+        challenger_state=challenger,
     )
     return report, records
 

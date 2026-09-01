@@ -52,7 +52,7 @@ class _ActivationFlight:
 
 
 class ActivationRuntime:
-    """The sole owner of activation pairs, authority, receipts, and recovery."""
+    """Own activation pairs and optionally the persistence lifetime."""
 
     def __init__(
         self,
@@ -60,6 +60,7 @@ class ActivationRuntime:
         active_pair: OwnedMpcPair,
         persistence: ModelPersistenceWorker,
         *,
+        owns_persistence: bool = False,
         clock_ms: Callable[[], int] | None = None,
         receipt_timeout: float = 2.0,
     ) -> None:
@@ -73,8 +74,12 @@ class ActivationRuntime:
             raise TypeError("persistence must be a ModelPersistenceWorker")
         if not isinstance(receipt_timeout, (int, float)) or isinstance(receipt_timeout, bool) or receipt_timeout < 0:
             raise ValueError("receipt_timeout must be nonnegative")
+        if not isinstance(owns_persistence, bool):
+            raise TypeError("owns_persistence must be a bool")
         self._pair_factory = pair_factory
         self._persistence = persistence
+        self._owns_persistence = owns_persistence
+        self._persistence_close_pending = owns_persistence
         self._clock_ms = (lambda: time.time_ns() // 1_000_000) if clock_ms is None else clock_ms
         self._receipt_timeout = float(receipt_timeout)
         self._lock = threading.RLock()
@@ -93,6 +98,8 @@ class ActivationRuntime:
         self._events: deque[ModelEvidenceRecord] = deque()
         self._terminated_reason: str | None = None
         self._role_generation = active_pair.descriptor.role_generation
+        self._estimator_seed_source: Callable[[float, int], object] | None = None
+        self._last_seed_refresh_status: str | None = None
         self._closed = False
 
     @property
@@ -150,6 +157,39 @@ class ActivationRuntime:
     def terminated_reason(self) -> str | None:
         with self._lock:
             return self._terminated_reason
+
+    def bind_estimator_seed_source(
+        self,
+        source: Callable[[float, int], object] | None,
+    ) -> None:
+        if source is not None and not callable(source):
+            raise TypeError("estimator seed source must be callable")
+        with self._lock:
+            self._estimator_seed_source = source
+
+    def _refresh_pair_seed(self, pair: OwnedMpcPair) -> bool:
+        source = self._estimator_seed_source
+        if source is None:
+            status = getattr(pair.core, "estimator_seed_status", None)
+            self._last_seed_refresh_status = status
+            return status == "exact"
+        try:
+            theta, n_delay = pair.core.estimator_seed_requirements()
+            pair.core.seed_from_trajectory(source(theta, n_delay))
+        except Exception:
+            self._last_seed_refresh_status = "uncertain"
+            return False
+        self._last_seed_refresh_status = getattr(
+            pair.core,
+            "estimator_seed_status",
+            None,
+        )
+        return self._last_seed_refresh_status is not None
+    @property
+    def last_seed_refresh_status(self) -> str | None:
+        with self._lock:
+            return self._last_seed_refresh_status
+
 
     @staticmethod
     def _receipt_is_durable(receipt: DurableActivationReceipt) -> bool:
@@ -513,6 +553,17 @@ class ActivationRuntime:
                 return False
             if self._inert_record is not None:
                 return self._inert_record.transaction_id == record.transaction_id
+            if getattr(pair.core, "estimator_seed_status", None) != "exact":
+                source = self._estimator_seed_source
+                if source is None:
+                    return False
+                try:
+                    theta, n_delay = pair.core.estimator_seed_requirements()
+                    pair.core.seed_from_trajectory(source(theta, n_delay))
+                except Exception:
+                    return False
+                if getattr(pair.core, "estimator_seed_status", None) != "exact":
+                    return False
             displaced = self._rollback_pair
             if displaced is not None:
                 try:
@@ -521,7 +572,9 @@ class ActivationRuntime:
                     return False
             incumbent = self._active_pair
             try:
-                pair.core.adopt_operating_state(incumbent.core.capture_operating_state())
+                pair.core.adopt_model_independent_state(
+                    incumbent.core.capture_model_independent_state()
+                )
             except Exception:
                 return False
             pair.revoke_output()
@@ -575,8 +628,12 @@ class ActivationRuntime:
             ):
                 return False
             try:
-                rollback.core.adopt_operating_state(pair.core.capture_operating_state())
+                rollback.core.adopt_model_independent_state(
+                    pair.core.capture_model_independent_state()
+                )
             except Exception:
+                return False
+            if not self._refresh_pair_seed(rollback):
                 return False
             pair.revoke_output()
             try:
@@ -660,8 +717,12 @@ class ActivationRuntime:
             failed = self._active_pair
             active_record = self._active_record
             try:
-                rollback.core.adopt_operating_state(failed.core.capture_operating_state())
+                rollback.core.adopt_model_independent_state(
+                    failed.core.capture_model_independent_state()
+                )
             except Exception:
+                return False
+            if not self._refresh_pair_seed(rollback):
                 return False
             failed.revoke_output()
             try:
@@ -811,7 +872,9 @@ class ActivationRuntime:
                         pair.close()
                 return False
             try:
-                restored.core.adopt_operating_state(self._active_pair.core.capture_operating_state())
+                restored.core.adopt_model_independent_state(
+                    self._active_pair.core.capture_model_independent_state()
+                )
             except Exception:
                 restored.close()
                 if rollback is not None:
@@ -856,7 +919,9 @@ class ActivationRuntime:
             current = self._active_pair
             if pair is current:
                 raise ValueError("replacement pair must be a distinct owner")
-            pair.core.adopt_operating_state(current.core.capture_operating_state())
+            pair.core.adopt_model_independent_state(
+                current.core.capture_model_independent_state()
+            )
             pair.revoke_output()
             displaced_rollback = self._rollback_pair
             pending = self._pending
@@ -923,9 +988,26 @@ class ActivationRuntime:
                 except BaseException:
                     self._retired_pairs.append(current)
 
+    def _close_owned_persistence_locked(self) -> BaseException | None:
+        if not self._persistence_close_pending:
+            return None
+        try:
+            if self._persistence.close(timeout=2.0) is not True:
+                return RuntimeError("model persistence close timed out")
+        except BaseException as error:
+            return error
+        self._persistence_close_pending = False
+        return None
+
+
     def close(self) -> None:
         with self._lock:
             if self._closed:
+                persistence_error = self._close_owned_persistence_locked()
+                if persistence_error is not None:
+                    raise RuntimeError(
+                        "could not close complete activation runtime ownership"
+                    ) from persistence_error
                 return
             aborts_durable = self._retry_pending_aborts_locked(wait_for_completion=True)
             self._closed = True
@@ -944,10 +1026,9 @@ class ActivationRuntime:
             errors: list[BaseException] = []
             if not aborts_durable:
                 errors.append(RuntimeError("unresolved activation abort transactions remain"))
-            try:
-                self._persistence.flush_and_stop(timeout=0.1)
-            except BaseException as error:
-                errors.append(error)
+            persistence_error = self._close_owned_persistence_locked()
+            if persistence_error is not None:
+                errors.append(persistence_error)
             closed_ids: set[int] = set()
             self._retired_pairs.clear()
             for pair in pairs:

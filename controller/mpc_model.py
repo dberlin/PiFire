@@ -108,8 +108,16 @@
 *****************************************
 """
 
+from dataclasses import dataclass
+from typing import Literal
+
 import numpy as np
 from scipy.linalg import expm
+
+from common.learning_trajectory import (
+    FrameDeliveryCertainty,
+    LearningTrajectoryFrame,
+)
 
 # Runtime estimators depend only on NumPy/SciPy. Native solver generation owns
 # CasADi and acados-template in the isolated codegen dependency group.
@@ -122,11 +130,64 @@ _KELVIN = 273.15
 #: same event as a parameter being recalibrated.
 #:
 #: 3  migration input only: variable-delay grey snapshot with retired nested learners
-#: 4  fixed eight-delay grey-only adaptation record
+#: 4  migration input only: fixed-delay checkpoint with inline challenger authority
+#: 5  migration input only: fixed-delay checkpoint with retired cook-refit state
+#: 6  migration input only: fixed eight-delay checkpoint with durable challenger reference
+#: 7  installation-bound fixed eight-delay grey checkpoint
 #:
-#: Version 3 is interpreted only by the one-shot startup migration.  Runtime
-#: restore and every current writer accept/emit version 4 exclusively.
-MODEL_SCHEMA = 4
+#: Versions 3 through 6 are interpreted only by startup migration. Runtime
+#: restore accepts legacy checkpoints only as inert migration input; current
+#: writers emit installation-bound version 7 exclusively.
+MODEL_SCHEMA = 7
+
+
+@dataclass(frozen=True, slots=True)
+class EstimatorSeed:
+    """Immutable trajectory-derived state used before an MPC estimator first runs."""
+
+    delay_states: tuple[float, ...]
+    chamber_temperature_c: float
+    disturbance: float
+    segment_id: str
+    pre_roll_digest: str
+    pre_roll_frame_count: int
+    required_frame_count: int
+    status: Literal["exact", "short", "absent", "uncertain"]
+
+    def __post_init__(self) -> None:
+        states = tuple(float(value) for value in self.delay_states)
+        if not all(np.isfinite(value) and 0.0 <= value <= 1.0 for value in states):
+            raise ValueError("estimator seed delay states must be finite and within [0, 1]")
+        object.__setattr__(self, "delay_states", states)
+        chamber = float(self.chamber_temperature_c)
+        disturbance = float(self.disturbance)
+        if not np.isfinite(chamber):
+            raise ValueError("estimator seed chamber temperature must be finite")
+        if not np.isfinite(disturbance) or disturbance != 0.0:
+            raise ValueError("trajectory estimator seed disturbance must be zero")
+        object.__setattr__(self, "chamber_temperature_c", chamber)
+        object.__setattr__(self, "disturbance", disturbance)
+        if not isinstance(self.segment_id, str) or not self.segment_id:
+            raise ValueError("estimator seed segment id must be non-blank")
+        if (
+            not isinstance(self.pre_roll_digest, str)
+            or len(self.pre_roll_digest) != 64
+            or any(character not in "0123456789abcdef" for character in self.pre_roll_digest)
+        ):
+            raise ValueError("estimator seed pre-roll digest must be lowercase SHA-256")
+        counts = (self.pre_roll_frame_count, self.required_frame_count)
+        if any(isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in counts):
+            raise ValueError("estimator seed frame counts must be nonnegative integers")
+        if self.pre_roll_frame_count > self.required_frame_count:
+            raise ValueError("estimator seed cannot contain more than its required suffix")
+        if self.status not in {"exact", "short", "absent", "uncertain"}:
+            raise ValueError("unsupported estimator seed status")
+        if self.status == "exact" and self.pre_roll_frame_count != self.required_frame_count:
+            raise ValueError("exact estimator seed must contain its complete suffix")
+        if self.status == "short" and not (0 < self.pre_roll_frame_count < self.required_frame_count):
+            raise ValueError("short estimator seed must contain an incomplete suffix")
+        if self.status in {"absent", "uncertain"} and (self.pre_roll_frame_count != 0 or states):
+            raise ValueError("absent or uncertain estimator seed cannot fabricate delay state")
 
 
 def _rad_loss(T_c, T_amb, sigma):
@@ -258,6 +319,222 @@ def _erlang_coefficients(n, a):
     return coef
 
 
+def _numeric_vector(values, name):
+    """Return one finite numeric vector without changing the caller's storage."""
+
+    try:
+        vector = np.asarray(values, dtype=float)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{name} must be a numeric sequence") from error
+    if vector.ndim != 1:
+        raise ValueError(f"{name} must be a one-dimensional sequence")
+    if not np.all(np.isfinite(vector)):
+        raise ValueError(f"{name} must contain only finite values")
+    return vector
+
+
+def _delay_stage_rate(*, theta, n_delay):
+    if isinstance(n_delay, bool) or not isinstance(n_delay, (int, np.integer)) or n_delay < 0:
+        raise ValueError("delay-state count must be a nonnegative integer")
+    count = int(n_delay)
+    if count == 0:
+        return count, 0.0
+    if (
+        isinstance(theta, bool)
+        or not isinstance(theta, (int, float, np.integer, np.floating))
+        or not np.isfinite(float(theta))
+        or float(theta) <= 0.0
+    ):
+        raise ValueError("delay-chain theta must be positive and finite")
+    return count, count / float(theta)
+
+
+def replay_delay_chain_arrays(
+    duration_s,
+    combustion_load,
+    *,
+    theta,
+    n_delay,
+    initial_load,
+):
+    """Replay compact exact-load arrays through an Erlang chain analytically."""
+
+    durations = _numeric_vector(duration_s, "delay replay durations")
+    loads = _numeric_vector(combustion_load, "delay replay loads")
+    if len(durations) != len(loads):
+        raise ValueError("delay replay durations and loads must have the same length")
+    if np.any(durations <= 0.0):
+        raise ValueError("delay replay durations must be positive")
+    if np.any((loads < 0.0) | (loads > 1.0)):
+        raise ValueError("delay replay loads must be normalized to [0, 1]")
+    initial = _normalized_load(initial_load)
+    count, stage_rate = _delay_stage_rate(theta=theta, n_delay=n_delay)
+    if count == 0:
+        states = np.empty(0, dtype=float)
+        states.setflags(write=False)
+        return states
+
+    states = np.full(count, initial, dtype=float)
+    for duration, load in zip(durations, loads, strict=True):
+        coefficients = _erlang_coefficients(count, np.asarray([stage_rate * float(duration)]))[0]
+        normalized_load = float(load)
+        states = normalized_load + np.convolve(coefficients, states - normalized_load)[:count]
+    states.setflags(write=False)
+    return states
+
+
+def replay_delay_chain(
+    intervals: tuple[LearningTrajectoryFrame, ...],
+    *,
+    theta: float,
+    n_delay: int,
+    initial_load: float,
+) -> tuple[float, ...]:
+    """Replay exact delivered load through an Erlang chain without integration."""
+
+    durations: list[float] = []
+    loads: list[float] = []
+    previous_end_ms: int | None = None
+    for frame in intervals:
+        if not isinstance(frame, LearningTrajectoryFrame):
+            raise TypeError("delay replay intervals must be LearningTrajectoryFrame values")
+        start_ms = frame.monotonic_start_ms
+        end_ms = frame.monotonic_end_ms
+        if (
+            isinstance(start_ms, bool)
+            or isinstance(end_ms, bool)
+            or not isinstance(start_ms, int)
+            or not isinstance(end_ms, int)
+            or end_ms <= start_ms
+        ):
+            raise ValueError("delay replay intervals must have positive chronology")
+        if previous_end_ms is not None and start_ms < previous_end_ms:
+            raise ValueError("delay replay intervals must not overlap or reverse")
+        if frame.auger_delivery_certainty is not FrameDeliveryCertainty.EXACT:
+            raise ValueError("delay replay requires exact auger delivery")
+        durations.append((end_ms - start_ms) / 1_000)
+        loads.append(_normalized_load(frame.normalized_combustion_load))
+        previous_end_ms = end_ms
+    states = replay_delay_chain_arrays(
+        durations,
+        loads,
+        theta=theta,
+        n_delay=n_delay,
+        initial_load=initial_load,
+    )
+    return tuple(float(value) for value in states)
+
+
+def _simulate_grey_intervals(
+    duration_s,
+    combustion_load,
+    ambient_c,
+    *,
+    C_c,
+    h_amb,
+    T0,
+    K_Q,
+    sigma,
+    theta,
+    n_delay,
+    initial_delay_states,
+    max_dt,
+):
+    """Advance the shared grey physics and return temperature after each interval."""
+
+    count, stage_rate = _delay_stage_rate(theta=theta, n_delay=n_delay)
+    delay_states = np.array(initial_delay_states, dtype=float, copy=True)
+    if delay_states.ndim != 1 or len(delay_states) != count or not np.all(np.isfinite(delay_states)):
+        raise ValueError("initial delay states must be a finite vector matching n_delay")
+    if np.any((delay_states < 0.0) | (delay_states > 1.0)):
+        raise ValueError("initial delay states must be normalized to [0, 1]")
+    capacitance = float(C_c)
+    chamber = float(T0)
+    loss = float(h_amb)
+    gain = float(K_Q)
+    radiation = float(sigma)
+    step_limit = float(max_dt)
+    scalars = (capacitance, chamber, loss, gain, radiation, step_limit)
+    if not all(np.isfinite(value) for value in scalars):
+        raise ValueError("grey simulation parameters must be finite")
+    if capacitance <= 0.0 or step_limit <= 0.0:
+        raise ValueError("grey capacitance and maximum step must be positive")
+
+    out = np.empty(len(duration_s), dtype=float)
+    for index, (span_value, load_value, ambient_value) in enumerate(
+        zip(duration_s, combustion_load, ambient_c, strict=True)
+    ):
+        span = float(span_value)
+        if span <= 0.0:
+            out[index] = chamber
+            continue
+        steps = max(1, int(np.ceil(span / step_limit)))
+        dt = span / steps
+        load = float(load_value)
+        ambient = float(ambient_value)
+        if count:
+            deviation = delay_states - load
+            coefficients = _erlang_coefficients(
+                count,
+                np.arange(1, steps + 1, dtype=float) * (stage_rate * dt),
+            )
+            heat = load + coefficients @ deviation[::-1]
+            delay_states = load + np.convolve(coefficients[-1], deviation)[:count]
+        else:
+            heat = None
+        for substep in range(steps):
+            delayed_load = load if heat is None else float(heat[substep])
+            chamber += (
+                dt
+                * (gain * delayed_load - loss * (chamber - ambient) - _rad_loss(chamber, ambient, radiation))
+                / capacitance
+            )
+        out[index] = chamber
+    return out
+
+
+def simulate_grey_box_intervals(
+    duration_s,
+    combustion_load,
+    ambient_c,
+    *,
+    C_c,
+    h_amb,
+    T0,
+    K_Q=1.0,
+    sigma=0.0,
+    theta=0.0,
+    n_delay=0,
+    initial_delay_states=(),
+    max_dt=0.125,
+):
+    """Simulate compact independent intervals from explicit candidate delay state."""
+
+    durations = _numeric_vector(duration_s, "grey interval durations")
+    loads = _numeric_vector(combustion_load, "combustion load samples")
+    ambient = _numeric_vector(ambient_c, "ambient temperature samples")
+    if len(durations) != len(loads) or len(durations) != len(ambient):
+        raise ValueError("grey interval durations, loads, and ambient values must have the same length")
+    if np.any(durations <= 0.0):
+        raise ValueError("grey interval durations must be positive")
+    if np.any((loads < 0.0) | (loads > 1.0)):
+        raise ValueError("combustion load samples must be normalized to [0, 1]")
+    return _simulate_grey_intervals(
+        durations,
+        loads,
+        ambient,
+        C_c=C_c,
+        h_amb=h_amb,
+        T0=T0,
+        K_Q=K_Q,
+        sigma=sigma,
+        theta=theta,
+        n_delay=n_delay,
+        initial_delay_states=initial_delay_states,
+        max_dt=max_dt,
+    )
+
+
 def simulate_grey_box(
     t,
     combustion_load,
@@ -274,74 +551,50 @@ def simulate_grey_box(
 ):
     """Forward-simulate chamber temperature for the plant the MPC plans against.
 
-    The single executable statement of the dynamics documented at the top of
-    this module, including the radiative loss and the Erlang transport-delay
-    chain. The offline calibration utility fits through this function so the
-    parameters it produces describe the model that consumes them.
-
-    `out[i]` is the chamber temperature AT `t[i]`, so `out[0] == T0`; each step
-    advances the state from `t[i]` to `t[i+1]` under normalized
-    `combustion_load[i]`. The disturbance state `d` is absent: it exists to
-    time, and fitting against it would let it absorb the very mismatch a
-    calibration exists to remove.
-
-    THE DELAY CHAIN IS ADVANCED EXACTLY, NOT INTEGRATED. It is linear and its
-    input is constant across a sample interval, so its state at every sub-step
-    is available in closed form (`_erlang_coefficients`). Integrating it with
-    explicit Euler instead -- as this function used to -- costs two things this
-    model cannot afford. It is stable only for a sub-step below 2*theta/n_delay,
-    and `theta` is a FITTED parameter with no lower bound worth the name, so a
-    grill with a short feed path could overflow the residual the calibration is
-    solving against; and it under-delays each stage, which the solve then
-    compensates for by inflating `theta` by about n_delay * sub-step. The
-    estimators below and the do-mpc NLP both discretize this same continuous
-    model exactly, so that inflation was a disagreement between what the fit
-    measured and what the controller then planned against.
-
-    `max_dt` is what remains: the sub-step for the chamber's own explicit Euler
-    step. With the chain exact, the resulting error is first order in the
-    sub-step and INDEPENDENT of theta and n_delay -- measured at 0.099 to 0.114 C
-    RMS per second of sub-step on the real MAK cook in tests/unit/mpc/fixtures,
-    uniformly to within 5% across theta from 3 s to 200 s and n_delay from 4 to
-    20. The coefficient is 0.114 at the default below and 0.099 at the coarsest
-    step measured, so the default is the expensive end of that range rather than
-    the flattering one. The default holds the numerical error to 0.014 C RMS,
-    a ninth of the 0.16 C of model fidelity the single-lump structure was
-    adopted at, so that what a fit reports is the grill rather than the
-    integrator. The measurement is
-    docs/superpowers/experiments/substep_convergence.py.
+    ``out[i]`` is the chamber temperature at ``t[i]``.  The delay chain is
+    advanced analytically and the chamber uses the same bounded explicit step
+    as compact segmented fitting.
     """
-    t = np.asarray(t, dtype=float)
-    combustion_load = np.asarray(combustion_load, dtype=float)
-    if not np.all(np.isfinite(combustion_load)):
-        raise ValueError("combustion load samples must be finite")
-    n = max(int(n_delay), 0)
-    lag_tau = (float(theta) / n) if (n > 0 and theta > 0.0) else 0.0
-    lags = np.zeros(n)
-    T_c = float(T0)
-    out = np.empty_like(t)
-    for i in range(len(t)):
-        out[i] = T_c
-        if i == len(t) - 1:
-            break
-        span = float(t[i + 1] - t[i])
-        if span <= 0.0:
-            continue
-        steps = max(1, int(np.ceil(span / max_dt)))
-        dt = span / steps
-        load = float(combustion_load[i])
-        if lag_tau > 0.0:
-            # lags(k*dt) = load + exp(A*k*dt) @ (lags(0) - load), exactly, for
-            # every sub-step k at once.
-            dev = lags - load
-            coef = _erlang_coefficients(n, np.arange(1, steps + 1) * (dt / lag_tau))
-            heat = (load + coef @ dev[::-1]).tolist()
-            lags = load + np.convolve(coef[-1], dev)[:n]
-        else:
-            heat = [load] * steps
-        for k in range(steps):
-            dT_c = (K_Q * heat[k] - h_amb * (T_c - T_amb) - _rad_loss(T_c, T_amb, sigma)) / C_c
-            T_c += dt * dT_c
+
+    times = _numeric_vector(t, "grey simulation times")
+    loads = _numeric_vector(combustion_load, "combustion load samples")
+    if len(times) != len(loads):
+        raise ValueError("grey simulation times and loads must have the same length")
+    if np.any((loads < 0.0) | (loads > 1.0)):
+        raise ValueError("combustion load samples must be normalized to [0, 1]")
+    out = np.empty(len(times), dtype=float)
+    if not len(times):
+        return out
+    out[0] = float(T0)
+    if len(times) == 1:
+        return out
+
+    ambient_values = np.asarray(T_amb, dtype=float)
+    if ambient_values.ndim == 0:
+        ambient = np.full(len(times) - 1, float(ambient_values), dtype=float)
+    elif ambient_values.ndim == 1 and len(ambient_values) == len(times):
+        ambient = ambient_values[:-1]
+    elif ambient_values.ndim == 1 and len(ambient_values) == len(times) - 1:
+        ambient = ambient_values
+    else:
+        raise ValueError("ambient temperature must be scalar or match the simulation intervals")
+    if not np.all(np.isfinite(ambient)):
+        raise ValueError("ambient temperature samples must be finite")
+    count, _ = _delay_stage_rate(theta=theta, n_delay=n_delay)
+    out[1:] = _simulate_grey_intervals(
+        np.diff(times),
+        loads[:-1],
+        ambient,
+        C_c=C_c,
+        h_amb=h_amb,
+        T0=T0,
+        K_Q=K_Q,
+        sigma=sigma,
+        theta=theta,
+        n_delay=n_delay,
+        initial_delay_states=np.zeros(count, dtype=float),
+        max_dt=max_dt,
+    )
     return out
 
 

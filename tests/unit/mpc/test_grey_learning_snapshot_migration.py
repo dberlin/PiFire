@@ -2,18 +2,32 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
+from dataclasses import replace
 
 import pytest
 
 from common import datastore
 from common.controller_model_state import MODEL_STATE_KEY, SCHEMA_VERSION
+from common.persistence.model_challenger import (
+    compare_and_swap_model_challenger,
+    read_model_challenger,
+)
 from common.persistence.model_evidence import read_model_activation, read_model_evidence
-from controller.model_learning.activation import GreyControlPairDescriptor, canonical_snapshot_digest
+from controller.model_learning.activation import (
+    ActivationPhase,
+    GreyControlPairDescriptor,
+    canonical_snapshot_digest,
+)
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
-from controller.model_learning.migration import migrate_mpc_learning_authority
+from controller.model_learning.migration import (
+    commit_restore_revalidation_authority,
+    migrate_mpc_learning_authority,
+)
 from controller.model_learning.report import backend_learning_report
+from controller.mpc_factory import MpcPairFactory
 from controller.mpc_model import MODEL_SCHEMA
 from controller.mpc_snapshot import GreySnapshotInvalid, migrate_grey_learning_snapshot
 
@@ -50,9 +64,168 @@ def _v3(**overrides):
 
 
 def _v4(revision=17, *, theta=47.0):
-    migrated = migrate_grey_learning_snapshot(_v3(revision=revision, params={**PARAMS, "theta": theta}))
-    assert migrated is not None
-    return migrated
+    parameters = {**PARAMS, "theta": theta}
+    active_digest = hashlib.sha256(
+        json.dumps(
+            parameters,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    return {
+        "version": 4,
+        "revision": revision,
+        "schema": "pifire-grey-learning/v4",
+        "structure": {"kind": "grey-box", "n_delay": 8, "state_count": 10},
+        "active": {
+            "parameters": parameters,
+            "metadata": {
+                "rmse": 1.7,
+                "samples": 420,
+                "band_c": [80.0, 220.0],
+                "nfev": 11,
+            },
+        },
+        "challenger": None,
+        "active_pair": None,
+        "window": None,
+        "candidate_pair": None,
+        "evidence": {
+            "eligible": 0,
+            "rejected": 0,
+            "confidence_decision_id": None,
+        },
+        "origin": None,
+        "policy": None,
+        "identification": {"status": "identified"},
+        "cook_refit": {"status": "idle", "latest": None},
+        "identities": {
+            "active_digest": active_digest,
+            "active_generation": 0,
+            "candidate_digest": None,
+            "candidate_generation": None,
+            "rollback_digest": None,
+            "rollback_generation": None,
+        },
+        "activation": {
+            "phase": "aborted",
+            "pending_persistence": False,
+            "pending_swap": False,
+        },
+        "failure": None,
+    }
+
+
+def _v5(revision=17, *, theta=47.0):
+    snapshot = _v4(revision=revision, theta=theta)
+    snapshot["version"] = 5
+    snapshot["schema"] = "pifire-grey-learning/v5"
+    snapshot.pop("challenger")
+    snapshot.pop("window")
+    snapshot.pop("candidate_pair")
+    snapshot["identities"].pop("candidate_digest")
+    snapshot["identities"].pop("candidate_generation")
+    snapshot["challenger_authority"] = None
+    return snapshot
+
+
+def _ready_review_v4():
+    snapshot = _v4(revision=4)
+    active_configuration = {
+        "schema": "pifire-grey-box-model/v4",
+        "n_delay": 8,
+        "parameters": {name: value for name, value in PARAMS.items() if name != "n_delay"},
+    }
+    candidate_configuration = {
+        **active_configuration,
+        "parameters": {
+            **active_configuration["parameters"],
+            "theta": 65.0,
+        },
+    }
+    legacy_active = GreyControlPairDescriptor(
+        model_digest=canonical_snapshot_digest(active_configuration),
+        configuration=active_configuration,
+        estimator_kind="ekf",
+        solver_kind="acados-grey",
+        candidate_generation=4,
+        role_generation=4,
+    )
+    legacy_candidate = GreyControlPairDescriptor(
+        model_digest=canonical_snapshot_digest(candidate_configuration),
+        configuration=candidate_configuration,
+        estimator_kind="ekf",
+        solver_kind="acados-grey",
+        candidate_generation=5,
+        role_generation=4,
+    )
+    active = MpcPairFactory.migrate_legacy_descriptor(legacy_active)
+    candidate = MpcPairFactory.migrate_legacy_descriptor(legacy_candidate)
+    snapshot["active"] = {
+        "parameters": dict(PARAMS),
+        "metadata": {
+            "rmse": 1.7,
+            "samples": 420,
+            "band_c": [80.0, 220.0],
+            "nfev": 11,
+        },
+    }
+    snapshot["challenger"] = {
+        "parameters": {
+            **PARAMS,
+            "theta": 65.0,
+        },
+        "metadata": {
+            "rmse": 1.2,
+            "samples": 420,
+            "band_c": [80.0, 220.0],
+            "nfev": 9,
+        },
+        "calibration_manifest": {
+            "command_revision": 11,
+            "session_id": "legacy-session",
+            "completed_stages": ["low", "middle", "high", "coast"],
+            "stage_evidence_ids": [
+                "legacy-calibration-low",
+                "legacy-calibration-middle",
+                "legacy-calibration-high",
+                "legacy-calibration-coast",
+            ],
+        },
+    }
+    snapshot["active_pair"] = legacy_active.to_dict()
+    snapshot["candidate_pair"] = legacy_candidate.to_dict()
+    snapshot["window"] = {
+        "session_id": "legacy-session",
+        "cook_id": "legacy-cook",
+        "first_observation_sequence": 21,
+        "last_observation_sequence": 440,
+        "configuration_digest": "c" * 64,
+        "incumbent_digest": active.model_digest,
+        "role_generation": active.role_generation,
+    }
+    snapshot["evidence"]["confidence_decision_id"] = "legacy-ready-decision"
+    snapshot["origin"] = CandidateOrigin.OPERATOR_CALIBRATION.value
+    snapshot["policy"] = "operator-reviewed"
+    snapshot["cook_refit"] = {
+        "status": "succeeded",
+        "latest": "ready-for-review",
+    }
+    snapshot["identities"] = {
+        "active_digest": active.model_digest,
+        "active_generation": active.role_generation,
+        "candidate_digest": candidate.model_digest,
+        "candidate_generation": candidate.candidate_generation,
+        "rollback_digest": None,
+        "rollback_generation": None,
+    }
+    snapshot["activation"] = {
+        "phase": "aborted",
+        "pending_persistence": False,
+        "pending_swap": False,
+    }
+    return snapshot, active, candidate
 
 
 def _authority(snapshot, *, kind="grey-box", generation=4):
@@ -76,14 +249,14 @@ def _stored_controller():
     return json.loads(datastore.get_blob(MODEL_STATE_KEY))["models"]["mpc"]
 
 
-def test_model_schema_is_grey_v4():
-    assert MODEL_SCHEMA == 4
+def test_model_schema_is_grey_v7():
+    assert MODEL_SCHEMA == 7
 
 
 def test_v3_migration_preserves_only_bounded_top_level_grey_data():
     migrated = migrate_grey_learning_snapshot(_v3())
 
-    assert migrated["version"] == 4
+    assert migrated["version"] == 7
     assert migrated["revision"] == 17
     assert migrated["structure"] == {"kind": "grey-box", "n_delay": 8, "state_count": 10}
     assert migrated["active"]["parameters"] == PARAMS
@@ -98,12 +271,59 @@ def test_v3_migration_preserves_only_bounded_top_level_grey_data():
     assert "innovation-state-space" not in encoded
     assert "neural" not in encoded
     assert migrated["evidence"] == {"eligible": 0, "rejected": 0, "confidence_decision_id": None}
+    assert migrated["challenger_authority"] is None
+    assert {
+        "challenger",
+        "window",
+        "candidate_pair",
+    }.isdisjoint(migrated)
+    assert "cook_refit" not in migrated
+    assert set(migrated["identities"]) == {
+        "active_digest",
+        "active_generation",
+        "rollback_digest",
+        "rollback_generation",
+    }
 
 
-def test_v4_round_trip_is_lossless_and_never_emits_v3():
-    current = _v4()
-    assert migrate_grey_learning_snapshot(current) == current
-    assert migrate_grey_learning_snapshot(current)["version"] == 4
+def test_v4_normalizes_to_v7_without_importing_an_inline_candidate():
+    migrated = migrate_grey_learning_snapshot(_v4())
+
+    assert migrated["version"] == 7
+    assert migrated["schema"] == "pifire-grey-learning/v7"
+    assert migrated["challenger_authority"] is None
+    assert {"challenger", "window", "candidate_pair", "cook_refit"}.isdisjoint(migrated)
+
+
+def test_v5_normalizes_to_v7_without_retaining_cook_refit():
+    migrated = migrate_grey_learning_snapshot(_v5())
+
+    assert migrated["version"] == 7
+    assert migrated["schema"] == "pifire-grey-learning/v7"
+    assert migrated["challenger_authority"] is None
+    assert "cook_refit" not in migrated
+
+
+def test_retired_cook_refit_origin_is_safely_retired_during_v5_migration():
+    legacy = _v5()
+    legacy["origin"] = "cook-refit"
+    legacy["policy"] = "cook-refit"
+    legacy["activation"] = {
+        "phase": "active",
+        "pending_persistence": False,
+        "pending_swap": False,
+    }
+
+    migrated = migrate_grey_learning_snapshot(legacy)
+
+    assert migrated["origin"] is None
+    assert migrated["policy"] is None
+    assert migrated["challenger_authority"] is None
+    assert migrated["activation"] == {
+        "phase": "aborted",
+        "pending_persistence": False,
+        "pending_swap": False,
+    }
 
 
 @pytest.mark.parametrize("delay", [0, 4, 7, 9, 8.5])
@@ -146,7 +366,7 @@ def test_atomic_authority_migration_matrix(ds, activation, controller, expected_
     assert result.source == expected_source
     assert result.reason == reason
     assert stored == result.snapshot
-    assert stored["version"] == 4
+    assert stored["version"] == 7
     assert stored["active"]["parameters"]["theta"] == expected_theta
     migration = json.loads(datastore.get_blob("mpc:model_activation_migration_input"))
     assert migration["current"]["snapshot"] == stored
@@ -253,8 +473,9 @@ def test_active_source_rewrites_snapshot_pointer_without_losing_singleton_identi
         separators=(",", ":"),
         allow_nan=False,
     )
-    assert state.phase == "prepared"
+    assert state.phase == "aborted"
     assert state.transaction_id == "transaction-active"
+    assert state.reason is not None and "prepared" in state.reason
     assert state.evidence_decision_id == "decision-active"
     assert state.incumbent_pair == active
     assert state.candidate_generation == 7
@@ -263,12 +484,11 @@ def test_active_source_rewrites_snapshot_pointer_without_losing_singleton_identi
     assert result.snapshot["identities"]["active_digest"] == active.model_digest
     assert result.snapshot["identities"]["active_generation"] == active.role_generation
     assert result.snapshot["evidence"]["confidence_decision_id"] == "decision-active"
-    assert result.snapshot["origin"] == CandidateOrigin.OPERATOR_CALIBRATION.value
-    assert result.snapshot["policy"] == ActivationPolicy.OPERATOR_REVIEWED.value
+    assert result.snapshot["challenger_authority"] is None
     assert result.snapshot["activation"] == {
-        "phase": "prepared",
+        "phase": "aborted",
         "pending_persistence": False,
-        "pending_swap": True,
+        "pending_swap": False,
     }
     assert canonical_snapshot_digest(state.active_pair.configuration) == result.snapshot["identities"]["active_digest"]
 
@@ -277,14 +497,12 @@ def test_migration_invalidation_is_durable_and_surfaces_from_real_backend(ds):
     _seed_controller({"version": 3, "broken": True})
 
     result = migrate_mpc_learning_authority(defaults=PARAMS)
-    report, records = backend_learning_report()
+    _, records = backend_learning_report()
 
-    invalidations = [
-        record for record in records if record.kind.value == "schema_invalidation" and record.schema_version == 3
-    ]
+    invalidations = [record for record in records if record.kind.value == "schema_invalidation"]
     assert result.reason == "schema-invalidated"
     assert len(invalidations) == 1
-    assert report.as_dict()["status"] == "schema-invalidated"
+    assert invalidations[0].schema_version == 3
     assert _stored_controller() == result.snapshot
 
 
@@ -355,7 +573,7 @@ def test_current_active_precedes_rollback_and_controller_authorities(ds):
         (
             {
                 "model_kind": "grey-box",
-                "model_schema": 4,
+                "model_schema": 5,
                 "snapshot": _v3(params={**PARAMS, "theta": 31.0}),
             },
             "schema-invalidated",
@@ -371,8 +589,8 @@ def test_current_active_precedes_rollback_and_controller_authorities(ds):
         (
             {
                 "model_kind": "grey-box",
-                "model_schema": 4,
-                "snapshot": {"version": 4},
+                "model_schema": 7,
+                "snapshot": {"version": 7},
             },
             "schema-invalidated",
         ),
@@ -425,7 +643,7 @@ def test_malformed_serialized_documents_are_replaced_by_defaults_without_partial
         "candidate": None,
         "current": {
             "model_kind": "grey-box",
-            "model_schema": 4,
+            "model_schema": 7,
             "snapshot": result.snapshot,
             "source": "defaults",
         },
@@ -443,8 +661,11 @@ def test_legacy_singleton_snapshot_is_selected_when_no_pair_identity_exists(ds):
             INSERT INTO model_activation_state(
                 singleton, active_snapshot_json, rollback_snapshot_json,
                 evidence_decision_id, controller_configuration_digest,
-                role_generation, phase
-            ) VALUES(1, ?, ?, 'legacy-decision', ?, 9, 'active')
+                role_generation, phase, origin, policy
+            ) VALUES(
+                1, ?, ?, 'legacy-decision', ?, 9, 'active',
+                'operator-calibration', 'operator-reviewed'
+            )
             """,
             (
                 json.dumps(active, indent=2),
@@ -455,20 +676,25 @@ def test_legacy_singleton_snapshot_is_selected_when_no_pair_identity_exists(ds):
 
     result = migrate_mpc_learning_authority(defaults=PARAMS)
     state = read_model_activation()
+    normalized_active = migrate_grey_learning_snapshot(active)
 
     assert result.source == "active"
     assert result.reason is None
-    assert result.snapshot == active
+    assert result.snapshot["active"] == normalized_active["active"]
     assert state is not None
     assert state.active_pair is None
     assert state.evidence_decision_id == "legacy-decision"
+    assert state.origin == CandidateOrigin.OPERATOR_CALIBRATION.value
+    assert state.policy == ActivationPolicy.CAUSAL_AUTO.value
+    assert result.snapshot["origin"] == CandidateOrigin.OPERATOR_CALIBRATION.value
+    assert result.snapshot["policy"] == ActivationPolicy.CAUSAL_AUTO.value
     assert state.active_snapshot_json == json.dumps(
-        active,
+        result.snapshot,
         sort_keys=True,
         separators=(",", ":"),
         allow_nan=False,
     )
-    assert _stored_controller() == active
+    assert _stored_controller() == result.snapshot
 
 
 def test_invalid_active_pair_configuration_yields_to_valid_rollback_pair(ds):
@@ -604,3 +830,305 @@ def test_rejected_rollback_pointer_update_rolls_back_controller_and_singleton(ds
     assert _stored_controller() == original
     assert read_model_activation() == original_state
     assert read_model_evidence() == original_evidence
+
+
+@pytest.mark.parametrize(
+    ("origin", "policy"),
+    (
+        (CandidateOrigin.PASSIVE_ONLINE, "passive-auto"),
+        (
+            CandidateOrigin.OPERATOR_CALIBRATION,
+            "operator-reviewed",
+        ),
+    ),
+)
+def test_controller_only_v5_legacy_policy_canonicalizes_without_reactivation(
+    ds,
+    origin: CandidateOrigin,
+    policy: str,
+) -> None:
+    checkpoint = _v5()
+    checkpoint["origin"] = origin.value
+    checkpoint["policy"] = policy
+    checkpoint["activation"] = {
+        "phase": "active",
+        "pending_persistence": False,
+        "pending_swap": False,
+    }
+    _seed_controller(checkpoint)
+
+    result = migrate_mpc_learning_authority(defaults=PARAMS)
+
+    assert result.source == "controller"
+    assert result.snapshot["origin"] == origin.value
+    assert result.snapshot["policy"] == ActivationPolicy.CAUSAL_AUTO.value
+    assert result.snapshot["activation"] == {
+        "phase": "active",
+        "pending_persistence": False,
+        "pending_swap": False,
+    }
+    assert read_model_activation() is None
+
+
+def test_valid_legacy_v4_ready_review_imports_one_evaluating_challenger(ds):
+    legacy, active, candidate = _ready_review_v4()
+    _seed_controller(legacy)
+
+    result = migrate_mpc_learning_authority(defaults=PARAMS)
+    challenger = read_model_challenger()
+
+    assert challenger is not None
+    assert challenger.phase == "evaluating"
+    assert challenger.origin is CandidateOrigin.OPERATOR_CALIBRATION
+    assert challenger.policy is ActivationPolicy.CAUSAL_AUTO
+    assert challenger.incumbent == active
+    assert challenger.candidate == candidate
+    assert challenger.controller_configuration_digest == legacy["window"]["configuration_digest"]
+    assert challenger.fit_lineage.parent_incumbent_digest == active.model_digest
+    assert challenger.fit_lineage.candidate_digest == candidate.model_digest
+    assert challenger.evaluation_epoch == 0
+    assert challenger.evaluation_round == 0
+    assert challenger.consecutive_wins == 0
+    assert challenger.last_decision_id is None
+    assert challenger.last_evidence_id is None
+    assert challenger.calibration_manifest == {
+        "command_revision": 11,
+        "session_id": "legacy-session",
+        "completed_stages": ("low", "middle", "high", "coast"),
+        "stage_evidence_ids": (
+            "legacy-calibration-low",
+            "legacy-calibration-middle",
+            "legacy-calibration-high",
+            "legacy-calibration-coast",
+        ),
+    }
+    assert result.snapshot["origin"] == CandidateOrigin.OPERATOR_CALIBRATION.value
+    assert result.snapshot["policy"] == ActivationPolicy.CAUSAL_AUTO.value
+    assert result.snapshot["challenger_authority"] == {
+        "challenger_id": challenger.challenger_id,
+        "revision": challenger.revision,
+    }
+    assert {"challenger", "window", "candidate_pair"}.isdisjoint(result.snapshot)
+    assert set(result.snapshot["identities"]) == {
+        "active_digest",
+        "active_generation",
+        "rollback_digest",
+        "rollback_generation",
+    }
+    assert _stored_controller() == result.snapshot
+
+
+def test_restore_revalidation_commit_publishes_complete_fallback_authority(ds) -> None:
+    legacy, _, _ = _ready_review_v4()
+    _seed_controller(legacy)
+    imported = migrate_mpc_learning_authority(defaults=PARAMS)
+    challenger = read_model_challenger()
+    assert challenger is not None
+    assert imported.snapshot["active_pair"] == challenger.incumbent.to_dict()
+
+    commit_restore_revalidation_authority(
+        snapshot=imported.snapshot,
+        challenger=challenger,
+        expected_challenger=challenger,
+        fallback_pair=challenger.incumbent,
+    )
+
+    activation = read_model_activation()
+    assert _stored_controller() == imported.snapshot
+    assert activation is not None
+    assert activation.phase == ActivationPhase.ABORTED.value
+    assert activation.transaction_id is not None
+    assert activation.incumbent_pair == challenger.incumbent
+    assert activation.candidate_pair == challenger.incumbent
+    assert activation.rollback_pair == challenger.incumbent
+    assert activation.reason == "installation-restore-revalidation"
+
+
+def test_restore_revalidation_commit_rolls_back_checkpoint_when_activation_write_fails(
+    ds,
+) -> None:
+    legacy, _, _ = _ready_review_v4()
+    _seed_controller(legacy)
+    imported = migrate_mpc_learning_authority(defaults=PARAMS)
+    challenger = read_model_challenger()
+    assert challenger is not None
+    commit_restore_revalidation_authority(
+        snapshot=imported.snapshot,
+        challenger=challenger,
+        expected_challenger=challenger,
+        fallback_pair=challenger.incumbent,
+    )
+    checkpoint_before = _stored_controller()
+    activation_before = read_model_activation()
+    replacement_challenger = replace(
+        challenger,
+        challenger_id="restore-revalidation-replacement",
+        revision=0,
+        created_ms=challenger.created_ms + 1,
+        updated_ms=challenger.updated_ms + 1,
+    )
+    replacement = {
+        **imported.snapshot,
+        "revision": imported.snapshot["revision"] + 1,
+        "challenger_authority": {
+            "challenger_id": replacement_challenger.challenger_id,
+            "revision": replacement_challenger.revision,
+        },
+    }
+    with datastore.connection() as connection:
+        connection.execute(
+            """
+            CREATE TRIGGER reject_restore_revalidation
+            BEFORE UPDATE ON model_activation_state
+            BEGIN
+                SELECT RAISE(ABORT, 'forced activation write failure');
+            END
+            """
+        )
+
+    try:
+        with pytest.raises(sqlite3.IntegrityError, match="forced activation write failure"):
+            commit_restore_revalidation_authority(
+                snapshot=replacement,
+                challenger=replacement_challenger,
+                expected_challenger=challenger,
+                fallback_pair=challenger.incumbent,
+            )
+    finally:
+        with datastore.connection() as connection:
+            connection.execute("DROP TRIGGER reject_restore_revalidation")
+
+    assert _stored_controller() == checkpoint_before
+    assert read_model_activation() == activation_before
+    assert read_model_challenger() == challenger
+
+
+@pytest.mark.parametrize(
+    "invalid_lineage",
+    [
+        "missing-challenger",
+        "missing-window",
+        "missing-candidate-pair",
+        "candidate-digest",
+        "incumbent-digest",
+        "origin-policy",
+    ],
+)
+def test_invalid_legacy_v4_candidate_is_absent_or_retired(ds, invalid_lineage: str) -> None:
+    legacy, _, _ = _ready_review_v4()
+    if invalid_lineage == "missing-challenger":
+        legacy["challenger"] = None
+    elif invalid_lineage == "missing-window":
+        legacy["window"] = None
+    elif invalid_lineage == "missing-candidate-pair":
+        legacy["candidate_pair"] = None
+    elif invalid_lineage == "candidate-digest":
+        legacy["identities"] = {
+            **legacy["identities"],
+            "candidate_digest": "e" * 64,
+        }
+    elif invalid_lineage == "incumbent-digest":
+        legacy["window"] = {
+            **legacy["window"],
+            "incumbent_digest": "f" * 64,
+        }
+    else:
+        legacy["policy"] = "passive-auto"
+    _seed_controller(legacy)
+
+    result = migrate_mpc_learning_authority(defaults=PARAMS)
+    challenger = read_model_challenger()
+
+    assert result.snapshot["challenger_authority"] is None
+    assert {"challenger", "window", "candidate_pair"}.isdisjoint(result.snapshot)
+    assert challenger is None or (challenger.phase == "retired" and challenger.retirement_reason is not None)
+
+
+def test_legacy_v4_prepared_activation_aborts_without_importing_candidate(ds):
+    legacy, _, _ = _ready_review_v4()
+    legacy["activation"] = {
+        "phase": "prepared",
+        "pending_persistence": False,
+        "pending_swap": True,
+    }
+    _seed_controller(legacy)
+
+    result = migrate_mpc_learning_authority(defaults=PARAMS)
+    activation = read_model_activation()
+    challenger = read_model_challenger()
+
+    assert result.snapshot["activation"] == {
+        "phase": "aborted",
+        "pending_persistence": False,
+        "pending_swap": False,
+    }
+    assert result.snapshot["challenger_authority"] is None
+    assert activation is None or activation.phase == ActivationPhase.ABORTED.value
+    assert challenger is None or challenger.phase == "retired"
+
+
+@pytest.mark.parametrize("mismatch", ["challenger-id", "revision"])
+def test_v7_challenger_reference_mismatch_retires_instead_of_projecting(ds, mismatch: str) -> None:
+    legacy, _, _ = _ready_review_v4()
+    _seed_controller(legacy)
+    imported = migrate_mpc_learning_authority(defaults=PARAMS)
+    challenger = read_model_challenger()
+    assert challenger is not None
+    tampered = {
+        **imported.snapshot,
+        "challenger_authority": {
+            "challenger_id": ("different-challenger" if mismatch == "challenger-id" else challenger.challenger_id),
+            "revision": (challenger.revision + 1 if mismatch == "revision" else challenger.revision),
+        },
+    }
+    _seed_controller(tampered)
+
+    remigrated = migrate_mpc_learning_authority(defaults=PARAMS)
+    retired = read_model_challenger()
+
+    assert remigrated.snapshot["challenger_authority"] is None
+    assert retired is not None
+    assert retired.phase == "retired"
+    assert retired.retirement_reason is not None and "reference" in retired.retirement_reason
+
+
+def test_v7_older_revision_reference_adopts_newer_durable_progress(ds) -> None:
+    legacy, _, _ = _ready_review_v4()
+    _seed_controller(legacy)
+    imported = migrate_mpc_learning_authority(defaults=PARAMS)
+    challenger = read_model_challenger()
+    assert challenger is not None
+    assert imported.snapshot["challenger_authority"] == {
+        "challenger_id": challenger.challenger_id,
+        "revision": challenger.revision,
+    }
+    advanced = compare_and_swap_model_challenger(
+        expected_revision=challenger.revision,
+        replacement=replace(
+            challenger,
+            revision=challenger.revision + 1,
+            updated_ms=challenger.updated_ms + 1,
+        ),
+    )
+
+    remigrated = migrate_mpc_learning_authority(defaults=PARAMS)
+
+    assert remigrated.snapshot["challenger_authority"] == {
+        "challenger_id": advanced.challenger_id,
+        "revision": advanced.revision,
+    }
+    assert read_model_challenger() == advanced
+
+
+def test_unreadable_challenger_row_is_removed_during_migration(ds) -> None:
+    legacy, _, _ = _ready_review_v4()
+    _seed_controller(legacy)
+    imported = migrate_mpc_learning_authority(defaults=PARAMS)
+    assert imported.snapshot["challenger_authority"] is not None
+    with datastore.connection() as connection:
+        connection.execute("UPDATE model_challenger_state SET state_json='{}' WHERE singleton=1")
+
+    remigrated = migrate_mpc_learning_authority(defaults=PARAMS)
+
+    assert remigrated.snapshot["challenger_authority"] is None
+    assert read_model_challenger() is None

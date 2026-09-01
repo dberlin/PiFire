@@ -7,10 +7,17 @@ import sqlite3
 import threading
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+from common import schema_migrations
+
+if TYPE_CHECKING:
+    from sqlite_utils import Database
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 DB_PATH: str = os.environ.get("PIFIRE_DB_PATH", os.path.join(_HERE, "..", "pifire.db"))
 _ORIGINAL_DB_PATH: str = DB_PATH
+DB_SCHEMA_VERSION = schema_migrations.CURRENT_SCHEMA_VERSION
 
 _local = threading.local()
 
@@ -19,6 +26,7 @@ _database_creation_allowed = True
 
 class DatabaseNotFoundError(sqlite3.OperationalError):
     """Raised when existing-only initialization cannot find the datastore."""
+
 
 # history table DDL (schema v8). `{name}` is templated so the pre-v4
 # migration below can rebuild it under a temporary name (history_new) with an
@@ -209,7 +217,7 @@ BEGIN
 END"""
 
 
-def _ensure_logs_retention(conn):
+def _ensure_logs_retention(database):
     """Install the retention trigger, but only when it is missing or stale.
 
     Unconditionally running DROP + CREATE would write to sqlite_master on EVERY
@@ -219,10 +227,11 @@ def _ensure_logs_retention(conn):
     state a single indexed read of sqlite_master.
     """
     desired = _logs_retention_ddl()
-    row = conn.execute("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='logs_prune'").fetchone()
+    row = database.execute("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='logs_prune'").fetchone()
     if row is not None and " ".join(row[0].split()) == " ".join(desired.split()):
         return
-    conn.executescript(f"DROP TRIGGER IF EXISTS logs_prune;\n{desired};")
+    database.execute("DROP TRIGGER IF EXISTS logs_prune")
+    database.execute(desired)
 
 
 SCHEMA = (
@@ -264,6 +273,150 @@ CREATE INDEX IF NOT EXISTS ix_errors_kind_id ON errors(kind, id);
 """
 )
 
+
+# Durable bounded cumulative-learning corpus (schema v9). Kept out of SCHEMA so
+# every table, index, singleton row, and the user_version bump stay in
+# _ensure_schema()'s serialized, atomic transaction.
+_LEARNING_TRAJECTORY_V9_DDL = (
+    """
+CREATE TABLE IF NOT EXISTS learning_trajectory_corpus (
+    singleton                  INTEGER PRIMARY KEY CHECK(singleton = 1),
+    schema_version             INTEGER NOT NULL,
+    corpus_revision            INTEGER NOT NULL,
+    segment_count              INTEGER NOT NULL,
+    pre_roll_count             INTEGER NOT NULL,
+    scored_count               INTEGER NOT NULL,
+    evicted_segment_count      INTEGER NOT NULL,
+    evicted_pre_roll_count     INTEGER NOT NULL,
+    evicted_scored_count       INTEGER NOT NULL,
+    quarantined_segment_count  INTEGER NOT NULL
+)
+""",
+    """
+CREATE TABLE IF NOT EXISTS learning_trajectory_segment (
+    segment_id                 TEXT PRIMARY KEY,
+    state                      TEXT NOT NULL CHECK(state IN ('open','finalized','quarantined')),
+    fit_partition_digest       TEXT NOT NULL,
+    header_json                TEXT NOT NULL CHECK(json_valid(header_json)),
+    start_monotonic_ms         INTEGER NOT NULL,
+    end_monotonic_ms           INTEGER NOT NULL,
+    start_wall_ms              INTEGER NOT NULL,
+    end_wall_ms                INTEGER NOT NULL,
+    start_sequence             INTEGER NOT NULL,
+    end_sequence               INTEGER NOT NULL,
+    hold_entry_json            TEXT CHECK(hold_entry_json IS NULL OR json_valid(hold_entry_json)),
+    hold_entry_revision        INTEGER,
+    pre_roll_count             INTEGER NOT NULL,
+    scored_count               INTEGER NOT NULL,
+    next_ordinal               INTEGER NOT NULL,
+    rolling_digest             TEXT NOT NULL,
+    final_digest               TEXT,
+    content_digest             TEXT NOT NULL,
+    begin_content_digest        TEXT NOT NULL,
+    roll_successor_segment_id   TEXT,
+    created_corpus_revision    INTEGER NOT NULL,
+    updated_corpus_revision    INTEGER NOT NULL,
+    finalized_corpus_revision  INTEGER,
+    pre_roll_end_reason        TEXT,
+    terminal_break_reason      TEXT,
+    source_trace_digest        TEXT,
+    source_schema_version      INTEGER NOT NULL,
+    source_row_digest          TEXT
+)
+""",
+    """
+CREATE TABLE IF NOT EXISTS learning_trajectory_frame (
+    segment_id                 TEXT NOT NULL,
+    ordinal                    INTEGER NOT NULL,
+    kind                       TEXT NOT NULL CHECK(kind IN ('pre-roll','scored')),
+    payload_schema_version     INTEGER NOT NULL CHECK(payload_schema_version IN (2, 3)),
+    interval_identity          TEXT NOT NULL,
+    canonical_json             TEXT NOT NULL CHECK(json_valid(canonical_json)),
+    frame_digest               TEXT NOT NULL,
+    created_corpus_revision    INTEGER NOT NULL,
+    PRIMARY KEY(segment_id, ordinal),
+    FOREIGN KEY(segment_id) REFERENCES learning_trajectory_segment(segment_id) ON DELETE CASCADE
+)
+""",
+    """
+CREATE TABLE IF NOT EXISTS learning_trajectory_operation_receipt (
+    operation_key             TEXT PRIMARY KEY,
+    operation_kind            TEXT NOT NULL CHECK(operation_kind IN ('append','break-and-begin')),
+    source_segment_id         TEXT NOT NULL,
+    request_digest            TEXT NOT NULL,
+    result_segment_id         TEXT NOT NULL,
+    inserted_pre_roll_count   INTEGER NOT NULL,
+    inserted_scored_count     INTEGER NOT NULL,
+    created_corpus_revision   INTEGER NOT NULL,
+    FOREIGN KEY(source_segment_id) REFERENCES learning_trajectory_segment(segment_id) ON DELETE CASCADE
+)
+""",
+    """
+CREATE TABLE IF NOT EXISTS learning_fit_run (
+    request_id                    TEXT PRIMARY KEY,
+    status                        TEXT NOT NULL CHECK(status IN ('queued','running','succeeded','failed','interrupted','stale')),
+    fit_partition_digest          TEXT NOT NULL,
+    corpus_revision               INTEGER NOT NULL,
+    corpus_digest                 TEXT NOT NULL,
+    manifest_json                 TEXT CHECK(manifest_json IS NULL OR json_valid(manifest_json)),
+    parent_incumbent_digest       TEXT NOT NULL,
+    parent_incumbent_generation   INTEGER NOT NULL,
+    candidate_generation          INTEGER NOT NULL,
+    trigger_origin                TEXT NOT NULL,
+    candidate_digest              TEXT,
+    result_error                  TEXT,
+    created_ms                    INTEGER NOT NULL,
+    started_ms                    INTEGER,
+    completed_ms                  INTEGER
+)
+""",
+    (
+        "CREATE INDEX IF NOT EXISTS ix_learning_segment_retention "
+        "ON learning_trajectory_segment(state, end_wall_ms, segment_id)"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS ix_learning_segment_partition "
+        "ON learning_trajectory_segment(fit_partition_digest, start_wall_ms, segment_id)"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS ix_learning_frame_revision "
+        "ON learning_trajectory_frame(segment_id, created_corpus_revision, ordinal)"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS ix_learning_operation_source "
+        "ON learning_trajectory_operation_receipt(source_segment_id, created_corpus_revision, operation_key)"
+    ),
+    ("CREATE INDEX IF NOT EXISTS ix_learning_fit_terminal ON learning_fit_run(status, completed_ms, request_id)"),
+    """
+INSERT OR IGNORE INTO learning_trajectory_corpus(
+    singleton, schema_version, corpus_revision, segment_count,
+    pre_roll_count, scored_count, evicted_segment_count,
+    evicted_pre_roll_count, evicted_scored_count,
+    quarantined_segment_count
+) VALUES(1, 1, 0, 0, 0, 0, 0, 0, 0, 0)
+""",
+)
+
+# Singleton durable challenger authority (schema v10).  The canonical JSON
+# owns the complete immutable state; the repeated identity columns make
+# revision CAS and corruption detection possible without trusting that JSON.
+_MODEL_CHALLENGER_V10_DDL = (
+    """
+CREATE TABLE model_challenger_state (
+    singleton      INTEGER PRIMARY KEY CHECK(singleton = 1),
+    challenger_id  TEXT NOT NULL,
+    revision       INTEGER NOT NULL CHECK(revision >= 0),
+    phase          TEXT NOT NULL
+                   CHECK(phase IN ('built', 'evaluating', 'qualified',
+                                   'activating', 'retired')),
+    schema_version INTEGER NOT NULL CHECK(schema_version = 1),
+    state_json     TEXT NOT NULL CHECK(json_valid(state_json)),
+    updated_ms     INTEGER NOT NULL CHECK(updated_ms >= 0)
+)
+""",
+    ("CREATE UNIQUE INDEX ix_model_challenger_identity ON model_challenger_state(challenger_id)"),
+)
+
 # one table per queue; JSON queues carry a json_valid CHECK, raw lists do not
 _JSON_QUEUE_TABLES = ["queue_control_write", "queue_systemq", "queue_systemo", "queue_displayq", "queue_autotune"]
 _RAW_LIST_TABLES = ["list_warnings", "list_users_connected"]
@@ -282,7 +435,7 @@ def _queue_ddl():
     return "\n".join(ddl)
 
 
-def _migrate_history_to_numeric_psp(conn):
+def _migrate_history_to_numeric_psp(database):
     """Rebuild `history` in place with NUMERIC-affinity psp, preserving rows.
     Unlike metrics (transient, per-cook), history is durable, so this cannot
     drop-and-recreate: it builds a shadow table with the corrected schema,
@@ -290,26 +443,35 @@ def _migrate_history_to_numeric_psp(conn):
     225.0 back to 225 on re-insert through the NUMERIC column), then swaps it
     in for the original.
 
-    Callers must run this inside a `transaction(conn)` block so the whole
-    rebuild commits or rolls back as one unit. Each DDL statement is issued
-    via `execute()` (not `executescript()`, which implicitly commits any
-    pending transaction before running) so it stays inside that transaction."""
-    conn.execute(_HISTORY_TABLE_DDL.format(name="history_new"))
-    conn.execute(
+    `_ensure_schema()` owns the caller transaction for this rebuild. Each DDL
+    statement is issued via `execute()` so the whole rebuild commits or rolls
+    back with the complete legacy bootstrap batch.
+    """
+    database.execute(_HISTORY_TABLE_DDL.format(name="history_new"))
+    database.execute(
         "INSERT INTO history_new (id, ts, psp, primary_temps, food_temps, aux_temps, notify_targets, ext_data) "
         "SELECT id, ts, psp, primary_temps, food_temps, aux_temps, notify_targets, ext_data FROM history"
     )
-    conn.execute("DROP TABLE history")
-    conn.execute("ALTER TABLE history_new RENAME TO history")
-    conn.execute(_HISTORY_INDEX_DDL)
+    database.execute("DROP TABLE history")
+    database.execute("ALTER TABLE history_new RENAME TO history")
+    database.execute(_HISTORY_INDEX_DDL)
 
 
 def _ensure_schema(conn):
-    conn.executescript(SCHEMA + _queue_ddl())
-    #  Applied separately, and conditionally: unlike CREATE TABLE IF NOT EXISTS
-    #  above, refreshing a trigger is a schema WRITE on every connection.
-    _ensure_logs_retention(conn)
-    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    """Serialize the complete legacy schema bootstrap as one atomic batch."""
+    with transaction(conn):
+        database = schema_migrations.database_for_connection(conn)
+        _ensure_legacy_schema(database)
+        schema_migrations.apply_registered_migrations(database)
+
+
+def _ensure_legacy_schema(database: Database) -> None:
+    """Bring databases at or below v10 to the frozen legacy baseline."""
+    database.executescript(SCHEMA + _queue_ddl())
+    # Applied separately, and conditionally: unlike CREATE TABLE IF NOT EXISTS
+    # above, refreshing a trigger is a schema WRITE on every connection.
+    _ensure_logs_retention(database)
+    version = database.execute("PRAGMA user_version").fetchone()[0]
     if 0 < version < 3:
         # Pre-v3 DB: either the old (id, data) JSON blob metrics table (v1,
         # untouched by CREATE TABLE IF NOT EXISTS above), or a v2 columnar
@@ -318,37 +480,28 @@ def _ensure_schema(conn):
         # round-trip). Recreate with the current (NUMERIC-affinity) DDL.
         # Metrics are per-cook/transient, so dropping in-progress metrics on
         # this one-time upgrade is acceptable.
-        conn.executescript("DROP TABLE IF EXISTS metrics;" + _METRICS_DDL)
+        database.executescript("DROP TABLE IF EXISTS metrics;" + _METRICS_DDL)
     if 0 < version < 4:
         # Pre-v4 DB: history.psp used REAL affinity, coercing integer
         # primary_setpoint values (e.g. 225) to floats (225.0) on round-trip.
         # history is durable, so rebuild-and-swap instead of drop+recreate.
-        # Wrapped in a single explicit transaction (SQLite DDL is
-        # transactional) so a crash mid-rebuild rolls back cleanly, leaving
-        # user_version unbumped -- the whole migration retries from scratch
-        # on the next connect instead of leaving a half-built history_new
-        # table or a dropped-but-not-renamed history table around.
-        #
-        # Pass `conn` explicitly (transaction(conn), not transaction()):
-        # we're still inside connection()'s call to _ensure_schema() here,
-        # before _local.conn is assigned, so a bare transaction() would call
-        # connection() again and recurse into _ensure_schema() on a second,
-        # separate sqlite3 connection.
-        with transaction(conn):
-            _migrate_history_to_numeric_psp(conn)
+        # _ensure_schema() owns one serialized transaction for the complete
+        # bootstrap, so a crash mid-rebuild rolls the database back to its
+        # exact pre-attempt state and the whole batch retries on next connect.
+        _migrate_history_to_numeric_psp(database)
     if version < 5:
         # Schema v5 introduces an additive control_trace table. `SCHEMA` has
         # already created it with IF NOT EXISTS, so an existing database keeps
         # every current row and starts with an empty trace table.
-        conn.execute("PRAGMA user_version=5")
+        database.execute("PRAGMA user_version=5")
     if version < 6:
         # Schema v6 adds an independent durable evidence ledger and singleton
         # activation state. Both are additive and begin empty on upgrade.
-        conn.execute("PRAGMA user_version=6")
+        database.execute("PRAGMA user_version=6")
     if version < 7:
         # Schema v7 turns activation authority into a crash-convergent pair
         # transaction. Existing active-only rows retain their old projection.
-        columns = {row[1] for row in conn.execute("PRAGMA table_info(model_activation_state)").fetchall()}
+        columns = {row[1] for row in database.execute("PRAGMA table_info(model_activation_state)").fetchall()}
         additions = (
             ("phase", "TEXT NOT NULL DEFAULT 'active'"),
             ("transaction_id", "TEXT"),
@@ -361,11 +514,10 @@ def _ensure_schema(conn):
             ("candidate_digest", "TEXT"),
             ("reason", "TEXT"),
         )
-        with transaction(conn):
-            for name, declaration in additions:
-                if name not in columns:
-                    conn.execute(f"ALTER TABLE model_activation_state ADD COLUMN {name} {declaration}")
-            conn.execute("PRAGMA user_version=7")
+        for name, declaration in additions:
+            if name not in columns:
+                database.execute(f"ALTER TABLE model_activation_state ADD COLUMN {name} {declaration}")
+        database.execute("PRAGMA user_version=7")
     if version < 8:
         # Schema v8 records the duty that drove each history sample: the auger
         # cycle ratio the controller commanded, the ratio actually delivered to
@@ -378,17 +530,28 @@ def _ensure_schema(conn):
         # Guarded by table_info so a fresh database -- where SCHEMA already
         # created the table with all three -- walks this branch to reach the
         # version bump without trying to add a column twice.
-        columns = {row[1] for row in conn.execute("PRAGMA table_info(history)").fetchall()}
+        columns = {row[1] for row in database.execute("PRAGMA table_info(history)").fetchall()}
         additions = (
             ("cycle_ratio", "REAL"),
             ("realized_cycle_ratio", "REAL"),
             ("fan_duty", "NUMERIC"),
         )
-        with transaction(conn):
-            for name, declaration in additions:
-                if name not in columns:
-                    conn.execute(f"ALTER TABLE history ADD COLUMN {name} {declaration}")
-            conn.execute("PRAGMA user_version=8")
+        for name, declaration in additions:
+            if name not in columns:
+                database.execute(f"ALTER TABLE history ADD COLUMN {name} {declaration}")
+        database.execute("PRAGMA user_version=8")
+    if version < 9:
+        # Schema v9 is an additive cumulative-learning corpus. Its DDL and
+        # version bump participate in _ensure_schema()'s one outer transaction.
+        for statement in _LEARNING_TRAJECTORY_V9_DDL:
+            database.execute(statement)
+        database.execute("PRAGMA user_version=9")
+    if version < 10:
+        # Schema v10 adds the independent challenger singleton. Its DDL and
+        # stamp roll back with the whole legacy bootstrap if any step fails.
+        for statement in _MODEL_CHALLENGER_V10_DDL:
+            database.execute(statement)
+        database.execute("PRAGMA user_version=10")
 
 
 def connection():

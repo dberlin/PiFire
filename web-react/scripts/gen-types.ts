@@ -28,7 +28,7 @@ const ARTIFACTS: Artifact[] = [
 
 async function exportPydanticSchemas(check: boolean): Promise<void> {
   const child = Bun.spawn(
-    ["uv", "run", "python", "-m", "common.web_contracts.export", check ? "--check" : "--write"],
+    ["uv", "run", "--no-sync", "python", "-m", "common.web_contracts.export", check ? "--check" : "--write"],
     {
       cwd: REPOSITORY_ROOT,
       stdout: "inherit",

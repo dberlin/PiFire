@@ -180,6 +180,45 @@ def _validated_model_evidence_rows(records: Sequence[ModelEvidenceRecord]) -> li
     return rows
 
 
+def _append_model_evidence_rows(
+    connection: sqlite3.Connection,
+    rows: Sequence[ModelEvidenceDbRow],
+) -> None:
+    connection.executemany(
+        """
+            INSERT INTO model_evidence(
+                evidence_id, session_id, cook_id, timestamp_ms, kind, role_generation,
+                model_digest, provenance_digest, schema_version, payload
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (
+                row.evidence_id,
+                row.session_id,
+                row.cook_id,
+                row.timestamp_ms,
+                row.kind,
+                row.role_generation,
+                row.model_digest,
+                row.provenance_digest,
+                row.schema_version,
+                row.payload,
+            )
+            for row in rows
+        ],
+    )
+
+
+def append_model_evidence_in_transaction(
+    connection: sqlite3.Connection,
+    records: Sequence[ModelEvidenceRecord],
+) -> None:
+    """Append validated evidence on a caller-owned SQLite transaction."""
+    rows = _validated_model_evidence_rows(records)
+    if rows:
+        _append_model_evidence_rows(connection, rows)
+
+
 def append_model_evidence(
     records: Sequence[ModelEvidenceRecord], *, database_path: str | os.PathLike[str] | None = None
 ) -> None:
@@ -187,31 +226,8 @@ def append_model_evidence(
     rows = _validated_model_evidence_rows(records)
     if not rows:
         return
-    values = [
-        (
-            row.evidence_id,
-            row.session_id,
-            row.cook_id,
-            row.timestamp_ms,
-            row.kind,
-            row.role_generation,
-            row.model_digest,
-            row.provenance_digest,
-            row.schema_version,
-            row.payload,
-        )
-        for row in rows
-    ]
     with _model_evidence_connection(database_path) as connection, datastore.transaction(connection) as conn:
-        conn.executemany(
-            """
-                INSERT INTO model_evidence(
-                    evidence_id, session_id, cook_id, timestamp_ms, kind, role_generation,
-                    model_digest, provenance_digest, schema_version, payload
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-            values,
-        )
+        _append_model_evidence_rows(conn, rows)
 
 
 def read_model_evidence(
@@ -222,8 +238,8 @@ def read_model_evidence(
     database_path: str | os.PathLike[str] | None = None,
 ) -> list[ModelEvidenceRecord]:
     """Return compatible compact evidence in deterministic append order."""
-    clauses = ["schema_version IN (?, ?, ?)"]
-    params: list[object] = [1, 2, MODEL_EVIDENCE_SCHEMA_VERSION]
+    clauses = ["schema_version IN (?, ?, ?, ?)"]
+    params: list[object] = [1, 2, 3, MODEL_EVIDENCE_SCHEMA_VERSION]
     if session_id is not None:
         clauses.append("session_id=?")
         params.append(_require_model_identifier(session_id, "session_id"))

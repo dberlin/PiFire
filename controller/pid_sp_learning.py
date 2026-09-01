@@ -12,29 +12,39 @@ from typing import cast
 from common.cook_diagnostics import ControllerLearningReport
 from common.persistence.protocols import JsonValue
 from common.web_contracts.learning import (
-    FopdtPidSpCheckpoint,
-    IpdtPidSpCheckpoint,
+    PidSpActiveModelReport,
     PidSpCheckpointModel,
     PidSpConfirmationProgress,
+    PidSpDelayEvidence,
+    PidSpDelayEvidenceStatus,
+    PidSpDelayProfileForm,
+    PidSpFormComparisonReport,
     PidSpGateValue,
+    PidSpHorizonLossReport,
     PidSpLearningGate,
     PidSpLearningReport,
     PidSpLearningStatus,
     PidSpLiveLearning,
     PidSpLiveLearningStatus,
+    PidSpModelComparisonReport,
 )
 from controller.fopdt_identifier import (
-    AMBIENT_F,
-    CONFIRM_WINDOW,
-    DELAYS,
-    FORM_FOPDT,
-    FORM_IPDT,
     MIN_ACCEPTED,
     MIN_ACCEPTED_SECONDS,
     MIN_DUTY_STD,
-    MIN_RISE_F,
     MIN_TEMP_SPAN_F,
-    RESTORE_BOUNDS,
+)
+from controller.pid_sp_delay_evidence import (
+    INITIAL_DELAY_BOUND_S,
+    DelayBlocker,
+    DelayProfile,
+)
+from controller.pid_sp_model_selection import (
+    CONFIRMATION_WINDOW,
+    ModelComparison,
+    SelectedPidSpModel,
+    encode_pid_sp_checkpoint,
+    project_pid_sp_persisted_checkpoint,
 )
 
 
@@ -99,14 +109,17 @@ def _validate_status_fields(identifier: Mapping[str, object], predictor: Mapping
             "duty_std",
             "temp_span",
             "duty_segments",
-            "best_residual",
-            "runner_up_residual",
-            "candidates_passing",
+            "raw_best_residual",
+            "raw_runner_up_residual",
+            "raw_candidates_passing",
             "distrust_count",
             "distrust_ratio",
         ),
     )
-    _validate_known_numeric_fields(predictor, ("x0", "xd", "residual_streak", "truncated"))
+    _validate_known_numeric_fields(
+        predictor,
+        ("x0", "xd", "z0", "zd", "residual_streak", "truncated"),
+    )
     for model_name, model in (
         ("identifier.trusted", identifier.get("trusted")),
         ("predictor.model", predictor.get("model")),
@@ -116,13 +129,155 @@ def _validate_status_fields(identifier: Mapping[str, object], predictor: Mapping
         if isinstance(model, Mapping):
             _validate_known_numeric_fields(
                 model,
-                ("K", "tau", "theta", "K_i", "c0", "revision", "identified_at_f", "setpoint_f"),
+                (
+                    "K",
+                    "tau",
+                    "tau_1",
+                    "tau_2",
+                    "theta",
+                    "K_i",
+                    "c0",
+                    "revision",
+                    "identified_at_f",
+                    "setpoint_f",
+                ),
             )
+
+
+_DELAY_STATUS_PRIORITY = (
+    DelayBlocker.NO_PHYSICALLY_VALID_CANDIDATE,
+    DelayBlocker.DELAY_RANGE_EXHAUSTED,
+    DelayBlocker.DELAY_BASIN_EDGE,
+    DelayBlocker.INSUFFICIENT_CONFIDENCE_EVIDENCE,
+    DelayBlocker.DELAY_BASIN_TOO_WIDE,
+    DelayBlocker.INSUFFICIENT_EXCITATION_EPISODES,
+)
+
+
+def _delay_evidence(
+    completed_episode_count: int,
+    profile: DelayProfile | None,
+) -> PidSpDelayEvidence:
+    if (
+        isinstance(completed_episode_count, bool)
+        or not isinstance(completed_episode_count, int)
+        or completed_episode_count < 0
+    ):
+        raise ValueError("completed_episode_count must be a non-negative integer")
+    if profile is None:
+        return PidSpDelayEvidence(
+            status=DelayBlocker.INSUFFICIENT_EXCITATION_EPISODES.value,
+            completed_episode_count=completed_episode_count,
+            evaluated_bound_s=INITIAL_DELAY_BOUND_S,
+            profile_form=None,
+            raw_basin_lower_s=None,
+            raw_basin_upper_s=None,
+            raw_basin_representative_s=None,
+            confidence_lower_s=None,
+            confidence_upper_s=None,
+            confidence_method=None,
+            confidence_resamples=None,
+            blockers=[DelayBlocker.INSUFFICIENT_EXCITATION_EPISODES.value],
+            authorized=False,
+        )
+
+    blockers = [blocker.value for blocker in profile.blockers]
+    primary = next(
+        (blocker.value for blocker in _DELAY_STATUS_PRIORITY if blocker in profile.blockers),
+        "delay-basin-stable",
+    )
+    basin = profile.basin
+    return PidSpDelayEvidence(
+        status=cast(PidSpDelayEvidenceStatus, primary),
+        completed_episode_count=completed_episode_count,
+        evaluated_bound_s=profile.evaluated_bound_s,
+        profile_form=cast(PidSpDelayProfileForm, profile.model_form),
+        raw_basin_lower_s=None if basin is None else basin.lower_s,
+        raw_basin_upper_s=None if basin is None else basin.upper_s,
+        raw_basin_representative_s=None if basin is None else basin.representative_s,
+        confidence_lower_s=None if basin is None else basin.confidence_lower_s,
+        confidence_upper_s=None if basin is None else basin.confidence_upper_s,
+        confidence_method=None if basin is None else basin.confidence_method,
+        confidence_resamples=None if basin is None else basin.confidence_resamples,
+        blockers=blockers,
+        authorized=profile.authorized,
+    )
+
+
+def _finite_loss(value: float) -> float | None:
+    return float(value) if math.isfinite(value) else None
+
+
+def _comparison_report(
+    comparison: ModelComparison | None,
+) -> PidSpModelComparisonReport | None:
+    if comparison is None:
+        return None
+    forms = tuple(
+        PidSpFormComparisonReport(
+            form=cast(PidSpDelayProfileForm, fit.form.value),
+            eligible=fit.eligible,
+            blockers=tuple(
+                blocker.value if isinstance(blocker, DelayBlocker) else blocker for blocker in fit.all_blockers
+            ),
+            one_step_loss=_finite_loss(fit.one_step_loss),
+            horizon_losses=tuple(
+                PidSpHorizonLossReport(
+                    horizon_s=horizon,
+                    loss=_finite_loss(loss),
+                )
+                for horizon, loss in fit.horizon_losses
+            ),
+            fold_losses=tuple(_finite_loss(loss) for loss in fit.fold_losses),
+            standard_error=_finite_loss(fit.standard_error),
+            basin_lower_s=(None if fit.delay_profile.basin is None else fit.delay_profile.basin.lower_s),
+            basin_upper_s=(None if fit.delay_profile.basin is None else fit.delay_profile.basin.upper_s),
+            confidence_lower_s=(
+                None if fit.delay_profile.basin is None else fit.delay_profile.basin.confidence_lower_s
+            ),
+            confidence_upper_s=(
+                None if fit.delay_profile.basin is None else fit.delay_profile.basin.confidence_upper_s
+            ),
+            confidence_method=(None if fit.delay_profile.basin is None else fit.delay_profile.basin.confidence_method),
+        )
+        for fit in comparison.fits
+    )
+    selected = comparison.selected
+    if selected is not None and not selected.authorized:
+        primary_blocker = "confirmation-pending"
+    elif selected is not None:
+        primary_blocker = None
+    else:
+        primary_blocker = next(
+            (
+                blocker.value if isinstance(blocker, DelayBlocker) else blocker
+                for fit in comparison.fits
+                for blocker in fit.all_blockers
+            ),
+            "no-eligible-model",
+        )
+    return PidSpModelComparisonReport(
+        forms=forms,
+        best_form=(None if comparison.best_form is None else cast(PidSpDelayProfileForm, comparison.best_form.value)),
+        comparison_threshold=comparison.comparison_threshold,
+        selection_margin=comparison.selection_margin,
+        selected_form=(None if selected is None else cast(PidSpDelayProfileForm, selected.form.value)),
+        confirmation=PidSpConfirmationProgress(
+            observed=None if selected is None else selected.confirmation_observed,
+            required=CONFIRMATION_WINDOW,
+        ),
+        primary_blocker=primary_blocker,
+    )
 
 
 def build_pid_sp_live_learning(
     identifier: Mapping[str, object],
     predictor: Mapping[str, object],
+    *,
+    completed_episode_count: int,
+    delay_profile: DelayProfile | None,
+    comparison: ModelComparison | None,
+    active_selected: SelectedPidSpModel | None = None,
 ) -> dict[str, object]:
     """Build one normalized projection from one identifier/predictor snapshot."""
 
@@ -137,10 +292,30 @@ def build_pid_sp_live_learning(
     temp_span = _number(identifier_owned, "temp_span")
     predictor_active = _boolean(predictor_owned, "active")
     predictor_disabled = _boolean(predictor_owned, "disabled")
-    confirmation = PidSpConfirmationProgress(
-        observed=_optional_nonnegative_int(identifier_owned, "confirming"),
-        required=CONFIRM_WINDOW,
-    )
+    comparison_report = _comparison_report(comparison)
+    if active_selected is not None:
+        if not isinstance(active_selected, SelectedPidSpModel):
+            raise TypeError("active_selected must be a SelectedPidSpModel or null")
+        if not active_selected.authorized:
+            raise ValueError("active_selected must be authorized")
+        active_model = PidSpActiveModelReport(
+            form=cast(PidSpDelayProfileForm, active_selected.form.value),
+            model_digest=active_selected.model_digest,
+        )
+    else:
+        active_model = None
+    if comparison_report is not None:
+        confirmation = comparison_report.confirmation
+    elif active_selected is not None:
+        confirmation = PidSpConfirmationProgress(
+            observed=active_selected.confirmation_observed,
+            required=active_selected.confirmation_required,
+        )
+    else:
+        confirmation = PidSpConfirmationProgress(
+            observed=None,
+            required=CONFIRMATION_WINDOW,
+        )
 
     gates = (
         PidSpLearningGate(
@@ -182,9 +357,9 @@ def build_pid_sp_live_learning(
 
     if predictor_disabled:
         status: PidSpLearningStatus = "fallback"
-    elif predictor_active and identifier_owned.get("trusted") is not None:
+    elif active_model is not None and predictor_active:
         status = "active"
-    elif all(gate.passed for gate in gates):
+    elif comparison is not None and comparison.selected is not None or all(gate.passed for gate in gates):
         status = "evaluating"
     elif gates[0].passed and gates[1].passed:
         status = "insufficient-excitation"
@@ -197,8 +372,11 @@ def build_pid_sp_live_learning(
         status=status,
         identifier=identifier,
         predictor=predictor,
+        delay_evidence=_delay_evidence(completed_episode_count, delay_profile),
         confirmation=confirmation,
         gates=gates,
+        comparison=comparison_report,
+        active_model=active_model,
     ).model_dump(mode="json")
 
 
@@ -240,90 +418,27 @@ def _canonical_bytes(value: object) -> bytes:
     ).encode("utf-8")
 
 
-def _checkpoint_error(detail: str, error: Exception | None = None) -> ValueError:
-    failure = ValueError(f"checkpoint {detail}")
-    if error is not None:
-        failure.__cause__ = error
-    return failure
-
-
-def _checkpoint_number(checkpoint: Mapping[str, object], field: str) -> float:
-    try:
-        raw = checkpoint[field]
-    except KeyError as error:
-        raise _checkpoint_error(f"{field} must be a number", error)
-    if isinstance(raw, bool):
-        raise _checkpoint_error(f"{field} must be a number")
-    try:
-        value = float(cast(str | int | float, raw))
-    except (OverflowError, TypeError, ValueError) as error:
-        raise _checkpoint_error(f"{field} must be a number", error)
-    if not math.isfinite(value):
-        raise _checkpoint_error(f"{field} must be finite")
-    return value
-
-
 def _normalize_checkpoint(checkpoint: object) -> dict[str, object] | None:
     if checkpoint is None:
         return None
-    if not isinstance(checkpoint, Mapping):
-        raise _checkpoint_error("must be an object")
-    owned = _owned_json_mapping(checkpoint, "checkpoint")
-    form = owned.get("form", FORM_FOPDT)
-    if form not in (FORM_FOPDT, FORM_IPDT):
-        raise _checkpoint_error("form is invalid")
-    bounds = RESTORE_BOUNDS[form]
-    values = {bound[0]: _checkpoint_number(owned, bound[0]) for bound in bounds}
-    for name, lower, upper in bounds:
-        if not lower <= values[name] <= upper:
-            raise _checkpoint_error(f"{name} is outside the restore bounds")
-    theta = _checkpoint_number(owned, "theta")
-    if not float(DELAYS.min()) <= theta <= float(DELAYS.max()):
-        raise _checkpoint_error("theta is outside the restore bounds")
-    revision_value = owned.get("revision")
-    if isinstance(revision_value, bool):
-        raise _checkpoint_error("revision must be a non-negative integer")
     try:
-        revision = int(cast(str | int | float, revision_value))
-    except (TypeError, ValueError) as error:
-        raise _checkpoint_error("revision must be a non-negative integer", error)
-    if revision < 0:
-        raise _checkpoint_error("revision must be a non-negative integer")
-
-    identified_value = owned.get("identified_at_f", owned.get("setpoint_f"))
-    identified_at_f = None
-    if identified_value is not None:
-        if isinstance(identified_value, bool):
-            raise _checkpoint_error("identified_at_f must be a number")
-        try:
-            identified = float(cast(str | int | float, identified_value))
-        except (OverflowError, TypeError, ValueError) as error:
-            raise _checkpoint_error("identified_at_f must be a number", error)
-        if not math.isfinite(identified):
-            raise _checkpoint_error("identified_at_f must be finite")
-        if identified > AMBIENT_F + MIN_RISE_F:
-            identified_at_f = identified
-
-    contract: PidSpCheckpointModel
-    if form == FORM_FOPDT:
-        contract = FopdtPidSpCheckpoint(
-            form="fopdt",
-            K=values["K"],
-            tau=values["tau"],
-            theta=theta,
-            revision=revision,
-            identified_at_f=identified_at_f,
-        )
-    else:
-        contract = IpdtPidSpCheckpoint(
-            form="ipdt",
-            K_i=values["K_i"],
-            c0=values["c0"],
-            theta=theta,
-            revision=revision,
-            identified_at_f=identified_at_f,
-        )
-    return contract.model_dump(mode="json", exclude_none=True)
+        decoded = project_pid_sp_persisted_checkpoint(checkpoint)
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError(f"checkpoint is invalid: {error}") from error
+    if decoded is None:
+        return None
+    normalized = encode_pid_sp_checkpoint(
+        decoded.selected,
+        revision=decoded.revision,
+        provenance=decoded.provenance,
+        installation_identity_digest=decoded.installation_identity_digest,
+    )
+    normalized["schema_version"] = 2
+    normalized.pop("installation_identity_digest")
+    return PidSpCheckpointModel.model_validate_json(
+        _canonical_bytes(normalized),
+        strict=True,
+    ).model_dump(mode="json")
 
 
 def _marked_pid_sp_live(value: object) -> bool:
@@ -391,7 +506,10 @@ def _normalize_live(live: object) -> dict[str, object]:
         "identifier",
         "predictor",
         "confirmation",
+        "delay_evidence",
         "gates",
+        "comparison",
+        "active_model",
     }
     if set(mapping) != required:
         raise ValueError("live status fields are invalid")
@@ -423,10 +541,34 @@ def _normalize_live(live: object) -> dict[str, object]:
         observed=_optional_nonnegative_int(confirmation_mapping, "observed"),
         required=required_confirmations,
     )
+    delay_mapping = _owned_json_mapping(mapping["delay_evidence"], "delay_evidence")
+    delay_evidence = PidSpDelayEvidence.model_validate(delay_mapping, strict=True)
     gates_value = mapping["gates"]
     if not isinstance(gates_value, Sequence) or isinstance(gates_value, (str, bytes, bytearray)):
         raise TypeError("gates must be an array")
     gates = [_learning_gate(value) for value in gates_value]
+    comparison_value = mapping["comparison"]
+    comparison = (
+        None
+        if comparison_value is None
+        else PidSpModelComparisonReport.model_validate(
+            _owned_json_mapping(comparison_value, "comparison"),
+            strict=True,
+        )
+    )
+    active_model_value = mapping["active_model"]
+    active_model = (
+        None
+        if active_model_value is None
+        else PidSpActiveModelReport.model_validate(
+            _owned_json_mapping(active_model_value, "active_model"),
+            strict=True,
+        )
+    )
+    if (status == "active") != (
+        active_model is not None and predictor["active"] is True and predictor["disabled"] is False
+    ):
+        raise ValueError("active status must match active model authority")
     normalized = PidSpLiveLearning(
         schema_version=1,
         controller="pid_sp",
@@ -434,7 +576,10 @@ def _normalize_live(live: object) -> dict[str, object]:
         identifier=identifier,
         predictor=predictor,
         confirmation=confirmation,
+        delay_evidence=delay_evidence,
         gates=tuple(gates),
+        comparison=comparison,
+        active_model=active_model,
     )
     return normalized.model_dump(mode="json")
 
@@ -457,7 +602,10 @@ def current_pid_sp_learning_report(
         "identifier": None,
         "predictor": None,
         "confirmation": None,
+        "delay_evidence": None,
         "checkpoint": normalized_checkpoint,
+        "comparison": None,
+        "active_model": None,
         "failure": None,
     }
     if live is not None:
@@ -479,10 +627,13 @@ def current_pid_sp_learning_report(
                     "identifier": normalized_live["identifier"],
                     "predictor": normalized_live["predictor"],
                     "confirmation": normalized_live["confirmation"],
+                    "delay_evidence": normalized_live["delay_evidence"],
+                    "comparison": normalized_live["comparison"],
+                    "active_model": normalized_live["active_model"],
                 }
             )
     payload["revision"] = hashlib.sha256(_canonical_bytes(payload)).hexdigest()
-    contract = PidSpLearningReport.model_validate(payload, strict=True)
+    contract = PidSpLearningReport.model_validate_json(_canonical_bytes(payload), strict=True)
     return _CanonicalPidSpLearningReport(_canonical_bytes(contract.model_dump(mode="json", exclude_unset=True)))
 
 

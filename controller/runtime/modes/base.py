@@ -14,12 +14,22 @@ and history publication.
 
 import json
 import logging
+import math
+import time
 from functools import partial
+from hashlib import sha256
 
+from common.learning_trajectory import TrajectoryBreakReason
 from common.modes import Mode, StatusState
 from common.process_mon import Process_Monitor
 from common.system import restart_control
 from controller.runtime.heartbeat import stamp_control_heartbeat
+from controller.runtime.learning_trajectory import (
+    ModeEntered,
+    ModeExited,
+    ThermalSample,
+    TrajectoryBoundary,
+)
 from controller.runtime.logic.cycle import smoke_cycle_times
 from controller.runtime.logic.fan import start_fan
 from controller.runtime.logic.pwm import ramp_params
@@ -163,6 +173,7 @@ class ControlMode:
         self.settings = None
         self.control = None
         self._excitation_last_read_at = None
+        self._trajectory_active_event = None
 
     # ---- hooks (safe defaults) ----
     def setup(self):
@@ -226,6 +237,239 @@ class ControlMode:
 
     # ---- shared helpers ----
     @staticmethod
+    def _trajectory_digest(value) -> str:
+        encoded = json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            default=str,
+        ).encode("utf-8")
+        return sha256(encoded).hexdigest()
+
+    @staticmethod
+    def _trajectory_clock_pair():
+        return time.monotonic_ns() // 1_000_000, time.time_ns() // 1_000_000
+
+    @staticmethod
+    def _mode_value(mode):
+        return mode.value if hasattr(mode, "value") else str(mode)
+
+    def _trajectory_mode_event(self, monotonic_ms, wall_ms):
+        settings = self.settings if isinstance(self.settings, dict) else {}
+        control = self.control if isinstance(self.control, dict) else {}
+        globals_settings = settings.get("globals", {})
+        controller_settings = settings.get("controller", {})
+        selected = (
+            controller_settings.get("selected", "unknown") if isinstance(controller_settings, dict) else "unknown"
+        )
+        controller_configs = controller_settings.get("config", {}) if isinstance(controller_settings, dict) else {}
+        selected_config = controller_configs.get(selected, {}) if isinstance(controller_configs, dict) else {}
+        units = globals_settings.get("units", "F") if isinstance(globals_settings, dict) else "F"
+        cycle_data = settings.get("cycle_data", {})
+        auger_duty_ceiling = cycle_data.get("u_max", 0.9) if isinstance(cycle_data, dict) else 0.9
+        settings_digest = self._trajectory_digest(settings)
+        settings_revision = int(settings_digest[:16], 16)
+        persisted_mode = self._mode_value(control.get("mode", self.name))
+        recipe_step_id = None
+        if persisted_mode == self._mode_value(Mode.RECIPE):
+            recipe = control.get("recipe", {})
+            if isinstance(recipe, dict):
+                recipe_step_id = f"step-{recipe.get('step', 0)}"
+        cook_id = control.get("cook_id")
+        if not self._valid_cook_id(cook_id):
+            cook_id = "uncooked"
+        effective_mode = self._mode_value(self.name)
+        trajectory = getattr(self.ctx, "learning_trajectory", None)
+        runtime_session_id = getattr(trajectory, "trajectory_session_id", None)
+        trajectory_session_id = runtime_session_id if isinstance(runtime_session_id, str) else ""
+        trace_session_id = getattr(trajectory, "trace_session_id", None) or ""
+        versions = settings.get("versions", {})
+        build = (
+            {
+                "server": str(versions.get("server", "unknown")),
+                "build": str(versions.get("build", "unknown")),
+            }
+            if isinstance(versions, dict)
+            else {"server": "unknown", "build": "unknown"}
+        )
+        return ModeEntered(
+            effective_mode=effective_mode,
+            persisted_mode=persisted_mode,
+            monotonic_ms=monotonic_ms,
+            wall_ms=wall_ms,
+            cook_id=cook_id,
+            trajectory_session_id=trajectory_session_id,
+            trace_session_id=trace_session_id,
+            recipe_step_id=recipe_step_id,
+            units=str(units),
+            settings_revision=settings_revision,
+            collection_provenance={"origin": "passive-online"},
+            configuration_provenance={
+                "settings_digest": settings_digest,
+                "controller": str(selected),
+            },
+            cadence_digest=self._trajectory_digest({"frame_ms": 20_000, "sample_sleep_ms": 50}),
+            model_structure_digest=self._trajectory_digest({"controller": selected, "structure": selected_config}),
+            held_physics_digest=self._trajectory_digest(selected_config),
+            delay_input_mapping_digest=self._trajectory_digest({"input": "normalized-combustion-load", "version": 1}),
+            actuation_mapping_digest=self._trajectory_digest(
+                {
+                    "cycle_data": settings.get("cycle_data", {}),
+                    "platform": settings.get("platform", {}),
+                    "pwm": settings.get("pwm", {}),
+                }
+            ),
+            auger_duty_ceiling=auger_duty_ceiling,
+            scored_fan_regime_digest=self._trajectory_digest(
+                {
+                    "platform": settings.get("platform", {}),
+                    "smoke_plus": settings.get("smoke_plus", {}),
+                }
+            ),
+            ambient_semantics_digest=self._trajectory_digest(
+                {
+                    "source": "configured",
+                    "T_amb": (selected_config.get("T_amb", 20.0) if isinstance(selected_config, dict) else 20.0),
+                }
+            ),
+            source_trace_digest=self._trajectory_digest(
+                {
+                    "cook_id": cook_id,
+                    "trace_session_id": trace_session_id or None,
+                }
+            ),
+            source_schema_version=1,
+            source_row_digest=self._trajectory_digest(
+                {
+                    "trace_session_id": trace_session_id or None,
+                    "trajectory_session_id": trajectory_session_id,
+                    "settings_revision": settings_revision,
+                }
+            ),
+            build_provenance=build,
+        )
+
+    def _emit_trajectory_mode_entered(self, monotonic_ms, wall_ms):
+        recorder = getattr(self.ctx, "learning_trajectory", None)
+        if recorder is None:
+            return
+        event = self._trajectory_mode_event(monotonic_ms, wall_ms)
+        self._trajectory_active_event = event
+        try:
+            recorder.mode_entered(event)
+        except Exception as error:
+            self.ctx.event_log.warning(f"Learning trajectory mode entry failed: {error}")
+
+    def _emit_trajectory_temperature(self, sensor_data, ptemp, monotonic_ms, wall_ms):
+        recorder = getattr(self.ctx, "learning_trajectory", None)
+        if recorder is None:
+            return
+        settings = self.settings if isinstance(self.settings, dict) else {}
+        globals_settings = settings.get("globals", {})
+        units = str(globals_settings.get("units", "F")) if isinstance(globals_settings, dict) else "F"
+        controller_settings = settings.get("controller", {})
+        selected = controller_settings.get("selected") if isinstance(controller_settings, dict) else None
+        configs = controller_settings.get("config", {}) if isinstance(controller_settings, dict) else {}
+        selected_config = configs.get(selected, {}) if isinstance(configs, dict) else {}
+        ambient_c = float(selected_config.get("T_amb", 20.0)) if isinstance(selected_config, dict) else 20.0
+        ambient = ambient_c * 9.0 / 5.0 + 32.0 if units == "F" else ambient_c
+        primary = sensor_data.get("primary", {}) if isinstance(sensor_data, dict) else {}
+        probe_source = next(iter(primary), None) if isinstance(primary, dict) else None
+        valid = isinstance(ptemp, (int, float)) and not isinstance(ptemp, bool) and math.isfinite(float(ptemp))
+        mode_event = self._trajectory_active_event
+        if mode_event is None:
+            mode_event = self._trajectory_mode_event(monotonic_ms, wall_ms)
+            self._trajectory_active_event = mode_event
+        try:
+            recorder.observe_temperature(
+                ThermalSample(
+                    monotonic_ms=monotonic_ms,
+                    wall_ms=wall_ms,
+                    chamber_temperature=float(ptemp) if valid else None,
+                    units=units,
+                    probe_valid=valid,
+                    probe_source=str(probe_source) if valid and probe_source else None,
+                    ambient_temperature=ambient,
+                    ambient_source="configured",
+                    ambient_uncertainty=0.0,
+                    settings_revision=mode_event.settings_revision,
+                    recipe_step_id=mode_event.recipe_step_id,
+                )
+            )
+        except Exception as error:
+            self.ctx.event_log.warning(f"Learning trajectory temperature capture failed: {error}")
+
+    def _emit_trajectory_mode_exited(
+        self,
+        control,
+        monotonic_ms,
+        wall_ms,
+        *,
+        next_effective_mode=None,
+        exit_reason=None,
+    ):
+        recorder = getattr(self.ctx, "learning_trajectory", None)
+        if recorder is None:
+            return
+        persisted_next = control.get("mode", Mode.STOP)
+        if control.get("updated") and persisted_next != Mode.RECIPE:
+            next_candidate = persisted_next
+        else:
+            next_candidate = (
+                next_effective_mode or getattr(self.ctx, "trajectory_next_effective_mode", None) or persisted_next
+            )
+        next_mode = self._mode_value(next_candidate)
+        reason = exit_reason
+        if reason is None and next_mode == self._mode_value(Mode.STOP):
+            reason = TrajectoryBreakReason.STOP
+        elif reason is None and next_mode == self._mode_value(Mode.ERROR):
+            reason = TrajectoryBreakReason.ERROR
+        try:
+            recorder.mode_exited(
+                ModeExited(
+                    effective_mode=self._mode_value(self.name),
+                    next_effective_mode=next_mode,
+                    monotonic_ms=monotonic_ms,
+                    wall_ms=wall_ms,
+                    reason=reason,
+                )
+            )
+        except Exception as error:
+            self.ctx.event_log.warning(f"Learning trajectory mode exit failed: {error}")
+
+    def _emit_trajectory_boundary(
+        self,
+        reason,
+        now,
+        detail,
+        *,
+        configuration=False,
+        replacement=False,
+    ):
+        recorder = getattr(self.ctx, "learning_trajectory", None)
+        if recorder is None:
+            return
+        monotonic_ms, wall_ms = self._trajectory_clock_pair()
+        replacement_mode = self._trajectory_mode_event(monotonic_ms, wall_ms) if replacement else None
+        if replacement_mode is not None:
+            self._trajectory_active_event = replacement_mode
+        boundary = TrajectoryBoundary(
+            reason=reason,
+            monotonic_ms=monotonic_ms,
+            wall_ms=wall_ms,
+            detail=f"{detail}@{now}",
+            replacement_mode=replacement_mode,
+        )
+        try:
+            if configuration:
+                recorder.configuration_changed(boundary)
+            else:
+                recorder.intervention(boundary)
+        except Exception as error:
+            self.ctx.event_log.warning(f"Learning trajectory boundary capture failed: {error}")
+
+    @staticmethod
     def _valid_cook_id(cook_id) -> bool:
         return isinstance(cook_id, str) and bool(cook_id) and cook_id == cook_id.strip()
 
@@ -237,6 +481,12 @@ class ControlMode:
             control["cook_id"] = cook_id
         self.control = control
         if now is not None and self._valid_cook_id(previous_cook_id) and previous_cook_id != cook_id:
+            self._emit_trajectory_boundary(
+                TrajectoryBreakReason.COOK_ROTATED,
+                now,
+                f"cook rotated from {previous_cook_id} to {cook_id}",
+                replacement=True,
+            )
             self.on_cook_identity_rotated(previous_cook_id, cook_id, now)
         return control
 
@@ -264,6 +514,12 @@ class ControlMode:
         self._stamp_mode_metric(control, self.ctx.store.read_pellet_db())
         self.state.timers.auger_toggle = now
         if self._valid_cook_id(previous_cook_id) and previous_cook_id != cook_id:
+            self._emit_trajectory_boundary(
+                TrajectoryBreakReason.HISTORY_CLEARED,
+                now,
+                f"history cleared from {previous_cook_id} to {cook_id}",
+                replacement=True,
+            )
             self.on_cook_identity_rotated(previous_cook_id, cook_id, now)
         return {
             "result": "OK",
@@ -520,9 +776,51 @@ class ControlMode:
 
         # Check if user changed settings and reload
         if control["settings_update"]:
+            previous_settings = self.settings
             control["settings_update"] = False
             ctx.store.write_control_snapshot(control, origin="control")
             self.settings = ctx.store.read_settings()
+            previous_globals = previous_settings.get("globals", {})
+            current_globals = self.settings.get("globals", {})
+            previous_controller = previous_settings.get("controller", {})
+            current_controller = self.settings.get("controller", {})
+            previous_selected = previous_controller.get("selected")
+            current_selected = current_controller.get("selected")
+            previous_configs = previous_controller.get("config", {})
+            current_configs = current_controller.get("config", {})
+            previous_selected_config = dict(previous_configs.get(previous_selected, {}))
+            current_selected_config = dict(current_configs.get(current_selected, {}))
+            previous_ambient = previous_selected_config.pop("T_amb", None)
+            current_ambient = current_selected_config.pop("T_amb", None)
+            reason = None
+            if previous_globals.get("units") != current_globals.get("units"):
+                reason = TrajectoryBreakReason.UNITS_CHANGED
+            elif previous_selected != current_selected or previous_selected_config != current_selected_config:
+                reason = TrajectoryBreakReason.STRUCTURE_CHANGED
+            elif previous_ambient != current_ambient:
+                reason = TrajectoryBreakReason.AMBIENT_SEMANTICS_CHANGED
+            elif previous_settings.get("smoke_plus") != self.settings.get("smoke_plus"):
+                reason = TrajectoryBreakReason.FAN_MAPPING_CHANGED
+            elif (
+                previous_settings.get("cycle_data") != self.settings.get("cycle_data")
+                or previous_settings.get("pwm") != self.settings.get("pwm")
+                or previous_settings.get("platform") != self.settings.get("platform")
+            ):
+                reason = TrajectoryBreakReason.ACTUATION_MAPPING_CHANGED
+            if reason is not None:
+                self._emit_trajectory_boundary(
+                    reason,
+                    now,
+                    "settings changed",
+                    configuration=True,
+                    replacement=True,
+                )
+            else:
+                revision_monotonic_ms, revision_wall_ms = self._trajectory_clock_pair()
+                self._trajectory_active_event = self._trajectory_mode_event(
+                    revision_monotonic_ms,
+                    revision_wall_ms,
+                )
             self.probe_complex.set_thermocouple_inference_policy(
                 self.settings["thermocouple_health"]["inference_policy"],
                 now=now,
@@ -593,6 +891,12 @@ class ControlMode:
             "auger",
             "pwm",
         ]:
+            if control["manual"]["change"] in {"fan", "auger", "pwm"}:
+                self._emit_trajectory_boundary(
+                    TrajectoryBreakReason.MANUAL,
+                    now,
+                    f"manual-{control['manual']['change']}",
+                )
             if mode != Mode.MANUAL:
                 override_time = now + self.settings["safety"]["manual_override_time"]
             else:
@@ -863,12 +1167,37 @@ class ControlMode:
         grill_platform.igniter_off()
         grill_platform.auger_off()
 
+        trajectory_entry_monotonic_ms, trajectory_entry_wall_ms = self._trajectory_clock_pair()
+        self._emit_trajectory_mode_entered(
+            trajectory_entry_monotonic_ms,
+            trajectory_entry_wall_ms,
+        )
         preflight_data, _ = self._read_probes_with_excitation()
         preflight_ptemp = next(iter(preflight_data["primary"].values()), None)
+        preflight_monotonic_ms, preflight_wall_ms = self._trajectory_clock_pair()
+        self._emit_trajectory_temperature(
+            preflight_data,
+            preflight_ptemp,
+            preflight_monotonic_ms,
+            preflight_wall_ms,
+        )
         last_valid_ptemp = preflight_ptemp if isinstance(preflight_ptemp, (int, float)) else None
         if self._process_thermocouple_health(preflight_data):
             grill_platform.fan_off()
             grill_platform.power_off()
+            fault_monotonic_ms, fault_wall_ms = self._trajectory_clock_pair()
+            self._emit_trajectory_boundary(
+                TrajectoryBreakReason.SAFETY,
+                ctx.clock.now(),
+                "preflight-thermocouple-fault",
+            )
+            self._emit_trajectory_mode_exited(
+                control,
+                fault_monotonic_ms,
+                fault_wall_ms,
+                next_effective_mode=Mode.ERROR,
+                exit_reason=TrajectoryBreakReason.ERROR,
+            )
             monitor.stop_monitor()
             self.ctx.event_log.error("Primary thermocouple fault blocked mode setup.")
             return ()
@@ -888,9 +1217,21 @@ class ControlMode:
         # Get initial probe sensor data, temperatures
         sensor_data, _ = self._read_probes_with_excitation()
         ptemp = next(iter(sensor_data["primary"].values()))  # Primary Temperature or the Pit Temperature
+        sample_monotonic_ms, sample_wall_ms = self._trajectory_clock_pair()
+        self._emit_trajectory_temperature(
+            sensor_data,
+            ptemp,
+            sample_monotonic_ms,
+            sample_wall_ms,
+        )
 
         # ---- thermocouple health precedes mode-specific numeric safety ----
         if self._process_thermocouple_health(sensor_data):
+            self._emit_trajectory_boundary(
+                TrajectoryBreakReason.SAFETY,
+                ctx.clock.now(),
+                "thermocouple-fault",
+            )
             self._on_safety_event("thermocouple_fault", ctx.clock.now())
             status = "Inactive"
         else:
@@ -974,6 +1315,13 @@ class ControlMode:
             # ---- SENSE: single fresh probe read for the whole tick ----
             sensor_data, current_output_status = self._read_probes_with_excitation(now)
             ptemp = next(iter(sensor_data["primary"].values()))  # Primary Temperature or the Pit Temperature
+            sample_monotonic_ms, sample_wall_ms = self._trajectory_clock_pair()
+            self._emit_trajectory_temperature(
+                sensor_data,
+                ptemp,
+                sample_monotonic_ms,
+                sample_wall_ms,
+            )
 
             in_data["probe_history"] = sensor_data
             in_data["primary_setpoint"] = control["primary_setpoint"] if mode == Mode.HOLD else 0
@@ -988,6 +1336,11 @@ class ControlMode:
 
             # ---- HEALTH (before numeric safety or actuation) ----
             if self._process_thermocouple_health(sensor_data):
+                self._emit_trajectory_boundary(
+                    TrajectoryBreakReason.SAFETY,
+                    now,
+                    "thermocouple-fault",
+                )
                 self._on_safety_event("thermocouple_fault", now)
                 break
             if isinstance(ptemp, (int, float)):
@@ -1002,6 +1355,11 @@ class ControlMode:
             # max-temp trip (walked first, so it keeps priority), then the mode's
             # flameout edges (GUARDS["Smoke"]/["Hold"]). A fired guard breaks.
             if evaluate_phase(self, ctx, "pre_act", now, ptemp):
+                self._emit_trajectory_boundary(
+                    TrajectoryBreakReason.SAFETY,
+                    now,
+                    "temperature-guard",
+                )
                 self._on_safety_event("temperature_guard", now)
                 break
 
@@ -1009,6 +1367,11 @@ class ControlMode:
             # that Smoke/Hold flameout are declarative guards; the hook remains
             # for any future mode override) ----
             if self.check_safety(now, ptemp):
+                self._emit_trajectory_boundary(
+                    TrajectoryBreakReason.SAFETY,
+                    now,
+                    "mode-safety",
+                )
                 break
 
             # ---- ACT: merged mode-specific per-tick control/auger/fan logic ----
@@ -1066,6 +1429,8 @@ class ControlMode:
         # END Mode Loop
         # *********
 
+        trajectory_exit_monotonic_ms, trajectory_exit_wall_ms = self._trajectory_clock_pair()
+
         # Clean-up and Exit
         grill_platform.auger_off()
         grill_platform.igniter_off()
@@ -1074,6 +1439,13 @@ class ControlMode:
 
         # ---- mode-specific teardown ----
         self.teardown(last_valid_ptemp)
+        if mode == Mode.HOLD:
+            trajectory_exit_monotonic_ms, trajectory_exit_wall_ms = self._trajectory_clock_pair()
+        self._emit_trajectory_mode_exited(
+            control,
+            trajectory_exit_monotonic_ms,
+            trajectory_exit_wall_ms,
+        )
 
         self.ctx.event_log.info(f"{mode} mode ended.")
 

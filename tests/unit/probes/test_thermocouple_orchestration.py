@@ -133,6 +133,16 @@ def _raw_inferred(state, now=2.0):
     )
 
 
+def test_read_probes_rejects_a_broken_owned_sample_hook() -> None:
+    probe = _probe("device", "port", "Grill", "Primary")
+    device = _Device("device", [probe], samples={})
+    device.get_thermocouple_samples = None
+    main = _main([probe], [device])
+
+    with pytest.raises(TypeError, match="NoneType.*not callable"):
+        main.read_probes(now=1.0)
+
+
 def test_constructor_validates_policy_before_building_devices():
     with pytest.raises(ValueError):
         ProbesMain(_empty_probe_map(), "F", inference_policy="sometimes")
@@ -212,7 +222,8 @@ def test_module_load_failure_falls_back_to_disabled_and_reports_error(monkeypatc
 
 def test_rebuild_clears_inference_even_when_previous_device_close_fails(caplog):
     class Uncloseable:
-        device_info = {"device": "stuck"}
+        def __init__(self) -> None:
+            self.device_info = {"device": "stuck"}
 
         def close(self):
             raise OSError("busy")

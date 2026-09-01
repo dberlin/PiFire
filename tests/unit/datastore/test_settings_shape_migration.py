@@ -68,7 +68,7 @@ def test_a_sparse_pre_setting_tree_backfills_observe_without_a_schema_bump(ds, t
 
     assert normalized["thermocouple_health"] == {"inference_policy": "observe"}
     assert normalized["schema_version"] == original_schema_version
-    assert SETTINGS_SCHEMA_VERSION == original_schema_version == 11
+    assert SETTINGS_SCHEMA_VERSION == original_schema_version == 12
 
 
 def test_only_the_steps_above_the_stamp_run(ds, monkeypatch):

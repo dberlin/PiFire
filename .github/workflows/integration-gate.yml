@@ -1,0 +1,149 @@
+name: Exact revision integration gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: exact-revision-integration-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  integration-gate:
+    name: Exact revision integration gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CI: "true"
+      PIFIRE_BACKEND_URL: http://127.0.0.1:5000
+      PIFIRE_GATE_LIVE_DB_PATH: ${{ runner.temp }}/pifire-ci/pifire.db
+      PIFIRE_GATE_LIVE_LOG_DIR: ${{ runner.temp }}/pifire-ci/logs
+    steps:
+      - name: Check out the exact event revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Set up Jujutsu
+        uses: taiki-e/install-action@v2
+        with:
+          tool: jj-cli
+
+      - name: Materialize the exact revision for Jujutsu
+        shell: bash
+        run: |
+          set -euo pipefail
+          jj git init --colocate .
+          jj --ignore-immutable edit "${GITHUB_SHA}"
+          resolved="$(jj --no-pager log --no-graph -r @ -T 'commit_id ++ "\n"')"
+          test "${resolved}" = "${GITHUB_SHA}"
+
+      - name: Install locked dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv sync --locked --all-groups
+          bun install --frozen-lockfile
+          bunx playwright install --with-deps chromium
+
+      - name: Run the exact revision gate against an isolated live PiFire
+        shell: bash
+        run: |
+          set -euo pipefail
+          runtime="${RUNNER_TEMP}/pifire-ci"
+          mkdir -p "${runtime}/history" "${runtime}/logs"
+          test ! -e history
+          test ! -e logs
+          ln -s "${runtime}/history" history
+          ln -s "${runtime}/logs" logs
+
+          control_pid=""
+          web_pid=""
+          cleanup() {
+            set +e
+            if [[ -n "${web_pid}" ]]; then kill "${web_pid}" 2>/dev/null; fi
+            if [[ -n "${control_pid}" ]]; then kill "${control_pid}" 2>/dev/null; fi
+            if [[ -n "${web_pid}" ]]; then wait "${web_pid}" 2>/dev/null; fi
+            if [[ -n "${control_pid}" ]]; then wait "${control_pid}" 2>/dev/null; fi
+          }
+          trap cleanup EXIT
+
+          PIFIRE_DB_PATH="${runtime}/pifire.db" \
+          PIFIRE_LOG_DIR="${runtime}/logs" \
+          uv run python - <<'PY'
+          from common import datastore
+          from common.persistence.runtime import read_settings, write_settings
+
+          datastore.init()
+          settings = read_settings()
+          settings["platform"]["real_hw"] = False
+          settings["globals"]["first_time_setup"] = False
+          write_settings(settings)
+          PY
+
+          PIFIRE_DB_PATH="${runtime}/pifire.db" \
+          PIFIRE_LOG_DIR="${runtime}/logs" \
+          uv run python control.py >"${runtime}/control.stdout.log" 2>"${runtime}/control.stderr.log" &
+          control_pid=$!
+          PIFIRE_DB_PATH="${runtime}/pifire.db" \
+          PIFIRE_LOG_DIR="${runtime}/logs" \
+          uv run gunicorn -k gthread --threads 25 -b 127.0.0.1:5000 -w 1 app:app \
+            >"${runtime}/web.stdout.log" 2>"${runtime}/web.stderr.log" &
+          web_pid=$!
+
+          ready=false
+          for _ in {1..60}; do
+            if ! kill -0 "${control_pid}" 2>/dev/null; then
+              echo "PiFire controller exited before readiness" >&2
+              cat "${runtime}/control.stderr.log" >&2
+              exit 1
+            fi
+            if ! kill -0 "${web_pid}" 2>/dev/null; then
+              echo "PiFire backend exited before readiness" >&2
+              cat "${runtime}/web.stderr.log" >&2
+              exit 1
+            fi
+            if curl --fail --silent --show-error --max-time 2 \
+              http://127.0.0.1:5000/api/get/mode >/dev/null; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [[ "${ready}" != true ]]; then
+            echo "PiFire backend did not become ready" >&2
+            cat "${runtime}/web.stderr.log" >&2
+            exit 1
+          fi
+
+          uv run python scripts/exact_revision_gate.py verify-ci --expected-revision "${{ github.sha }}"
+
+      - name: Upload exact-revision evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: exact-revision-${{ github.sha }}
+          path: .artifacts/exact-revision/${{ github.sha }}/
+          include-hidden-files: true
+          if-no-files-found: error

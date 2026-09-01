@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import FrozenInstanceError, replace
 from typing import cast
 
@@ -31,7 +31,7 @@ from common.model_evidence import (
     RecorderGapEvidence,
     RollbackEvidence,
 )
-from controller.applied_output import AppliedOutput, OutputSource
+from controller.applied_output import AppliedOutput, FrameFeedbackDisposition, OutputSource
 from controller.model_learning.activation import ActivationPhase
 from controller.model_learning.calibration import (
     CalibrationDecision,
@@ -40,6 +40,7 @@ from controller.model_learning.calibration import (
 )
 from controller.model_learning.contracts import CandidateOrigin, FrameObservation
 from controller.mpc_allocator import allocate
+from controller.mpc_model import EstimatorSeed
 from controller.runtime.control_trace_session import (
     ControlTraceSession,
     TraceSessionContext,
@@ -50,24 +51,76 @@ from controller.runtime.framed_pulse import (
     PulseControllerState,
 )
 from controller.runtime.logic.pulse import PulseResetReason
-from controller.runtime.model_fitting import (
-    TeardownRefitOutcome,
-    TeardownRefitResult,
-)
 from controller.runtime.model_persistence import DurableActivationReceipt, EvidenceSubmission
-from controller.runtime.modes.hold_learning import (
-    HoldLearningRuntime,
-    HoldRefitResult,
-)
+from controller.runtime.modes.hold_learning import HoldLearningRuntime
 from controller.runtime.runner import (
+    ModelRestoreOutcome,
     ObservationOutcomeDrain,
     ObservationOutcomeEnvelope,
     ObservationSubmission,
     ObservationTerminalDrop,
+    build_runner,
 )
 from controller.runtime.state import ControllerState
 from grillplat.actuator_capabilities import AugerTiming
+from tests.characterization.fixtures import base_control, base_pellet_db, base_settings
+from tests.characterization.harness import make_ctx
+from tests.fakes import learning_trajectory
+from tests.fakes.learning_trajectory import ExactEstimatorSeedSource
+from tests.fakes.probes import FakeProbes
 from tests.unit.runtime._persistence_helpers import _pair_phase_state
+
+
+def _learning_input_context():
+    control = base_control(mode="Hold")
+    context, _grill, _notifier = make_ctx(
+        base_settings(),
+        control,
+        base_pellet_db(),
+        FakeProbes().script([225.0]),
+    )
+    return context, control
+
+
+@pytest.mark.parametrize("cook_id", ("", " ", "\t\n"), ids=("empty", "space", "whitespace"))
+def test_bind_exact_learning_inputs_rejects_blank_cook_identity(cook_id: str) -> None:
+    context, control = _learning_input_context()
+
+    with pytest.raises(ValueError, match="cook_id"):
+        learning_trajectory.bind_exact_learning_inputs(context, control, cook_id=cook_id)
+
+
+def test_bind_exact_learning_inputs_normalizes_padded_cook_identity() -> None:
+    context, control = _learning_input_context()
+
+    learning_trajectory.bind_exact_learning_inputs(
+        context,
+        control,
+        cook_id="  hold-learning-cook\t",
+    )
+
+    assert control["cook_id"] == "hold-learning-cook"
+
+
+def test_bind_exact_learning_inputs_installs_complete_production_shaped_inputs() -> None:
+    context, control = _learning_input_context()
+
+    source = learning_trajectory.bind_exact_learning_inputs(
+        context,
+        control,
+        cook_id="hold-learning-cook",
+    )
+
+    assert control["cook_id"] == "hold-learning-cook"
+    assert isinstance(source, ExactEstimatorSeedSource)
+    assert context.learning_trajectory is source
+    seed = source.seed_for(
+        theta=60.0,
+        n_delay=3,
+        at_ms=1_000,
+        measured_temp_c=107.5,
+    )
+    assert isinstance(seed, EstimatorSeed)
 
 
 class _Recorder:
@@ -103,20 +156,20 @@ class _Persistence:
         accepted: bool = True,
         blocked: bool = False,
         checkpoint_results: Sequence[bool] = (True,),
-        flush_result: bool = True,
-        flush_error: BaseException | None = None,
+        barrier_result: bool = True,
+        barrier_error: BaseException | None = None,
         failed: bool = False,
         events=None,
     ) -> None:
         self.accepted = accepted
         self.evidence_blocked = blocked
         self.checkpoint_results = list(checkpoint_results)
-        self.flush_result = flush_result
-        self.flush_error = flush_error
+        self.barrier_result = barrier_result
+        self.barrier_error = barrier_error
         self.failed = failed
         self.batches: list[tuple[ModelEvidenceRecord, ...]] = []
         self.checkpoints: list[tuple[str, dict[str, object]]] = []
-        self.flush_calls = 0
+        self.barrier_calls = 0
         self.events = [] if events is None else events
 
     def submit_evidence_batch(self, records: Sequence[ModelEvidenceRecord]) -> EvidenceSubmission:
@@ -132,12 +185,13 @@ class _Persistence:
             return self.checkpoint_results.pop(0)
         return False
 
-    def flush_and_stop(self) -> bool:
-        self.flush_calls += 1
-        self.events.append("persistence:flush")
-        if self.flush_error is not None:
-            raise self.flush_error
-        return self.flush_result
+    def barrier(self, timeout: float = 2.0) -> bool:
+        del timeout
+        self.barrier_calls += 1
+        self.events.append("persistence:barrier")
+        if self.barrier_error is not None:
+            raise self.barrier_error
+        return self.barrier_result
 
 
 class _Runner:
@@ -147,6 +201,7 @@ class _Runner:
         self.next_evicted_sequence: int | None = None
         self.submissions: list[FrameObservation] = []
         self.completed: list[tuple[AppliedOutput, FrameObservation]] = []
+        self.outputs: list[AppliedOutput] = []
         self.bindings: list[tuple[int, str, str | None]] = []
         self.retirements: list[int] = []
         self.confidence: list[ModelEvidenceRecord] = []
@@ -154,7 +209,7 @@ class _Runner:
         self.drains: list[ObservationOutcomeDrain] = []
         self.drain_count = 0
         self.raise_on_observe: BaseException | None = None
-        self.restore_outcome: bool | None = None
+        self.restore_outcome: ModelRestoreOutcome | None = None
         self.events = [] if events is None else events
 
     def observe_frame(self, observation: FrameObservation) -> ObservationSubmission | None:
@@ -166,6 +221,9 @@ class _Runner:
         submission = ObservationSubmission(sequence, self.generation, self.next_evicted_sequence)
         self.next_evicted_sequence = None
         return submission
+
+    def set_output(self, applied: AppliedOutput) -> None:
+        self.outputs.append(applied)
 
     def complete_frame(self, applied: AppliedOutput, observation: FrameObservation) -> ObservationSubmission | None:
         self.completed.append((applied, observation))
@@ -188,11 +246,20 @@ class _Runner:
         self.events.append(("confidence", record))
         return DurableActivationReceipt(accepted=self.confidence_accepted)
 
-    def restore_model(self, snapshot: dict[str, object]) -> bool:
+    def restore_model(
+        self,
+        snapshot: dict[str, object],
+        *,
+        restore_token: str | None = None,
+    ) -> ModelRestoreOutcome:
         del snapshot
-        return False
+        return ModelRestoreOutcome(
+            restore_token=restore_token,
+            accepted=False,
+            effective_authority=None,
+        )
 
-    def drain_restore_outcome(self) -> bool | None:
+    def drain_restore_outcome(self) -> ModelRestoreOutcome | None:
         outcome = self.restore_outcome
         self.restore_outcome = None
         return outcome
@@ -219,24 +286,27 @@ class _Runner:
     def drain_activation_events(self) -> tuple[ModelEvidenceRecord, ...]:
         return ()
 
-    def stop_for_refit(self) -> bool | None:
+    def stop_and_retain_for_teardown(self) -> bool | None:
         return None
 
     def controller_state(self) -> object:
         return {}
 
-    def refit_from_cook(self) -> object:
-        return None
+    def schedule_corpus_fit(self, origin: CandidateOrigin) -> bool:
+        return self._schedule_corpus_fit_after_barrier(origin, None)
+
+    def _schedule_corpus_fit_after_barrier(self, origin, before_schedule) -> bool:
+        del origin
+        if before_schedule is not None:
+            before_schedule()
+        return False
 
     def get_model_snapshot(self) -> object:
         return None
 
-    def finalize_cook_refit(self, outcome: TeardownRefitOutcome) -> bool:
-        del outcome
-        return False
-
-    def finish_teardown(self) -> None:
-        return None
+    def finish_teardown(self, finalizer=None) -> None:
+        if finalizer is not None:
+            finalizer()
 
 
 class _NoSubmissionRunner(_Runner):
@@ -255,6 +325,8 @@ class _LifecycleRunner(_Runner):
         super().__init__(events=events)
         self.restore_accepted = restore_accepted
         self.asynchronous = asynchronous
+        self.restore_effective_authority: dict[str, object] | None = None
+        self.restore_staged_for_revalidation = False
         self.restored_models: list[dict[str, object]] = []
         self.activation_restores: list[tuple[object, tuple[ModelEvidenceRecord, ...]]] = []
         self.rollbacks: list[str] = []
@@ -262,19 +334,34 @@ class _LifecycleRunner(_Runner):
         self.activation_events: list[ModelEvidenceRecord] = []
         self.status: object = {}
         self.status_error: BaseException | None = None
-        self.refit_result: object = None
-        self.refit_error: BaseException | None = None
-        self.refit_calls = 0
+        self.fit_requests: list[CandidateOrigin] = []
         self.snapshot: object = {"revision": 1}
-        self.finalize_results: list[bool] = [True]
-        self.finalize_errors: list[BaseException | None] = []
-        self.finalized: list[TeardownRefitOutcome] = []
         self.finish_calls = 0
         self.finish_error: BaseException | None = None
+        self.restore_token: str | None = None
 
-    def restore_model(self, snapshot: dict[str, object]) -> bool:
+    def restore_model(
+        self,
+        snapshot: dict[str, object],
+        *,
+        restore_token: str | None = None,
+    ) -> ModelRestoreOutcome:
         self.restored_models.append(snapshot)
-        return self.restore_accepted
+        self.restore_token = restore_token
+        if self.asynchronous:
+            return ModelRestoreOutcome(
+                restore_token=restore_token,
+                accepted=True,
+                effective_authority=None,
+                pending=True,
+            )
+        effective_authority = snapshot if self.restore_effective_authority is None else self.restore_effective_authority
+        return ModelRestoreOutcome(
+            restore_token=restore_token,
+            accepted=self.restore_accepted,
+            effective_authority=effective_authority,
+            staged_for_revalidation=self.restore_staged_for_revalidation,
+        )
 
     def runs_async(self) -> bool:
         return self.asynchronous
@@ -309,35 +396,26 @@ class _LifecycleRunner(_Runner):
             raise self.status_error
         return self.status
 
-    def refit_from_cook(self) -> object:
-        self.refit_calls += 1
-        if self.refit_error is not None:
-            raise self.refit_error
-        return self.refit_result
+    def schedule_corpus_fit(self, origin: CandidateOrigin) -> bool:
+        return self._schedule_corpus_fit_after_barrier(origin, None)
 
-    def finalize_cook_refit(self, outcome: TeardownRefitOutcome) -> bool:
-        self.finalized.append(outcome)
-        if self.finalize_errors:
-            error = self.finalize_errors.pop(0)
-            if error is not None:
-                raise error
-        if outcome is TeardownRefitOutcome.CHECKPOINT_FAILURE:
-            self.snapshot = {
-                "revision": len(self.finalized) + 1,
-                "cook_refit": {"latest": outcome.value},
-            }
-        if self.finalize_results:
-            return self.finalize_results.pop(0)
-        return False
+    def _schedule_corpus_fit_after_barrier(self, origin, before_schedule) -> bool:
+        if before_schedule is not None and not before_schedule():
+            return False
+        self.fit_requests.append(origin)
+        return True
 
     def get_model_snapshot(self) -> object:
         return self.snapshot
 
-    def finish_teardown(self) -> None:
+    def finish_teardown(self, finalizer=None) -> None:
         self.finish_calls += 1
         self.events.append("runner:finish")
         if self.finish_error is not None:
             raise self.finish_error
+        if finalizer is not None:
+            finalizer()
+        self.events.append("runner:close")
 
 
 class _ModelStore:
@@ -528,6 +606,7 @@ def _runtime(
     runner: _Runner | None = None,
     persistence: _Persistence | None = None,
     logger: _LifecycleLogger | None = None,
+    learning_trajectory=None,
 ):
     trace, recorder = _trace(opened=opened)
     actual_runner = _Runner() if runner is None else runner
@@ -540,8 +619,49 @@ def _runtime(
         controller_name="mpc",
         logger=_LifecycleLogger() if logger is None else logger,
         initial_generation=actual_runner.generation,
+        learning_trajectory=learning_trajectory,
     )
     return runtime, actual_runner, actual_persistence, trace, recorder
+
+
+def _production_pid_sp_runtime():
+    settings = {
+        "controller": {
+            "selected": "pid_sp",
+            "config": {
+                "pid_sp": {
+                    "PB": 60.0,
+                    "Ti": 180.0,
+                    "Td": 45.0,
+                    "stable_window": 12,
+                    "center_factor": 0.001,
+                }
+            },
+        },
+        "globals": {"units": "F"},
+        "cycle_data": {"u_min": 0.1, "u_max": 0.9},
+    }
+    runner, status = build_runner(settings, {"primary_setpoint": 225.0})
+    assert status == "Active"
+    assert runner is not None
+    recorder = _Recorder()
+    trace = ControlTraceSession(recorder, warning=lambda _message: None)
+    identity = trace.ensure_open(
+        replace(_trace_context(), controller=ControllerType.PID_SP),
+        timestamp_ms=0,
+    )
+    assert identity is not None
+    runtime = HoldLearningRuntime(
+        runner=runner,
+        model_store=None,
+        persistence=_Persistence(),
+        trace=trace,
+        controller_name="pid_sp",
+        logger=_LifecycleLogger(),
+        initial_generation=runner.configuration_revision(),
+    )
+    runtime.bind_generation(runner.configuration_revision())
+    return runtime, recorder
 
 
 def _lifecycle_runtime(
@@ -736,6 +856,137 @@ def test_sub_millisecond_frame_leaves_the_control_loop_running() -> None:
     ]
 
 
+class _ReplayTrajectory:
+    def __init__(self) -> None:
+        self.replays: list[tuple[FrameObservation, bool]] = []
+        self.anchor: tuple[int, float] | None = None
+
+    def observe_hold_frame(
+        self,
+        observation: FrameObservation,
+        *,
+        replay_only: bool = False,
+    ) -> None:
+        self.replays.append((observation, replay_only))
+        self.anchor = (
+            round(observation.frame_end_s * 1_000),
+            observation.temp_c,
+        )
+
+    def estimator_seed_anchor(self) -> tuple[int, float] | None:
+        return self.anchor
+
+    def barrier(self, timeout: float = 2.0) -> bool:
+        del timeout
+        return True
+
+
+class _ReplayWithoutAnchor:
+    def observe_hold_frame(
+        self,
+        observation: FrameObservation,
+        *,
+        replay_only: bool = False,
+    ) -> None:
+        del observation, replay_only
+
+    def barrier(self, timeout: float = 2.0) -> bool:
+        del timeout
+        return True
+
+
+def test_seed_warmup_requires_the_complete_trajectory_observer() -> None:
+    runtime, *_ = _runtime(learning_trajectory=_ReplayWithoutAnchor())
+    runtime.set_seed_warmup_remaining(1)
+
+    with pytest.raises(AttributeError, match="estimator_seed_anchor"):
+        runtime.submit_completed_observation((0, 20_000), _observation())
+
+
+@pytest.mark.parametrize(
+    "disposition",
+    (FrameFeedbackDisposition.COMPLETE, FrameFeedbackDisposition.DISCARDED),
+)
+def test_seed_warmup_replays_without_learning_and_delivers_terminal_feedback(
+    disposition: FrameFeedbackDisposition,
+) -> None:
+    trajectory = _ReplayTrajectory()
+    runtime, runner, *_ = _runtime(learning_trajectory=trajectory)
+    observation = _observation(frame_start_s=0.0, frame_end_s=20.0)
+    feedback = AppliedOutput(
+        0.25,
+        OutputSource.CONTROLLER,
+        20.0,
+        requested=0.25,
+        feedback_disposition=disposition,
+    )
+    runtime.set_seed_warmup_remaining(1)
+
+    runtime.submit_completed_observation((0, 20_000), observation, feedback)
+
+    assert trajectory.replays == [(observation, True)]
+    assert trajectory.estimator_seed_anchor() == (
+        round(observation.frame_end_s * 1_000),
+        observation.temp_c,
+    )
+    assert runtime.seed_warmup_remaining == 0
+    assert runner.outputs == [feedback]
+    assert runner.completed == []
+    assert runner.submissions == []
+
+
+class _TrajectoryObserver:
+    def __init__(self) -> None:
+        self.observations: list[FrameObservation] = []
+        self.anchor: tuple[int, float] | None = None
+
+    def observe_hold_frame(
+        self,
+        observation: FrameObservation,
+        *,
+        replay_only: bool = False,
+    ) -> None:
+        del replay_only
+        self.observations.append(observation)
+        self.anchor = (round(observation.frame_end_s * 1_000), observation.temp_c)
+
+    def estimator_seed_anchor(self) -> tuple[int, float] | None:
+        return self.anchor
+
+    def barrier(self, timeout: float = 2.0) -> bool:
+        del timeout
+        return True
+
+
+def test_eligible_reconciled_hold_observation_enters_trajectory_exactly_once() -> None:
+    trace, _recorder = _trace()
+    runner = _Runner()
+    trajectory = _TrajectoryObserver()
+    runtime = HoldLearningRuntime(
+        runner=runner,
+        model_store=None,
+        persistence=_Persistence(),
+        trace=trace,
+        controller_name="mpc",
+        logger=_LifecycleLogger(),
+        initial_generation=runner.generation,
+        learning_trajectory=trajectory,
+    )
+    observation = _observation()
+    eligible = {
+        **_outcome(),
+        "eligible": True,
+        "rejection_reasons": (),
+    }
+
+    runtime.submit_completed_observation((0, 20_000), observation)
+    runner.drains.append(_drain(ObservationOutcomeEnvelope(1, 0, observation, eligible)))
+    runtime.reconcile_outcomes(22.0)
+    runtime.reconcile_outcomes(23.0)
+
+    assert trajectory.observations == [observation]
+
+
 def test_accepted_outcome_keeps_exact_frame_feedback_identity_and_reconciles_once() -> None:
     runtime, runner, _persistence, _trace_session, recorder = _runtime()
     observation = _observation()
@@ -784,6 +1035,29 @@ def test_complete_grey_outcome_without_obsolete_scores_stays_eligible() -> None:
     assert payloads[0].eligible is True
     assert payloads[0].rejection_reasons == ()
     assert _gap_payloads(recorder) == []
+
+
+def test_pid_sp_completed_frame_records_one_model_observation_without_a_gap() -> None:
+    runtime, recorder = _production_pid_sp_runtime()
+    observation = _observation()
+
+    runtime.submit_completed_observation((0, 20_000), observation)
+    runtime.reconcile_outcomes(22.0)
+
+    gaps = _gap_payloads(recorder)
+    assert gaps == [], [gap.reason for gap in gaps]
+    assert len(_records(recorder, TraceEventKind.MODEL_OBSERVATION)) == 1
+
+
+def test_pid_sp_discontinuous_frame_records_the_exact_gap() -> None:
+    runtime, recorder = _production_pid_sp_runtime()
+    observation = _observation(continuous=False)
+
+    runtime.submit_completed_observation((0, 20_000), observation)
+    runtime.reconcile_outcomes(22.0)
+
+    assert _observation_payloads(recorder) == []
+    assert [gap.reason for gap in _gap_payloads(recorder)] == ["discontinuous"]
 
 
 def test_submission_eviction_terminal_drop_and_dropped_sequence_are_consumed_once() -> None:
@@ -935,6 +1209,60 @@ def test_blocked_worker_records_gap_without_submitting_to_learner() -> None:
     assert runner.submissions == []
     assert runtime.evidence_available is False
     assert [payload.reason for payload in _gap_payloads(recorder)] == ["model-persistence-unavailable"]
+
+
+def test_blocked_worker_delivers_terminal_feedback_without_resubmitting_observation() -> None:
+    persistence = _Persistence(blocked=True)
+    runtime, runner, actual_persistence, _trace_session, recorder = _runtime(persistence=persistence)
+    observation = _observation()
+    feedback = AppliedOutput(
+        0.25,
+        OutputSource.CONTROLLER,
+        20.0,
+        requested=0.25,
+        feedback_disposition=FrameFeedbackDisposition.COMPLETE,
+    )
+
+    runtime.submit_completed_observation((0, 0), observation, feedback)
+    runner.drains.append(
+        _drain(
+            terminal_drops=(
+                ObservationTerminalDrop(
+                    submission_sequence=1,
+                    configuration_generation=0,
+                    observation=observation,
+                    reason="runner-no-observation-outcome",
+                ),
+            )
+        )
+    )
+    runtime.reconcile_outcomes(22.0)
+
+    assert runner.outputs == [feedback]
+    assert runner.completed == []
+    assert runner.submissions == []
+    assert [payload.reason for payload in _gap_payloads(recorder)] == ["model-persistence-unavailable"]
+    assert len(actual_persistence.batches) == 1
+    compact_gap = cast(RecorderGapEvidence, actual_persistence.batches[0][0].payload)
+    assert compact_gap.reason == "model-persistence-unavailable"
+
+
+def test_invalid_probe_delivers_terminal_feedback_without_learner_submission() -> None:
+    runtime, runner, _persistence, _trace_session, _recorder = _runtime()
+    observation = _observation(probe_valid=False, continuous=False)
+    feedback = AppliedOutput(
+        0.0,
+        OutputSource.CONTROLLER,
+        20.0,
+        requested=0.25,
+        feedback_disposition=FrameFeedbackDisposition.DISCARDED,
+    )
+
+    runtime.submit_completed_observation((0, 0), observation, feedback)
+
+    assert runner.outputs == [feedback]
+    assert runner.completed == []
+    assert runner.submissions == []
 
 
 def test_runner_submission_exception_is_not_hidden_or_partially_accepted() -> None:
@@ -1642,14 +1970,180 @@ def test_restore_model_clears_stale_authority_before_absent_checkpoint_noop() ->
     assert logger.warnings == []
 
 
+def test_missing_checkpoint_for_new_controller_supersedes_old_pending_restore(
+    monkeypatch,
+) -> None:
+    from controller.runtime.modes import hold_learning as learning_module
+
+    activation_reads = 0
+
+    def read_activation():
+        nonlocal activation_reads
+        activation_reads += 1
+        return None
+
+    monkeypatch.setattr(learning_module, "read_model_activation", read_activation)
+    monkeypatch.setattr(learning_module, "read_model_evidence", lambda: ())
+    old_snapshot: dict[str, object] = {"revision": 8, "K": 700.0}
+    runtime, runner, store, trace, recorder, _logger = _lifecycle_runtime(
+        snapshot=old_snapshot,
+        asynchronous=True,
+    )
+
+    runtime.restore_model(timestamp_ms=1_250)
+    old_restore_token = runner.restore_token
+    assert old_restore_token is not None
+    assert runtime.submitted_restore_authority is not None
+
+    store.snapshot = None
+    runtime.restore_model(timestamp_ms=1_500, controller_name="mpc")
+
+    assert runtime.submitted_restore_authority is None
+    assert trace.model_authority is None
+
+    trace.rotate(runner_snapshot_fallback_safe=False)
+    next_context = replace(
+        _trace_context(),
+        controller=ControllerType.MPC,
+        runner_generation=1,
+        submitted_model=runtime.submitted_restore_authority,
+    )
+    assert trace.ensure_open(next_context, timestamp_ms=1_500) is not None
+    new_session = _records(recorder, TraceEventKind.SESSION)[-1]
+    assert (new_session.payload.model_revision, new_session.payload.model_provenance) == (None, None)
+
+    runner.restore_outcome = ModelRestoreOutcome(
+        restore_token=old_restore_token,
+        accepted=True,
+        effective_authority=old_snapshot,
+    )
+    runtime.reconcile_outcomes(1.75)
+    runtime.reconcile_activation()
+
+    assert runtime.submitted_restore_authority is None
+    assert trace.model_authority is None
+    assert activation_reads == 1
+
 @pytest.mark.parametrize(
-    ("asynchronous", "authority_provenance"),
-    ((False, "restored"), (True, "restore_submitted")),
-    ids=("synchronous", "asynchronous"),
+    (
+        "outcome",
+        "asynchronous",
+        "verdict",
+        "staged_for_revalidation",
+        "expected_revision",
+        "expected_provenance",
+        "expected_events",
+    ),
+    (
+        pytest.param(
+            "pending",
+            True,
+            None,
+            False,
+            None,
+            None,
+            (ModelEventType.RESTORE,),
+            id="pending",
+        ),
+        pytest.param(
+            "accepted-immediate",
+            False,
+            True,
+            False,
+            8,
+            "restored",
+            (ModelEventType.RESTORE,),
+            id="accepted-immediate",
+        ),
+        pytest.param(
+            "accepted-staged",
+            True,
+            True,
+            True,
+            0,
+            "configured_fallback",
+            (ModelEventType.RESTORE,),
+            id="accepted-staged",
+        ),
+        pytest.param(
+            "rejected",
+            True,
+            False,
+            False,
+            None,
+            None,
+            (ModelEventType.RESTORE, ModelEventType.REJECT),
+            id="rejected",
+        ),
+    ),
 )
-def test_restore_model_records_accepted_sync_and_async_provenance(
+def test_restore_authority_state_table_separates_pending_submission_from_effective_authority(
+    outcome: str,
     asynchronous: bool,
-    authority_provenance: str,
+    verdict: bool | None,
+    staged_for_revalidation: bool,
+    expected_revision: int | None,
+    expected_provenance: str | None,
+    expected_events: tuple[ModelEventType, ...],
+) -> None:
+    candidate: dict[str, object] = {"revision": 8, "K": 700.0}
+    fallback: dict[str, object] = {"revision": 0, "provenance": "configured"}
+    runner = _LifecycleRunner(asynchronous=asynchronous)
+    runtime, _runner, _store, trace, recorder, _logger = _lifecycle_runtime(
+        snapshot=candidate,
+        runner=runner,
+    )
+
+    runtime.restore_model(timestamp_ms=1_250)
+
+    if asynchronous:
+        submitted = runtime.submitted_restore_authority
+        assert submitted is not None
+        assert (submitted.snapshot, submitted.provenance) == (candidate, "restore_submitted")
+        assert trace.model_authority is None
+    else:
+        assert runtime.submitted_restore_authority is None
+
+    if asynchronous and verdict is not None:
+        assert runner.restore_token is not None
+        runner.restore_outcome = ModelRestoreOutcome(
+            restore_token=runner.restore_token,
+            accepted=verdict,
+            effective_authority=fallback if staged_for_revalidation or not verdict else candidate,
+            staged_for_revalidation=staged_for_revalidation,
+        )
+        runtime.reconcile_outcomes(1.5)
+
+    if outcome == "pending":
+        submitted = runtime.submitted_restore_authority
+        assert submitted is not None
+        assert (submitted.snapshot, submitted.provenance) == (candidate, "restore_submitted")
+    else:
+        assert runtime.submitted_restore_authority is None
+
+    authority = trace.model_authority
+    if expected_revision is None:
+        assert authority is None
+    else:
+        assert authority is not None
+        assert (
+            authority.snapshot["revision"],
+            authority.provenance,
+        ) == (
+            expected_revision,
+            expected_provenance,
+        )
+    events = tuple(
+        record.payload.event
+        for record in _records(recorder, TraceEventKind.MODEL_EVENT)
+        if isinstance(record.payload, ModelEventPayload)
+    )
+    assert events == expected_events
+
+
+@pytest.mark.parametrize("asynchronous", (False, True), ids=("synchronous", "asynchronous"))
+def test_restore_model_records_accepted_sync_and_async_effective_authority(
+    asynchronous: bool,
 ) -> None:
     snapshot: dict[str, object] = {"revision": 3, "K": 700.0}
     runtime, runner, store, trace, recorder, logger = _lifecycle_runtime(
@@ -1661,10 +2155,19 @@ def test_restore_model_records_accepted_sync_and_async_provenance(
 
     assert store.loads == ["pid_sp"]
     assert runner.restored_models == [snapshot]
+    if asynchronous:
+        assert trace.model_authority is None
+        assert runner.restore_token is not None
+        runner.restore_outcome = ModelRestoreOutcome(
+            restore_token=runner.restore_token,
+            accepted=True,
+            effective_authority=snapshot,
+        )
+        runtime.reconcile_outcomes(1.5)
     authority = trace.model_authority
     assert authority is not None
     assert authority.snapshot == snapshot
-    assert authority.provenance == authority_provenance
+    assert authority.provenance == "restored"
     [record] = _records(recorder, TraceEventKind.MODEL_EVENT)
     assert isinstance(record.payload, ModelEventPayload)
     assert record.ts_ms == 1_250
@@ -1675,14 +2178,50 @@ def test_restore_model_records_accepted_sync_and_async_provenance(
     assert logger.warnings == []
 
 
-def test_an_async_restore_the_worker_refuses_is_reported_when_its_verdict_arrives() -> None:
-    """An async runner answers "queued", so the verdict has to correct the record.
+@pytest.mark.parametrize("asynchronous", (False, True), ids=("synchronous", "asynchronous"))
+@pytest.mark.parametrize(
+    "installation_identity_digest",
+    (None, "f" * 64),
+    ids=("legacy", "installation-mismatch"),
+)
+def test_untrusted_restore_reports_configured_fallback_as_effective_authority(
+    asynchronous: bool,
+    installation_identity_digest: str | None,
+) -> None:
+    candidate: dict[str, object] = {
+        "revision": 9,
+        "installation_identity_digest": installation_identity_digest,
+    }
+    fallback = {"revision": 0, "provenance": "configured"}
+    runner = _LifecycleRunner(asynchronous=asynchronous)
+    runner.restore_effective_authority = fallback
+    runner.restore_staged_for_revalidation = True
+    runtime, _runner, _store, trace, _recorder, logger = _lifecycle_runtime(
+        snapshot=candidate,
+        runner=runner,
+    )
 
-    Between submission and adoption the session has already logged a restore and
-    stamped model authority from the stored snapshot. If the worker then refuses
-    it, the controller is running the configured model while the trace still
-    claims the persisted one.
-    """
+    runtime.restore_model(timestamp_ms=1_250)
+    if asynchronous:
+        assert trace.model_authority is None
+        assert runner.restore_token is not None
+        runner.restore_outcome = ModelRestoreOutcome(
+            restore_token=runner.restore_token,
+            accepted=True,
+            effective_authority=fallback,
+            staged_for_revalidation=True,
+        )
+        runtime.reconcile_outcomes(1.5)
+
+    authority = trace.model_authority
+    assert authority is not None
+    assert authority.snapshot == fallback
+    assert authority.provenance == "configured_fallback"
+    assert runner.restored_models == [candidate]
+    assert logger.warnings == []
+
+
+def test_an_async_restore_the_worker_refuses_is_reported_when_its_verdict_arrives() -> None:
     snapshot: dict[str, object] = {"revision": 4, "K": 710.0}
     runtime, runner, _store, trace, recorder, logger = _lifecycle_runtime(
         snapshot=snapshot,
@@ -1692,10 +2231,15 @@ def test_an_async_restore_the_worker_refuses_is_reported_when_its_verdict_arrive
 
     runtime.restore_model(timestamp_ms=2_500)
 
-    assert trace.model_authority is not None
+    assert trace.model_authority is None
     assert logger.infos == ["Submitted the stored pid_sp model for restore"]
 
-    runner.restore_outcome = False
+    assert runner.restore_token is not None
+    runner.restore_outcome = ModelRestoreOutcome(
+        restore_token=runner.restore_token,
+        accepted=False,
+        effective_authority={"revision": 0, "provenance": "configured"},
+    )
     runtime.reconcile_outcomes(3.0)
 
     assert trace.model_authority is None
@@ -1798,13 +2342,21 @@ def test_reconcile_activation_treats_absent_durable_state_as_noop(
     assert logger.warnings == []
 
 
-def test_reconcile_activation_restores_each_prepared_active_and_aborted_identity_once(
+@pytest.mark.parametrize(
+    "origin",
+    (
+        CandidateOrigin.PASSIVE_ONLINE,
+        CandidateOrigin.OPERATOR_CALIBRATION,
+    ),
+)
+def test_reconcile_activation_restores_both_causal_origins_in_each_durable_phase_once(
     monkeypatch,
+    origin: CandidateOrigin,
 ) -> None:
     from controller.runtime.modes import hold_learning as learning_module
 
     states = [
-        _pair_phase_state(phase)[0]
+        _pair_phase_state(phase, origin=origin)[0]
         for phase in (
             ActivationPhase.PREPARED,
             ActivationPhase.ACTIVE,
@@ -1972,259 +2524,47 @@ def test_submit_online_checkpoint_uses_nonblocking_worker_and_availability(
     assert runtime.evidence_available is accepted
 
 
-def _learning_settings(enabled: bool):
-    return {
-        "controller": {
-            "config": {
-                "pid_sp": {
-                    "enable_identification": enabled,
-                }
-            }
-        }
-    }
-
-
-@pytest.mark.parametrize(
-    ("enabled", "verdict", "expected_outcome", "reason"),
-    (
-        (False, None, TeardownRefitOutcome.DISABLED, None),
-        (True, None, TeardownRefitOutcome.INSUFFICIENT, "no reason recorded"),
-        (
-            True,
-            TeardownRefitResult.rejected(
-                "physical-bounds",
-                origin=CandidateOrigin.COOK_REFIT,
-            ),
-            TeardownRefitOutcome.REJECTED,
-            "physical-bounds",
-        ),
-        (
-            True,
-            TeardownRefitResult.ready_for_review(
-                "operator review",
-                candidate_digest="a" * 64,
-            ),
-            TeardownRefitOutcome.READY_FOR_REVIEW,
-            "operator review",
-        ),
-        (
-            True,
-            TeardownRefitResult.accepted_next_cook(
-                "accepted",
-                candidate_digest="b" * 64,
-            ),
-            TeardownRefitOutcome.ACCEPTED_NEXT_COOK,
-            "accepted",
-        ),
-    ),
-    ids=(
-        "disabled",
-        "insufficient",
-        "rejected",
-        "ready-for-review",
-        "accepted-next-cook",
-    ),
-)
-def test_refit_once_returns_immutable_typed_outcome_and_never_repeats(
-    enabled: bool,
-    verdict: TeardownRefitResult | None,
-    expected_outcome: TeardownRefitOutcome,
-    reason: str | None,
-) -> None:
+def test_refused_checkpoint_does_not_block_authorized_calibration_fit() -> None:
+    persistence = _Persistence(checkpoint_results=(False,))
     runner = _LifecycleRunner()
-    runner.refit_result = verdict
-    runtime, _runner, _store, _trace_session, _recorder, logger = _lifecycle_runtime(runner=runner)
-
-    first = runtime.refit_once(_learning_settings(enabled))
-    second = runtime.refit_once(_learning_settings(not enabled))
-
-    assert first is second
-    assert first.outcome is expected_outcome
-    assert first.verdict is verdict
-    assert runner.refit_calls == int(enabled)
-    with pytest.raises(FrozenInstanceError):
-        first.outcome = TeardownRefitOutcome.FAILED
-    if not enabled:
-        assert logger.infos == ["Model refit skipped at cook end: Learn This Grill is disabled."]
-    else:
-        assert logger.infos == [f"Model refit at cook end: {expected_outcome.value} ({reason})."]
-
-
-@pytest.mark.parametrize(
-    ("runner_result", "runner_error", "expected_error"),
-    (
-        (
-            {"outcome": "accepted-next-cook"},
-            None,
-            "Model refit failed at cook end: invalid refit result",
-        ),
-        (
-            None,
-            RuntimeError("fit exploded"),
-            "Model refit failed at cook end: fit exploded",
-        ),
-    ),
-    ids=("malformed", "exception"),
-)
-def test_refit_once_turns_malformed_and_exception_results_into_typed_failure(
-    runner_result: object,
-    runner_error: BaseException | None,
-    expected_error: str,
-) -> None:
-    runner = _LifecycleRunner()
-    runner.refit_result = runner_result
-    runner.refit_error = runner_error
-    runtime, _runner, _store, _trace_session, _recorder, logger = _lifecycle_runtime(runner=runner)
-
-    result = runtime.refit_once(_learning_settings(True))
-
-    assert result.outcome is TeardownRefitOutcome.FAILED
-    assert result.verdict is None
-    assert runner.refit_calls == 1
-    assert logger.errors == [expected_error]
-
-
-@pytest.mark.parametrize(
-    ("enabled", "verdict", "expected_events"),
-    (
-        (
-            False,
-            None,
-            (ModelEventType.REFIT,),
-        ),
-        (
-            True,
-            TeardownRefitResult.rejected(
-                "physical-bounds",
-                origin=CandidateOrigin.COOK_REFIT,
-            ),
-            (ModelEventType.REFIT, ModelEventType.REJECT),
-        ),
-        (
-            True,
-            TeardownRefitResult.ready_for_review(
-                "operator review",
-                candidate_digest="c" * 64,
-            ),
-            (ModelEventType.REFIT, ModelEventType.ADOPT),
-        ),
-    ),
-    ids=("disabled", "rejected", "adopted"),
-)
-def test_publish_final_checkpoint_records_exact_trace_events_and_authority(
-    enabled: bool,
-    verdict: TeardownRefitResult | None,
-    expected_events: tuple[ModelEventType, ...],
-) -> None:
-    runner = _LifecycleRunner()
-    runner.refit_result = verdict
-    runner.snapshot = {"revision": 11, "params": {"theta": 40.0}}
-    persistence = _Persistence()
-    runtime, _runner, _store, trace, recorder, _logger = _lifecycle_runtime(
+    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(
         runner=runner,
         persistence=persistence,
     )
-    refit = runtime.refit_once(_learning_settings(enabled))
-
-    assert runtime.publish_final_checkpoint_once(refit, timestamp_ms=6_000)
-
-    payloads = [
-        record.payload
-        for record in _records(recorder, TraceEventKind.MODEL_EVENT)
-        if isinstance(record.payload, ModelEventPayload)
-    ]
-    assert tuple(payload.event for payload in payloads) == expected_events
-    assert all(record.ts_ms == 6_000 for record in _records(recorder, TraceEventKind.MODEL_EVENT))
-    assert trace.model_authority is None
-    assert persistence.checkpoints == [("pid_sp", runner.snapshot)]
-    before = (tuple(runner.finalized), tuple(persistence.checkpoints))
-    assert runtime.publish_final_checkpoint_once(refit, timestamp_ms=7_000)
-    assert (tuple(runner.finalized), tuple(persistence.checkpoints)) == before
-
-
-@pytest.mark.parametrize("failure", ("refusal", "exception"))
-def test_publish_final_checkpoint_never_queues_snapshot_stale_before_finalization_failure(
-    failure: str,
-) -> None:
-    runner = _LifecycleRunner()
-    runner.snapshot = {"revision": 1, "stale": True}
-    if failure == "refusal":
-        runner.finalize_results = [False, True]
-    else:
-        runner.finalize_errors = [RuntimeError("finalize exploded"), None]
-        runner.finalize_results = [True]
-    persistence = _Persistence()
-    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(
-        runner=runner, persistence=persistence
+    generation = 7
+    runtime.handoff_calibration(
+        CalibrationDecision(
+            True,
+            0.08,
+            "low",
+            CalibrationProgress(),
+            events=(CalibrationEvent("start_accepted", "low", 0.08, 0.08, 0.0),),
+            command_generation=generation,
+        ),
+        result_revision=41,
+        timestamp_ms=12_500,
     )
-    refit = runtime.refit_once(_learning_settings(False))
+    assert not runtime.submit_online_checkpoint({"revision": 9})
 
-    assert runtime.publish_final_checkpoint_once(refit, timestamp_ms=8_000)
-
-    assert runner.finalized == [
-        TeardownRefitOutcome.DISABLED,
-        TeardownRefitOutcome.CHECKPOINT_FAILURE,
-    ]
-    assert len(persistence.checkpoints) == 1
-    submitted = persistence.checkpoints[0][1]
-    assert submitted["cook_refit"] == {"latest": "checkpoint-failure"}
-    assert "stale" not in submitted
-
-
-@pytest.mark.parametrize("snapshot", (None, ["malformed"]), ids=("missing", "malformed"))
-def test_publish_final_checkpoint_makes_missing_or_malformed_snapshot_terminal(
-    snapshot: object,
-) -> None:
-    runner = _LifecycleRunner()
-    runner.snapshot = snapshot
-    persistence = _Persistence()
-    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(
-        runner=runner, persistence=persistence
+    runtime.handoff_calibration(
+        CalibrationDecision(
+            False,
+            0.0,
+            "high",
+            CalibrationProgress(),
+            completed_stages=("low", "middle", "high"),
+            outcome="completed",
+            command_generation=generation,
+        ),
+        result_revision=42,
+        timestamp_ms=13_000,
     )
-    refit = runtime.refit_once(_learning_settings(False))
 
-    first = runtime.publish_final_checkpoint_once(refit, timestamp_ms=9_000)
-    second = runtime.publish_final_checkpoint_once(refit, timestamp_ms=10_000)
-
-    assert not first
-    assert not second
-    assert runner.finalized == [
-        TeardownRefitOutcome.DISABLED,
-        TeardownRefitOutcome.CHECKPOINT_FAILURE,
-    ]
-    assert persistence.checkpoints == []
-    assert not runtime.evidence_available
+    assert runner.fit_requests == [CandidateOrigin.OPERATOR_CALIBRATION]
+    assert persistence.barrier_calls == 1
 
 
-def test_publish_final_checkpoint_bounds_authoritative_retry_and_is_idempotent() -> None:
-    runner = _LifecycleRunner()
-    verdict = TeardownRefitResult.accepted_next_cook(
-        "accepted",
-        candidate_digest="d" * 64,
-    )
-    runner.refit_result = verdict
-    runner.finalize_results = [True, True]
-    runner.snapshot = {"revision": 12, "cook_refit": {"latest": "accepted-next-cook"}}
-    persistence = _Persistence(checkpoint_results=(False, True))
-    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(
-        runner=runner, persistence=persistence
-    )
-    refit = runtime.refit_once(_learning_settings(True))
-
-    assert runtime.publish_final_checkpoint_once(refit, timestamp_ms=11_000)
-    assert runtime.publish_final_checkpoint_once(refit, timestamp_ms=12_000)
-
-    assert runner.finalized == [
-        TeardownRefitOutcome.ACCEPTED_NEXT_COOK,
-        TeardownRefitOutcome.CHECKPOINT_FAILURE,
-    ]
-    assert [
-        cast(Mapping[str, object], snapshot["cook_refit"])["latest"] for _name, snapshot in persistence.checkpoints
-    ] == ["accepted-next-cook", "checkpoint-failure"]
-    assert not runtime.evidence_available
-
-
-def test_finish_teardown_orders_retire_flush_trace_close_and_runner_finish_once() -> None:
+def test_finish_teardown_orders_retire_barrier_finalizer_and_runner_close_once() -> None:
     events: list[object] = []
     runner = _LifecycleRunner(events=events)
     persistence = _Persistence(events=events)
@@ -2242,24 +2582,137 @@ def test_finish_teardown_orders_retire_flush_trace_close_and_runner_finish_once(
 
     assert events == [
         ("runner:retire", 4),
-        "persistence:flush",
-        "trace:close",
+        "persistence:barrier",
         "runner:finish",
+        "trace:close",
+        "runner:close",
     ]
     assert runner.retirements == [4]
-    assert persistence.flush_calls == 1
+    assert persistence.barrier_calls == 1
     assert recorder.close_calls == 1
     assert runner.finish_calls == 1
 
 
+def test_submitted_stop_fit_postfit_barrier_precedes_trace_flush_and_core_close() -> None:
+    events: list[object] = []
+    runner = _LifecycleRunner(events=events)
+    persistence = _Persistence(events=events)
+    recorder = _Recorder(events=events)
+    trace, _recorder = _trace(recorder=recorder)
+    original_flush = trace.flush_pending
+
+    def record_flush() -> None:
+        events.append("trace:flush")
+        return original_flush()
+
+    trace.flush_pending = record_flush
+    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(
+        runner=runner,
+        persistence=persistence,
+        trace=trace,
+        recorder=recorder,
+        controller_name="mpc",
+    )
+    assert runtime.schedule_stop_fit(
+        {
+            "controller": {
+                "config": {
+                    "mpc": {
+                        "enable_identification": True,
+                    },
+                },
+            },
+        },
+    )
+
+    runtime.finish_teardown(generation=4)
+    runtime.finish_teardown(generation=4)
+
+    assert events == [
+        ("runner:retire", 4),
+        "persistence:barrier",
+        "runner:finish",
+        "persistence:barrier",
+        "trace:flush",
+        "trace:flush",
+        "trace:close",
+        "runner:close",
+    ]
+    assert persistence.barrier_calls == 2
+    assert recorder.close_calls == 1
+    assert runner.finish_calls == 1
+
+
+def test_postfit_barrier_failure_still_closes_trace_and_runner_core() -> None:
+    events: list[object] = []
+
+    class _PostfitFailurePersistence(_Persistence):
+        def barrier(self, timeout: float = 2.0) -> bool:
+            del timeout
+            self.barrier_calls += 1
+            self.events.append("persistence:barrier")
+            if self.barrier_calls == 2:
+                raise RuntimeError("terminal fit durability failed")
+            return True
+
+    runner = _LifecycleRunner(events=events)
+    persistence = _PostfitFailurePersistence(events=events)
+    recorder = _Recorder(events=events)
+    trace, _recorder = _trace(recorder=recorder)
+    logger = _LifecycleLogger()
+    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(
+        runner=runner,
+        persistence=persistence,
+        trace=trace,
+        recorder=recorder,
+        logger=logger,
+        controller_name="mpc",
+    )
+    assert runtime.schedule_stop_fit(
+        {
+            "controller": {
+                "config": {
+                    "mpc": {
+                        "enable_identification": True,
+                    },
+                },
+            },
+        },
+    )
+
+    runtime.finish_teardown(generation=4)
+
+    assert events == [
+        ("runner:retire", 4),
+        "persistence:barrier",
+        "runner:finish",
+        "persistence:barrier",
+        "trace:close",
+        "runner:close",
+    ]
+    assert logger.warnings == [
+        "Post-fit model persistence barrier failed: terminal fit durability failed",
+    ]
+    assert not runtime.evidence_available
+
+
+def test_successful_teardown_barrier_result_is_stable_and_fenced_once() -> None:
+    persistence = _Persistence(barrier_result=True)
+    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(persistence=persistence)
+
+    assert runtime.barrier_for_teardown(generation=4)
+    assert runtime.barrier_for_teardown(generation=4)
+    assert persistence.barrier_calls == 1
+
+
 @pytest.mark.parametrize("failure", ("refusal", "timeout"))
-def test_finish_teardown_marks_flush_failure_and_still_finishes_resources(
+def test_finish_teardown_marks_barrier_failure_and_still_finishes_resources(
     failure: str,
 ) -> None:
     runner = _LifecycleRunner()
     persistence = _Persistence(
-        flush_result=failure != "refusal",
-        flush_error=TimeoutError("flush timed out") if failure == "timeout" else None,
+        barrier_result=failure != "refusal",
+        barrier_error=(TimeoutError("barrier timed out") if failure == "timeout" else None),
     )
     runtime, _runner, _store, _trace_session, recorder, _logger = _lifecycle_runtime(
         runner=runner, persistence=persistence
@@ -2268,8 +2721,7 @@ def test_finish_teardown_marks_flush_failure_and_still_finishes_resources(
     runtime.finish_teardown(generation=5)
     runtime.finish_teardown(generation=5)
 
-    assert runner.finalized == [TeardownRefitOutcome.CHECKPOINT_FAILURE]
-    assert persistence.flush_calls == 1
+    assert persistence.barrier_calls == 1
     assert recorder.close_calls == 1
     assert runner.finish_calls == 1
     assert not runtime.evidence_available
@@ -2339,7 +2791,7 @@ def test_partial_lifecycle_calls_preserve_noop_and_failure_boundaries() -> None:
     runtime.restore_model(timestamp_ms=1_000, controller_name="mpc")
     runtime.reconcile_activation()
     runtime.drain_activation_events()
-    refit = runtime.refit_once(
+    scheduled = runtime.schedule_stop_fit(
         {
             "controller": {
                 "config": {
@@ -2350,19 +2802,11 @@ def test_partial_lifecycle_calls_preserve_noop_and_failure_boundaries() -> None:
             }
         }
     )
-    published = runtime.publish_final_checkpoint_once(
-        refit,
-        timestamp_ms=2_000,
-    )
     runtime.finish_teardown(generation=0)
 
     assert store.loads == []
     assert runtime.status_fragment() == {}
-    assert refit == HoldRefitResult(
-        TeardownRefitOutcome.INSUFFICIENT,
-        None,
-    )
-    assert not published
+    assert not scheduled
     assert not runtime.evidence_available
     assert logger.warnings == []
 
@@ -2394,138 +2838,6 @@ def test_status_fragment_rejects_invalid_public_runner_status(
     runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(runner=runner)
 
     assert runtime.status_fragment() == {}
-
-
-@pytest.mark.parametrize(
-    "settings",
-    (
-        {"controller": []},
-        {"controller": {"config": []}},
-        {"controller": {"config": {"pid_sp": []}}},
-    ),
-    ids=("controller", "config", "selected"),
-)
-def test_refit_once_rejects_malformed_settings_as_disabled(
-    settings,
-) -> None:
-    runtime, runner, _store, _trace_session, _recorder, logger = _lifecycle_runtime()
-
-    result = runtime.refit_once(settings)
-
-    assert result == HoldRefitResult(TeardownRefitOutcome.DISABLED, None)
-    assert runner.refit_calls == 0
-    assert len(logger.errors) == 1
-    assert logger.errors[0].startswith("Model refit failed at cook end:")
-
-
-def test_controller_switch_does_not_dedupe_an_identical_checkpoint_for_new_owner() -> None:
-    snapshot: dict[str, object] = {"revision": 7}
-    runner = _LifecycleRunner()
-    runner.snapshot = snapshot
-    store = _ModelStore(snapshot)
-    persistence = _Persistence(checkpoint_results=(True, True))
-    runtime = HoldLearningRuntime(
-        runner=runner,
-        model_store=store,
-        persistence=persistence,
-        trace=None,
-        controller_name="pid_sp",
-        logger=_LifecycleLogger(),
-        initial_generation=0,
-    )
-
-    assert runtime.submit_online_checkpoint(snapshot)
-    runtime.restore_model(timestamp_ms=1_000, controller_name="mpc")
-    published = runtime.publish_final_checkpoint_once(
-        HoldRefitResult(TeardownRefitOutcome.DISABLED, None),
-        timestamp_ms=2_000,
-    )
-
-    assert store.loads == ["mpc"]
-    assert runner.restored_models == [snapshot]
-    assert published
-    assert persistence.checkpoints == [
-        ("pid_sp", snapshot),
-        ("mpc", snapshot),
-    ]
-
-
-def test_failed_identical_checkpoint_stops_when_failure_finalization_refuses() -> None:
-    snapshot: dict[str, object] = {"revision": 8}
-    runner = _LifecycleRunner()
-    runner.snapshot = snapshot
-    runner.finalize_results = [True, False]
-    persistence = _Persistence(checkpoint_results=(False,))
-    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(
-        runner=runner, persistence=persistence
-    )
-
-    assert not runtime.submit_online_checkpoint(snapshot)
-    published = runtime.publish_final_checkpoint_once(
-        HoldRefitResult(TeardownRefitOutcome.DISABLED, None),
-        timestamp_ms=3_000,
-    )
-
-    assert not published
-    assert runner.finalized == [
-        TeardownRefitOutcome.DISABLED,
-        TeardownRefitOutcome.CHECKPOINT_FAILURE,
-    ]
-    assert persistence.checkpoints == [("pid_sp", snapshot)]
-
-
-def test_checkpoint_failure_outcome_does_not_retry_a_refused_snapshot() -> None:
-    snapshot: dict[str, object] = {"revision": 9}
-    runner = _LifecycleRunner()
-    runner.snapshot = snapshot
-    persistence = _Persistence(checkpoint_results=(False,))
-    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(
-        runner=runner, persistence=persistence
-    )
-
-    published = runtime.publish_final_checkpoint_once(
-        HoldRefitResult(TeardownRefitOutcome.CHECKPOINT_FAILURE, None),
-        timestamp_ms=4_000,
-    )
-
-    assert not published
-    assert runner.finalized == [TeardownRefitOutcome.CHECKPOINT_FAILURE]
-    assert len(persistence.checkpoints) == 1
-    submitted = persistence.checkpoints[0][1]
-    assert submitted["cook_refit"] == {"latest": "checkpoint-failure"}
-
-
-def test_authoritative_retry_rejects_a_malformed_refinalized_snapshot() -> None:
-    class _MalformedRetryRunner(_LifecycleRunner):
-        def finalize_cook_refit(
-            self,
-            outcome: TeardownRefitOutcome,
-        ) -> bool:
-            accepted = super().finalize_cook_refit(outcome)
-            if outcome is TeardownRefitOutcome.CHECKPOINT_FAILURE:
-                self.snapshot = None
-            return accepted
-
-    snapshot: dict[str, object] = {"revision": 10}
-    runner = _MalformedRetryRunner()
-    runner.snapshot = snapshot
-    runner.finalize_results = [True, True]
-    persistence = _Persistence(checkpoint_results=(False,))
-    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(
-        runner=runner, persistence=persistence
-    )
-
-    published = runtime.publish_final_checkpoint_once(
-        HoldRefitResult(TeardownRefitOutcome.DISABLED, None),
-        timestamp_ms=5_000,
-    )
-
-    assert not published
-    assert runner.finalized == [
-        TeardownRefitOutcome.DISABLED,
-        TeardownRefitOutcome.CHECKPOINT_FAILURE,
-    ]
-    assert persistence.checkpoints == [("pid_sp", snapshot)]
 
 
 def test_finish_teardown_contains_retirement_and_trace_flush_exceptions() -> None:

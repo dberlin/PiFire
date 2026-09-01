@@ -6,10 +6,8 @@ import hashlib
 import json
 import math
 from collections.abc import Mapping
-from dataclasses import asdict
 
 from controller.model_learning.activation import GreyControlPairDescriptor
-from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin, FitStatus, FitWindowIdentity
 from controller.mpc_model import MODEL_SCHEMA
 
 GREY_BOX_KIND = "grey-box"
@@ -37,6 +35,30 @@ _GREY_V4_KEYS = frozenset(
         "failure",
     )
 )
+_GREY_V5_SCHEMA = "pifire-grey-learning/v5"
+_GREY_V5_KEYS = frozenset(
+    (
+        "version",
+        "revision",
+        "schema",
+        "structure",
+        "active",
+        "active_pair",
+        "evidence",
+        "origin",
+        "policy",
+        "identification",
+        "cook_refit",
+        "identities",
+        "activation",
+        "failure",
+        "challenger_authority",
+    )
+)
+_GREY_V6_SCHEMA = "pifire-grey-learning/v6"
+_GREY_V6_KEYS = _GREY_V5_KEYS - {"cook_refit"}
+_GREY_V7_SCHEMA = "pifire-grey-learning/v7"
+_GREY_V7_KEYS = _GREY_V6_KEYS | {"installation_identity_digest"}
 
 
 class GreySnapshotInvalid(ValueError):
@@ -128,6 +150,84 @@ def _grey_v4_optional_digest(value, reason):
     return value
 
 
+def _grey_v4_window(value):
+    window = _grey_v4_mapping(
+        value,
+        (
+            "session_id",
+            "cook_id",
+            "first_observation_sequence",
+            "last_observation_sequence",
+            "configuration_digest",
+            "incumbent_digest",
+            "role_generation",
+        ),
+        "invalid-window",
+    )
+    session_id = _grey_v4_optional_text(window["session_id"], "invalid-window")
+    if session_id is None:
+        raise GreySnapshotInvalid("invalid-window")
+    _grey_v4_optional_text(window["cook_id"], "invalid-window")
+    first_sequence = _grey_v4_nonnegative_int(
+        window["first_observation_sequence"],
+        "invalid-window",
+    )
+    last_sequence = _grey_v4_nonnegative_int(
+        window["last_observation_sequence"],
+        "invalid-window",
+    )
+    if last_sequence < first_sequence:
+        raise GreySnapshotInvalid("invalid-window")
+    if _grey_v4_optional_digest(window["configuration_digest"], "invalid-window") is None:
+        raise GreySnapshotInvalid("invalid-window")
+    if _grey_v4_optional_digest(window["incumbent_digest"], "invalid-window") is None:
+        raise GreySnapshotInvalid("invalid-window")
+    _grey_v4_nonnegative_int(window["role_generation"], "invalid-window")
+
+
+def _grey_origin_policy(origin, policy, *, legacy):
+    if origin is None or policy is None:
+        if origin is None and policy is None:
+            return None, None, False
+        raise GreySnapshotInvalid("invalid-origin" if origin is None else "invalid-policy")
+    admitted_origins = {"passive-online", "operator-calibration"}
+    if legacy:
+        admitted_origins.add("cook-refit")
+    if not isinstance(origin, str) or origin not in admitted_origins:
+        raise GreySnapshotInvalid("invalid-origin")
+    admitted_policies = {
+        "passive-online": {"causal-auto"},
+        "operator-calibration": {"causal-auto"},
+        "cook-refit": {"cook-refit"},
+    }
+    if legacy:
+        admitted_policies["passive-online"].add("passive-auto")
+        admitted_policies["operator-calibration"].add("operator-reviewed")
+    if not isinstance(policy, str) or policy not in admitted_policies[origin]:
+        raise GreySnapshotInvalid("invalid-policy")
+    if origin == "cook-refit":
+        return None, None, True
+    return origin, "causal-auto", False
+
+
+def _grey_v4_cook_refit(value):
+    cook_refit = _grey_v4_mapping(
+        value,
+        ("status", "latest"),
+        "invalid-cook-refit",
+    )
+    if cook_refit["status"] not in {
+        "idle",
+        "queued",
+        "running",
+        "succeeded",
+        "failed",
+        "stale",
+    }:
+        raise GreySnapshotInvalid("invalid-cook-refit")
+    _grey_v4_optional_text(cook_refit["latest"], "invalid-cook-refit")
+
+
 def _grey_v4_model(value, reason):
     model = _grey_v4_mapping(value, ("parameters", "metadata"), reason)
     metadata = _grey_v4_mapping(
@@ -158,34 +258,16 @@ def _grey_v4_pair_descriptor(value, reason):
 def _grey_v4_snapshot(snapshot):
     revision = _grey_v4_nonnegative_int(snapshot.get("revision"), "invalid-revision")
     active = _grey_v4_model(snapshot.get("active"), "invalid-active")
-    challenger_value = snapshot.get("challenger")
-    challenger = None if challenger_value is None else _grey_v4_model(challenger_value, "invalid-challenger")
+    if (challenger_value := snapshot.get("challenger")) is not None:
+        _grey_v4_model(challenger_value, "invalid-challenger")
     window_value = snapshot.get("window")
-    if window_value is None:
-        window = None
-    else:
-        try:
-            window_mapping = _grey_v4_mapping(
-                window_value,
-                (
-                    "session_id",
-                    "cook_id",
-                    "first_observation_sequence",
-                    "last_observation_sequence",
-                    "configuration_digest",
-                    "incumbent_digest",
-                    "role_generation",
-                ),
-                "invalid-window",
-            )
-            window = asdict(FitWindowIdentity(**dict(window_mapping)))
-        except (TypeError, ValueError) as error:
-            raise GreySnapshotInvalid("invalid-window") from error
+    if window_value is not None:
+        _grey_v4_window(window_value)
     active_pair = _grey_v4_pair_descriptor(
         snapshot.get("active_pair"),
         "invalid-active-pair",
     )
-    candidate_pair = _grey_v4_pair_descriptor(
+    _grey_v4_pair_descriptor(
         snapshot.get("candidate_pair"),
         "invalid-candidate-pair",
     )
@@ -202,16 +284,11 @@ def _grey_v4_snapshot(snapshot):
             "invalid-evidence",
         ),
     }
-    origin_value = snapshot.get("origin")
-    try:
-        origin = None if origin_value is None else CandidateOrigin(origin_value).value
-    except (TypeError, ValueError) as error:
-        raise GreySnapshotInvalid("invalid-origin") from error
-    policy_value = snapshot.get("policy")
-    try:
-        policy = None if policy_value is None else ActivationPolicy(policy_value).value
-    except (TypeError, ValueError) as error:
-        raise GreySnapshotInvalid("invalid-policy") from error
+    origin, policy, retired_origin = _grey_origin_policy(
+        snapshot.get("origin"),
+        snapshot.get("policy"),
+        legacy=True,
+    )
     identification_value = _grey_v4_mapping(
         snapshot.get("identification"),
         ("status",),
@@ -220,19 +297,7 @@ def _grey_v4_snapshot(snapshot):
     identification_status = identification_value["status"]
     if identification_status not in ("identified", "unidentified"):
         raise GreySnapshotInvalid("invalid-identification")
-    cook_refit_value = _grey_v4_mapping(
-        snapshot.get("cook_refit"),
-        ("status", "latest"),
-        "invalid-cook-refit",
-    )
-    try:
-        cook_refit_status = FitStatus(cook_refit_value["status"]).value
-    except (TypeError, ValueError) as error:
-        raise GreySnapshotInvalid("invalid-cook-refit") from error
-    cook_refit = {
-        "status": cook_refit_status,
-        "latest": _grey_v4_optional_text(cook_refit_value["latest"], "invalid-cook-refit"),
-    }
+    _grey_v4_cook_refit(snapshot.get("cook_refit"))
     identities_value = _grey_v4_mapping(
         snapshot.get("identities"),
         (
@@ -273,6 +338,12 @@ def _grey_v4_snapshot(snapshot):
     ):
         raise GreySnapshotInvalid("invalid-activation")
     activation = dict(activation_value)
+    if retired_origin:
+        activation = {
+            "phase": "aborted",
+            "pending_persistence": False,
+            "pending_swap": False,
+        }
     failure_value = snapshot.get("failure")
     if failure_value is None:
         failure = None
@@ -291,22 +362,117 @@ def _grey_v4_snapshot(snapshot):
     return {
         "version": MODEL_SCHEMA,
         "revision": revision,
-        "schema": _GREY_V4_SCHEMA,
+        "schema": _GREY_V7_SCHEMA,
         "structure": {"kind": GREY_BOX_KIND, "n_delay": 8, "state_count": 10},
         "active": active,
-        "challenger": challenger,
         "active_pair": active_pair,
-        "window": window,
-        "candidate_pair": candidate_pair,
         "evidence": evidence,
         "origin": origin,
         "policy": policy,
         "identification": {"status": identification_status},
-        "cook_refit": cook_refit,
-        "identities": identities,
+        "identities": {
+            "active_digest": identities["active_digest"],
+            "active_generation": identities["active_generation"],
+            "rollback_digest": identities["rollback_digest"],
+            "rollback_generation": identities["rollback_generation"],
+        },
         "activation": activation,
         "failure": failure,
+        "challenger_authority": None,
+        "installation_identity_digest": None,
     }
+
+
+def _grey_v5_snapshot(snapshot):
+    authority_value = snapshot.get("challenger_authority")
+    if authority_value is None:
+        authority = None
+    else:
+        authority_mapping = _grey_v4_mapping(
+            authority_value,
+            ("challenger_id", "revision"),
+            "invalid-challenger-authority",
+        )
+        challenger_id = _grey_v4_optional_text(
+            authority_mapping["challenger_id"],
+            "invalid-challenger-authority",
+        )
+        if challenger_id is None:
+            raise GreySnapshotInvalid("invalid-challenger-authority")
+        authority = {
+            "challenger_id": challenger_id,
+            "revision": _grey_v4_nonnegative_int(
+                authority_mapping["revision"],
+                "invalid-challenger-authority",
+            ),
+        }
+    identities_value = _grey_v4_mapping(
+        snapshot.get("identities"),
+        (
+            "active_digest",
+            "active_generation",
+            "rollback_digest",
+            "rollback_generation",
+        ),
+        "invalid-identities",
+    )
+    legacy = {
+        **dict(snapshot),
+        "version": 4,
+        "schema": _GREY_V4_SCHEMA,
+        "challenger": None,
+        "window": None,
+        "candidate_pair": None,
+        "identities": {
+            **dict(identities_value),
+            "candidate_digest": None,
+            "candidate_generation": None,
+        },
+    }
+    legacy.pop("challenger_authority", None)
+    normalized = _grey_v4_snapshot(legacy)
+    normalized["challenger_authority"] = None if snapshot.get("origin") == "cook-refit" else authority
+    return normalized
+
+
+def _grey_v6_snapshot(snapshot):
+    origin, policy, _ = _grey_origin_policy(
+        snapshot.get("origin"),
+        snapshot.get("policy"),
+        legacy=False,
+    )
+    legacy = {
+        **dict(snapshot),
+        "version": 5,
+        "schema": _GREY_V5_SCHEMA,
+        "cook_refit": {"status": "idle", "latest": None},
+    }
+    normalized = _grey_v5_snapshot(legacy)
+    normalized["origin"] = origin
+    normalized["policy"] = policy
+    return normalized
+
+
+def _installation_identity_digest(value):
+    if value is None:
+        return None
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise GreySnapshotInvalid("invalid-installation-identity")
+    return value
+
+
+def _grey_v7_snapshot(snapshot):
+    legacy = dict(snapshot)
+    installation_digest = legacy.pop("installation_identity_digest", None)
+    legacy["version"] = 6
+    legacy["schema"] = _GREY_V6_SCHEMA
+    normalized = _grey_v6_snapshot(legacy)
+    normalized["installation_identity_digest"] = _installation_identity_digest(installation_digest)
+    return normalized
 
 
 def _grey_parameters_digest(parameters):
@@ -315,7 +481,13 @@ def _grey_parameters_digest(parameters):
     ).hexdigest()
 
 
-def new_grey_learning_snapshot(*, revision, parameters, metadata):
+def new_grey_learning_snapshot(
+    *,
+    revision,
+    parameters,
+    metadata,
+    installation_identity_digest=None,
+):
     if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
         raise GreySnapshotInvalid("invalid-revision")
     owned_parameters = normalize_grey_parameters(parameters)
@@ -324,25 +496,19 @@ def new_grey_learning_snapshot(*, revision, parameters, metadata):
     return {
         "version": MODEL_SCHEMA,
         "revision": revision,
-        "schema": _GREY_V4_SCHEMA,
+        "schema": _GREY_V7_SCHEMA,
         "structure": {"kind": GREY_BOX_KIND, "n_delay": 8, "state_count": 10},
         "active": {"parameters": owned_parameters, "metadata": owned_metadata},
-        "challenger": None,
-        "window": None,
-        "evidence": {"eligible": 0, "rejected": 0, "confidence_decision_id": None},
         "active_pair": None,
+        "evidence": {"eligible": 0, "rejected": 0, "confidence_decision_id": None},
         "origin": None,
-        "candidate_pair": None,
         "policy": None,
         "identification": {
             "status": "identified" if owned_metadata["samples"] else "unidentified",
         },
-        "cook_refit": {"status": "idle", "latest": None},
         "identities": {
             "active_digest": digest,
             "active_generation": 0,
-            "candidate_digest": None,
-            "candidate_generation": None,
             "rollback_digest": None,
             "rollback_generation": None,
         },
@@ -352,11 +518,13 @@ def new_grey_learning_snapshot(*, revision, parameters, metadata):
             "pending_swap": False,
         },
         "failure": None,
+        "challenger_authority": None,
+        "installation_identity_digest": _installation_identity_digest(installation_identity_digest),
     }
 
 
 def migrate_grey_learning_snapshot(snapshot):
-    """Own one compatible checkpoint as v4, accepting v3 only for migration."""
+    """Own one compatible checkpoint as v7, accepting v3-v6 only for migration."""
 
     if not isinstance(snapshot, Mapping):
         raise GreySnapshotInvalid("malformed-snapshot")
@@ -368,11 +536,23 @@ def migrate_grey_learning_snapshot(snapshot):
             parameters=snapshot.get("params"),
             metadata=metadata,
         )
-    if version != MODEL_SCHEMA:
-        raise GreySnapshotInvalid("incompatible-schema")
-    if set(snapshot) != _GREY_V4_KEYS or snapshot.get("schema") != _GREY_V4_SCHEMA:
-        raise GreySnapshotInvalid("malformed-v4")
     structure = snapshot.get("structure")
     if structure != {"kind": GREY_BOX_KIND, "n_delay": 8, "state_count": 10}:
         raise GreySnapshotInvalid("incompatible-structure")
-    return _grey_v4_snapshot(snapshot)
+    if version == 4:
+        if set(snapshot) != _GREY_V4_KEYS or snapshot.get("schema") != _GREY_V4_SCHEMA:
+            raise GreySnapshotInvalid("malformed-v4")
+        return _grey_v4_snapshot(snapshot)
+    if version == 5:
+        if set(snapshot) != _GREY_V5_KEYS or snapshot.get("schema") != _GREY_V5_SCHEMA:
+            raise GreySnapshotInvalid("malformed-v5")
+        return _grey_v5_snapshot(snapshot)
+    if version == 6:
+        if set(snapshot) != _GREY_V6_KEYS or snapshot.get("schema") != _GREY_V6_SCHEMA:
+            raise GreySnapshotInvalid("malformed-v6")
+        return _grey_v6_snapshot(snapshot)
+    if version != MODEL_SCHEMA:
+        raise GreySnapshotInvalid("incompatible-schema")
+    if set(snapshot) != _GREY_V7_KEYS or snapshot.get("schema") != _GREY_V7_SCHEMA:
+        raise GreySnapshotInvalid("malformed-v7")
+    return _grey_v7_snapshot(snapshot)

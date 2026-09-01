@@ -54,11 +54,7 @@
       "type": "string"
     },
     "ActivationPolicy": {
-      "enum": [
-        "passive-auto",
-        "operator-reviewed",
-        "cook-refit"
-      ],
+      "const": "causal-auto",
       "type": "string"
     },
     "ActivationReport": {
@@ -411,8 +407,7 @@
     "CandidateOrigin": {
       "enum": [
         "passive-online",
-        "operator-calibration",
-        "cook-refit"
+        "operator-calibration"
       ],
       "type": "string"
     },
@@ -430,28 +425,19 @@
           ]
         },
         "candidate_generation": {
-          "anyOf": [
-            {
-              "minimum": 0,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Candidate Generation"
+          "minimum": 0,
+          "title": "Candidate Generation",
+          "type": "integer"
+        },
+        "challenger_id": {
+          "minLength": 1,
+          "title": "Challenger Id",
+          "type": "string"
         },
         "digest": {
-          "anyOf": [
-            {
-              "pattern": "^[0-9a-f]{64}$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Digest"
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Digest",
+          "type": "string"
         },
         "fit_quality": {
           "anyOf": [
@@ -475,15 +461,11 @@
           ],
           "title": "Identifiability"
         },
+        "lineage": {
+          "$ref": "#/$defs/ModelFitLineageReport"
+        },
         "origin": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/CandidateOrigin"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "$ref": "#/$defs/CandidateOrigin"
         },
         "parameter_deltas": {
           "anyOf": [
@@ -516,30 +498,29 @@
             }
           ]
         },
+        "phase": {
+          "enum": [
+            "built",
+            "evaluating",
+            "qualified",
+            "activating"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
         "policy": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ActivationPolicy"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "$ref": "#/$defs/ActivationPolicy"
         },
         "role_generation": {
-          "anyOf": [
-            {
-              "minimum": 0,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Role Generation"
+          "minimum": 0,
+          "title": "Role Generation",
+          "type": "integer"
         }
       },
       "required": [
+        "challenger_id",
+        "phase",
+        "lineage",
         "digest",
         "origin",
         "policy",
@@ -552,6 +533,82 @@
         "assessment"
       ],
       "title": "CandidateReport",
+      "type": "object"
+    },
+    "CausalEvaluationProgress": {
+      "additionalProperties": false,
+      "properties": {
+        "completed_horizons": {
+          "items": {
+            "enum": [
+              3,
+              15,
+              45,
+              90,
+              180
+            ],
+            "type": "integer"
+          },
+          "title": "Completed Horizons",
+          "type": "array"
+        },
+        "epoch": {
+          "minimum": 0,
+          "title": "Epoch",
+          "type": "integer"
+        },
+        "pending_origins": {
+          "items": {
+            "$ref": "#/$defs/PendingForecastOriginReport"
+          },
+          "title": "Pending Origins",
+          "type": "array"
+        },
+        "required_horizons": {
+          "items": {
+            "enum": [
+              3,
+              15,
+              45,
+              90,
+              180
+            ],
+            "type": "integer"
+          },
+          "title": "Required Horizons",
+          "type": "array"
+        },
+        "required_wins": {
+          "minimum": 0,
+          "title": "Required Wins",
+          "type": "integer"
+        },
+        "resumed_from_previous_cook": {
+          "title": "Resumed From Previous Cook",
+          "type": "boolean"
+        },
+        "round": {
+          "minimum": 0,
+          "title": "Round",
+          "type": "integer"
+        },
+        "wins": {
+          "minimum": 0,
+          "title": "Wins",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "epoch",
+        "round",
+        "completed_horizons",
+        "required_horizons",
+        "wins",
+        "required_wins",
+        "resumed_from_previous_cook",
+        "pending_origins"
+      ],
+      "title": "CausalEvaluationProgress",
       "type": "object"
     },
     "CheckStatus": {
@@ -569,70 +626,60 @@
       "title": "CommandResponseData",
       "type": "object"
     },
-    "CookRefitAuthorization": {
-      "enum": [
-        "not-run",
-        "blocked",
-        "operator-review",
-        "next-cook"
-      ],
-      "type": "string"
-    },
-    "CookRefitOutcome": {
-      "enum": [
-        "disabled",
-        "insufficient",
-        "rejected",
-        "failed",
-        "ready-for-review",
-        "accepted-next-cook",
-        "checkpoint-failure"
-      ],
-      "type": "string"
-    },
-    "CookRefitReport": {
+    "CorpusStatusReport": {
       "additionalProperties": false,
       "properties": {
-        "authorization": {
-          "$ref": "#/$defs/CookRefitAuthorization"
-        },
-        "final_status": {
+        "digest": {
           "anyOf": [
             {
-              "$ref": "#/$defs/FitStatus"
-            },
-            {
-              "$ref": "#/$defs/CookRefitOutcome"
-            }
-          ],
-          "title": "Final Status"
-        },
-        "latest": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/CookRefitOutcome"
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "title": "Digest"
         },
-        "next_cook": {
-          "title": "Next Cook",
-          "type": "boolean"
+        "fit_partition_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Fit Partition Digest"
         },
-        "status": {
-          "$ref": "#/$defs/FitStatus"
+        "revision": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Revision"
+        },
+        "slices": {
+          "items": {
+            "$ref": "#/$defs/FitCorpusSliceReport"
+          },
+          "title": "Slices",
+          "type": "array"
         }
       },
       "required": [
-        "status",
-        "latest",
-        "final_status",
-        "authorization",
-        "next_cook"
+        "digest",
+        "revision",
+        "fit_partition_digest",
+        "slices"
       ],
-      "title": "CookRefitReport",
+      "title": "CorpusStatusReport",
       "type": "object"
     },
     "EvidenceGate": {
@@ -726,6 +773,58 @@
         }
       ]
     },
+    "FitCorpusSliceReport": {
+      "additionalProperties": false,
+      "properties": {
+        "pre_roll_count": {
+          "minimum": 0,
+          "title": "Pre Roll Count",
+          "type": "integer"
+        },
+        "prefix_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Prefix Digest",
+          "type": "string"
+        },
+        "scored_count": {
+          "minimum": 0,
+          "title": "Scored Count",
+          "type": "integer"
+        },
+        "segment_content_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Segment Content Digest"
+        },
+        "segment_id": {
+          "minLength": 1,
+          "title": "Segment Id",
+          "type": "string"
+        },
+        "through_ordinal": {
+          "minimum": 0,
+          "title": "Through Ordinal",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "segment_id",
+        "through_ordinal",
+        "prefix_digest",
+        "segment_content_digest",
+        "pre_roll_count",
+        "scored_count"
+      ],
+      "title": "FitCorpusSliceReport",
+      "type": "object"
+    },
     "FitReport": {
       "additionalProperties": false,
       "properties": {
@@ -740,6 +839,18 @@
           ],
           "title": "Error"
         },
+        "fit_corpus_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Fit Corpus Digest"
+        },
         "request_id": {
           "anyOf": [
             {
@@ -753,23 +864,12 @@
         },
         "status": {
           "$ref": "#/$defs/FitStatus"
-        },
-        "window_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Window Id"
         }
       },
       "required": [
         "status",
         "request_id",
-        "window_id",
+        "fit_corpus_digest",
         "error"
       ],
       "title": "FitReport",
@@ -786,92 +886,12 @@
       ],
       "type": "string"
     },
-    "FitWindowIdentity": {
-      "additionalProperties": false,
-      "properties": {
-        "configuration_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Configuration Digest",
-          "type": "string"
-        },
-        "cook_id": {
-          "anyOf": [
-            {
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Cook Id"
-        },
-        "first_observation_sequence": {
-          "minimum": 0,
-          "title": "First Observation Sequence",
-          "type": "integer"
-        },
-        "incumbent_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Incumbent Digest",
-          "type": "string"
-        },
-        "last_observation_sequence": {
-          "minimum": 0,
-          "title": "Last Observation Sequence",
-          "type": "integer"
-        },
-        "role_generation": {
-          "minimum": 0,
-          "title": "Role Generation",
-          "type": "integer"
-        },
-        "session_id": {
-          "minLength": 1,
-          "title": "Session Id",
-          "type": "string"
-        }
-      },
-      "required": [
-        "session_id",
-        "cook_id",
-        "first_observation_sequence",
-        "last_observation_sequence",
-        "configuration_digest",
-        "incumbent_digest",
-        "role_generation"
-      ],
-      "title": "FitWindowIdentity",
-      "type": "object"
-    },
-    "FopdtPidSpCheckpoint": {
+    "FopdtPidSpParameters": {
       "additionalProperties": false,
       "properties": {
         "K": {
           "title": "K",
           "type": "number"
-        },
-        "form": {
-          "const": "fopdt",
-          "title": "Form",
-          "type": "string"
-        },
-        "identified_at_f": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Identified At F"
-        },
-        "revision": {
-          "minimum": 0,
-          "title": "Revision",
-          "type": "integer"
         },
         "tau": {
           "title": "Tau",
@@ -883,13 +903,11 @@
         }
       },
       "required": [
-        "form",
         "K",
         "tau",
-        "theta",
-        "revision"
+        "theta"
       ],
-      "title": "FopdtPidSpCheckpoint",
+      "title": "FopdtPidSpParameters",
       "type": "object"
     },
     "FopdtPidSpPredictor": {
@@ -967,7 +985,7 @@
       "title": "GreyParameters",
       "type": "object"
     },
-    "IpdtPidSpCheckpoint": {
+    "IpdtPidSpParameters": {
       "additionalProperties": false,
       "properties": {
         "K_i": {
@@ -978,41 +996,17 @@
           "title": "C0",
           "type": "number"
         },
-        "form": {
-          "const": "ipdt",
-          "title": "Form",
-          "type": "string"
-        },
-        "identified_at_f": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Identified At F"
-        },
-        "revision": {
-          "minimum": 0,
-          "title": "Revision",
-          "type": "integer"
-        },
         "theta": {
           "title": "Theta",
           "type": "number"
         }
       },
       "required": [
-        "form",
         "K_i",
         "c0",
-        "theta",
-        "revision"
+        "theta"
       ],
-      "title": "IpdtPidSpCheckpoint",
+      "title": "IpdtPidSpParameters",
       "type": "object"
     },
     "IpdtPidSpPredictor": {
@@ -1084,122 +1078,6 @@
       "title": "LearningFailure",
       "type": "object"
     },
-    "ModelActionRejected": {
-      "additionalProperties": false,
-      "properties": {
-        "accepted": {
-          "const": false,
-          "title": "Accepted",
-          "type": "boolean"
-        },
-        "active_kind": {
-          "const": "grey-box",
-          "title": "Active Kind",
-          "type": "string"
-        },
-        "detail": {
-          "title": "Detail",
-          "type": "string"
-        },
-        "error": {
-          "const": "model-activation-rejected",
-          "title": "Error",
-          "type": "string"
-        }
-      },
-      "required": [
-        "accepted",
-        "active_kind",
-        "error",
-        "detail"
-      ],
-      "title": "ModelActionRejected",
-      "type": "object"
-    },
-    "ModelActivationAccepted": {
-      "additionalProperties": false,
-      "properties": {
-        "accepted": {
-          "const": true,
-          "title": "Accepted",
-          "type": "boolean"
-        },
-        "candidate_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Candidate Digest",
-          "type": "string"
-        },
-        "decision_id": {
-          "minLength": 1,
-          "title": "Decision Id",
-          "type": "string"
-        },
-        "phase": {
-          "const": "prepared",
-          "title": "Phase",
-          "type": "string"
-        },
-        "role_generation": {
-          "minimum": 0,
-          "title": "Role Generation",
-          "type": "integer"
-        },
-        "transaction_id": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Transaction Id",
-          "type": "string"
-        }
-      },
-      "required": [
-        "accepted",
-        "phase",
-        "transaction_id",
-        "decision_id",
-        "candidate_digest",
-        "role_generation"
-      ],
-      "title": "ModelActivationAccepted",
-      "type": "object"
-    },
-    "ModelActivationAcknowledgement": {
-      "discriminator": {
-        "mapping": {
-          "False": "#/$defs/ModelActionRejected",
-          "True": "#/$defs/ModelActivationAccepted"
-        },
-        "propertyName": "accepted"
-      },
-      "oneOf": [
-        {
-          "$ref": "#/$defs/ModelActivationAccepted"
-        },
-        {
-          "$ref": "#/$defs/ModelActionRejected"
-        }
-      ],
-      "title": "ModelActivationAcknowledgement"
-    },
-    "ModelActivationRequest": {
-      "additionalProperties": false,
-      "properties": {
-        "candidate_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Candidate Digest",
-          "type": "string"
-        },
-        "decision_id": {
-          "minLength": 1,
-          "title": "Decision Id",
-          "type": "string"
-        }
-      },
-      "required": [
-        "candidate_digest",
-        "decision_id"
-      ],
-      "title": "ModelActivationRequest",
-      "type": "object"
-    },
     "ModelEvidenceReport": {
       "additionalProperties": false,
       "properties": {
@@ -1220,7 +1098,14 @@
           "$ref": "#/$defs/CalibrationReport"
         },
         "candidate": {
-          "$ref": "#/$defs/CandidateReport"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CandidateReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "checks": {
           "additionalProperties": {
@@ -1229,8 +1114,8 @@
           "title": "Checks",
           "type": "object"
         },
-        "cook_refit": {
-          "$ref": "#/$defs/CookRefitReport"
+        "corpus": {
+          "$ref": "#/$defs/CorpusStatusReport"
         },
         "decision_id": {
           "anyOf": [
@@ -1249,6 +1134,16 @@
           },
           "title": "Errors",
           "type": "array"
+        },
+        "evaluation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CausalEvaluationProgress"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "evidence": {
           "$ref": "#/$defs/EvidenceSummary"
@@ -1302,22 +1197,12 @@
           "type": "string"
         },
         "schema_version": {
-          "const": 2,
+          "const": 3,
           "title": "Schema Version",
           "type": "integer"
         },
         "status": {
           "$ref": "#/$defs/ModelEvidenceStatus"
-        },
-        "window": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/FitWindowIdentity"
-            },
-            {
-              "type": "null"
-            }
-          ]
         }
       },
       "required": [
@@ -1327,9 +1212,9 @@
         "decision_id",
         "evidence",
         "fit",
-        "cook_refit",
-        "window",
         "checks",
+        "evaluation",
+        "corpus",
         "candidate",
         "activation",
         "active_model",
@@ -1347,18 +1232,73 @@
     },
     "ModelEvidenceStatus": {
       "enum": [
+        "warming",
         "collecting",
-        "insufficient-excitation",
         "fitting",
         "evaluating",
-        "ready-for-review",
+        "interrupted",
+        "qualified",
         "activating",
         "active",
         "fallback",
-        "error",
-        "schema-invalidated"
+        "error"
       ],
       "type": "string"
+    },
+    "ModelFitLineageReport": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Candidate Digest",
+          "type": "string"
+        },
+        "candidate_generation": {
+          "minimum": 0,
+          "title": "Candidate Generation",
+          "type": "integer"
+        },
+        "fit_corpus_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Fit Corpus Digest",
+          "type": "string"
+        },
+        "parent_incumbent_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Parent Incumbent Digest",
+          "type": "string"
+        },
+        "parent_incumbent_generation": {
+          "minimum": 0,
+          "title": "Parent Incumbent Generation",
+          "type": "integer"
+        },
+        "request_id": {
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "result_status": {
+          "const": "succeeded",
+          "title": "Result Status",
+          "type": "string"
+        },
+        "trigger_origin": {
+          "$ref": "#/$defs/CandidateOrigin"
+        }
+      },
+      "required": [
+        "request_id",
+        "parent_incumbent_digest",
+        "parent_incumbent_generation",
+        "candidate_generation",
+        "fit_corpus_digest",
+        "trigger_origin",
+        "result_status",
+        "candidate_digest"
+      ],
+      "title": "ModelFitLineageReport",
+      "type": "object"
     },
     "ModelIdentities": {
       "additionalProperties": false,
@@ -1495,7 +1435,7 @@
     "ModelRollbackAcknowledgement": {
       "discriminator": {
         "mapping": {
-          "False": "#/$defs/ModelActionRejected",
+          "False": "#/$defs/ModelRollbackRejected",
           "True": "#/$defs/ModelRollbackAccepted"
         },
         "propertyName": "accepted"
@@ -1505,10 +1445,42 @@
           "$ref": "#/$defs/ModelRollbackAccepted"
         },
         {
-          "$ref": "#/$defs/ModelActionRejected"
+          "$ref": "#/$defs/ModelRollbackRejected"
         }
       ],
       "title": "ModelRollbackAcknowledgement"
+    },
+    "ModelRollbackRejected": {
+      "additionalProperties": false,
+      "properties": {
+        "accepted": {
+          "const": false,
+          "title": "Accepted",
+          "type": "boolean"
+        },
+        "active_kind": {
+          "const": "grey-box",
+          "title": "Active Kind",
+          "type": "string"
+        },
+        "detail": {
+          "title": "Detail",
+          "type": "string"
+        },
+        "error": {
+          "const": "model-rollback-rejected",
+          "title": "Error",
+          "type": "string"
+        }
+      },
+      "required": [
+        "accepted",
+        "active_kind",
+        "error",
+        "detail"
+      ],
+      "title": "ModelRollbackRejected",
+      "type": "object"
     },
     "ModelRollbackRequest": {
       "additionalProperties": false,
@@ -1624,20 +1596,191 @@
       "title": "MpcCalibrationCommandResponseData",
       "type": "object"
     },
-    "PidSpCheckpointModel": {
-      "discriminator": {
-        "mapping": {
-          "fopdt": "#/$defs/FopdtPidSpCheckpoint",
-          "ipdt": "#/$defs/IpdtPidSpCheckpoint"
+    "PendingForecastOriginReport": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Candidate Digest",
+          "type": "string"
         },
-        "propertyName": "form"
+        "candidate_generation": {
+          "minimum": 0,
+          "title": "Candidate Generation",
+          "type": "integer"
+        },
+        "horizon_steps": {
+          "enum": [
+            3,
+            15,
+            45,
+            90,
+            180
+          ],
+          "title": "Horizon Steps",
+          "type": "integer"
+        },
+        "incumbent_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Incumbent Digest",
+          "type": "string"
+        },
+        "origin_sequence": {
+          "minimum": 0,
+          "title": "Origin Sequence",
+          "type": "integer"
+        },
+        "role_generation": {
+          "minimum": 0,
+          "title": "Role Generation",
+          "type": "integer"
+        }
       },
-      "oneOf": [
+      "required": [
+        "origin_sequence",
+        "horizon_steps",
+        "role_generation",
+        "candidate_generation",
+        "incumbent_digest",
+        "candidate_digest"
+      ],
+      "title": "PendingForecastOriginReport",
+      "type": "object"
+    },
+    "PidSpActiveModelReport": {
+      "additionalProperties": false,
+      "properties": {
+        "form": {
+          "$ref": "#/$defs/PidSpDelayProfileForm"
+        },
+        "model_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Model Digest",
+          "type": "string"
+        }
+      },
+      "required": [
+        "form",
+        "model_digest"
+      ],
+      "title": "PidSpActiveModelReport",
+      "type": "object"
+    },
+    "PidSpCheckpointBasin": {
+      "additionalProperties": false,
+      "properties": {
+        "blockers": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Blockers",
+          "type": "array"
+        },
+        "confidence_lower_s": {
+          "minimum": 0,
+          "title": "Confidence Lower S",
+          "type": "integer"
+        },
+        "confidence_method": {
+          "enum": [
+            "raw-basin",
+            "provided",
+            "moving-block-refit"
+          ],
+          "title": "Confidence Method",
+          "type": "string"
+        },
+        "confidence_resamples": {
+          "minimum": 0,
+          "title": "Confidence Resamples",
+          "type": "integer"
+        },
+        "confidence_upper_s": {
+          "minimum": 0,
+          "title": "Confidence Upper S",
+          "type": "integer"
+        },
+        "episode_count": {
+          "minimum": 0,
+          "title": "Episode Count",
+          "type": "integer"
+        },
+        "interior": {
+          "title": "Interior",
+          "type": "boolean"
+        },
+        "lower_s": {
+          "minimum": 0,
+          "title": "Lower S",
+          "type": "integer"
+        },
+        "representative_s": {
+          "minimum": 0,
+          "title": "Representative S",
+          "type": "integer"
+        },
+        "upper_s": {
+          "minimum": 0,
+          "title": "Upper S",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "lower_s",
+        "upper_s",
+        "representative_s",
+        "confidence_lower_s",
+        "confidence_upper_s",
+        "confidence_method",
+        "confidence_resamples",
+        "episode_count",
+        "interior",
+        "blockers"
+      ],
+      "title": "PidSpCheckpointBasin",
+      "type": "object"
+    },
+    "PidSpCheckpointModel": {
+      "additionalProperties": false,
+      "properties": {
+        "provenance": {
+          "minLength": 1,
+          "title": "Provenance",
+          "type": "string"
+        },
+        "revision": {
+          "minimum": 0,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": 2,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "selected": {
+          "$ref": "#/$defs/PidSpSelectedCheckpoint"
+        }
+      },
+      "required": [
+        "schema_version",
+        "revision",
+        "provenance",
+        "selected"
+      ],
+      "title": "PidSpCheckpointModel",
+      "type": "object"
+    },
+    "PidSpCheckpointParameters": {
+      "anyOf": [
         {
-          "$ref": "#/$defs/FopdtPidSpCheckpoint"
+          "$ref": "#/$defs/IpdtPidSpParameters"
         },
         {
-          "$ref": "#/$defs/IpdtPidSpCheckpoint"
+          "$ref": "#/$defs/FopdtPidSpParameters"
+        },
+        {
+          "$ref": "#/$defs/SopdtPidSpParameters"
         }
       ]
     },
@@ -1669,6 +1812,320 @@
       "title": "PidSpConfirmationProgress",
       "type": "object"
     },
+    "PidSpDelayBlocker": {
+      "enum": [
+        "insufficient-excitation-episodes",
+        "insufficient-confidence-evidence",
+        "delay-basin-too-wide",
+        "delay-basin-edge",
+        "delay-range-exhausted",
+        "no-physically-valid-delay-candidate"
+      ],
+      "type": "string"
+    },
+    "PidSpDelayConfidenceMethod": {
+      "enum": [
+        "raw-basin",
+        "provided",
+        "moving-block-refit"
+      ],
+      "type": "string"
+    },
+    "PidSpDelayEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "authorized": {
+          "title": "Authorized",
+          "type": "boolean"
+        },
+        "blockers": {
+          "items": {
+            "$ref": "#/$defs/PidSpDelayBlocker"
+          },
+          "title": "Blockers",
+          "type": "array"
+        },
+        "completed_episode_count": {
+          "minimum": 0,
+          "title": "Completed Episode Count",
+          "type": "integer"
+        },
+        "confidence_lower_s": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Confidence Lower S"
+        },
+        "confidence_method": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PidSpDelayConfidenceMethod"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "confidence_resamples": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Confidence Resamples"
+        },
+        "confidence_upper_s": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Confidence Upper S"
+        },
+        "evaluated_bound_s": {
+          "minimum": 0,
+          "title": "Evaluated Bound S",
+          "type": "integer"
+        },
+        "profile_form": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PidSpDelayProfileForm"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "raw_basin_lower_s": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Raw Basin Lower S"
+        },
+        "raw_basin_representative_s": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Raw Basin Representative S"
+        },
+        "raw_basin_upper_s": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Raw Basin Upper S"
+        },
+        "status": {
+          "$ref": "#/$defs/PidSpDelayEvidenceStatus"
+        }
+      },
+      "required": [
+        "status",
+        "completed_episode_count",
+        "evaluated_bound_s",
+        "profile_form",
+        "raw_basin_lower_s",
+        "raw_basin_upper_s",
+        "raw_basin_representative_s",
+        "confidence_lower_s",
+        "confidence_upper_s",
+        "confidence_method",
+        "confidence_resamples",
+        "blockers",
+        "authorized"
+      ],
+      "title": "PidSpDelayEvidence",
+      "type": "object"
+    },
+    "PidSpDelayEvidenceStatus": {
+      "enum": [
+        "insufficient-excitation-episodes",
+        "insufficient-confidence-evidence",
+        "delay-basin-too-wide",
+        "delay-basin-edge",
+        "delay-range-exhausted",
+        "no-physically-valid-delay-candidate",
+        "delay-basin-stable"
+      ],
+      "type": "string"
+    },
+    "PidSpDelayProfileForm": {
+      "enum": [
+        "ipdt",
+        "fopdt",
+        "sopdt"
+      ],
+      "type": "string"
+    },
+    "PidSpFormComparisonReport": {
+      "additionalProperties": false,
+      "properties": {
+        "basin_lower_s": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Basin Lower S"
+        },
+        "basin_upper_s": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Basin Upper S"
+        },
+        "blockers": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Blockers",
+          "type": "array"
+        },
+        "confidence_lower_s": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Confidence Lower S"
+        },
+        "confidence_method": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PidSpDelayConfidenceMethod"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "confidence_upper_s": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Confidence Upper S"
+        },
+        "eligible": {
+          "title": "Eligible",
+          "type": "boolean"
+        },
+        "fold_losses": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Fold Losses",
+          "type": "array"
+        },
+        "form": {
+          "$ref": "#/$defs/PidSpDelayProfileForm"
+        },
+        "horizon_losses": {
+          "items": {
+            "$ref": "#/$defs/PidSpHorizonLossReport"
+          },
+          "title": "Horizon Losses",
+          "type": "array"
+        },
+        "one_step_loss": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "One Step Loss"
+        },
+        "standard_error": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Standard Error"
+        }
+      },
+      "required": [
+        "form",
+        "eligible",
+        "blockers",
+        "one_step_loss",
+        "horizon_losses",
+        "fold_losses",
+        "standard_error",
+        "basin_lower_s",
+        "basin_upper_s",
+        "confidence_lower_s",
+        "confidence_upper_s",
+        "confidence_method"
+      ],
+      "title": "PidSpFormComparisonReport",
+      "type": "object"
+    },
     "PidSpGateValue": {
       "anyOf": [
         {
@@ -1682,6 +2139,33 @@
         }
       ]
     },
+    "PidSpHorizonLossReport": {
+      "additionalProperties": false,
+      "properties": {
+        "horizon_s": {
+          "minimum": 0,
+          "title": "Horizon S",
+          "type": "integer"
+        },
+        "loss": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Loss"
+        }
+      },
+      "required": [
+        "horizon_s",
+        "loss"
+      ],
+      "title": "PidSpHorizonLossReport",
+      "type": "object"
+    },
     "PidSpIdentifierReport": {
       "additionalProperties": false,
       "properties": {
@@ -1690,26 +2174,6 @@
         },
         "accepted_seconds": {
           "$ref": "#/$defs/FiniteNumber"
-        },
-        "best_residual": {
-          "$ref": "#/$defs/FiniteNumber"
-        },
-        "candidates_passing": {
-          "minimum": 0,
-          "title": "Candidates Passing",
-          "type": "integer"
-        },
-        "confirming": {
-          "anyOf": [
-            {
-              "minimum": 0,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Confirming"
         },
         "distrust_count": {
           "minimum": 0,
@@ -1734,7 +2198,15 @@
         "duty_std": {
           "$ref": "#/$defs/FiniteNumber"
         },
-        "runner_up_residual": {
+        "raw_best_residual": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "raw_candidates_passing": {
+          "minimum": 0,
+          "title": "Raw Candidates Passing",
+          "type": "integer"
+        },
+        "raw_runner_up_residual": {
           "$ref": "#/$defs/FiniteNumber"
         },
         "temp_span": {
@@ -1747,7 +2219,7 @@
         "trusted": {
           "anyOf": [
             {
-              "$ref": "#/$defs/PidSpCheckpointModel"
+              "$ref": "#/$defs/PidSpPredictorModel"
             },
             {
               "type": "null"
@@ -1762,10 +2234,9 @@
         "temp_span",
         "transition_seen",
         "duty_segments",
-        "best_residual",
-        "runner_up_residual",
-        "candidates_passing",
-        "confirming",
+        "raw_best_residual",
+        "raw_runner_up_residual",
+        "raw_candidates_passing",
         "trusted",
         "distrust_count",
         "distrust_ratio"
@@ -1841,10 +2312,30 @@
     "PidSpLearningReport": {
       "additionalProperties": false,
       "properties": {
+        "active_model": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PidSpActiveModelReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "checkpoint": {
           "anyOf": [
             {
               "$ref": "#/$defs/PidSpCheckpointModel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "comparison": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PidSpModelComparisonReport"
             },
             {
               "type": "null"
@@ -1865,6 +2356,16 @@
           "const": "pid_sp",
           "title": "Controller",
           "type": "string"
+        },
+        "delay_evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PidSpDelayEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "failure": {
           "anyOf": [
@@ -1932,6 +2433,9 @@
         "identifier",
         "predictor",
         "checkpoint",
+        "comparison",
+        "active_model",
+        "delay_evidence",
         "failure"
       ],
       "title": "PidSpLearningReport",
@@ -1949,11 +2453,92 @@
       ],
       "type": "string"
     },
+    "PidSpModelComparisonReport": {
+      "additionalProperties": false,
+      "properties": {
+        "best_form": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PidSpDelayProfileForm"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "comparison_threshold": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Comparison Threshold"
+        },
+        "confirmation": {
+          "$ref": "#/$defs/PidSpConfirmationProgress"
+        },
+        "forms": {
+          "items": {
+            "$ref": "#/$defs/PidSpFormComparisonReport"
+          },
+          "title": "Forms",
+          "type": "array"
+        },
+        "primary_blocker": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Primary Blocker"
+        },
+        "selected_form": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PidSpDelayProfileForm"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "selection_margin": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Selection Margin"
+        }
+      },
+      "required": [
+        "forms",
+        "best_form",
+        "comparison_threshold",
+        "selection_margin",
+        "selected_form",
+        "confirmation",
+        "primary_blocker"
+      ],
+      "title": "PidSpModelComparisonReport",
+      "type": "object"
+    },
     "PidSpPredictorModel": {
       "discriminator": {
         "mapping": {
           "fopdt": "#/$defs/FopdtPidSpPredictor",
-          "ipdt": "#/$defs/IpdtPidSpPredictor"
+          "ipdt": "#/$defs/IpdtPidSpPredictor",
+          "sopdt": "#/$defs/SopdtPidSpPredictor"
         },
         "propertyName": "form"
       },
@@ -1963,6 +2548,9 @@
         },
         {
           "$ref": "#/$defs/IpdtPidSpPredictor"
+        },
+        {
+          "$ref": "#/$defs/SopdtPidSpPredictor"
         }
       ]
     },
@@ -2002,6 +2590,12 @@
         },
         "xd": {
           "$ref": "#/$defs/FiniteNumber"
+        },
+        "z0": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "zd": {
+          "$ref": "#/$defs/FiniteNumber"
         }
       },
       "required": [
@@ -2009,11 +2603,208 @@
         "disabled",
         "x0",
         "xd",
+        "z0",
+        "zd",
         "residual_streak",
         "truncated",
         "model"
       ],
       "title": "PidSpPredictorReport",
+      "type": "object"
+    },
+    "PidSpSelectedCheckpoint": {
+      "additionalProperties": false,
+      "properties": {
+        "authorized": {
+          "const": true,
+          "title": "Authorized",
+          "type": "boolean"
+        },
+        "common_row_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Common Row Digest",
+          "type": "string"
+        },
+        "comparison_threshold": {
+          "title": "Comparison Threshold",
+          "type": "number"
+        },
+        "configuration_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Configuration Digest",
+          "type": "string"
+        },
+        "confirmation_observed": {
+          "const": 20,
+          "title": "Confirmation Observed",
+          "type": "integer"
+        },
+        "confirmation_required": {
+          "const": 20,
+          "title": "Confirmation Required",
+          "type": "integer"
+        },
+        "delay_basin": {
+          "$ref": "#/$defs/PidSpCheckpointBasin"
+        },
+        "episode_ids": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Episode Ids",
+          "type": "array"
+        },
+        "fit_corpus_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Fit Corpus Digest",
+          "type": "string"
+        },
+        "fold_losses": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Fold Losses",
+          "type": "array"
+        },
+        "form": {
+          "enum": [
+            "ipdt",
+            "fopdt",
+            "sopdt"
+          ],
+          "title": "Form",
+          "type": "string"
+        },
+        "horizon_losses": {
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          "title": "Horizon Losses",
+          "type": "array"
+        },
+        "model_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Model Digest",
+          "type": "string"
+        },
+        "one_step_loss": {
+          "title": "One Step Loss",
+          "type": "number"
+        },
+        "parameters": {
+          "$ref": "#/$defs/PidSpCheckpointParameters"
+        },
+        "schema_version": {
+          "const": "pid-sp-model-selection/v1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "selection_margin": {
+          "title": "Selection Margin",
+          "type": "number"
+        },
+        "standard_error": {
+          "title": "Standard Error",
+          "type": "number"
+        }
+      },
+      "required": [
+        "schema_version",
+        "form",
+        "parameters",
+        "delay_basin",
+        "one_step_loss",
+        "horizon_losses",
+        "fold_losses",
+        "standard_error",
+        "episode_ids",
+        "common_row_digest",
+        "fit_corpus_digest",
+        "configuration_digest",
+        "comparison_threshold",
+        "selection_margin",
+        "confirmation_observed",
+        "confirmation_required",
+        "authorized",
+        "model_digest"
+      ],
+      "title": "PidSpSelectedCheckpoint",
+      "type": "object"
+    },
+    "SopdtPidSpParameters": {
+      "additionalProperties": false,
+      "properties": {
+        "K": {
+          "title": "K",
+          "type": "number"
+        },
+        "tau_1": {
+          "title": "Tau 1",
+          "type": "number"
+        },
+        "tau_2": {
+          "title": "Tau 2",
+          "type": "number"
+        },
+        "theta": {
+          "title": "Theta",
+          "type": "number"
+        }
+      },
+      "required": [
+        "K",
+        "tau_1",
+        "tau_2",
+        "theta"
+      ],
+      "title": "SopdtPidSpParameters",
+      "type": "object"
+    },
+    "SopdtPidSpPredictor": {
+      "additionalProperties": false,
+      "properties": {
+        "K": {
+          "title": "K",
+          "type": "number"
+        },
+        "form": {
+          "const": "sopdt",
+          "title": "Form",
+          "type": "string"
+        },
+        "tau_1": {
+          "title": "Tau 1",
+          "type": "number"
+        },
+        "tau_2": {
+          "title": "Tau 2",
+          "type": "number"
+        },
+        "theta": {
+          "title": "Theta",
+          "type": "number"
+        }
+      },
+      "required": [
+        "form",
+        "K",
+        "tau_1",
+        "tau_2",
+        "theta"
+      ],
+      "title": "SopdtPidSpPredictor",
       "type": "object"
     }
   },
@@ -2029,44 +2820,56 @@
     "CandidateAssessment",
     "CandidateOrigin",
     "CandidateReport",
+    "CausalEvaluationProgress",
     "CheckStatus",
-    "CookRefitAuthorization",
-    "CookRefitOutcome",
-    "CookRefitReport",
+    "CorpusStatusReport",
     "EvidenceGate",
     "EvidenceSummary",
+    "FitCorpusSliceReport",
     "FitReport",
     "FitStatus",
-    "FitWindowIdentity",
-    "FopdtPidSpCheckpoint",
+    "FopdtPidSpParameters",
     "FopdtPidSpPredictor",
     "GreyParameters",
-    "IpdtPidSpCheckpoint",
+    "IpdtPidSpParameters",
     "IpdtPidSpPredictor",
     "LearningFailure",
-    "ModelActionRejected",
-    "ModelActivationAccepted",
-    "ModelActivationAcknowledgement",
-    "ModelActivationRequest",
     "ModelEvidenceReport",
     "ModelEvidenceStatus",
+    "ModelFitLineageReport",
     "ModelIdentities",
     "ModelRollbackAccepted",
     "ModelRollbackAcknowledgement",
+    "ModelRollbackRejected",
     "ModelRollbackRequest",
     "MpcCalibrationAction",
     "MpcCalibrationCommand",
     "MpcCalibrationCommandResponse",
     "MpcCalibrationCommandResponseData",
+    "PendingForecastOriginReport",
+    "PidSpActiveModelReport",
+    "PidSpCheckpointBasin",
     "PidSpCheckpointModel",
+    "PidSpCheckpointParameters",
     "PidSpConfirmationProgress",
+    "PidSpDelayBlocker",
+    "PidSpDelayConfidenceMethod",
+    "PidSpDelayEvidence",
+    "PidSpDelayEvidenceStatus",
+    "PidSpDelayProfileForm",
+    "PidSpFormComparisonReport",
     "PidSpGateValue",
+    "PidSpHorizonLossReport",
     "PidSpIdentifierReport",
     "PidSpLearningFailure",
     "PidSpLearningGate",
     "PidSpLearningReport",
     "PidSpLearningStatus",
+    "PidSpModelComparisonReport",
     "PidSpPredictorModel",
-    "PidSpPredictorReport"
+    "PidSpPredictorReport",
+    "PidSpSelectedCheckpoint",
+    "SopdtPidSpParameters",
+    "SopdtPidSpPredictor"
   ]
 }

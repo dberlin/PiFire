@@ -9,22 +9,14 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Generic, Protocol, TypeVar
+from typing import TYPE_CHECKING, Protocol
 
-from common.web_contracts.learning import ModelActivationRequest
-
-from .contracts import ActivationPolicy, CandidateOrigin
+from .contracts import ActivationPolicy, CandidateOrigin, activation_policy_for_origin
 
 if TYPE_CHECKING:
     from controller.mpc_factory import OwnedMpcPair
 
 
-_PairT = TypeVar("_PairT", bound="OwnedMpcPair")
-_POLICY_BY_ORIGIN = {
-    CandidateOrigin.PASSIVE_ONLINE: ActivationPolicy.PASSIVE_AUTO,
-    CandidateOrigin.OPERATOR_CALIBRATION: ActivationPolicy.OPERATOR_REVIEWED,
-    CandidateOrigin.COOK_REFIT: ActivationPolicy.COOK_REFIT,
-}
 _ESTIMATOR_CONSTRUCTION_FIELDS = frozenset({"control_period", "est_q_temp", "est_q_dist", "est_r_meas"})
 
 
@@ -86,6 +78,18 @@ class ActivationPhase(StrEnum):
     PREPARED = "prepared"
     ACTIVE = "active"
     ABORTED = "aborted"
+
+
+@dataclass(frozen=True, slots=True)
+class ActivationRequest:
+    """Strict internal authorization for an automatic activation transaction."""
+
+    candidate_digest: str
+    decision_id: str
+
+    def __post_init__(self) -> None:
+        _digest(self.candidate_digest, "candidate_digest")
+        _nonblank(self.decision_id, "decision_id")
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,7 +200,7 @@ class PreparedActivationRecord:
             raise ValueError("prepared rollback owner must be the exact incumbent pair")
         if not isinstance(self.origin, CandidateOrigin) or not isinstance(self.policy, ActivationPolicy):
             raise TypeError("activation origin and policy must be typed")
-        if _POLICY_BY_ORIGIN[self.origin] is not self.policy:
+        if self.policy is not activation_policy_for_origin(self.origin):
             raise ValueError("origin-policy-mismatch")
         _nonblank(self.decision_id, "decision_id")
         if self.phase is ActivationPhase.ABORTED:
@@ -282,25 +286,25 @@ class _DurableReceipt(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
-class ActivationDecision(Generic[_PairT]):
+class ActivationDecision[PairT: "OwnedMpcPair"]:
     accepted: bool
     reason: str
     phase: ActivationPhase | None
     incumbent_pair: OwnedMpcPair
-    candidate_pair: _PairT | None = None
+    candidate_pair: PairT | None = None
     record: PreparedActivationRecord | None = None
 
 
-class ActivationManager(Generic[_PairT]):
+class ActivationManager[PairT: "OwnedMpcPair"]:
     """Validate and durably prepare one complete pair without installing it."""
 
     def __init__(
         self,
         *,
         incumbent_pair: OwnedMpcPair,
-        build_candidate: Callable[[GreyControlPairDescriptor], _PairT],
-        validate_candidate: Callable[[_PairT], bool],
-        native_dry_solve: Callable[[_PairT], bool],
+        build_candidate: Callable[[GreyControlPairDescriptor], PairT],
+        validate_candidate: Callable[[PairT], bool],
+        native_dry_solve: Callable[[PairT], bool],
         persist_prepared: Callable[[PreparedActivationRecord], _DurableReceipt],
         clock_ms: Callable[[], int] | None = None,
         receipt_timeout: float | None = None,
@@ -316,33 +320,33 @@ class ActivationManager(Generic[_PairT]):
         self._persist_prepared = persist_prepared
         self._clock_ms = clock_ms or (lambda: time.time_ns() // 1_000_000)
         self._receipt_timeout = receipt_timeout
-        self._prepared: ActivationDecision[_PairT] | None = None
+        self._prepared: ActivationDecision[PairT] | None = None
 
     @property
     def active_pair(self) -> OwnedMpcPair:
         return self._active_pair
 
     @property
-    def prepared(self) -> ActivationDecision[_PairT] | None:
+    def prepared(self) -> ActivationDecision[PairT] | None:
         return self._prepared
 
     def prepare(
         self,
-        request: ModelActivationRequest,
+        request: ActivationRequest,
         candidate: GreyControlPairDescriptor,
         *,
         origin: CandidateOrigin,
         policy: ActivationPolicy,
-    ) -> ActivationDecision[_PairT]:
-        if not isinstance(request, ModelActivationRequest):
-            raise TypeError("request must be a ModelActivationRequest")
+    ) -> ActivationDecision[PairT]:
+        if not isinstance(request, ActivationRequest):
+            raise TypeError("request must be an ActivationRequest")
         if not isinstance(candidate, GreyControlPairDescriptor):
             raise TypeError("candidate must be a GreyControlPairDescriptor")
         if not isinstance(origin, CandidateOrigin) or not isinstance(policy, ActivationPolicy):
             raise TypeError("origin and policy must be typed")
         if request.candidate_digest != candidate.model_digest:
             return self._reject("candidate-digest-changed")
-        if _POLICY_BY_ORIGIN[origin] is not policy:
+        if activation_policy_for_origin(origin) is not policy:
             return self._reject("origin-policy-mismatch")
         if self._prepared is not None:
             record = self._prepared.record
@@ -419,15 +423,12 @@ class ActivationManager(Generic[_PairT]):
         self._prepared = decision
         return decision
 
-    def _reject(self, reason: str) -> ActivationDecision[_PairT]:
+    def _reject(self, reason: str) -> ActivationDecision[PairT]:
         return ActivationDecision(False, reason, None, self._active_pair)
 
     @staticmethod
     def _close_failed(pair: OwnedMpcPair) -> None:
-        try:
-            pair.close()
-        except Exception:
-            pass
+        pair.close()
 
 
 @dataclass(frozen=True, slots=True)

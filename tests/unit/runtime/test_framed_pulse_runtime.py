@@ -7,7 +7,6 @@ from common.control_trace import ActuationMode, InhibitReason
 from controller.applied_output import FrameFeedbackDisposition, OutputSource
 from controller.runtime.framed_pulse import FramedPulseRuntime, FramedPulseSample, PulseControllerState
 from controller.runtime.logic.pulse import PulseFrameResult, PulseReason, PulseResetReason
-from controller.runtime.model_fitting import PassiveGreyHistory
 from controller.runtime.state import ControllerState
 from grillplat.actuator_capabilities import AugerTiming
 
@@ -345,9 +344,8 @@ _LIVE_TICKS_S = (
 )
 
 
-def test_live_regime_completed_frames_are_continuous_and_accepted_by_the_fitter() -> None:
+def test_live_regime_completed_frames_are_continuous_repository_observations() -> None:
     runtime, _controller = _live_regime_runtime()
-    history = PassiveGreyHistory(role_generation=7, max_observations=12)
 
     observations = [
         completion.observation
@@ -366,9 +364,6 @@ def test_live_regime_completed_frames_are_continuous_and_accepted_by_the_fitter(
         assert not observation.skipped
         assert not observation.reset
         assert observation.continuous is True
-    decisions = [history.observe(observation) for observation in observations]
-    assert [(decision.accepted, decision.reasons) for decision in decisions] == [(True, ())] * 3
-    assert len(history.observations) == 3
 
 
 def test_a_sample_taken_before_the_frame_ended_is_discontinuous() -> None:

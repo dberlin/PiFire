@@ -5,19 +5,11 @@ import {
   parsePidSpLearningReport,
 } from "../../../src/helpers/pidSpLearning/pidSpLearningApi";
 
-const FOPDT = {
-  form: "fopdt" as const,
+const PREDICTOR_SOPDT = {
+  form: "sopdt" as const,
   K: 86.5,
-  tau: 610,
-  theta: 45,
-  revision: 7,
-  identified_at_f: 250,
-};
-
-const PREDICTOR_FOPDT = {
-  form: "fopdt" as const,
-  K: 86.5,
-  tau: 610,
+  tau_1: 210,
+  tau_2: 610,
   theta: 45,
 };
 
@@ -28,11 +20,10 @@ const IDENTIFIER = {
   temp_span: 18.25,
   transition_seen: true,
   duty_segments: 6,
-  best_residual: 0.42,
-  runner_up_residual: 0.73,
-  candidates_passing: 2,
-  confirming: 3,
-  trusted: FOPDT,
+  raw_best_residual: 0.42,
+  raw_runner_up_residual: 0.73,
+  raw_candidates_passing: 2,
+  trusted: PREDICTOR_SOPDT,
   distrust_count: 1,
   distrust_ratio: 0.125,
 };
@@ -42,9 +33,95 @@ const PREDICTOR = {
   disabled: false,
   x0: 241.25,
   xd: 238.75,
+  z0: 240.5,
+  zd: 239.25,
   residual_streak: 1,
   truncated: 2,
-  model: PREDICTOR_FOPDT,
+  model: PREDICTOR_SOPDT,
+};
+
+const CHECKPOINT = {
+  schema_version: 2 as const,
+  revision: 7,
+  provenance: "confirmed-online-fit",
+  selected: {
+    schema_version: "pid-sp-model-selection/v1" as const,
+    form: "sopdt" as const,
+    parameters: { K: 86.5, tau_1: 210, tau_2: 610, theta: 45 },
+    delay_basin: {
+      lower_s: 40,
+      upper_s: 50,
+      representative_s: 45,
+      confidence_lower_s: 40,
+      confidence_upper_s: 50,
+      confidence_method: "moving-block-refit" as const,
+      confidence_resamples: 128,
+      episode_count: 3,
+      interior: true,
+      blockers: [],
+    },
+    one_step_loss: 0.42,
+    horizon_losses: [
+      [3, 0.43],
+      [15, 0.48],
+    ] as [number, number][],
+    fold_losses: [0.44, 0.46],
+    standard_error: 0.01,
+    episode_ids: ["episode-a", "episode-b", "episode-c"],
+    common_row_digest: "c".repeat(64),
+    fit_corpus_digest: "d".repeat(64),
+    configuration_digest: "e".repeat(64),
+    comparison_threshold: 0.5,
+    selection_margin: 0.08,
+    confirmation_observed: 20 as const,
+    confirmation_required: 20 as const,
+    authorized: true as const,
+    model_digest: "f".repeat(64),
+  },
+};
+
+const DELAY_EVIDENCE = {
+  status: "no-physically-valid-delay-candidate" as const,
+  completed_episode_count: 3,
+  evaluated_bound_s: 300,
+  profile_form: "fopdt" as const,
+  raw_basin_lower_s: null,
+  raw_basin_upper_s: null,
+  raw_basin_representative_s: null,
+  confidence_lower_s: null,
+  confidence_upper_s: null,
+  confidence_method: null,
+  confidence_resamples: null,
+  blockers: ["no-physically-valid-delay-candidate" as const],
+  authorized: false,
+};
+
+const COMPARISON = {
+  forms: [
+    {
+      form: "fopdt" as const,
+      eligible: false,
+      blockers: ["no-physically-valid-delay-candidate"],
+      one_step_loss: null,
+      horizon_losses: [
+        { horizon_s: 3, loss: null },
+        { horizon_s: 15, loss: null },
+      ],
+      fold_losses: [null, null],
+      standard_error: null,
+      basin_lower_s: null,
+      basin_upper_s: null,
+      confidence_lower_s: null,
+      confidence_upper_s: null,
+      confidence_method: null,
+    },
+  ],
+  best_form: "sopdt" as const,
+  comparison_threshold: 0.5,
+  selection_margin: 0.08,
+  selected_form: "sopdt" as const,
+  confirmation: { observed: 20, required: 20 },
+  primary_blocker: null,
 };
 
 const REPORT: PidSpLearningReport = {
@@ -69,10 +146,13 @@ const REPORT: PidSpLearningReport = {
       unit: null,
     },
   ],
-  confirmation: { observed: 3, required: 4 },
+  confirmation: { observed: 20, required: 20 },
   identifier: IDENTIFIER,
   predictor: PREDICTOR,
-  checkpoint: FOPDT,
+  checkpoint: CHECKPOINT,
+  comparison: COMPARISON,
+  active_model: { form: "sopdt", model_digest: "f".repeat(64) },
+  delay_evidence: DELAY_EVIDENCE,
   failure: null,
 };
 
@@ -87,6 +167,9 @@ const IDLE: PidSpLearningReport = {
   identifier: null,
   predictor: null,
   checkpoint: null,
+  comparison: null,
+  active_model: null,
+  delay_evidence: null,
   failure: null,
 };
 
@@ -142,36 +225,38 @@ describe("fetchPidSpLearningReport", () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe("https://grill.example/api/pid-sp-learning/report");
   });
 
-  it("decodes both discriminated durable model forms", async () => {
-    const ipdt = {
-      form: "ipdt" as const,
-      K_i: 0.87,
-      c0: -0.18,
-      theta: 30,
-      revision: 9,
-      identified_at_f: 275,
-    };
+  it("decodes schema-2 checkpoints and all three discriminated model forms", async () => {
     const predictorIpdt = {
       form: "ipdt" as const,
       K_i: 0.87,
       c0: -0.18,
       theta: 30,
     };
+    const ipdt = {
+      ...structuredClone(CHECKPOINT),
+      revision: 9,
+      selected: {
+        ...structuredClone(CHECKPOINT.selected),
+        form: "ipdt" as const,
+        parameters: { K_i: 0.87, c0: -0.18, theta: 30 },
+      },
+    };
     fetchMock.mockResolvedValueOnce(response(structuredClone(REPORT))).mockResolvedValueOnce(
       response({
         ...structuredClone(REPORT),
         checkpoint: ipdt,
-        identifier: { ...structuredClone(IDENTIFIER), trusted: ipdt },
+        identifier: { ...structuredClone(IDENTIFIER), trusted: predictorIpdt },
         predictor: { ...structuredClone(PREDICTOR), model: predictorIpdt },
       }),
     );
 
-    const fopdt = await fetchPidSpLearningReport();
+    const sopdt = await fetchPidSpLearningReport();
     const integrating = await fetchPidSpLearningReport();
 
-    expect(fopdt.data?.checkpoint).toEqual(FOPDT);
+    expect(sopdt.data?.checkpoint).toEqual(CHECKPOINT);
+    expect(sopdt.data?.identifier?.trusted).toEqual(PREDICTOR_SOPDT);
     expect(integrating.data?.checkpoint).toEqual(ipdt);
-    expect(integrating.data?.identifier?.trusted).toEqual(ipdt);
+    expect(integrating.data?.identifier?.trusted).toEqual(predictorIpdt);
     expect(integrating.data?.predictor?.model).toEqual(predictorIpdt);
   });
 
@@ -324,8 +409,20 @@ describe("fetchPidSpLearningReport", () => {
   });
 
   it.each([
-    ["checkpoint numeric boolean", { ...REPORT, checkpoint: { ...FOPDT, K: true } }],
-    ["null checkpoint provenance", { ...REPORT, checkpoint: { ...FOPDT, identified_at_f: null } }],
+    [
+      "checkpoint numeric boolean",
+      {
+        ...REPORT,
+        checkpoint: {
+          ...CHECKPOINT,
+          selected: {
+            ...CHECKPOINT.selected,
+            parameters: { ...CHECKPOINT.selected.parameters, K: true },
+          },
+        },
+      },
+    ],
+    ["null checkpoint provenance", { ...REPORT, checkpoint: { ...CHECKPOINT, provenance: null } }],
     ["identifier numeric boolean", { ...REPORT, identifier: { ...IDENTIFIER, accepted: false } }],
     [
       "predictor numeric boolean",
@@ -333,7 +430,19 @@ describe("fetchPidSpLearningReport", () => {
     ],
     [
       "non-finite checkpoint",
-      { ...REPORT, checkpoint: { ...FOPDT, theta: Number.POSITIVE_INFINITY } },
+      {
+        ...REPORT,
+        checkpoint: {
+          ...CHECKPOINT,
+          selected: {
+            ...CHECKPOINT.selected,
+            parameters: {
+              ...CHECKPOINT.selected.parameters,
+              theta: Number.POSITIVE_INFINITY,
+            },
+          },
+        },
+      },
     ],
     [
       "non-finite gate",
@@ -355,7 +464,7 @@ describe("fetchPidSpLearningReport", () => {
         ...REPORT,
         predictor: {
           ...PREDICTOR,
-          model: { ...PREDICTOR_FOPDT, theta: Number.POSITIVE_INFINITY },
+          model: { ...PREDICTOR_SOPDT, theta: Number.POSITIVE_INFINITY },
         },
       },
     ],
@@ -365,7 +474,7 @@ describe("fetchPidSpLearningReport", () => {
         ...REPORT,
         predictor: {
           ...PREDICTOR,
-          model: { ...PREDICTOR_FOPDT, K: true },
+          model: { ...PREDICTOR_SOPDT, K: true },
         },
       },
     ],
@@ -375,7 +484,7 @@ describe("fetchPidSpLearningReport", () => {
         ...REPORT,
         predictor: {
           ...PREDICTOR,
-          model: { ...PREDICTOR_FOPDT, revision: 7 },
+          model: { ...PREDICTOR_SOPDT, revision: 7 },
         },
       },
     ],
@@ -421,14 +530,14 @@ describe("fetchPidSpLearningReport", () => {
 
     const parsed = parsePidSpLearningReport(source);
     parsed.gates[0]!.name = "changed";
-    if (parsed.identifier?.trusted?.form === "fopdt") {
-      parsed.identifier.trusted.K = -1;
+    if (parsed.identifier?.trusted?.form === "sopdt") {
+      parsed.identifier.trusted.tau_2 = -1;
     }
 
     expect(source.gates[0]?.name).toBe("accepted_samples");
-    expect(source.identifier?.trusted?.form).toBe("fopdt");
-    if (source.identifier?.trusted?.form === "fopdt") {
-      expect(source.identifier.trusted.K).toBe(86.5);
+    expect(source.identifier?.trusted?.form).toBe("sopdt");
+    if (source.identifier?.trusted?.form === "sopdt") {
+      expect(source.identifier.trusted.tau_2).toBe(610);
     }
   });
 });

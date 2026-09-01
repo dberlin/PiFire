@@ -1,10 +1,20 @@
 # controller/runtime/context.py
 """Bundle of everything a control cycle needs. Passed instead of globals."""
 
+from __future__ import annotations
+
 import logging
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
+from common.persistence.learning_trajectory import LearningTrajectoryRepository
 from common.persistence.protocols import ControllerStore
+from controller.runtime.actuation_delivery import DeliveredGrillPlatform
+from controller.runtime.learning_trajectory import LearningTrajectoryRuntime
+from controller.runtime.model_persistence import ModelPersistenceWorker
+
+if TYPE_CHECKING:
+    from controller.model_learning.grey_runtime import GreyLearningProcessOwner
 
 #: The two operator-visible logger names. `create_logger` configures their
 #: handlers, level and file once at process startup (control.py); everything
@@ -16,7 +26,7 @@ CONTROL_LOG_NAME = "control"
 
 @dataclass
 class Devices:
-    grill_platform: object
+    grill_platform: DeliveredGrillPlatform
     probe_complex: object
     dist_device: object
 
@@ -33,3 +43,8 @@ class ControllerContext:
     #  files instead of silently discarding the message.
     event_log: object = field(default_factory=lambda: logging.getLogger(EVENT_LOG_NAME))
     control_log: object = field(default_factory=lambda: logging.getLogger(CONTROL_LOG_NAME))
+    trajectory_repository: LearningTrajectoryRepository | None = None
+    model_persistence: ModelPersistenceWorker | None = None
+    grey_learning_process: GreyLearningProcessOwner | None = None
+    learning_trajectory: LearningTrajectoryRuntime | None = None
+    trajectory_next_effective_mode: str | None = None

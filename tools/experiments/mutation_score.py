@@ -26,6 +26,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 PROMOTION = ROOT / "controller" / "model_promotion.py"
 UPDATE = ROOT / "controller" / "update_mpc.py"
 GREY_RUNTIME = ROOT / "controller" / "model_learning" / "grey_runtime.py"
+SEGMENTED_FIT = ROOT / "controller" / "runtime" / "model_fitting.py"
 MPC_CONFIG = ROOT / "controller" / "mpc_config.py"
 MPC_CORE = ROOT / "controller" / "mpc_core.py"
 MODEL = ROOT / "controller" / "mpc_model.py"
@@ -37,6 +38,7 @@ NODES = [
     "tests/unit/mpc/test_mpc_model.py",
     "tests/unit/mpc/test_mpc_model_snapshot.py",
     "tests/unit/mpc/test_mpc_ekf.py",
+    "tests/unit/mpc/test_segmented_grey_fit.py",
 ]
 
 #: (label, file, old, new). Each `old` must appear exactly once.
@@ -129,22 +131,22 @@ MUTATIONS = [
         '_FREE = ("K_Q", "C_c", "h_amb", "theta")',
     ),
     (
-        "M18 held parameters dropped instead of held",
-        UPDATE,
-        "    held = {k: float(init[k]) for k in _FIT_KEYS if k not in _FREE}",
-        '    held = {"h_amb": float(init["h_amb"]), "sigma": 0.0}',
+        "M18 held physics dropped from segmented simulation",
+        SEGMENTED_FIT,
+        "                h_amb=job.config.h_amb,",
+        "                h_amb=0.0,",
     ),
     (
-        "M19 the solve back in raw parameters instead of their logarithms",
-        UPDATE,
-        "        params.update(zip(_FREE, (math.exp(v) for v in z)))",
-        "        params.update(zip(_FREE, (float(v) for v in z)))",
+        "M19 segmented fit decodes log parameters as raw values",
+        SEGMENTED_FIT,
+        "                else math.exp(log_value)",
+        "                else log_value",
     ),
     (
-        "M19b the log floor returns the raw value for a degenerate start",
-        UPDATE,
-        "    return math.log(value) if value > 0.0 and math.isfinite(value) else floor",
-        "    return math.log(value) if value > 0.0 and math.isfinite(value) else value",
+        "M19b segmented fit ignores the bounded log floor",
+        SEGMENTED_FIT,
+        "                if log_value <= lower_log",
+        "                if False",
     ),
     (
         "M24 steady-state search ceiling collapsed to nothing",
@@ -156,25 +158,25 @@ MUTATIONS = [
     (
         "M25 the simulator drops the firing-rate gain",
         MODEL,
-        "            dT_c = (K_Q * heat[k] - h_amb * (T_c - T_amb) - _rad_loss(T_c, T_amb, sigma)) / C_c",
-        "            dT_c = (heat[k] - h_amb * (T_c - T_amb) - _rad_loss(T_c, T_amb, sigma)) / C_c",
+        "gain * delayed_load",
+        "delayed_load",
     ),
     (
         "M26 the simulator drops the radiative loss",
         MODEL,
-        "            dT_c = (K_Q * heat[k] - h_amb * (T_c - T_amb) - _rad_loss(T_c, T_amb, sigma)) / C_c",
-        "            dT_c = (K_Q * heat[k] - h_amb * (T_c - T_amb)) / C_c",
+        "_rad_loss(chamber, ambient, radiation)",
+        "0.0",
     ),
     (
         "M27 the simulator ignores the transport chain",
         MODEL,
-        "            heat = (load + coef @ dev[::-1]).tolist()",
-        "            heat = [load] * steps",
+        "            heat = load + coefficients @ deviation[::-1]",
+        "            heat = np.full(steps, load)",
     ),
     (
         "M28 the simulator stops sub-stepping",
         MODEL,
-        "        steps = max(1, int(np.ceil(span / max_dt)))",
+        "        steps = max(1, int(np.ceil(span / step_limit)))",
         "        steps = 1",
     ),
     (
@@ -225,13 +227,13 @@ MUTATIONS = [
     (
         "M33 the snapshot schema never moves with the model",
         MODEL,
-        "MODEL_SCHEMA = 4",
-        "MODEL_SCHEMA = 3",
+        "MODEL_SCHEMA = 7",
+        "MODEL_SCHEMA = 6",
     ),
     (
         "M34 restore_model takes a snapshot of any version",
         GREY_RUNTIME,
-        '        if not isinstance(snapshot, dict) or snapshot.get("version") != self.MODEL_SCHEMA:',
+        "        if not isinstance(snapshot, dict) or version != self.MODEL_SCHEMA:",
         "        if False:",
     ),
     (
@@ -240,7 +242,7 @@ MUTATIONS = [
         (
             "            self._logger.warning(\n"
             '                f"[mpc] discarding a version {version!r} model snapshot: runtime restore "\n'
-            '                f"accepts only grey schema {self.MODEL_SCHEMA}; version 3 is migration input only."\n'
+            '                f"accepts only grey schema {self.MODEL_SCHEMA}; versions 3 through 6 are migration input only."\n'
             "            )\n"
             "            return False"
         ),

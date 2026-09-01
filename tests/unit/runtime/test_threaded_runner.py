@@ -2,6 +2,7 @@ import collections
 import json
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -9,6 +10,7 @@ import pytest
 
 from common.control_trace import (
     ActuationMode,
+    AllocationClampReason,
     ControllerType,
     HorizonScorePayload,
     ModelEvaluationPayload,
@@ -16,7 +18,10 @@ from common.control_trace import (
     ResultStaleState,
     TraceEventKind,
 )
+from common.learning_trajectory import FitCorpusIdentity
 from common.model_evidence import (
+    AllocationEvidence,
+    CalibrationSummaryEvidence,
     ConfidenceDecisionEvidence,
     EvidenceKind,
     FallbackEvidence,
@@ -25,7 +30,7 @@ from common.model_evidence import (
     RefreshDiagnosticsEvidence,
     SessionSummaryEvidence,
 )
-from common.persistence.model_evidence import ModelActivationState
+from common.persistence.model_evidence import ModelActivationState, append_model_evidence
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.base import ControllerLearningDiagnostics
 from controller.model_learning.activation import (
@@ -46,6 +51,7 @@ from controller.runtime.modes.hold_learning import HoldLearningRuntime
 from controller.runtime.runner import (
     _MAX_PENDING_OBSERVATIONS,
     _MAX_PENDING_OUTPUTS,
+    ModelRestoreOutcome,
     SyncControllerRunner,
     ThreadedControllerRunner,
     _freeze_evidence,
@@ -157,6 +163,7 @@ class FakeCore:
         self.tag = "core-a"
         self.activation_calls = []
         self._activation_terminated = False
+        self.closed = 0
 
     def get_control_period(self):
         return self._period
@@ -230,6 +237,121 @@ class FakeCore:
 
     def terminate_mpc_activation(self, reason):
         self._activation_terminated = True
+
+    def close(self):
+        self.closed += 1
+
+
+class FakeMpcLearningCore(FakeCore):
+    """Complete MPC-learning core with explicit, observable hook calls."""
+
+    def __init__(self, period=0.01, commands_fan=False, ratio=0.5):
+        super().__init__(period=period, commands_fan=commands_fan, ratio=ratio)
+        self.seed_requirement_calls = 0
+        self.learning_diagnostics_calls = 0
+        self.seed_source_bindings = []
+        self.learning_identity_bindings = []
+        self.observations = []
+        self.observation_failures = []
+        self.fit_schedules = []
+        self.fit_ticket_schedules = []
+        self.fit_polls = []
+        self.consumed_fit_tickets = []
+        self.fit_failures = []
+        self.terminal_fit_tickets = set()
+        self.schedule_result = True
+        self.observation_outcome = {
+            "role_generation": 0,
+            "eligible": False,
+            "rejection_reasons": (),
+            "forecast_origin_evidence": (),
+        }
+
+    def estimator_seed_requirements(self) -> tuple[float, int]:
+        self.seed_requirement_calls += 1
+        return 60.0, 8
+
+    def bind_estimator_seed_source(
+        self,
+        source: Callable[[float, int], object] | None,
+    ) -> None:
+        self.seed_source_bindings.append(source)
+
+    def bind_learning_identity(
+        self,
+        session_id: str,
+        cook_id: str | None,
+        role_generation: int,
+    ) -> None:
+        self.learning_identity_bindings.append(
+            (session_id, cook_id, role_generation),
+        )
+
+    def observe_frame(self, observation: FrameObservation) -> object:
+        self.observations.append(observation)
+        return dict(
+            self.observation_outcome,
+            role_generation=observation.role_generation,
+        )
+
+    def observation_failure(
+        self,
+        observation: FrameObservation,
+        error: BaseException,
+    ) -> object:
+        self.observation_failures.append((observation, error))
+        return {
+            "role_generation": observation.role_generation,
+            "eligible": False,
+            "rejection_reasons": ("learner-exception",),
+            "learner_error": f"{type(error).__name__}: {error}",
+        }
+
+    def poll_learning_off_path(
+        self,
+        *,
+        live_origin: CandidateOrigin | None = None,
+    ) -> object:
+        self.fit_polls.append((threading.get_ident(), live_origin))
+        return None
+
+    def schedule_corpus_fit(self, origin: CandidateOrigin) -> bool:
+        self.fit_schedules.append(origin)
+        return self.schedule_result
+
+    def _schedule_corpus_fit_ticket(
+        self,
+        origin: CandidateOrigin,
+    ) -> str | None:
+        ticket = f"{len(self.fit_ticket_schedules) + 1:064x}"
+        self.fit_ticket_schedules.append((ticket, origin))
+        return ticket
+
+    def _consume_terminal_corpus_fit_ticket(
+        self,
+        ticket: str,
+        origin: CandidateOrigin,
+    ) -> bool:
+        terminal = (ticket, origin)
+        self.consumed_fit_tickets.append(terminal)
+        if terminal not in self.terminal_fit_tickets:
+            return False
+        self.terminal_fit_tickets.remove(terminal)
+        return True
+
+    def fail_corpus_fit(
+        self,
+        ticket: str,
+        error: BaseException | str,
+    ) -> None:
+        self.fit_failures.append((ticket, error))
+
+    def get_learning_diagnostics(self) -> ControllerLearningDiagnostics:
+        self.learning_diagnostics_calls += 1
+        return ControllerLearningDiagnostics(
+            schema_version=1,
+            state={"failure": None},
+        )
 
 
 def test_threaded_runner_captures_fallback_evidence_from_an_ordinary_compute():
@@ -312,7 +434,7 @@ class CloseAwarePeriodWait:
 
 
 def test_runners_retire_generation_bound_context_until_rebound() -> None:
-    class NoOutcomeCore(FakeCore):
+    class NoOutcomeCore(FakeMpcLearningCore):
         def __init__(self):
             super().__init__()
             self.observed = threading.Event()
@@ -423,7 +545,7 @@ def test_threaded_result_retains_consumed_temperature_after_newer_submit():
 
 
 def test_threaded_result_retains_owned_learning_snapshot_across_repolls():
-    class LearningCore(FakeCore):
+    class LearningCore(FakeMpcLearningCore):
         def __init__(self):
             super().__init__()
             self.learning_state = {"generation": 0, "gates": [{"passed": False}]}
@@ -809,6 +931,97 @@ def test_threaded_runner_set_target_and_reconfigure_applied_by_thread():
         r.stop()
 
 
+def test_failed_exact_seed_stays_closed_until_acknowledged_cold_seed_succeeds():
+    class SeedCore(FakeCore):
+        def __init__(self):
+            super().__init__()
+            self.seed_statuses = []
+
+        def seed_from_trajectory(self, seed):
+            self.seed_statuses.append(seed.status)
+            if seed.status == "exact":
+                raise ValueError("incompatible exact seed")
+
+    core = SeedCore()
+    runner = ThreadedControllerRunner(core)
+    try:
+        with pytest.raises(RuntimeError, match="incompatible exact seed"):
+            runner.seed_operating_state(SimpleNamespace(status="exact"))
+        runner.submit(70.0)
+        assert not core.updated.wait(0.05)
+
+        runner.seed_operating_state(SimpleNamespace(status="absent"))
+        assert core.updated.wait(2.0)
+        assert core.seed_statuses == ["exact", "absent"]
+    finally:
+        runner.stop()
+
+
+def test_hold_waits_for_real_threaded_completed_first_solve(
+    hold_cycle,
+    monkeypatch,
+):
+    class BlockingFirstSolveCore(FakeCore):
+        def __init__(self):
+            super().__init__(period=10.0)
+            self.solve_entered = threading.Event()
+            self.solve_release = threading.Event()
+            self.activation_events = []
+
+        def estimator_seed_requirements(self):
+            return 60.0, 8
+
+        def seed_from_trajectory(self, _seed):
+            return None
+
+        def set_safety_ceiling_c(self, _ceiling_c):
+            return None
+
+        def request_calibration(self, _command):
+            return None
+
+        def cancel_calibration(self, _reason):
+            return None
+
+        def update(self, temp):
+            self.solve_entered.set()
+            assert self.solve_release.wait(2.0)
+            return super().update(temp)
+
+    core = BlockingFirstSolveCore()
+    runner = ThreadedControllerRunner(
+        core,
+        controller_type=ControllerType.MPC,
+    )
+    reported = []
+    set_output = runner.set_output
+
+    def record_output(applied):
+        reported.append(applied)
+        set_output(applied)
+
+    monkeypatch.setattr(runner, "set_output", record_output)
+    hold = hold_cycle(runner, controller="mpc")
+    try:
+        hold.setup()
+        hold.on_tick(1.0, 110.0, hold.grill.get_output_status())
+
+        assert core.solve_entered.wait(2.0)
+        assert runner.latest().revision == 0
+        assert hold._first_solve_pending
+        assert reported == []
+
+        core.solve_release.set()
+        assert _wait_for(lambda: runner.latest().revision >= 1)
+        hold.on_tick(2.0, 110.0, hold.grill.get_output_status())
+
+        assert not hold._first_solve_pending
+        assert reported[0].source is OutputSource.SEED
+    finally:
+        core.solve_release.set()
+        hold.teardown(110.0)
+
+
 def test_threaded_runner_never_exposes_core_internals_before_first_result():
     core = FakeCore()
     r = ThreadedControllerRunner(core)
@@ -1016,7 +1229,8 @@ def test_restore_model_is_applied_on_the_worker_thread():
     core = _OrderRecordingCore()
     runner = ThreadedControllerRunner(core)
     try:
-        assert runner.restore_model({"revision": 7}) is True
+        submission = runner.restore_model({"revision": 7})
+        assert submission.accepted and submission.pending
         runner.submit(212.0)
         assert _wait_for(lambda: core.restored == [{"revision": 7}])
     finally:
@@ -1028,7 +1242,8 @@ def test_restore_model_deep_copies_the_snapshot_on_the_way_in():
     runner = ThreadedControllerRunner(core)
     try:
         snapshot = {"revision": 7, "online_adaptation": {"challenger": {"params": [1.0]}}}
-        assert runner.restore_model(snapshot) is True
+        submission = runner.restore_model(snapshot)
+        assert submission.accepted and submission.pending
         snapshot["online_adaptation"]["challenger"]["params"][0] = 999.0
         runner.submit(212.0)
         assert _wait_for(
@@ -1042,7 +1257,10 @@ def test_restore_model_rejects_none_without_touching_the_core():
     core = _OrderRecordingCore()
     runner = ThreadedControllerRunner(core)
     try:
-        assert runner.restore_model(None) is False
+        outcome = runner.restore_model(None)
+        assert not outcome.accepted
+        assert not outcome.pending
+        assert outcome.effective_authority == {"revision": 1}
         runner.submit(212.0)
         assert _wait_for(lambda: ("update", 212.0) in core.calls)
         assert core.restored == []
@@ -1129,7 +1347,7 @@ def _drain_once(runner):
 
 
 def test_completed_frame_does_not_overtake_older_output_dispatch():
-    class _BlockedDispatchCore(_BlockedWorkerCore):
+    class _BlockedDispatchCore(_BlockedWorkerCore, FakeMpcLearningCore):
         def observe_frame(self, observation):
             with self.lock:
                 self.calls.append(("observe_frame", observation.frame_end_s))
@@ -1159,7 +1377,7 @@ def test_completed_frame_does_not_overtake_older_output_dispatch():
 @pytest.mark.parametrize("operation", ("restore", "rollback", "fallback"))
 @pytest.mark.parametrize("transition_first", (False, True))
 def test_role_transition_and_completed_frame_share_one_causal_fifo(operation, transition_first):
-    class _RoleCore(_BlockedWorkerCore):
+    class _RoleCore(_BlockedWorkerCore, FakeMpcLearningCore):
         def __init__(self):
             super().__init__()
             self.role = 0
@@ -1247,7 +1465,7 @@ def test_deadline_fallback_waits_behind_frame_queued_during_the_solve():
             with self.lock:
                 self.value += seconds
 
-    class _DeadlineCore(_OrderRecordingCore):
+    class _DeadlineCore(_OrderRecordingCore, FakeMpcLearningCore):
         def __init__(self, clock):
             super().__init__()
             self.clock = clock
@@ -1349,7 +1567,7 @@ class _ObservationBarrier:
         self.release.clear()
 
 
-class _ObservationRecordingCore(_OrderRecordingCore):
+class _ObservationRecordingCore(_OrderRecordingCore, FakeMpcLearningCore):
     def __init__(self):
         super().__init__()
         self.observations = []
@@ -1487,7 +1705,6 @@ def test_threaded_runner_isolates_observation_failure_and_marks_the_next_frame_d
         def __init__(self):
             super().__init__()
             self.failed = False
-            self.failures = []
 
         def observe_frame(self, observation):
             super().observe_frame(observation)
@@ -1495,20 +1712,13 @@ def test_threaded_runner_isolates_observation_failure_and_marks_the_next_frame_d
                 self.failed = True
                 raise FloatingPointError("learner failed")
 
-        def observation_failure(self, observation, error):
-            self.failures.append((observation, error))
-            return {
-                "role_generation": observation.role_generation,
-                "eligible": False,
-                "rejection_reasons": ("learner-exception",),
-            }
-
     core = RaisingCore()
     runner = ThreadedControllerRunner(core, wait_for_period=barrier)
     core.runner = runner
-    runner.bind_evidence_context(0, "session", "cook")
     try:
         assert barrier.first_waiting.wait(2.0)
+        assert runner._learning_core is core
+        runner.bind_evidence_context(0, "session", "cook")
         first = _frame(0)
         first_submission = runner.observe_frame(first)
         runner.submit(212.0)
@@ -1517,9 +1727,14 @@ def test_threaded_runner_isolates_observation_failure_and_marks_the_next_frame_d
         assert _wait_for(lambda: ("update", 212.0) in core.calls)
         first_drain = runner.drain_observation_outcomes()
         assert len(first_drain.envelopes) == 1
+        assert first_drain.terminal_drops == ()
         assert first_drain.envelopes[0].submission_sequence == first_submission.submission_sequence
         assert first_drain.envelopes[0].outcome["rejection_reasons"] == ("learner-exception",)
-        assert core.failures and isinstance(core.failures[0][1], FloatingPointError)
+        assert len(core.observation_failures) == 1
+        failed_observation, failure = core.observation_failures[0]
+        assert failed_observation is first
+        assert isinstance(failure, FloatingPointError)
+        assert runner.drain_observation_outcomes().envelopes == ()
         assert runner._thread.is_alive()
 
         runner.observe_frame(_frame(1))
@@ -1663,6 +1878,94 @@ def test_threaded_runner_seeds_swapped_core_before_reserved_observation_and_solv
         runner.stop()
 
 
+def test_threaded_reconfigure_installs_learning_capability_before_queued_learning_work(
+    monkeypatch,
+):
+    import controller.runtime.runner as runner_module
+
+    class AtomicLearningCore(FakeMpcLearningCore):
+        def __init__(self):
+            super().__init__(period=0.001)
+            self.runner = None
+            self.installation_snapshots = []
+
+        def _record_installation(self, operation: str) -> None:
+            with self.runner._lock:
+                self.installation_snapshots.append(
+                    (
+                        operation,
+                        self.runner._core is self,
+                        self.runner._learning_core is self,
+                    )
+                )
+
+        def bind_estimator_seed_source(
+            self,
+            source: Callable[[float, int], object] | None,
+        ) -> None:
+            self._record_installation("seed-source")
+            super().bind_estimator_seed_source(source)
+
+        def bind_learning_identity(
+            self,
+            session_id: str,
+            cook_id: str | None,
+            role_generation: int,
+        ) -> None:
+            self._record_installation("identity")
+            super().bind_learning_identity(session_id, cook_id, role_generation)
+
+        def observe_frame(self, observation: FrameObservation) -> object:
+            self._record_installation("observation")
+            return super().observe_frame(observation)
+
+    barrier = _ObservationBarrier()
+    old = FakeMpcLearningCore(period=0.001)
+    replacement = AtomicLearningCore()
+    monkeypatch.setattr(
+        runner_module,
+        "_build_core",
+        lambda *args, **kwargs: (replacement, "Active"),
+    )
+    runner = ThreadedControllerRunner(old, wait_for_period=barrier)
+    replacement.runner = runner
+
+    def seed_source(window_seconds: float, minimum_samples: int) -> object:
+        return window_seconds, minimum_samples
+
+    observation = replace(_frame(0), role_generation=1)
+    try:
+        assert barrier.first_waiting.wait(2.0)
+        assert runner.reconfigure({"controller": {"selected": "mpc"}}, {}) == "Active"
+        runner.bind_evidence_context(1, "replacement-session", "replacement-cook")
+        runner.bind_estimator_seed_source(seed_source)
+        submission = runner.observe_frame(observation)
+        runner.submit(212.0)
+        barrier.release.set()
+
+        assert submission is not None
+        assert _wait_for(lambda: len(replacement.installation_snapshots) == 3)
+        assert replacement.installation_snapshots == [
+            ("identity", True, True),
+            ("seed-source", True, True),
+            ("observation", True, True),
+        ]
+        assert replacement.learning_identity_bindings == [
+            ("replacement-session", "replacement-cook", 1),
+        ]
+        assert replacement.seed_source_bindings == [seed_source]
+        assert replacement.observations == [observation]
+        with runner._lock:
+            assert runner._core is replacement
+            assert runner._learning_core is replacement
+        assert old.learning_identity_bindings == []
+        assert old.seed_source_bindings == []
+        assert old.observations == []
+    finally:
+        barrier.release.set()
+        runner.stop()
+
+
 def test_threaded_submission_reports_exact_out_of_order_input_eviction():
     barrier = _ObservationBarrier()
     core = _ObservationRecordingCore()
@@ -1754,12 +2057,15 @@ def test_threaded_generation_specific_overflow_marks_only_reserved_generation():
         runner.stop()
 
 
-def test_threaded_runner_ignores_observations_for_a_core_without_a_learner():
+def test_threaded_non_learning_core_runs_and_closes_without_learning_dispatch():
     barrier = _ObservationBarrier()
     core = FakeCore()
     runner = ThreadedControllerRunner(core, wait_for_period=barrier)
     try:
         assert barrier.first_waiting.wait(2.0)
+        assert runner._learning_core is None
+        assert runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE) is False
+        assert not runner._corpus_fit_plans
         runner.observe_frame(_frame(0))
         runner.submit(212.0)
         barrier.release.set()
@@ -1770,6 +2076,7 @@ def test_threaded_runner_ignores_observations_for_a_core_without_a_learner():
     finally:
         barrier.release.set()
         runner.stop()
+    assert core.closed == 1
 
 
 class _DeliveryBlockingObservationCore(_ObservationRecordingCore):
@@ -2005,8 +2312,32 @@ def test_threaded_public_reconfigure_transfers_queued_calibration_without_replay
     barrier = _ObservationBarrier()
     old = CalibrationCore("old")
     new = CalibrationCore("new")
-    monkeypatch.setattr(runner_module, "_build_core", lambda settings, control, logger=None: (new, "Active"))
-    runner = ThreadedControllerRunner(old, wait_for_period=barrier)
+
+    def build_core(
+        settings,
+        control,
+        *,
+        logger=None,
+        model_persistence=None,
+        trajectory_repository=None,
+        fit_partition_digest=None,
+        grey_learning_process=None,
+    ):
+        del settings, control
+        assert logger is None
+        assert model_persistence is None
+        assert trajectory_repository is None
+        assert fit_partition_digest is None
+        assert grey_learning_process is process_owner
+        return new, "Active"
+
+    monkeypatch.setattr(runner_module, "_build_core", build_core)
+    process_owner = object()
+    runner = ThreadedControllerRunner(
+        old,
+        grey_learning_process=process_owner,
+        wait_for_period=barrier,
+    )
     try:
         assert barrier.first_waiting.wait(2.0)
         assert runner.reconfigure({"controller": {"selected": "mpc"}}, {}) == "Active"
@@ -2036,11 +2367,26 @@ def test_threaded_reconfigure_closes_replaced_core_only_after_atomic_install(mon
 
     old = CloseAwareCore(period=0.001)
     new = CloseAwareCore(period=0.001, commands_fan=True)
-    monkeypatch.setattr(
-        runner_module,
-        "_build_core",
-        lambda settings, control, logger=None: (new, "Active"),
-    )
+
+    def build_core(
+        settings,
+        control,
+        *,
+        logger=None,
+        model_persistence=None,
+        trajectory_repository=None,
+        fit_partition_digest=None,
+        grey_learning_process=None,
+    ):
+        del settings, control
+        assert logger is None
+        assert model_persistence is None
+        assert trajectory_repository is None
+        assert fit_partition_digest is None
+        assert grey_learning_process is None
+        return new, "Active"
+
+    monkeypatch.setattr(runner_module, "_build_core", build_core)
     runner = ThreadedControllerRunner(old)
     try:
         assert runner.reconfigure({"controller": {"selected": "mpc"}}, {}) == "Active"
@@ -2061,11 +2407,26 @@ def test_threaded_reconfigure_closes_superseded_uninstalled_core(monkeypatch):
     first = CloseAwareCore(period=0.001)
     second = CloseAwareCore(period=0.001)
     builds = iter((first, second))
-    monkeypatch.setattr(
-        runner_module,
-        "_build_core",
-        lambda settings, control, logger=None: (next(builds), "Active"),
-    )
+
+    def build_core(
+        settings,
+        control,
+        *,
+        logger=None,
+        model_persistence=None,
+        trajectory_repository=None,
+        fit_partition_digest=None,
+        grey_learning_process=None,
+    ):
+        del settings, control
+        assert logger is None
+        assert model_persistence is None
+        assert trajectory_repository is None
+        assert fit_partition_digest is None
+        assert grey_learning_process is None
+        return next(builds), "Active"
+
+    monkeypatch.setattr(runner_module, "_build_core", build_core)
     runner = ThreadedControllerRunner(active, wait_for_period=barrier)
     try:
         assert barrier.first_waiting.wait(2.0)
@@ -2100,8 +2461,808 @@ def test_threaded_stop_never_closes_a_core_under_a_live_timed_out_worker():
     assert core.closed == 1
 
 
+class _CorpusDrainCore(CloseAwareCore, FakeMpcLearningCore):
+    def __init__(self) -> None:
+        super().__init__(period=0.001)
+        self.fit_requests = []
+        self.fit_tickets = []
+        self.deliveries = collections.deque()
+        self.deliver_on_schedule = False
+        self.poll_entered = threading.Event()
+        self.poll_release = threading.Event()
+        self.block_poll = False
+        self.fit_failures = []
+
+    def schedule_corpus_fit(self, origin: CandidateOrigin) -> bool:
+        self.fit_schedules.append(origin)
+        return self._schedule_corpus_fit_ticket(origin) is not None
+
+    def _schedule_corpus_fit_ticket(
+        self,
+        origin: CandidateOrigin,
+    ) -> str | None:
+        ticket = f"{len(self.fit_tickets) + 1:064x}"
+        self.fit_requests.append(origin)
+        self.fit_tickets.append(ticket)
+        self.fit_ticket_schedules.append((ticket, origin))
+        if self.deliver_on_schedule:
+            self.deliveries.append((ticket, origin))
+        return ticket
+
+    def poll_learning_off_path(
+        self,
+        *,
+        live_origin: CandidateOrigin | None = None,
+    ) -> object:
+        self.fit_polls.append((threading.get_ident(), live_origin))
+        self.poll_entered.set()
+        if self.block_poll:
+            assert self.poll_release.wait(2.0)
+            self.block_poll = False
+        if self.deliveries:
+            ticket, origin = self.deliveries.popleft()
+            self.terminal_fit_tickets.add((ticket, origin))
+            return SimpleNamespace(
+                message=SimpleNamespace(
+                    request=SimpleNamespace(request_id=ticket, origin=origin),
+                ),
+            )
+        return None
+
+    def get_learning_diagnostics(self) -> ControllerLearningDiagnostics:
+        return ControllerLearningDiagnostics(
+            schema_version=1,
+            state={"failure": None},
+        )
+
+    def fail_corpus_fit(
+        self,
+        ticket: str,
+        error: BaseException | str,
+    ) -> None:
+        self.fit_failures.append((ticket, str(error)))
+
+
+class _RuntimeCorpusOwnerCore(_CorpusDrainCore):
+    def __init__(self, harness):
+        super().__init__()
+        self.harness = harness
+        self.scheduled_tickets = []
+
+    def schedule_corpus_fit(self, origin: CandidateOrigin) -> bool:
+        self.fit_schedules.append(origin)
+        return self.harness.runtime.request_corpus_fit(
+            origin,
+            replace_owned_prepared=True,
+        )
+
+    def _schedule_corpus_fit_ticket(
+        self,
+        origin: CandidateOrigin,
+    ) -> str | None:
+        ticket = self.harness.runtime._request_corpus_fit_ticket(
+            origin,
+            replace_owned_prepared=True,
+        )
+        if ticket is not None:
+            self.scheduled_tickets.append(ticket)
+            self.fit_ticket_schedules.append((ticket, origin))
+        return ticket
+
+    def _consume_terminal_corpus_fit_ticket(
+        self,
+        ticket: str,
+        origin: CandidateOrigin,
+    ) -> bool:
+        self.consumed_fit_tickets.append((ticket, origin))
+        return self.harness.runtime._consume_terminal_fit_ticket(
+            ticket,
+            origin,
+        )
+
+    def poll_learning_off_path(
+        self,
+        *,
+        live_origin: CandidateOrigin | None = None,
+    ) -> object:
+        self.fit_polls.append((threading.get_ident(), live_origin))
+        return self.harness.runtime.poll_learning_off_path(
+            live_origin=live_origin,
+        )
+
+    def get_learning_diagnostics(self) -> ControllerLearningDiagnostics:
+        return ControllerLearningDiagnostics(
+            schema_version=1,
+            state=self.harness.runtime.learning_status(),
+        )
+
+    def close(self):
+        if self.closed:
+            return
+        self.harness.runtime.close()
+        self.harness.activation.close()
+        super().close()
+
+
+def _append_complete_calibration_trigger(repository) -> None:
+    segment = repository.read_segment("segment-b")
+    assert segment is not None
+    frame = next(item for item in segment.scored_hold_frames if item.calibration_origin)
+    stage_order = ("low", "middle", "high", "coast")
+
+    def allocation(load: float) -> AllocationEvidence:
+        return AllocationEvidence(
+            normalized_combustion_load=load,
+            auger_duty=load,
+            fan_duty=None,
+            u_max=1.0,
+            fan_min_pct=0.0,
+            fan_max_pct=100.0,
+            fan_enabled=False,
+            auger_clamp_reason=AllocationClampReason.NONE,
+            fan_clamp_reason=AllocationClampReason.NONE,
+            allocator_revision=2,
+        )
+
+    records = []
+    for index, stage in enumerate(stage_order):
+        probe_q = 0.0 if stage == "coast" else 0.1
+        combined_q = 0.3 + probe_q
+        records.append(
+            ModelEvidenceRecord(
+                evidence_id=f"threaded-calibration-{stage}",
+                kind=EvidenceKind.CALIBRATION_SUMMARY,
+                session_id=segment.trajectory_session_id,
+                cook_id=segment.cook_id,
+                timestamp_ms=frame.monotonic_start_ms + index,
+                role_generation=4,
+                model_digest="a" * 64,
+                provenance_digest="b" * 64,
+                payload=CalibrationSummaryEvidence(
+                    accepted=True,
+                    probe_count=0 if stage == "coast" else 1,
+                    result_revision=index + 1,
+                    command_revision=17,
+                    command_action="start",
+                    baseline_q=0.3,
+                    probe_q=probe_q,
+                    combined_q=combined_q,
+                    baseline_allocation=allocation(0.3),
+                    combined_allocation=allocation(combined_q),
+                    scheduled_on_seconds=6.0,
+                    delivered_on_seconds=6.0,
+                    status="active",
+                    stage=stage,
+                    completed_stages=stage_order[:index],
+                    continuous=True,
+                ),
+            ),
+        )
+    append_model_evidence(
+        records,
+        database_path=repository._database_path,
+    )
+
+
+def _append_newer_passive_fit_corpus(repository, *, segment_id: str) -> FitCorpusIdentity:
+    from tests.unit.common._learning_trajectory_helpers import (
+        _finalize_segment,
+        _segment,
+    )
+
+    segment = _segment(
+        segment_id,
+        epoch_ms=5_000_000,
+        start_sequence=10_000,
+        scored_count=2,
+    )
+    _finalize_segment(repository, segment)
+    fit_corpus = repository.snapshot_fit_corpus(segment.fit_partition_digest).identity
+    assert isinstance(fit_corpus, FitCorpusIdentity)
+    return fit_corpus
+
+
+def _prepared_process_candidate(tmp_path, origin):
+    from controller.model_learning.grey_runtime import GreyLearningProcessOwner
+    from tests.unit.mpc._grey_learning_runtime_helpers import (
+        _ControlledDeliveryCorpusWorker,
+        _CorpusRepositoryProbe,
+        _harness,
+        _reopened_corpus,
+        _reopened_ready_passive_corpus,
+    )
+
+    corpus_factory = _reopened_ready_passive_corpus if origin is CandidateOrigin.PASSIVE_ONLINE else _reopened_corpus
+    repository, partition = corpus_factory(tmp_path)
+    if origin is CandidateOrigin.OPERATOR_CALIBRATION:
+        _append_complete_calibration_trigger(repository)
+    owner = GreyLearningProcessOwner()
+    _ControlledDeliveryCorpusWorker.instances.clear()
+    first = _harness(
+        trajectory_repository=_CorpusRepositoryProbe(repository),
+        fit_partition_digest=lambda: partition,
+        fit_worker_factory=_ControlledDeliveryCorpusWorker,
+        process_owner=owner,
+        learning_enabled=True,
+    )
+    first.runtime.bind_learning_identity("session-a", "cook-a", 0)
+    assert first.runtime.request_corpus_fit(origin)
+    assert first.runtime.poll_learning_off_path() == (None, None)
+    worker = _ControlledDeliveryCorpusWorker.instances[-1]
+    worker.released = True
+    delivery, _ = first.runtime.poll_learning_off_path()
+    assert delivery is not None
+    prepared = owner.learning.prepared
+    assert prepared is not None and prepared.accepted
+    assert prepared.candidate.request.origin is origin
+    assert isinstance(prepared.candidate.request.fit_corpus, FitCorpusIdentity)
+    return repository, partition, owner, first, worker, prepared
+
+
+def test_threaded_corpus_fit_schedules_polls_and_consumes_one_matching_ticket():
+    class TerminalTicketCore(_CorpusDrainCore):
+        def __init__(self):
+            super().__init__()
+            self.marked_terminal = False
+
+        def poll_learning_off_path(
+            self,
+            *,
+            live_origin: CandidateOrigin | None = None,
+        ) -> object:
+            if self.fit_tickets and not self.marked_terminal:
+                self.terminal_fit_tickets.add(
+                    (self.fit_tickets[-1], self.fit_requests[-1]),
+                )
+                self.marked_terminal = True
+            return super().poll_learning_off_path(live_origin=live_origin)
+
+    core = TerminalTicketCore()
+    runner = ThreadedControllerRunner(core)
+    try:
+        assert runner._learning_core is core
+        assert runner.schedule_corpus_fit(CandidateOrigin.OPERATOR_CALIBRATION)
+        assert _wait_for(lambda: not runner._corpus_fit_plans)
+
+        ticket = "0" * 63 + "1"
+        assert core.fit_requests == [CandidateOrigin.OPERATOR_CALIBRATION]
+        assert core.fit_tickets == [ticket]
+        assert core.fit_ticket_schedules == [
+            (ticket, CandidateOrigin.OPERATOR_CALIBRATION),
+        ]
+        assert core.fit_polls
+        assert all(thread_id != runner._thread.ident for thread_id, _live_origin in core.fit_polls)
+        assert {thread_id for thread_id, _live_origin in core.fit_polls} == {
+            runner._learning_thread.ident,
+        }
+        assert core.consumed_fit_tickets == [
+            (ticket, CandidateOrigin.OPERATOR_CALIBRATION),
+        ]
+    finally:
+        runner.stop()
+
+
+def test_threaded_corpus_fit_requires_terminal_ticket_after_matching_delivery():
+    class DelayedTerminalTicketCore(_CorpusDrainCore):
+        def __init__(self):
+            super().__init__()
+            self.poll_count = 0
+
+        def poll_learning_off_path(
+            self,
+            *,
+            live_origin: CandidateOrigin | None = None,
+        ) -> object:
+            self.poll_count += 1
+            if self.poll_count == 1:
+                ticket = self.fit_tickets[-1]
+                origin = self.fit_requests[-1]
+                return SimpleNamespace(
+                    message=SimpleNamespace(
+                        request=SimpleNamespace(request_id=ticket, origin=origin),
+                    ),
+                )
+            self.terminal_fit_tickets.add(
+                (self.fit_tickets[-1], self.fit_requests[-1]),
+            )
+            return None
+
+    core = DelayedTerminalTicketCore()
+    runner = ThreadedControllerRunner(core)
+    try:
+        assert runner.stop_and_retain_for_teardown()
+        core.poll_count = 0
+        assert runner.schedule_corpus_fit(CandidateOrigin.OPERATOR_CALIBRATION)
+        assert _wait_for(lambda: not runner._corpus_fit_plans)
+
+        assert core.poll_count >= 2
+    finally:
+        runner.stop()
+
+
+def test_live_corpus_fit_requires_terminal_ticket_after_matching_delivery():
+    class DelayedLiveTerminalTicketCore(_CorpusDrainCore):
+        def __init__(self):
+            super().__init__()
+            self.delivered = False
+
+        def poll_learning_off_path(
+            self,
+            *,
+            live_origin: CandidateOrigin | None = None,
+        ) -> object:
+            self.fit_polls.append((threading.get_ident(), live_origin))
+            if not self.fit_tickets:
+                return None
+            ticket = self.fit_tickets[-1]
+            origin = self.fit_requests[-1]
+            if not self.delivered:
+                self.delivered = True
+                return SimpleNamespace(
+                    message=SimpleNamespace(
+                        request=SimpleNamespace(request_id=ticket, origin=origin),
+                    ),
+                )
+            self.terminal_fit_tickets.add((ticket, origin))
+            return None
+
+    core = DelayedLiveTerminalTicketCore()
+    runner = ThreadedControllerRunner(core)
+    try:
+        assert runner.schedule_corpus_fit(CandidateOrigin.OPERATOR_CALIBRATION)
+        assert _wait_for(
+            lambda: len(core.consumed_fit_tickets) >= 2 or not runner._corpus_fit_plans,
+        )
+
+        assert len(core.consumed_fit_tickets) >= 2
+    finally:
+        runner.stop()
+
+
+def test_live_fit_barrier_and_submission_run_on_learning_dispatcher():
+    core = _CorpusDrainCore()
+    core.deliver_on_schedule = True
+    runner = ThreadedControllerRunner(core)
+    calling_thread = threading.get_ident()
+    barrier_threads = []
+
+    def barrier() -> bool:
+        barrier_threads.append(threading.get_ident())
+        return True
+
+    try:
+        assert runner._schedule_corpus_fit_after_barrier(
+            CandidateOrigin.OPERATOR_CALIBRATION,
+            barrier,
+        )
+        assert _wait_for(lambda: not runner._corpus_fit_plans)
+        assert core.fit_requests == [CandidateOrigin.OPERATOR_CALIBRATION]
+        assert barrier_threads
+        assert barrier_threads[0] != calling_thread
+    finally:
+        runner.stop()
+
+
+def test_stop_fit_drain_ignores_unrelated_delivery_until_requested_origin_terminalizes():
+    core = _CorpusDrainCore()
+    runner = ThreadedControllerRunner(core)
+    try:
+        assert runner.stop_and_retain_for_teardown()
+        core.deliveries.append(
+            ("f" * 64, CandidateOrigin.OPERATOR_CALIBRATION),
+        )
+        core.deliver_on_schedule = True
+        assert runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+        assert _wait_for(lambda: runner._corpus_fit_thread is None)
+        assert core.fit_requests == [CandidateOrigin.PASSIVE_ONLINE]
+        assert not core.deliveries
+    finally:
+        runner.stop()
+
+
+def test_stop_passive_fit_rejection_preserves_an_existing_challenger() -> None:
+    core = _CorpusDrainCore()
+    core._schedule_corpus_fit_ticket = lambda _origin: None
+    runner = ThreadedControllerRunner(core)
+    try:
+        assert runner.stop_and_retain_for_teardown()
+        assert runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+        assert _wait_for(lambda: runner._corpus_fit_thread is None)
+        assert core.fit_failures == []
+    finally:
+        runner.stop()
+
+
+def test_finish_teardown_is_nonblocking_and_finalizes_once_after_stop_fit_terminalizes() -> None:
+    events: list[str] = []
+
+    class _OrderedCloseCore(_CorpusDrainCore):
+        def close(self):
+            events.append("core:close")
+            super().close()
+
+    core = _OrderedCloseCore()
+    core.deliver_on_schedule = True
+    runner = ThreadedControllerRunner(core)
+    assert runner.stop_and_retain_for_teardown()
+    core.block_poll = True
+    assert runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+    assert core.poll_entered.wait(2.0)
+
+    runner.finish_teardown(lambda: events.append("finalizer"))
+    runner.finish_teardown(lambda: events.append("duplicate-finalizer"))
+
+    assert not core.poll_release.is_set()
+    assert events == []
+    core.poll_release.set()
+    assert _wait_for(lambda: runner._final_core_closed)
+    assert events == ["finalizer", "core:close"]
+
+
+def test_finish_teardown_runs_immediate_finalizer_and_closes_when_no_fit_is_pending() -> None:
+    events: list[str] = []
+
+    class _OrderedCloseCore(_CorpusDrainCore):
+        def close(self):
+            events.append("core:close")
+            super().close()
+
+    runner = ThreadedControllerRunner(_OrderedCloseCore())
+    assert runner.stop_and_retain_for_teardown()
+
+    runner.finish_teardown(lambda: events.append("finalizer"))
+
+    assert events == ["finalizer", "core:close"]
+
+
+def test_finish_teardown_runs_new_finalizer_once_when_core_already_closed() -> None:
+    events: list[str] = []
+
+    class _OrderedCloseCore(_CorpusDrainCore):
+        def close(self):
+            events.append("core:close")
+            super().close()
+
+    runner = ThreadedControllerRunner(_OrderedCloseCore())
+    runner.stop()
+    assert events == ["core:close"]
+
+    runner.finish_teardown(lambda: events.append("late-finalizer"))
+    runner.finish_teardown(lambda: events.append("duplicate-finalizer"))
+
+    assert events == ["core:close", "late-finalizer"]
+
+
+def test_finish_teardown_runs_finalizer_after_rejected_stop_fit_fallback() -> None:
+    events: list[str] = []
+
+    class _OrderedCloseCore(_CorpusDrainCore):
+        def close(self):
+            events.append("core:close")
+            super().close()
+
+    core = _OrderedCloseCore()
+    core._schedule_corpus_fit_ticket = lambda _origin: None
+    runner = ThreadedControllerRunner(core)
+    assert runner.stop_and_retain_for_teardown()
+    assert runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+
+    runner.finish_teardown(lambda: events.append("finalizer"))
+
+    assert _wait_for(lambda: runner._final_core_closed)
+    assert events == ["finalizer", "core:close"]
+
+
+def test_finalizer_exception_cannot_prevent_final_core_close() -> None:
+    events: list[str] = []
+
+    class _OrderedCloseCore(_CorpusDrainCore):
+        def close(self):
+            events.append("core:close")
+            super().close()
+
+    runner = ThreadedControllerRunner(_OrderedCloseCore())
+    assert runner.stop_and_retain_for_teardown()
+
+    def fail_finalizer() -> None:
+        events.append("finalizer")
+        raise RuntimeError("post-fit barrier failed")
+
+    runner.finish_teardown(fail_finalizer)
+
+    assert events == ["finalizer", "core:close"]
+
+
+def test_stop_fit_drain_ignores_older_same_origin_ticket() -> None:
+    core = _CorpusDrainCore()
+    runner = ThreadedControllerRunner(core)
+    try:
+        assert runner.stop_and_retain_for_teardown()
+        core.deliveries.append(("f" * 64, CandidateOrigin.PASSIVE_ONLINE))
+        core.deliver_on_schedule = True
+
+        assert runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+        assert _wait_for(lambda: runner._corpus_fit_thread is None)
+
+        assert core.fit_requests == [CandidateOrigin.PASSIVE_ONLINE]
+        assert core.fit_tickets == ["0" * 63 + "1"]
+        assert not core.deliveries
+    finally:
+        runner.stop()
+
+
+def test_process_owned_newer_stop_fit_supersedes_prepared_candidate_and_closes(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from controller.model_learning.grey_runtime import GreyLearningProcessOwner
+    from controller.runtime.model_fitting import GreyLearningOrchestrator
+    from tests.unit.mpc._grey_learning_runtime_helpers import (
+        _ControlledDeliveryCorpusWorker,
+        _CorpusRepositoryProbe,
+        _harness,
+        _reopened_ready_passive_corpus,
+    )
+
+    repository, partition = _reopened_ready_passive_corpus(tmp_path)
+    owner = GreyLearningProcessOwner()
+    _ControlledDeliveryCorpusWorker.instances.clear()
+
+    first = _harness(
+        trajectory_repository=_CorpusRepositoryProbe(repository),
+        fit_partition_digest=lambda: partition,
+        fit_worker_factory=_ControlledDeliveryCorpusWorker,
+        process_owner=owner,
+        learning_enabled=True,
+    )
+    first.runtime.bind_learning_identity("session-a", "cook-a", 0)
+    first_core = _RuntimeCorpusOwnerCore(first)
+    first_runner = ThreadedControllerRunner(first_core)
+    assert first_runner.stop_and_retain_for_teardown()
+    assert first_runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+    first_runner.finish_teardown()
+    assert _wait_for(
+        lambda: (
+            bool(_ControlledDeliveryCorpusWorker.instances)
+            and _ControlledDeliveryCorpusWorker.instances[-1].job is not None
+        )
+    )
+    worker = _ControlledDeliveryCorpusWorker.instances[-1]
+    worker.released = True
+    assert _wait_for(
+        lambda: first_core.closed == 1 and owner.learning.prepared is not None and owner.learning.prepared.accepted
+    )
+    prepared = owner.learning.prepared
+    assert prepared is not None
+    old_pair = prepared.candidate_pair
+    old_request = worker.job.request
+    newer_corpus = _append_newer_passive_fit_corpus(
+        repository,
+        segment_id="newer-passive-supersession",
+    )
+    assert newer_corpus.corpus_revision > old_request.fit_corpus.corpus_revision
+    assert newer_corpus.corpus_digest != old_request.fit_corpus.corpus_digest
+
+    second = _harness(
+        trajectory_repository=_CorpusRepositoryProbe(repository),
+        fit_partition_digest=lambda: partition,
+        fit_worker_factory=_ControlledDeliveryCorpusWorker,
+        process_owner=owner,
+    )
+    second.runtime.bind_learning_identity("session-b", "cook-b", 0)
+    assert owner.learning.prepared is prepared
+    superseded_pairs = []
+    original_superseding_submit = GreyLearningOrchestrator.submit_superseding_corpus_fit
+
+    def record_superseded(orchestrator, job, expected, *, persist):
+        result = original_superseding_submit(
+            orchestrator,
+            job,
+            expected,
+            persist=persist,
+        )
+        if result[1]:
+            superseded_pairs.append(expected.candidate_pair)
+        return result
+
+    monkeypatch.setattr(
+        GreyLearningOrchestrator,
+        "submit_superseding_corpus_fit",
+        record_superseded,
+    )
+    second_core = _RuntimeCorpusOwnerCore(second)
+    second_runner = ThreadedControllerRunner(second_core)
+    assert second_runner.stop_and_retain_for_teardown()
+    assert second_runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+    second_runner.finish_teardown()
+
+    assert _wait_for(lambda: second_core.closed == 1 and bool(superseded_pairs))
+    assert superseded_pairs == [old_pair]
+    assert old_pair.controller.closed
+    new_request = worker.job.request
+    assert new_request.request_id == second_core.scheduled_tickets[-1]
+    assert new_request.origin is CandidateOrigin.PASSIVE_ONLINE
+    assert new_request.fit_corpus == newer_corpus
+    owner.close()
+
+
+def test_stopped_runner_terminalizes_stop_behind_owned_operator_candidate(
+    tmp_path,
+) -> None:
+    from tests.unit.mpc._grey_learning_runtime_helpers import (
+        _CorpusRepositoryProbe,
+        _harness,
+    )
+
+    repository, partition, owner, first, worker, prepared = _prepared_process_candidate(
+        tmp_path,
+        CandidateOrigin.OPERATOR_CALIBRATION,
+    )
+    old_request = worker.job.request
+    newer_corpus = _append_newer_passive_fit_corpus(
+        repository,
+        segment_id="newer-behind-operator",
+    )
+    assert newer_corpus.corpus_revision > old_request.fit_corpus.corpus_revision
+    assert newer_corpus.corpus_digest != old_request.fit_corpus.corpus_digest
+    probe = _CorpusRepositoryProbe(repository)
+    second = _harness(
+        trajectory_repository=probe,
+        fit_partition_digest=lambda: partition,
+        fit_worker_factory=type(worker),
+        process_owner=owner,
+    )
+    second.runtime.bind_learning_identity("session-b", "cook-b", 0)
+    second_core = _RuntimeCorpusOwnerCore(second)
+    second_runner = ThreadedControllerRunner(second_core)
+    assert second_runner.stop_and_retain_for_teardown()
+    assert second_runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+    second_runner.finish_teardown()
+
+    assert _wait_for(lambda: second_core.closed == 1)
+    assert owner.learning.prepared is prepared
+    assert prepared.candidate_pair.controller.closed is False
+    assert worker.job.request is old_request
+    assert second.runtime._corpus_fit_failure is None
+    assert second_core.scheduled_tickets
+    terminal_ticket = second_core.scheduled_tickets[-1]
+    assert ("record", terminal_ticket) in probe.events
+    assert ("stale", terminal_ticket) in probe.events
+    supersession = second.persistence.evidence[-1].payload
+    assert supersession.origin == CandidateOrigin.PASSIVE_ONLINE.value
+    assert supersession.policy == ActivationPolicy.CAUSAL_AUTO.value
+    assert supersession.rejection_reasons == ("superseded-by-prepared-operator-calibration-candidate",)
+    first.runtime.close()
+    first.activation.close()
+    owner.close()
+
+
+def test_stopped_runner_clears_transferred_preparation_without_closing_authority(
+    tmp_path,
+) -> None:
+    from tests.unit.mpc._grey_learning_runtime_helpers import (
+        _CorpusRepositoryProbe,
+        _harness,
+    )
+
+    repository, partition, owner, first, worker, prepared = _prepared_process_candidate(
+        tmp_path,
+        CandidateOrigin.PASSIVE_ONLINE,
+    )
+    request = prepared.candidate.request
+    owner.learning._last_evaluation = SimpleNamespace(
+        accepted=True,
+        consecutive_wins=2,
+        role_generation=request.parent_incumbent_generation,
+        candidate_generation=request.candidate_generation,
+        incumbent_digest=request.parent_incumbent_digest,
+        challenger_digest=prepared.candidate_digest,
+    )
+    handoff = owner.learning.handoff_if_ready(
+        confidence_accepted=True,
+        online_enabled=True,
+        prepare=lambda _prepared, _policy: "transferred-candidate",
+    )
+    assert handoff is not None and not handoff.blockers
+    transferred_controller = prepared.candidate_pair.controller
+    newer_corpus = _append_newer_passive_fit_corpus(
+        repository,
+        segment_id="newer-after-transfer",
+    )
+    assert newer_corpus.corpus_revision > request.fit_corpus.corpus_revision
+    assert newer_corpus.corpus_digest != request.fit_corpus.corpus_digest
+
+    second = _harness(
+        trajectory_repository=_CorpusRepositoryProbe(repository),
+        fit_partition_digest=lambda: partition,
+        fit_worker_factory=type(worker),
+        process_owner=owner,
+    )
+    second.runtime.bind_learning_identity("session-b", "cook-b", 0)
+    second_core = _RuntimeCorpusOwnerCore(second)
+    second_runner = ThreadedControllerRunner(second_core)
+    assert second_runner.stop_and_retain_for_teardown()
+    assert second_runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+    second_runner.finish_teardown()
+
+    assert _wait_for(lambda: second_core.closed == 1)
+    assert second_core.scheduled_tickets
+    newer_ticket = second_core.scheduled_tickets[-1]
+    newer_request = worker.job.request
+    assert newer_request.request_id == newer_ticket
+    assert newer_request.origin is CandidateOrigin.PASSIVE_ONLINE
+    assert newer_request.fit_corpus == newer_corpus
+    assert transferred_controller.closed is False
+    assert owner.learning.prepared is not None
+    assert owner.learning.prepared.candidate.request.request_id == newer_ticket
+    first.runtime.close()
+    first.activation.close()
+    owner.close()
+    assert transferred_controller.closed is False
+    transferred_controller.close()
+    assert transferred_controller.closed
+
+
+def test_overlapping_fit_schedule_attaches_to_the_existing_drain_truthfully():
+    core = _CorpusDrainCore()
+    runner = ThreadedControllerRunner(core)
+    try:
+        assert runner.stop_and_retain_for_teardown()
+        core.block_poll = True
+        core.deliver_on_schedule = True
+        core.poll_entered.clear()
+        assert runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+        assert core.poll_entered.wait(2.0)
+        assert runner.schedule_corpus_fit(CandidateOrigin.OPERATOR_CALIBRATION)
+        core.poll_release.set()
+        assert _wait_for(lambda: runner._corpus_fit_thread is None)
+        assert core.fit_requests == [
+            CandidateOrigin.PASSIVE_ONLINE,
+            CandidateOrigin.OPERATOR_CALIBRATION,
+        ]
+        assert not core.deliveries
+    finally:
+        core.poll_release.set()
+        runner.stop()
+
+
+def test_finish_teardown_closes_once_after_fit_thread_terminalizes():
+    core = _CorpusDrainCore()
+    runner = ThreadedControllerRunner(core)
+
+    assert runner.stop_and_retain_for_teardown()
+    core.block_poll = True
+    core.deliver_on_schedule = True
+    core.poll_entered.clear()
+    assert runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+    assert core.poll_entered.wait(2.0)
+    runner.finish_teardown()
+    assert core.closed == 0
+    core.poll_release.set()
+    assert _wait_for(lambda: core.closed == 1)
+    assert runner._corpus_fit_thread is None
+
+
+def test_finish_teardown_closes_after_stop_and_retain_timeout_worker_exits():
+    core = BlockingCore()
+    core.closed = 0
+    core.close = lambda: setattr(core, "closed", core.closed + 1)
+    runner = ThreadedControllerRunner(core)
+    runner.submit(200.0)
+    assert core.entered.wait(2.0)
+
+    assert runner.stop_and_retain_for_teardown() is False
+    runner.finish_teardown()
+    assert core.closed == 0
+    core.gate.set()
+    runner._thread.join(timeout=2.0)
+
+    assert not runner._thread.is_alive()
+    assert core.closed == 1
+
+
 def test_learning_lifecycle_dispatcher_drains_each_fit_off_the_controller_worker():
-    class LearningCore(FakeCore):
+    class LearningCore(FakeMpcLearningCore):
         def __init__(self):
             super().__init__(period=0.001)
             self.pending = False
@@ -2110,7 +3271,8 @@ def test_learning_lifecycle_dispatcher_drains_each_fit_off_the_controller_worker
             self.poll_threads = []
             self.condition = threading.Condition()
 
-        def observe_frame(self, observation):
+        def observe_frame(self, observation: FrameObservation) -> object:
+            self.observations.append(observation)
             with self.condition:
                 if not self.pending:
                     self.pending = True
@@ -2123,7 +3285,12 @@ def test_learning_lifecycle_dispatcher_drains_each_fit_off_the_controller_worker
                 "forecast_origin_evidence": (),
             }
 
-        def poll_learning_off_path(self):
+        def poll_learning_off_path(
+            self,
+            *,
+            live_origin: CandidateOrigin | None = None,
+        ) -> object:
+            self.fit_polls.append((threading.get_ident(), live_origin))
             with self.condition:
                 self.poll_threads.append(threading.get_ident())
                 if self.pending:
@@ -2499,7 +3666,7 @@ def test_failed_active_recovery_terminalizes_before_configured_pair_can_update()
         incumbent=incumbent,
         candidate=candidate,
         origin=CandidateOrigin.PASSIVE_ONLINE,
-        policy=ActivationPolicy.PASSIVE_AUTO,
+        policy=ActivationPolicy.CAUSAL_AUTO,
         decision_id="failed-active-recovery",
     ).transition(ActivationPhase.ACTIVE)
     persisted = ModelActivationState(
@@ -2545,21 +3712,61 @@ class _RefusingRestoreCore(_OrderRecordingCore):
         return False
 
 
-def test_a_restore_the_core_refuses_is_reported_back_from_the_worker():
-    """Queued is not adopted, so the worker's verdict has to travel back.
-
-    `restore_model` returns True for accepted-for-restore; the core decides on
-    the worker thread. Without a return path a refusal reaches nothing that can
-    log it or correct the session's model provenance.
-    """
+def test_a_restore_the_core_refuses_reports_the_configured_authority_from_the_worker():
     core = _RefusingRestoreCore()
     runner = ThreadedControllerRunner(core)
     try:
         assert runner.drain_restore_outcome() is None
-        assert runner.restore_model({"revision": 7}) is True
+        submission = runner.restore_model({"revision": 7}, restore_token="restore-7")
+        assert submission == ModelRestoreOutcome(
+            restore_token="restore-7",
+            accepted=True,
+            effective_authority=None,
+            pending=True,
+        )
         runner.submit(212.0)
 
-        assert _wait_for(lambda: runner.drain_restore_outcome() is False)
+        def capture_restore_outcome():
+            outcome = runner.drain_restore_outcome()
+            if outcome is None:
+                return False
+            core.observed_restore_outcome = outcome
+            return True
+
+        assert _wait_for(capture_restore_outcome)
+        assert core.observed_restore_outcome == ModelRestoreOutcome(
+            restore_token="restore-7",
+            accepted=False,
+            effective_authority={"revision": 1},
+        )
         assert runner.drain_restore_outcome() is None
+    finally:
+        runner.stop()
+
+
+def test_legacy_restore_reports_configured_authority_while_candidate_stays_staged():
+    core = _OrderRecordingCore()
+    runner = ThreadedControllerRunner(core)
+    candidate = {"revision": 7, "installation_identity_digest": None}
+    try:
+        submission = runner.restore_model(candidate, restore_token="legacy-restore")
+        assert submission.pending
+        runner.submit(212.0)
+
+        def capture_restore_outcome():
+            outcome = runner.drain_restore_outcome()
+            if outcome is None:
+                return False
+            core.observed_restore_outcome = outcome
+            return True
+
+        assert _wait_for(capture_restore_outcome)
+        assert core.observed_restore_outcome == ModelRestoreOutcome(
+            restore_token="legacy-restore",
+            accepted=True,
+            effective_authority={"revision": 1},
+            staged_for_revalidation=True,
+        )
+        assert core.restored == [candidate]
     finally:
         runner.stop()

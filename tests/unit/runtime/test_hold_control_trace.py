@@ -2,6 +2,7 @@
 
 import queue
 import threading
+from collections.abc import Callable
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -10,6 +11,8 @@ import pytest
 from common import datastore
 from common.control_trace import (
     ActuationMode,
+    AllocationClampReason,
+    AllocationPayload,
     AmbientSource,
     AmbientUncertainty,
     AppliedOutputPayload,
@@ -28,7 +31,13 @@ from common.controller_model_state import CheckpointSaveOutcome
 from common.model_evidence import ForecastOriginEvidence, ModelEvidenceRecord, RecorderGapEvidence
 from common.persistence.control_trace import read_control_trace_session
 from controller.applied_output import AppliedOutput, FrameFeedbackDisposition, OutputSource
-from controller.base import MpcFailureState, MpcTraceDiagnostics, PidSpTraceDiagnostics, PidTraceDiagnostics
+from controller.base import (
+    ControllerLearningDiagnostics,
+    MpcFailureState,
+    MpcTraceDiagnostics,
+    PidSpTraceDiagnostics,
+    PidTraceDiagnostics,
+)
 from controller.control_trace_replay import ReplayIssueCode, validate_records
 from controller.model_learning.contracts import CandidateOrigin, FrameObservation
 from controller.mpc import Controller
@@ -40,12 +49,12 @@ from controller.runtime.control_trace_session import (
     TraceUpdateContext,
 )
 from controller.runtime.framed_pulse import FramedPulseRuntime
-from controller.runtime.model_fitting import TeardownRefitResult
 from controller.runtime.model_persistence import EvidenceSubmission
 from controller.runtime.modes.hold import HoldMode
 from controller.runtime.modes.hold_learning import parse_model_lifecycle_payload
 from controller.runtime.runner import (
     ControllerUpdateResult,
+    ModelRestoreOutcome,
     ObservationOutcomeEnvelope,
     SyncControllerRunner,
     ThreadedControllerRunner,
@@ -69,6 +78,7 @@ def _open_trace_session(mode, now):
     assert context is not None
     previous = trace.identity
     identity = trace.ensure_open(context, timestamp_ms=int(now * 1_000))
+    mode._bind_trajectory_trace(identity)
     learning = mode._hold_learning
     if previous is None and identity is not None and learning is not None:
         learning.bind_generation(mode._runner_configuration_revision)
@@ -252,6 +262,13 @@ def _pid_sp_result(revision=1):
         fan=None,
         input_temperature=100.0,
         diagnostics=diagnostics,
+        allocation=allocate(
+            0.3,
+            u_max=1.0,
+            fan_min_pct=0.0,
+            fan_max_pct=0.0,
+            enable_fan=False,
+        ),
         revision=revision,
         solve_start_monotonic=1.0,
         solve_end_monotonic=1.1,
@@ -439,17 +456,25 @@ def test_mpc_hold_records_update_allocation_and_framed_feedback_once_per_revisio
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
     mode.control["cook_id"] = "cook-mpc"
-    output = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
-    mode.on_tick(2.0, 220.0, output)
+    mode.on_tick(2.0, 220.0, mode.grill.get_output_status())
     mode.on_tick(22.0, 220.0, mode.grill.get_output_status())
 
     event_kinds = [record.event_kind for record in recorder.records]
-    assert event_kinds[:4] == [
+    assert event_kinds[:5] == [
         TraceEventKind.SESSION,
+        TraceEventKind.ESTIMATOR_SEED,
         TraceEventKind.CONTROL_UPDATE,
         TraceEventKind.ALLOCATION,
         TraceEventKind.APPLIED_OUTPUT,
     ]
+    seed_record = recorder.records[1]
+    assert seed_record.session_id == _identity(mode).session_id
+    assert seed_record.cook_id == "cook-mpc"
+    assert seed_record.ts_ms == 2_000
+    assert seed_record.payload.segment_id == "hold-test-segment"
+    assert seed_record.payload.status == "exact"
+    assert seed_record.payload.role_generation == 0
+    assert seed_record.payload.candidate_generation == 0
     timestamps = [record.ts_ms for record in recorder.records]
     assert timestamps == sorted(timestamps)
     update_record = next(record for record in recorder.records if record.event_kind is TraceEventKind.CONTROL_UPDATE)
@@ -489,7 +514,7 @@ def test_mpc_hold_records_update_allocation_and_framed_feedback_once_per_revisio
         result.allocation.fan_max_pct,
         result.allocation.fan_enabled,
     )
-    assert validate_records(recorder.records).valid
+    assert (replay := validate_records(recorder.records)).valid, [(issue.code, issue.detail) for issue in replay.issues]
 
 
 @pytest.mark.parametrize(
@@ -504,12 +529,12 @@ def test_pid_family_hold_records_completed_framed_pulse(hold_cycle, monkeypatch,
     mode.setup()
     mode.control["cook_id"] = f"cook-{controller}"
 
-    mode.on_tick(2.0, 220.0, {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100})
+    mode.on_tick(2.0, 220.0, mode.grill.get_output_status())
     mode.on_tick(22.0, 220.0, mode.grill.get_output_status())
 
     frames = [record for record in recorder.records if record.event_kind is TraceEventKind.ACTUATION_FRAME]
     assert frames and all(record.controller.value == controller for record in frames)
-    assert validate_records(recorder.records).valid
+    assert (replay := validate_records(recorder.records)).valid, [(issue.code, issue.detail) for issue in replay.issues]
 
 
 def test_fahrenheit_hold_keeps_model_observation_ambient_celsius_while_session_displays_fahrenheit(
@@ -654,13 +679,21 @@ def test_production_hold_seed_lifecycle_rereads_into_calibration(hold_cycle, tmp
     session_id = _identity(mode).session_id
     assert session_id is not None
     records = read_control_trace_session(session_id)
-    assert [record.event_kind for record in records[:4]] == [
+    assert [record.event_kind for record in records[:5]] == [
         TraceEventKind.SESSION,
+        TraceEventKind.ESTIMATOR_SEED,
         TraceEventKind.CONTROL_UPDATE,
         TraceEventKind.ALLOCATION,
         TraceEventKind.APPLIED_OUTPUT,
     ]
-    seed_index = 3
+    estimator_seed = records[1]
+    assert estimator_seed.session_id == session_id
+    assert estimator_seed.cook_id == "calibration-seed"
+    assert estimator_seed.payload.segment_id == "hold-test-segment"
+    assert estimator_seed.payload.status == "exact"
+    assert estimator_seed.payload.role_generation == 0
+    assert estimator_seed.payload.candidate_generation == 0
+    seed_index = 4
     seed = records[seed_index].payload
     assert seed.result_revision == 0
     assert seed.output_source is OutputSource.SEED
@@ -831,8 +864,23 @@ def test_real_pid_sp_first_hold_update_records_unidentified_model_trace(hold_cyc
     mode.on_tick(22.0, 220.0, mode.grill.get_output_status())
 
     (payload,) = [record.payload for record in recorder.records if record.event_kind is TraceEventKind.CONTROL_UPDATE]
+    (allocation,) = [record.payload for record in recorder.records if record.event_kind is TraceEventKind.ALLOCATION]
     assert isinstance(payload, PidSpUpdatePayload)
+    assert isinstance(allocation, AllocationPayload)
     assert payload.tau_seconds == 0.0
+    assert allocation.result_revision == payload.result_revision
+    assert (
+        allocation.normalized_combustion_load,
+        allocation.requested_auger_duty,
+    ) == pytest.approx((payload.requested_output, payload.requested_output))
+    assert allocation.requested_fan_duty is None
+    assert allocation.u_max == 1.0
+    assert allocation.fan_min_pct == allocation.fan_max_pct == 0.0
+    assert allocation.fan_enabled is False
+    assert allocation.mpc_has_fan_authority is False
+    assert allocation.auger_clamp_reason is AllocationClampReason.NONE
+    assert allocation.fan_clamp_reason is AllocationClampReason.NONE
+    assert allocation.allocator_revision == 2
     assert validate_records(recorder.records).valid
 
 
@@ -902,10 +950,24 @@ def test_reconfigure_finishes_the_old_pid_session_before_opening_coherent_mpc_se
     assert new_session_events[0].payload.model_revision == 8
     assert new_session_events[0].payload.model_provenance == "restore_submitted"
     assert new_session_events[1].payload.event.value == "restore"
-    assert not any(
-        record.event_kind is TraceEventKind.APPLIED_OUTPUT and record.payload.result_revision == 0
+    seed_records = [
+        record
         for record in new_session_events
+        if record.event_kind is TraceEventKind.APPLIED_OUTPUT and record.payload.result_revision == 0
+    ]
+    assert len(seed_records) == 1
+    seed_record = seed_records[0]
+    assert seed_record.payload.output_source is OutputSource.SEED
+    assert seed_record.payload.sample_complete is True
+    result_two = next(
+        record
+        for record in new_session_events
+        if record.event_kind is TraceEventKind.CONTROL_UPDATE and record.payload.result_revision == 2
     )
+    assert new_session_events.index(result_two) < new_session_events.index(seed_record)
+    old_session_events = [record for record in recorder.records if record.session_id == old_session_id]
+    assert validate_records(old_session_events).valid
+    assert validate_records(new_session_events).valid
     assert (
         next(
             record
@@ -932,40 +994,6 @@ def test_mpc_zero_raw_load_and_zero_requested_auger_duty_remain_zero(hold_cycle,
     allocation = next(record.payload for record in recorder.records if record.event_kind is TraceEventKind.ALLOCATION)
     applied = next(record.payload for record in recorder.records if record.event_kind is TraceEventKind.APPLIED_OUTPUT)
     assert (update.raw_output, allocation.requested_auger_duty, applied.realized_auger_duty) == (0.0, 0.0, 0.0)
-
-
-@pytest.mark.parametrize(
-    ("accepted", "expected_event"),
-    [(False, "reject"), (True, "adopt")],
-    ids=["rejected-refit", "accepted-refit"],
-)
-def test_refit_records_refit_then_its_verdict(hold_cycle, monkeypatch, accepted, expected_event):
-    recorder = _install_recorder(monkeypatch)
-    runner = FakeControllerRunner(period=1.0, commands_fan=True, actuation_mode=ActuationMode.FRAMED_PULSE)
-    runner.snapshot = {"revision": 7}
-    runner.refit_verdict = (
-        TeardownRefitResult.accepted_next_cook(
-            "accepted by trace fixture",
-            candidate_digest="a" * 64,
-        )
-        if accepted
-        else TeardownRefitResult.rejected(
-            "rejected by trace fixture",
-            origin=CandidateOrigin.COOK_REFIT,
-        )
-    )
-    mode = hold_cycle(runner, controller="mpc")
-    mode.setup()
-    mode.settings["controller"]["config"]["mpc"]["enable_identification"] = True
-    mode.control["cook_id"] = f"cook-refit-{accepted}"
-    _open_trace_session(mode, 1.0)
-
-    mode.teardown(220.0)
-
-    model_events = [
-        record.payload.event.value for record in recorder.records if record.event_kind is TraceEventKind.MODEL_EVENT
-    ]
-    assert model_events == ["refit", expected_event]
 
 
 def test_mpc_applied_load_is_measured_and_attributed_to_the_producing_frame(hold_cycle, monkeypatch):
@@ -1136,7 +1164,10 @@ def test_first_safety_callback_opens_and_binds_the_trace_session(
     ]
 
 
-def test_initial_async_restore_session_uses_queued_snapshot_not_old_published_snapshot(hold_cycle, monkeypatch):
+def test_initial_async_restore_session_records_immutable_submission_without_publishing_authority(
+    hold_cycle,
+    monkeypatch,
+):
     class _ModelStore:
         def load(self, controller):
             return {"revision": 8} if controller == "mpc" else None
@@ -1152,8 +1183,16 @@ def test_initial_async_restore_session_uses_queued_snapshot_not_old_published_sn
     mode = hold_cycle(runner, controller="mpc", model_store=_ModelStore())
     mode.setup()
     mode.control["cook_id"] = "cook-async-restore"
+    trace = _trace(mode)
+    learning = _learning(mode)
+
+    submitted = learning.submitted_restore_authority
+    assert submitted is not None
+    assert (submitted.snapshot, submitted.provenance) == ({"revision": 8}, "restore_submitted")
+    assert trace.model_authority is None
 
     _open_trace_session(mode, 1.0)
+    assert trace.model_authority is None
 
     (session,) = [record for record in recorder.records if record.event_kind is TraceEventKind.SESSION]
     assert (session.payload.model_revision, session.payload.model_provenance) == (8, "restore_submitted")
@@ -1161,6 +1200,20 @@ def test_initial_async_restore_session_uses_queued_snapshot_not_old_published_sn
     assert [
         record.payload.event.value for record in recorder.records if record.event_kind is TraceEventKind.MODEL_EVENT
     ] == ["restore"]
+
+    assert runner.restore_token is not None
+    runner.restore_outcome = ModelRestoreOutcome(
+        restore_token=runner.restore_token,
+        accepted=True,
+        effective_authority={"revision": 8},
+    )
+    learning.reconcile_outcomes(1.5)
+
+    authority = trace.model_authority
+    assert authority is not None
+    assert (authority.snapshot, authority.provenance) == ({"revision": 8}, "restored")
+    assert learning.submitted_restore_authority is None
+    assert (session.payload.model_revision, session.payload.model_provenance) == (8, "restore_submitted")
 
 
 def _run_first_loop_safety_trace(hold_cycle, monkeypatch, *, control_mode=None, guard_temperature=None):
@@ -1212,9 +1265,15 @@ def test_async_reconfigure_does_not_leak_the_old_published_model_into_new_sessio
             self._controller_type = ControllerType.MPC
             return super().reconfigure(settings, control, logger=logger)
 
-        def restore_model(self, snapshot):
+        def restore_model(self, snapshot, *, restore_token=None):
+            self.restore_token = restore_token
             self.restored.append(snapshot)
-            return restore_accepted
+            return ModelRestoreOutcome(
+                restore_token=restore_token,
+                accepted=restore_accepted,
+                effective_authority=None,
+                pending=restore_accepted,
+            )
 
     class _ModelStore:
         def load(self, controller):
@@ -1349,7 +1408,20 @@ def test_base_manual_auger_on_reasserts_manual_output_after_framed_reset(hold_cy
         for record in recorder.records
         if record.event_kind is TraceEventKind.APPLIED_OUTPUT and record.payload.output_source is OutputSource.SEED
     ]
-    assert len(seeds) == 1 and seeds[0].sample_complete is True
+    assert seeds == []
+    manual = [
+        record.payload
+        for record in recorder.records
+        if record.event_kind is TraceEventKind.APPLIED_OUTPUT
+        and record.payload.output_source is OutputSource.MANUAL_OVERRIDE
+    ]
+    assert len(manual) == 1 and manual[0].sample_complete is True
+    assert manual[0].result_revision == 1
+    assert (manual[0].interval_start_ms, manual[0].interval_end_ms) == (
+        2_000,
+        3_000,
+    )
+    assert _trace(mode).applied_state.output_source is OutputSource.MANUAL_OVERRIDE
     assert validate_records(recorder.records).valid
 
 
@@ -1544,6 +1616,9 @@ def test_historical_evidence_rotation_preserves_live_applied_interval(hold_cycle
     mode.control["cook_id"] = "historical-evidence-rotation"
     old_identity = _open_trace_session(mode, 0.0)
     assert old_identity is not None
+    trajectory = mode.ctx.learning_trajectory
+    assert trajectory is not None
+    trajectory_session_id = trajectory.trace_session_id
     trace = _trace(mode)
     trace.prepare_applied_output(
         AppliedOutput(0.4, OutputSource.CONTROLLER, 2.0, requested=0.5),
@@ -1570,6 +1645,7 @@ def test_historical_evidence_rotation_preserves_live_applied_interval(hold_cycle
 
     assert _identity(mode).session_id != old_identity.session_id
     assert _identity(mode).controller is ControllerType.MPC
+    assert trajectory.trace_session_id == trajectory_session_id
     assert trace.record_applied_interval(
         TraceAppliedIntervalContext(
             timestamp_ms=4_000,
@@ -1623,6 +1699,37 @@ def test_threaded_stop_timeout_rotates_reserved_generation_gaps_and_fences_late_
         def __init__(self):
             self.observation_started = threading.Event()
             self.release_observation = threading.Event()
+            self.seed_requirement_calls = 0
+            self.learning_diagnostics_calls = 0
+            self.seed_source_bindings = []
+            self.learning_identity_bindings = []
+            self.observations = []
+            self.observation_failures = []
+            self.fit_schedules = []
+            self.fit_ticket_schedules = []
+            self.fit_polls = []
+            self.consumed_fit_tickets = []
+            self.fit_failures = []
+
+        def estimator_seed_requirements(self) -> tuple[float, int]:
+            self.seed_requirement_calls += 1
+            return 60.0, 8
+
+        def bind_estimator_seed_source(
+            self,
+            source: Callable[[float, int], object] | None,
+        ) -> None:
+            self.seed_source_bindings.append(source)
+
+        def bind_learning_identity(
+            self,
+            session_id: str,
+            cook_id: str | None,
+            role_generation: int,
+        ) -> None:
+            self.learning_identity_bindings.append(
+                (session_id, cook_id, role_generation),
+            )
 
         def get_control_period(self):
             return 1.0
@@ -1654,10 +1761,64 @@ def test_threaded_stop_timeout_rotates_reserved_generation_gaps_and_fences_late_
         def update(self, _temperature):
             return {"cycle_ratio": 0.0, "fan": None}
 
-        def observe_frame(self, observation):
+        def observe_frame(self, observation: FrameObservation) -> object:
+            self.observations.append(observation)
             self.observation_started.set()
             self.release_observation.wait()
-            return _model_observation_outcome(frame_end_ms=int(observation.frame_end_s * 1_000))
+            return _model_observation_outcome(
+                frame_end_ms=int(observation.frame_end_s * 1_000),
+            )
+
+        def observation_failure(
+            self,
+            observation: FrameObservation,
+            error: BaseException,
+        ) -> object:
+            self.observation_failures.append((observation, error))
+            return _model_observation_outcome(
+                frame_end_ms=int(observation.frame_end_s * 1_000),
+            )
+
+        def poll_learning_off_path(
+            self,
+            *,
+            live_origin: CandidateOrigin | None = None,
+        ) -> object:
+            self.fit_polls.append((threading.get_ident(), live_origin))
+            return None
+
+        def schedule_corpus_fit(self, origin: CandidateOrigin) -> bool:
+            self.fit_schedules.append(origin)
+            return False
+
+        def _schedule_corpus_fit_ticket(
+            self,
+            origin: CandidateOrigin,
+        ) -> str | None:
+            self.fit_ticket_schedules.append(origin)
+            return None
+
+        def _consume_terminal_corpus_fit_ticket(
+            self,
+            ticket: str,
+            origin: CandidateOrigin,
+        ) -> bool:
+            self.consumed_fit_tickets.append((ticket, origin))
+            return False
+
+        def fail_corpus_fit(
+            self,
+            ticket: str,
+            error: BaseException | str,
+        ) -> None:
+            self.fit_failures.append((ticket, error))
+
+        def get_learning_diagnostics(self) -> ControllerLearningDiagnostics:
+            self.learning_diagnostics_calls += 1
+            return ControllerLearningDiagnostics(
+                schema_version=1,
+                state={},
+            )
 
     class _EvidenceWorker:
         evidence_blocked = False
@@ -1670,8 +1831,10 @@ def test_threaded_stop_timeout_rotates_reserved_generation_gaps_and_fences_late_
             self.batches.append(records)
             return EvidenceSubmission(accepted=True)
 
-        def flush_and_stop(self):
+        def barrier(self, timeout=2.0):
+            del timeout
             self.stopped = True
+            return True
 
     from controller.runtime.logic.pulse import PulseFrameResult
 
@@ -1680,7 +1843,10 @@ def test_threaded_stop_timeout_rotates_reserved_generation_gaps_and_fences_late_
     core = _BlockingObservationCore()
     runner = ThreadedControllerRunner(core, wait_for_period=gate)
     worker = _EvidenceWorker()
-    monkeypatch.setattr("controller.runtime.modes.hold.ModelPersistenceWorker", lambda *_args: worker)
+    monkeypatch.setattr(
+        "controller.runtime.modes.hold.ModelPersistenceWorker",
+        lambda *_args, **_kwargs: worker,
+    )
     mode = hold_cycle(runner, controller="mpc")
     try:
         assert gate.waiting.wait(1.0)

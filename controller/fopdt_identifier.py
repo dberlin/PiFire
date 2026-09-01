@@ -22,37 +22,66 @@ import itertools
 
 import numpy as np
 
+from .pid_sp_delay_evidence import MAX_DELAY_BOUND_S
+
 #: Dead-time candidates, seconds.
 DELAYS = np.arange(0.0, 125.0, 5.0)
 N_CANDIDATES = DELAYS.size
 
 
 class DutyHistory:
-    """Applied auger duty as a step function, with a running cumulative integral.
-
-    An auger is on or off, so duty between reports really is piecewise constant
-    and the integral is exact rather than approximated. That turns a delayed
-    window average -- needed for every candidate delay on every observation --
-    into one searchsorted plus a linear interpolation.
-    """
+    """Applied auger duty with exact step or completed-interval ownership."""
 
     def __init__(self, max_delay):
-        self._max_delay = float(max_delay)
-        self._t = []  # segment start times
+        self.set_retention_s(max_delay)
+        self._mode = None
+        self._t = []  # segment start times for forward steps
         self._u = []  # duty in force from _t[i] until _t[i + 1]
         self._i = []  # integral of duty dt from _t[0] to _t[i]
         self._ta = np.empty(0)
         self._ua = np.empty(0)
         self._ia = np.empty(0)
+        self._starts = []
+        self._ends = []
+        self._ratios = []
+        self._sa = np.empty(0)
+        self._ea = np.empty(0)
+        self._ra = np.empty(0)
+        self._ca = np.empty(0)
+        self._coverage_a = np.empty(0)
 
     def __len__(self):
-        return len(self._t)
+        return len(self._starts) if self._mode == "intervals" else len(self._t)
 
     def earliest(self):
+        if self._mode == "intervals":
+            return self._starts[0] if self._starts else None
         return self._t[0] if self._t else None
 
+    def latest_end(self):
+        return self._ends[-1] if self._mode == "intervals" and self._ends else None
+
+    @property
+    def uses_exact_intervals(self):
+        return self._mode == "intervals"
+
+    @property
+    def retention_s(self):
+        return self._max_delay
+
+    def set_retention_s(self, retention_s):
+        if isinstance(retention_s, bool) or not isinstance(retention_s, int | float):
+            raise TypeError("retention_s must be a number")
+        retention = float(retention_s)
+        if not np.isfinite(retention) or retention <= 0.0:
+            raise ValueError("retention_s must be finite and positive")
+        self._max_delay = retention
+
     def record(self, timestamp, ratio):
-        """Append a duty segment. Ignores a non-advancing timestamp or a repeat."""
+        """Append a forward duty step, retaining the legacy command-history API."""
+        if self._mode == "intervals":
+            raise ValueError("cannot mix forward duty steps with completed intervals")
+        self._mode = "steps"
         timestamp = float(timestamp)
         ratio = float(ratio)
         if self._t:
@@ -67,43 +96,127 @@ class DutyHistory:
         self._u.append(ratio)
         self._sync()
 
+    def record_interval(self, start_s, end_s, ratio):
+        """Append duty owned by exactly ``[start_s, end_s)``.
+
+        Adjacent intervals remain contiguous. Gaps remain uncovered rather than
+        inheriting either neighboring duty, and overlaps are rejected because
+        two realized duties cannot own the same physical time.
+        """
+        if self._mode == "steps":
+            raise ValueError("cannot mix completed intervals with forward duty steps")
+        start = float(start_s)
+        end = float(end_s)
+        duty = float(ratio)
+        if not np.isfinite(start) or not np.isfinite(end) or end <= start:
+            raise ValueError("duty interval must have finite increasing bounds")
+        if not np.isfinite(duty) or not 0.0 <= duty <= 1.0:
+            raise ValueError("duty ratio must be finite and in [0, 1]")
+        if self._ends and start < self._ends[-1]:
+            raise ValueError("duty intervals must not overlap")
+        self._mode = "intervals"
+        self._starts.append(start)
+        self._ends.append(end)
+        self._ratios.append(duty)
+        self._sync_intervals()
+
     def _sync(self):
         self._ta = np.asarray(self._t, dtype=float)
         self._ua = np.asarray(self._u, dtype=float)
         self._ia = np.asarray(self._i, dtype=float)
 
-    def integral(self, times):
-        """Integral of duty from the earliest retained time to each of `times`.
+    def _sync_intervals(self):
+        self._sa = np.asarray(self._starts, dtype=float)
+        self._ea = np.asarray(self._ends, dtype=float)
+        self._ra = np.asarray(self._ratios, dtype=float)
+        count = self._sa.size
+        self._ca = np.zeros(count, dtype=float)
+        if count > 1:
+            durations = self._ea[:-1] - self._sa[:-1]
+            self._ca[1:] = np.cumsum(self._ra[:-1] * durations)
+        coverage = np.empty(count, dtype=float)
+        for index in range(count):
+            coverage[index] = (
+                coverage[index - 1] if index and self._sa[index] == self._ea[index - 1] else self._sa[index]
+            )
+        self._coverage_a = coverage
 
-        Times after the last record extrapolate the last duty forward, which is
-        what the auger is actually doing until the next report.
-        """
+    def _interval_integral(self, times):
+        times = np.asarray(times, dtype=float)
+        if self._sa.size == 0:
+            return np.zeros_like(times)
+        index = np.clip(
+            np.searchsorted(self._sa, times, side="right") - 1,
+            0,
+            self._sa.size - 1,
+        )
+        elapsed = np.clip(times - self._sa[index], 0.0, self._ea[index] - self._sa[index])
+        return self._ca[index] + self._ra[index] * elapsed
+
+    def integral(self, times):
+        """Integral from the earliest retained time to each requested time."""
+        if self._mode == "intervals":
+            return self._interval_integral(times)
         times = np.asarray(times, dtype=float)
         if self._ta.size == 0:
             return np.zeros_like(times)
         idx = np.clip(np.searchsorted(self._ta, times, side="right") - 1, 0, self._ta.size - 1)
         return self._ia[idx] + self._ua[idx] * np.maximum(times - self._ta[idx], 0.0)
 
-    def average(self, t_start, t_end, delays):
-        """Mean duty over [t_start - theta, t_end - theta) for every theta.
+    def covers(self, t_start, t_end):
+        """Whether exact recorded duty fully owns ``[t_start, t_end)``."""
+        start = float(t_start)
+        end = float(t_end)
+        if end < start:
+            return False
+        if end == start:
+            return True
+        if self._mode != "intervals":
+            earliest = self.earliest()
+            return earliest is not None and start >= earliest
+        if self._sa.size == 0:
+            return False
+        index = int(np.searchsorted(self._sa, end, side="left")) - 1
+        return index >= 0 and end <= self._ea[index] and start >= self._coverage_a[index]
 
-        Returns (values, valid). A candidate is invalid when its window reaches
-        back before the earliest retained segment: there is no duty to average
-        there, and guessing one would fabricate an observation.
-        """
+    def average(self, t_start, t_end, delays):
+        """Mean duty over each delayed window, plus exact-coverage validity."""
         delays = np.asarray(delays, dtype=float)
         span = float(t_end) - float(t_start)
-        if span <= 0.0 or self._ta.size == 0:
+        if span <= 0.0:
             return np.zeros_like(delays), np.zeros(delays.shape, dtype=bool)
         lo = float(t_start) - delays
         hi = float(t_end) - delays
+        if self._mode == "intervals":
+            if self._sa.size == 0:
+                return np.zeros_like(delays), np.zeros(delays.shape, dtype=bool)
+            raw_index = np.searchsorted(self._sa, hi, side="left") - 1
+            index = np.clip(raw_index, 0, self._sa.size - 1)
+            valid = (raw_index >= 0) & (hi <= self._ea[index]) & (lo >= self._coverage_a[index])
+            values = (self.integral(hi) - self.integral(lo)) / span
+            return values, valid
+        if self._ta.size == 0:
+            return np.zeros_like(delays), np.zeros(delays.shape, dtype=bool)
         values = (self.integral(hi) - self.integral(lo)) / span
         return values, lo >= self._ta[0]
 
     def segments(self, t_start, t_end):
-        """[(duration, duty)] covering [t_start, t_end), split at every change."""
+        """Recorded ``(duration, duty)`` pieces intersecting the query window."""
         t_start, t_end = float(t_start), float(t_end)
-        if t_end <= t_start or self._ta.size == 0:
+        if t_end <= t_start:
+            return []
+        if self._mode == "intervals":
+            return [
+                (min(end, t_end) - max(start, t_start), duty)
+                for start, end, duty in zip(
+                    self._starts,
+                    self._ends,
+                    self._ratios,
+                    strict=True,
+                )
+                if min(end, t_end) > max(start, t_start)
+            ]
+        if self._ta.size == 0:
             return []
         edges = [t_start]
         edges.extend(t for t in self._t if t_start < t < t_end)
@@ -117,8 +230,17 @@ class DutyHistory:
         return out
 
     def prune(self, now):
-        """Drop segments no candidate delay can still reach."""
+        """Drop history no candidate delay can still reach."""
         horizon = float(now) - self._max_delay
+        if self._mode == "intervals":
+            keep = int(np.searchsorted(self._ea, horizon, side="left"))
+            if keep:
+                del self._starts[:keep]
+                del self._ends[:keep]
+                del self._ratios[:keep]
+            if keep or self._starts:
+                self._sync_intervals()
+            return
         keep = 0
         while keep + 1 < len(self._t) and self._t[keep + 1] <= horizon:
             keep += 1
@@ -166,19 +288,31 @@ class RLSBank:
         self.P = np.tile(P0 * np.eye(self._m), (self._n, 1, 1))
         self.resid_ew = np.zeros(self._n)
 
-    def update(self, phi, y):
-        """One accepted observation into the whole bank. `phi` is (N, M)."""
+    def update(self, phi, y, candidate_mask=None):
+        """Update all candidates, or only rows with exact delayed-window coverage."""
         phi = np.asarray(phi, dtype=float)
-        Pphi = np.einsum("nij,nj->ni", self.P, phi)
-        denom = LAM + np.einsum("ni,ni->n", phi, Pphi)
+        if candidate_mask is None:
+            rows = slice(None)
+        else:
+            candidate_mask = np.asarray(candidate_mask, dtype=bool)
+            if candidate_mask.shape != (self._n,):
+                raise ValueError("candidate mask must match the estimator bank")
+            if not candidate_mask.any():
+                return
+            rows = candidate_mask
+
+        active_phi = phi[rows]
+        covariance = self.P[rows]
+        theta = self.Theta[rows]
+        Pphi = np.einsum("nij,nj->ni", covariance, active_phi)
+        denom = LAM + np.einsum("ni,ni->n", active_phi, Pphi)
         gain = Pphi / denom[:, None]
-        err = y - np.einsum("ni,ni->n", phi, self.Theta)
-        self.Theta += gain * err[:, None]
-        self.P = (self.P - np.einsum("ni,nj->nij", gain, Pphi)) / LAM
-        # Hold P symmetric against accumulated float drift.
-        self.P = 0.5 * (self.P + self.P.transpose(0, 2, 1))
-        self.resid_ew = EW_ALPHA * err**2 + (1.0 - EW_ALPHA) * self.resid_ew
-        self._reset_degenerate()
+        err = y - np.einsum("ni,ni->n", active_phi, theta)
+        self.Theta[rows] = theta + gain * err[:, None]
+        updated_covariance = (covariance - np.einsum("ni,nj->nij", gain, Pphi)) / LAM
+        self.P[rows] = 0.5 * (updated_covariance + updated_covariance.transpose(0, 2, 1))
+        self.resid_ew[rows] = EW_ALPHA * err**2 + (1.0 - EW_ALPHA) * self.resid_ew[rows]
+        self._reset_degenerate(candidate_mask)
 
     def reset(self, mask):
         """Return the masked candidates to their initial state."""
@@ -189,15 +323,15 @@ class RLSBank:
         self.P[mask] = P0 * np.eye(self._m)
         self.resid_ew[mask] = 0.0
 
-    def _reset_degenerate(self):
-        """A candidate whose covariance diagonal has gone non-positive, or whose
-        Theta/P/resid_ew has gone non-finite, starts over rather than poisoning
-        the bank."""
+    def _reset_degenerate(self, candidate_mask=None):
+        """Reset updated candidates whose estimator state became unusable."""
         bad = ~np.isfinite(self.Theta).all(axis=1)
         bad |= ~np.isfinite(self.P).all(axis=(1, 2))
         bad |= ~np.isfinite(self.resid_ew)
         diag = np.einsum("nii->ni", self.P)
         bad |= (diag <= 0.0).any(axis=1)
+        if candidate_mask is not None:
+            bad &= candidate_mask
         self.reset(bad)
 
 
@@ -346,9 +480,8 @@ def promote(resid_ew, mask):
 
 
 #: Initial trust can begin after 25 accepted observations spanning 500 s.
-#: At PID-SP's fixed 20 s cadence, the subsequent 20-sample confirmation
-#: window makes 900 s the earliest activation. Every evidence-dependent gate
-#: below remains authoritative, so a slow or unexcited grill keeps learning.
+#: Retained for the existing live-learning confirmation disclosure. Raw bank
+#: candidates no longer advance this counter or authorize a model.
 MIN_ACCEPTED_SECONDS = 500.0
 MIN_ACCEPTED = 25
 MIN_DUTY_STD = 0.05
@@ -356,24 +489,9 @@ MIN_TRANSITION = 0.05
 MIN_TRANSITION_HOLD = 60.0
 MIN_TEMP_SPAN_F = 15.0
 CONFIRM_WINDOW = 20
-CONFIRM_K_TOL = 0.05
-CONFIRM_TAU_TOL = 0.075
-#: After initial trust, a candidate is a revision only when it moves this far.
-MATERIAL_K = 0.05
-MATERIAL_TAU = 0.05
-MATERIAL_THETA = 5.0
-
-
-#: The two model forms the identifier can promote, and which of each form's
-#: parameters blend on adoption, with the fraction of change that counts as
-#: material. `theta` is handled separately in every case -- it moves outright.
 FORM_FOPDT = "fopdt"
 FORM_IPDT = "ipdt"
-FORM_PARAMS = {
-    FORM_FOPDT: (("K", MATERIAL_K), ("tau", MATERIAL_TAU)),
-    FORM_IPDT: (("K_i", MATERIAL_K), ("c0", MATERIAL_TAU)),
-}
-CONFIRM_TOL = {"K": CONFIRM_K_TOL, "tau": CONFIRM_TAU_TOL, "K_i": CONFIRM_K_TOL, "c0": CONFIRM_TAU_TOL}
+FORM_SOPDT = "sopdt"
 #: The parameters a persisted record of each form must carry, and the range each
 #: must land in to be worth restoring. The model store keeps bytes and judges
 #: nothing, so every bound the live gates apply is re-applied here. A rising
@@ -381,9 +499,12 @@ CONFIRM_TOL = {"K": CONFIRM_K_TOL, "tau": CONFIRM_TAU_TOL, "K_i": CONFIRM_K_TOL,
 RESTORE_BOUNDS = {
     FORM_FOPDT: (("K", GAIN_MIN, GAIN_MAX), ("tau", TAU_MIN, TAU_MAX)),
     FORM_IPDT: (("K_i", GAIN_RATE_MIN, GAIN_RATE_MAX), ("c0", -np.inf, 0.0)),
+    FORM_SOPDT: (
+        ("K", GAIN_MIN, GAIN_MAX),
+        ("tau_1", TAU_MIN, TAU_MAX),
+        ("tau_2", TAU_MIN, TAU_MAX),
+    ),
 }
-#: How much of a passing revision blends into the trusted values.
-BLEND = 0.1
 #: Still air around the grill. The hold duty scales with the chamber's rise above
 #: it, so carrying an operating point to another set point needs a floor to
 #: measure the rise FROM; a few degrees either way moves the ratio very little.
@@ -412,11 +533,10 @@ DISTRUST_WINDOW = 20
 
 
 class FOPDTIdentifier:
-    """Passive online identification of the grill's FOPDT parameters.
+    """Passive online diagnostic identification of the grill's dynamics.
 
-    Nothing here perturbs the auger: the identifier learns from whatever
-    excitation the controller's own regulation happens to produce, and stays
-    untrusted until the gates say the data earned it.
+    Nothing here perturbs the auger. Raw bank candidates remain diagnostic;
+    authoritative trust enters only through an explicitly restored model.
     """
 
     def __init__(self):
@@ -430,6 +550,7 @@ class FOPDTIdentifier:
         self._prev = None  # (timestamp, temperature) anchor
         self._gap = True  # the next observation would span an undriven interval
         self._commanded = True  # whether the most recent report was controller-driven
+        self._last_interval_end = None
         self._accepted = 0
         self._accepted_seconds = 0.0
         self._temp_lo = None
@@ -443,10 +564,7 @@ class FOPDTIdentifier:
         self._transition_at = None
         self._trusted = None
         self._revision = 0
-        self._confirm = None
-        # A model just restored from a previous cook has not yet been
-        # confirmed against THIS plant, so the materiality gate leaves it
-        # alone until an adoption earns that protection (see _evaluate).
+        # Retargeting applies only to an explicitly restored model.
         self._restored = False
         self._distrust_confirm = 0
         self._distrust_count = 0
@@ -469,6 +587,22 @@ class FOPDTIdentifier:
             self._gap = True
             return
         self._note_transition(now, applied.ratio)
+
+    def observe_interval(self, start_s, end_s, realized_duty, temperature_f):
+        """Record one completed duty interval and its terminal temperature."""
+        start = float(start_s)
+        end = float(end_s)
+        duty = float(realized_duty)
+        previous_end = self._last_interval_end
+        self._history.record_interval(start, end, duty)
+        if previous_end is not None and start != previous_end:
+            self._prev = None
+            self._gap = True
+        self._history.prune(end)
+        self._last_interval_end = end
+        self._commanded = True
+        self._note_transition(start, duty)
+        return self.observe(temperature_f, end)
 
     def _note_transition(self, now, ratio):
         """A sustained duty change is the excitation this design waits for."""
@@ -506,6 +640,7 @@ class FOPDTIdentifier:
         # A candidate whose window predates retained history contributes its
         # last known duty rather than dropping the whole observation.
         duty = np.where(valid, duty, duty[valid][0])
+        candidate_mask = valid if self._history.uses_exact_intervals else None
 
         shared = np.array([1.0, (y0 - T_REF) / T_SCALE])
         phi = np.empty((N_CANDIDATES, 3))
@@ -513,11 +648,11 @@ class FOPDTIdentifier:
         phi[:, 1] = shared[1]
         phi[:, 2] = duty
         rate = (temp - y0) / dt
-        self._bank.update(phi, rate)
+        self._bank.update(phi, rate, candidate_mask)
         iphi = np.empty((N_CANDIDATES, 2))
         iphi[:, 0] = shared[0]
         iphi[:, 1] = duty
-        self._ibank.update(iphi, rate)
+        self._ibank.update(iphi, rate, candidate_mask)
 
         self._accepted += 1
         self._accepted_seconds += dt
@@ -528,7 +663,6 @@ class FOPDTIdentifier:
         self._duty_sum += mean_duty
         self._duty_sq += mean_duty * mean_duty
         self._check_distrust()
-        self._evaluate()
         return True
 
     # ------------------------------------------------------------------- trust
@@ -539,25 +673,17 @@ class FOPDTIdentifier:
         var = max(self._duty_sq / self._duty_n - mean * mean, 0.0)
         return float(np.sqrt(var))
 
-    def _excited(self):
-        return (
-            self._accepted >= MIN_ACCEPTED
-            and self._accepted_seconds >= MIN_ACCEPTED_SECONDS
-            and self._duty_std() >= MIN_DUTY_STD
-            and self._transition_seen
-            and self._temp_lo is not None
-            and (self._temp_hi - self._temp_lo) >= MIN_TEMP_SPAN_F
-        )
-
     def _trusted_index(self):
         return int(np.argmin(np.abs(DELAYS - self._trusted["theta"])))
 
     def _distrust_ratio(self):
         """The trusted delay's residual relative to the best candidate's, or
-        None while untrusted. Unconditional on `_excited()`: this is exactly
-        the regime -- degraded control suppressing the excitation promote()
-        needs -- the distrust check exists to catch."""
+        None while untrusted. This remains unconditional because degraded
+        control can suppress the excitation needed by later fitting."""
         if self._trusted is None:
+            return None
+        theta = float(self._trusted["theta"])
+        if theta < float(DELAYS.min()) or theta > float(DELAYS.max()):
             return None
         resid = self._bank.resid_ew
         best = float(np.min(resid))
@@ -566,11 +692,7 @@ class FOPDTIdentifier:
         return float(resid[self._trusted_index()]) / best
 
     def _check_distrust(self):
-        """Drop trust once the trusted delay's residual has run materially
-        worse than the best candidate's for DISTRUST_WINDOW straight
-        observations. Not sticky: clearing `_trusted` here is the only
-        effect: the identifier is simply untrusted again and re-promotes
-        through the normal machinery once the evidence supports it."""
+        """Drop explicitly restored trust after sustained residual degradation."""
         ratio = self._distrust_ratio()
         if ratio is None:
             self._distrust_confirm = 0
@@ -583,122 +705,6 @@ class FOPDTIdentifier:
             self._distrust_count += 1
             self._distrust_confirm = 0
             self._trusted = None
-            self._confirm = None
-
-    def _evaluate(self):
-        if not self._excited():
-            return
-        params = recover_parameters(self._bank.Theta)
-        rse_K, rse_tau = relative_standard_errors(self._bank.Theta, self._bank.P, self._bank.resid_ew)
-        mask = gate_mask(params, rse_K, rse_tau)
-        winner, _ = promote(self._bank.resid_ew, mask)
-        if winner is not None:
-            candidate = {
-                "form": FORM_FOPDT,
-                "K": float(params["K"][winner]),
-                "tau": float(params["tau"][winner]),
-                "theta": float(DELAYS[winner]),
-            }
-        else:
-            # A chamber slow relative to the observation window looks like an
-            # integrator over it, and a first-order fit of one returns a negative
-            # time constant and a negative gain together -- confidently
-            # impossible, so the gate above rejects every candidate and the
-            # controller learns nothing. The integrating form is what that
-            # chamber actually is.
-            iparams = recover_integrating_parameters(self._ibank.Theta)
-            irse = integrating_relative_standard_errors(self._ibank.Theta, self._ibank.P, self._ibank.resid_ew)
-            imask = integrating_gate_mask(iparams, irse)
-            iwinner, _ = promote(self._ibank.resid_ew, imask)
-            if iwinner is None:
-                # One evaluation with no gated winner is a noisy sample, not a
-                # verdict on the samples already agreeing: discarding the window
-                # here made a 19-deep confirmation die one short and start over,
-                # so whether a chamber was ever identified came down to the
-                # noise draw. Pause instead, as a loss of excitation already
-                # does above -- the parameter agreement `_confirmed` demands is
-                # what keeps a window honest across the gap.
-                return
-            candidate = {
-                "form": FORM_IPDT,
-                "K_i": float(iparams["K_i"][iwinner]),
-                "c0": float(iparams["c0"][iwinner]),
-                "theta": float(DELAYS[iwinner]),
-            }
-        # A restored model has not yet been confirmed against this cook's
-        # plant, so it has not earned the churn protection the materiality
-        # gate gives a model this cook already confirmed -- any candidate
-        # that survives confirmation below replaces it outright.
-        if self._trusted is not None and not self._restored and not self._material(candidate):
-            self._confirm = None
-            return
-        if not self._confirmed(candidate):
-            return
-        self._adopt(candidate)
-
-    @staticmethod
-    def _continuous_params(candidate):
-        """The candidate's parameters that blend, by model form.
-
-        `theta` is excluded everywhere it appears below: a delay moves outright
-        once confirmed, because a delay half way between two candidates is not a
-        delay any candidate had.
-        """
-        return FORM_PARAMS[candidate.get("form", FORM_FOPDT)]
-
-    def _material(self, candidate):
-        if candidate.get("form", FORM_FOPDT) != self._trusted.get("form", FORM_FOPDT):
-            # A different model form is not a revision of the trusted one, so
-            # there is no small-change threshold that could hold it back.
-            return True
-        if abs(candidate["theta"] - self._trusted["theta"]) >= MATERIAL_THETA:
-            return True
-        return any(
-            abs(candidate[name] - self._trusted[name]) / abs(self._trusted[name]) >= tol
-            for name, tol in self._continuous_params(candidate)
-        )
-
-    def _confirmed(self, candidate):
-        """A candidate must hold still for a full window before it is believed."""
-        window = self._confirm
-        if (
-            window is None
-            or window["theta"] != candidate["theta"]
-            or window.get("form", FORM_FOPDT) != candidate.get("form", FORM_FOPDT)
-        ):
-            self._confirm = {"n": 1, **candidate}
-            return False
-        for name, _material_tol in self._continuous_params(candidate):
-            tol = CONFIRM_TOL[name]
-            if abs(candidate[name] - window[name]) / abs(window[name]) > tol:
-                self._confirm = {"n": 1, **candidate}
-                return False
-        window["n"] += 1
-        for name, _ in self._continuous_params(candidate):
-            window[name] = candidate[name]
-        return window["n"] >= CONFIRM_WINDOW
-
-    def _adopt(self, candidate):
-        self._confirm = None
-        if self._trusted is None or self._trusted.get("form", FORM_FOPDT) != candidate.get("form", FORM_FOPDT):
-            # Nothing to blend against across a change of form: the parameters
-            # do not even mean the same thing.
-            self._trusted = dict(candidate)
-        else:
-            # Delay moves outright once confirmed; the continuous parameters
-            # blend, so one noisy window cannot swing the model.
-            blended = {"form": candidate.get("form", FORM_FOPDT), "theta": candidate["theta"]}
-            for name, _ in self._continuous_params(candidate):
-                blended[name] = (1.0 - BLEND) * self._trusted[name] + BLEND * candidate[name]
-            self._trusted = blended
-        self._revision += 1
-        # The chamber temperature this fit describes. c0 absorbs the heat loss at
-        # it, so the hold duty the model implies is a statement about THIS
-        # temperature and needs rescaling to speak about another.
-        self._identified_at_f = None if self._prev is None else float(self._prev[1])
-        # This adoption is evidence from the current cook's own plant, so the
-        # model has now earned the churn protection a restored one lacks.
-        self._restored = False
 
     #: Accepted observations before an integrating gain is worth acting on. Far
     #: below what promotion needs, because promotion is about telling one dead
@@ -825,47 +831,58 @@ class FOPDTIdentifier:
             model["identified_at_f"] = self._identified_at_f
         return model
 
-    def restore(self, model):
-        """Adopt a persisted model, re-checking the physics the store does not
-        judge. A restored model is trusted immediately: a process restart is not
-        a reason to doubt parameters that were earned."""
+    @staticmethod
+    def _validated_restore(model):
         if not isinstance(model, dict):
-            return False
-        # A record written before the identifier could promote an integrating
-        # chamber names no form, and every such record is a first-order fit.
+            return None
         form = model.get("form", FORM_FOPDT)
         bounds = RESTORE_BOUNDS.get(form)
         if bounds is None:
-            return False
+            return None
         try:
             values = {name: float(model[name]) for name, _lo, _hi in bounds}
             theta = float(model["theta"])
             revision = int(model["revision"])
         except KeyError, TypeError, ValueError:
-            return False
+            return None
         if not all(np.isfinite([*values.values(), theta])) or revision < 0:
-            return False
+            return None
         if any(not lo <= values[name] <= hi for name, lo, hi in bounds):
-            return False
-        if theta < float(DELAYS.min()) or theta > float(DELAYS.max()):
-            return False
-        self._trusted = {"form": form, "theta": theta, **values}
-        # The operating point this fit describes. Records predating the field
-        # named it only as provenance, and that is the same temperature. Kept
-        # only when it is a temperature a chamber could have been holding: the
-        # provenance is written unconditionally and reads 0 on a controller that
-        # never had a target.
+            return None
+        if form == FORM_SOPDT and values["tau_1"] > values["tau_2"]:
+            return None
+        if theta < float(DELAYS.min()) or theta > MAX_DELAY_BOUND_S:
+            return None
         identified_at = model.get("identified_at_f", model.get("setpoint_f"))
-        self._identified_at_f = (
-            float(identified_at)
-            if identified_at is not None and float(identified_at) > AMBIENT_F + MIN_RISE_F
-            else None
+        try:
+            normalized_identified_at = (
+                float(identified_at)
+                if identified_at is not None and float(identified_at) > AMBIENT_F + MIN_RISE_F
+                else None
+            )
+        except TypeError, ValueError:
+            return None
+        return (
+            {"form": form, "theta": theta, **values},
+            normalized_identified_at,
+            revision,
         )
+
+    def preflight_restore(self, model) -> bool:
+        """Validate a complete activation without changing identifier state."""
+
+        return self._validated_restore(model) is not None
+
+    def restore(self, model) -> bool:
+        """Adopt one preflight-valid persisted model as immediately trusted."""
+
+        validated = self._validated_restore(model)
+        if validated is None:
+            return False
+        trusted, identified_at, revision = validated
+        self._trusted = trusted
+        self._identified_at_f = identified_at
         self._revision = revision
-        # A confirmation window built against the pre-restore trusted state must
-        # not count toward confirming a candidate against this one.
-        self._confirm = None
-        # Not yet confirmed against this cook's plant -- see _evaluate.
         self._restored = True
         self._distrust_confirm = 0
         return True
@@ -882,10 +899,9 @@ class FOPDTIdentifier:
             "temp_span": round((self._temp_hi - self._temp_lo) if self._temp_lo is not None else 0.0, 2),
             "transition_seen": self._transition_seen,
             "duty_segments": len(self._history),
-            "best_residual": float(ordered[0]),
-            "runner_up_residual": float(ordered[1]),
-            "candidates_passing": int(gate_mask(params, rse_K, rse_tau).sum()),
-            "confirming": None if self._confirm is None else self._confirm["n"],
+            "raw_best_residual": float(ordered[0]),
+            "raw_runner_up_residual": float(ordered[1]),
+            "raw_candidates_passing": int(gate_mask(params, rse_K, rse_tau).sum()),
             "trusted": self.trusted_model(),
             "distrust_count": self._distrust_count,
             "distrust_ratio": self._distrust_ratio(),

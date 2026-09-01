@@ -326,7 +326,8 @@ def test_active_zero_probe_dwell_does_not_claim_completed_probe_evidence(hold_cy
         def submit_checkpoint(self, name, snapshot):
             return True
 
-        def flush_and_stop(self):
+        def barrier(self, timeout=2.0):
+            del timeout
             return True
 
     class _SilentLogger:
@@ -508,6 +509,7 @@ def test_multiframe_catchup_pairs_each_exact_feedback_with_its_observation(hold_
 def test_hold_stamps_latched_probe_frame_before_reconfigure_reset(hold_cycle):
     runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1)])
     hold = hold_cycle(runner, controller="mpc")
+    hold.control["cook_id"] = "reconfigure-calibration-reset"
     hold.setup()
 
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
@@ -525,6 +527,7 @@ def test_hold_stamps_latched_probe_frame_before_reconfigure_reset(hold_cycle):
 def test_hold_does_not_carry_cancelled_frame_status_into_later_baseline(hold_cycle):
     runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1), _result(2)])
     hold = hold_cycle(runner, controller="mpc")
+    hold.control["cook_id"] = "reconfigure-calibration-baseline"
     hold.setup()
 
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
@@ -566,6 +569,7 @@ def test_runtime_intervention_cancels_probe_to_exact_grey_box_baseline(
     inactive = _result(3)
     runner = FakeControllerRunner(period=1.0).script([active, following, inactive])
     hold = hold_cycle(runner, controller="mpc")
+    hold.control["cook_id"] = f"calibration-intervention-{intervention}"
     hold.setup()
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
 
@@ -604,6 +608,7 @@ def test_manual_callback_then_in_flight_result_uses_one_cancellation_path(
 ) -> None:
     runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1), _result(2, probe=0.1)])
     hold = hold_cycle(runner, controller="mpc")
+    hold.control["cook_id"] = "manual-callback-calibration"
     hold.setup()
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
 
@@ -1217,6 +1222,7 @@ def test_manual_release_still_records_once_without_active_probe(
 def test_manual_release_cancels_an_active_probe_once(hold_cycle) -> None:
     runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1), _result(2, probe=0.1)])
     hold = hold_cycle(runner, controller="mpc")
+    hold.control["cook_id"] = "manual-release-calibration"
     hold.setup()
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
 
@@ -1270,8 +1276,13 @@ def test_cancelled_frame_persists_matching_raw_and_compact_evidence_once(hold_cy
     real_worker = hold_module.ModelPersistenceWorker
 
     class CapturingWorker(real_worker):
-        def __init__(self, store, logger):
-            super().__init__(store, logger, append_evidence=persisted.extend)
+        def __init__(self, store, logger, *, trajectory_repository=None):
+            super().__init__(
+                store,
+                logger,
+                trajectory_repository=trajectory_repository,
+                append_evidence=persisted.extend,
+            )
             workers.append(self)
 
     monkeypatch.setattr(hold_module, "ControlTraceRecorder", lambda *, warning: recorder)
@@ -1294,7 +1305,7 @@ def test_cancelled_frame_persists_matching_raw_and_compact_evidence_once(hold_cy
     hold.state.lid.open_detected = True
     hold.on_tick(23.0, 200.0, hold.grill.get_output_status())
     hold.on_tick(25.0, 200.0, hold.grill.get_output_status())
-    assert workers[0].flush_and_stop(timeout=1.0)
+    assert workers[0].barrier(timeout=1.0)
 
     raw = [record.payload for record in recorder.records if record.event_kind is TraceEventKind.MODEL_OBSERVATION]
     compact = [record.payload for record in persisted if record.kind is EvidenceKind.CALIBRATION_SUMMARY]
@@ -1345,8 +1356,13 @@ def test_current_stale_probe_result_does_not_claim_prior_interval_evidence(
     real_worker = hold_module.ModelPersistenceWorker
 
     class CapturingWorker(real_worker):
-        def __init__(self, store, logger):
-            super().__init__(store, logger, append_evidence=persisted.extend)
+        def __init__(self, store, logger, *, trajectory_repository=None):
+            super().__init__(
+                store,
+                logger,
+                trajectory_repository=trajectory_repository,
+                append_evidence=persisted.extend,
+            )
             workers.append(self)
 
     monkeypatch.setattr(
@@ -1391,7 +1407,7 @@ def test_current_stale_probe_result_does_not_claim_prior_interval_evidence(
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
     hold.on_tick(25.0, 200.0, hold.grill.get_output_status())
-    assert workers[0].flush_and_stop(timeout=1.0)
+    assert workers[0].barrier(timeout=1.0)
 
     current_observations = [observation for observation in runner.observations if observation.result_revision == 2]
     assert current_observations == []
@@ -1461,8 +1477,13 @@ def test_hold_persists_measured_completed_stages_on_coast_evidence(hold_cycle, m
     real_worker = hold_module.ModelPersistenceWorker
 
     class CapturingWorker(real_worker):
-        def __init__(self, store, logger):
-            super().__init__(store, logger, append_evidence=persisted.extend)
+        def __init__(self, store, logger, *, trajectory_repository=None):
+            super().__init__(
+                store,
+                logger,
+                trajectory_repository=trajectory_repository,
+                append_evidence=persisted.extend,
+            )
             workers.append(self)
 
     monkeypatch.setattr(hold_module, "ControlTraceRecorder", lambda *, warning: Recorder(warning=warning))
@@ -1499,7 +1520,7 @@ def test_hold_persists_measured_completed_stages_on_coast_evidence(hold_cycle, m
     assert runner.observations
     assert runner.observations[-1].calibration_stage == "coast"
     assert runner.observations[-1].calibration_command_revision == 1
-    assert workers[0].flush_and_stop(timeout=1.0)
+    assert workers[0].barrier(timeout=1.0)
 
     coast = [
         record.payload

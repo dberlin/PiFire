@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from math import ceil
 from types import SimpleNamespace
 
 import pytest
@@ -13,6 +14,7 @@ from controller.model_learning.contracts import ActivationPolicy, CandidateOrigi
 from controller.model_learning.grey_runtime import GreyLearningRuntime
 from controller.mpc_config import MpcConfig
 from controller.mpc_factory import MpcPairFactory, OwnedMpcPair
+from controller.mpc_model import EstimatorSeed
 from controller.runtime.model_fitting import CandidatePair
 from controller.runtime.model_persistence import (
     DurableActivationReceipt,
@@ -74,8 +76,8 @@ class _Persistence:
     def __init__(self, events):
         self._events = events
 
-    def flush_and_stop(self, *, timeout):
-        assert timeout == pytest.approx(0.1)
+    def close(self, timeout=2.0):
+        del timeout
         self._events.append("persistence-close")
 
 
@@ -97,6 +99,7 @@ def _patch_construction(monkeypatch, events, pair):
 class _ActivationPersistence(ModelPersistenceWorker):
     def __init__(self) -> None:
         self.reject_evidence = False
+        self.close_count = 0
         self.phase_receipts: list[DurableActivationReceipt] = []
 
     def submit_activation_phase(self, _record, *, expected_phase):
@@ -108,8 +111,9 @@ class _ActivationPersistence(ModelPersistenceWorker):
     def submit_evidence(self, _record):
         return EvidenceSubmission(accepted=not self.reject_evidence)
 
-    def flush_and_stop(self, *, timeout=0.1):
+    def close(self, timeout=2.0):
         del timeout
+        self.close_count += 1
         return True
 
 
@@ -163,7 +167,7 @@ def _activation_composition() -> _ActivationComposition:
         incumbent=incumbent.descriptor,
         candidate=candidate.descriptor,
         origin=CandidateOrigin.PASSIVE_ONLINE,
-        policy=ActivationPolicy.PASSIVE_AUTO,
+        policy=ActivationPolicy.CAUSAL_AUTO,
         decision_id="composition-transition",
     )
     persistence = _ActivationPersistence()
@@ -172,6 +176,18 @@ def _activation_composition() -> _ActivationComposition:
         incumbent,
         persistence,
         clock_ms=lambda: 2_000,
+    )
+    runtime.bind_estimator_seed_source(
+        lambda theta, n_delay: EstimatorSeed(
+            delay_states=(0.4,) * n_delay,
+            chamber_temperature_c=110.0,
+            disturbance=0.0,
+            segment_id="composition-fixture",
+            pre_roll_digest="c" * 64,
+            pre_roll_frame_count=ceil(3 * theta / 20.0),
+            required_frame_count=ceil(3 * theta / 20.0),
+            status="exact",
+        )
     )
     grey = GreyLearningRuntime(
         pair_factory=factory,
@@ -186,7 +202,6 @@ def _activation_composition() -> _ActivationComposition:
         ),
         configuration=lambda: MpcConfig(runtime.active_pair.core.config),
         snapshot_parameters=lambda: runtime.active_pair.core.snapshot_parameters(),
-        cook_history=lambda: tuple(runtime.active_pair.core.history),
         sync_configuration=lambda: None,
         append_trace=lambda _records: None,
     )
@@ -220,7 +235,7 @@ def _assert_activation_consistency(
     assert composition.controller.cfg == expected_pair.core.config
     assert composition.controller.get_control_period() == pytest.approx(control_period)
     assert composition.runtime.role_generation == role_generation
-    assert composition.grey.teardown_role_generation == role_generation
+    assert composition.grey.learning_role_generation == role_generation
 
 
 def test_controller_constructs_and_closes_focused_owners_in_dependency_order(
@@ -253,14 +268,23 @@ def test_controller_constructs_and_closes_focused_owners_in_dependency_order(
             events.append("persistence")
 
     class Activation:
-        def __init__(self, _factory, active_pair, persistence):
+        def __init__(
+            self,
+            _factory,
+            active_pair,
+            persistence,
+            *,
+            owns_persistence,
+        ):
             self.active_pair = active_pair
             self._persistence = persistence
+            self._owns_persistence = owns_persistence
             events.append("activation")
 
         def close(self):
             events.append("activation-close")
-            self._persistence.flush_and_stop(timeout=0.1)
+            if self._owns_persistence:
+                self._persistence.close()
             self.active_pair.close()
 
     class Grey:
@@ -291,6 +315,7 @@ def test_controller_constructs_and_closes_focused_owners_in_dependency_order(
     ]
 
     controller.close()
+    controller.close()
     assert events[-4:] == [
         "grey-close",
         "activation-close",
@@ -299,13 +324,67 @@ def test_controller_constructs_and_closes_focused_owners_in_dependency_order(
     ]
 
 
-def test_activation_construction_failure_reverse_closes_untransferred_owners(monkeypatch):
+def test_injected_controller_normal_close_never_closes_worker(monkeypatch) -> None:
     events = []
     pair = _Pair(events)
     persistence = _Persistence(events)
     _patch_construction(monkeypatch, events, pair)
 
-    def fail_activation(_factory, _pair, _persistence):
+    class Activation:
+        def __init__(
+            self,
+            _factory,
+            active_pair,
+            persistence_worker,
+            *,
+            owns_persistence,
+        ):
+            assert owns_persistence is False
+            self.active_pair = active_pair
+            self._persistence = persistence_worker
+            events.append("activation")
+
+        def close(self):
+            events.append("activation-close")
+            self.active_pair.close()
+
+    class Grey:
+        def __init__(self, **_callbacks):
+            events.append("grey")
+
+        def close(self):
+            events.append("grey-close")
+
+    monkeypatch.setattr(mpc_module, "ActivationRuntime", Activation)
+    monkeypatch.setattr(mpc_module, "GreyLearningRuntime", Grey)
+
+    controller = mpc_module.Controller(
+        dict(_CONFIG),
+        "C",
+        dict(_CYCLE),
+        activation_persistence=persistence,
+    )
+    controller.close()
+    controller.close()
+
+    assert events[-3:] == ["grey-close", "activation-close", "pair-close"]
+    assert "persistence-close" not in events
+
+
+def test_injected_activation_construction_failure_does_not_close_worker(monkeypatch):
+    events = []
+    pair = _Pair(events)
+    persistence = _Persistence(events)
+    _patch_construction(monkeypatch, events, pair)
+
+    def fail_activation(
+        _factory,
+        _pair,
+        _persistence,
+        *,
+        owns_persistence,
+    ):
+        assert owns_persistence is False
         events.append("activation")
         raise LookupError("activation-construction")
 
@@ -324,6 +403,42 @@ def test_activation_construction_failure_reverse_closes_untransferred_owners(mon
         "configured",
         "pair",
         "activation",
+        "pair-close",
+    ]
+
+
+def test_internal_activation_construction_failure_closes_worker_once(monkeypatch):
+    events = []
+    pair = _Pair(events)
+    persistence = _Persistence(events)
+    _patch_construction(monkeypatch, events, pair)
+    monkeypatch.setattr(
+        mpc_module,
+        "ModelPersistenceWorker",
+        lambda _store, _logger: persistence,
+    )
+
+    def fail_activation(
+        _factory,
+        _pair,
+        _persistence,
+        *,
+        owns_persistence,
+    ):
+        assert owns_persistence is True
+        events.append("activation")
+        raise LookupError("activation-construction")
+
+    monkeypatch.setattr(mpc_module, "ActivationRuntime", fail_activation)
+
+    with pytest.raises(LookupError, match="activation-construction"):
+        mpc_module.Controller(dict(_CONFIG), "C", dict(_CYCLE))
+
+    assert events == [
+        "factory",
+        "configured",
+        "pair",
+        "activation",
         "persistence-close",
         "pair-close",
     ]
@@ -336,14 +451,23 @@ def test_grey_construction_failure_preserves_original_after_activation_cleanup_f
     _patch_construction(monkeypatch, events, pair)
 
     class Activation:
-        def __init__(self, _factory, active_pair, persistence_worker):
+        def __init__(
+            self,
+            _factory,
+            active_pair,
+            persistence_worker,
+            *,
+            owns_persistence,
+        ):
             self.active_pair = active_pair
             self._persistence = persistence_worker
+            self._owns_persistence = owns_persistence
             events.append("activation")
 
         def close(self):
             events.append("activation-close")
-            self._persistence.flush_and_stop(timeout=0.1)
+            if self._owns_persistence:
+                self._persistence.close()
             self.active_pair.close()
             raise RuntimeError("activation-cleanup")
 
@@ -362,10 +486,9 @@ def test_grey_construction_failure_preserves_original_after_activation_cleanup_f
             activation_persistence=persistence,
         )
 
-    assert events[-4:] == [
+    assert events[-3:] == [
         "grey",
         "activation-close",
-        "persistence-close",
         "pair-close",
     ]
 
@@ -412,7 +535,7 @@ def test_same_generation_activation_noop_does_not_synchronize_configuration():
         assert composition.runtime.role_generation == 4
         assert composition.controller.cfg is original_config
         assert composition.controller.get_control_period() == pytest.approx(2.0)
-        assert composition.grey.teardown_role_generation == 4
+        assert composition.grey.learning_role_generation == 4
     finally:
         composition.close()
 
@@ -429,7 +552,7 @@ def test_precommit_authorization_rejection_does_not_synchronize_configuration():
         assert composition.runtime.role_generation == 4
         assert composition.controller.cfg is original_config
         assert composition.controller.get_control_period() == pytest.approx(2.0)
-        assert composition.grey.teardown_role_generation == 4
+        assert composition.grey.learning_role_generation == 4
     finally:
         composition.close()
 
@@ -449,15 +572,15 @@ def test_rejected_precommit_transitions_do_not_synchronize_activation_identity()
             is False
         )
         assert composition.controller.cfg is original_config
-        assert composition.grey.teardown_role_generation == 4
+        assert composition.grey.learning_role_generation == 4
 
         assert composition.controller.activation_runtime_failure("solve failed") is False
         assert composition.controller.cfg is original_config
-        assert composition.grey.teardown_role_generation == 4
+        assert composition.grey.learning_role_generation == 4
 
         assert composition.controller.rollback_activation("operator rollback") is False
         assert composition.controller.cfg is original_config
-        assert composition.grey.teardown_role_generation == 4
+        assert composition.grey.learning_role_generation == 4
     finally:
         composition.close()
 
@@ -479,7 +602,7 @@ def test_advance_synchronizes_only_after_generation_commits_on_terminal_false():
         assert composition.runtime.role_generation == 4
         assert composition.controller.cfg is composition.incumbent.core.config
         assert composition.controller.get_control_period() == pytest.approx(2.0)
-        assert composition.grey.teardown_role_generation == 4
+        assert composition.grey.learning_role_generation == 4
 
         composition.persistence.phase_receipts[-1]._complete(durable=True)
         composition.persistence.reject_evidence = True
@@ -582,6 +705,7 @@ def test_successful_authorization_synchronizes_generation_and_public_configurati
             core=SimpleNamespace(
                 config=active_config,
                 set_target=lambda _target: None,
+                estimator_seed_status=None,
             )
         ),
         role_generation=5,

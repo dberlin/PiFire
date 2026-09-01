@@ -19,12 +19,61 @@ from common.model_evidence import (
     RecorderGapEvidence,
     TimingDistributionEvidence,
 )
+from common.persistence.model_challenger import ModelChallengerState
 
 from .contracts import CandidateOrigin, LearningStatus
 
 _REQUIRED_HORIZONS = (3, 15, 45, 90, 180)
 _RMSE_LIMITS = {3: 2.8, 15: 2.8, 45: 2.8, 90: 5.0, 180: 5.0}
-_REQUIRED_STAGES = frozenset(("low", "middle", "high", "coast"))
+_REQUIRED_STAGE_ORDER = ("low", "middle", "high", "coast")
+_REQUIRED_STAGES = frozenset(_REQUIRED_STAGE_ORDER)
+
+
+@dataclass(frozen=True, slots=True)
+class QualificationDecision:
+    """Pure durable challenger qualification result."""
+
+    accepted: bool
+    blockers: tuple[str, ...]
+
+
+def qualification_gates(state: ModelChallengerState) -> QualificationDecision:
+    """Apply the shared durable wins gate and operator-only manifest gate."""
+    if not isinstance(state, ModelChallengerState):
+        raise TypeError("state must be a ModelChallengerState")
+
+    blockers: list[str] = []
+    if state.consecutive_wins < state.required_wins:
+        blockers.append("consecutive-wins")
+    if state.origin is CandidateOrigin.OPERATOR_CALIBRATION and not _complete_calibration_manifest(
+        state.calibration_manifest
+    ):
+        blockers.append("calibration-manifest")
+    return QualificationDecision(not blockers, tuple(blockers))
+
+
+def _complete_calibration_manifest(manifest: Mapping[str, object] | None) -> bool:
+    if manifest is None:
+        return False
+    command_revision = manifest.get("command_revision")
+    session_id = manifest.get("session_id")
+    completed_stages = manifest.get("completed_stages")
+    stage_evidence_ids = manifest.get("stage_evidence_ids")
+    return (
+        isinstance(command_revision, int)
+        and not isinstance(command_revision, bool)
+        and command_revision > 0
+        and isinstance(session_id, str)
+        and bool(session_id.strip())
+        and isinstance(completed_stages, Sequence)
+        and not isinstance(completed_stages, (str, bytes))
+        and tuple(completed_stages) == _REQUIRED_STAGE_ORDER
+        and isinstance(stage_evidence_ids, Sequence)
+        and not isinstance(stage_evidence_ids, (str, bytes))
+        and len(stage_evidence_ids) == len(_REQUIRED_STAGE_ORDER)
+        and all(isinstance(value, str) and bool(value.strip()) for value in stage_evidence_ids)
+        and len(set(stage_evidence_ids)) == len(_REQUIRED_STAGE_ORDER)
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,7 +181,6 @@ def evaluate_confidence(
     origins, duplicate_conflict = _origins(selected)
     assessment = _newest_payload(selected, CandidateAssessmentEvidence)
     timing = _newest_payload(selected, TimingDistributionEvidence)
-    schema_invalidated = _text(state.get("status")) == LearningStatus.SCHEMA_INVALIDATED.value
 
     gates: list[GateResult] = []
     _gate(gates, "ledger-integrity", ledger_valid and not duplicate_conflict, "ledger-integrity")
@@ -195,9 +243,7 @@ def evaluate_confidence(
     _gate(
         gates,
         "schema-integrity",
-        bool(selected)
-        and all(record.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION for record in selected)
-        and not schema_invalidated,
+        bool(selected) and all(record.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION for record in selected),
         "schema-integrity",
     )
     continuity_records = (
@@ -257,7 +303,7 @@ def evaluate_confidence(
         _gate(gates, f"cook-weight:{label}", _cook_weight_ok(origins, interval), "cook-effective-weight")
 
     blockers = tuple(gate.reason for gate in gates if not gate.passed and gate.reason is not None)
-    status = _status(authoritative, schema_invalidated, selected, assessment, blockers)
+    status = _status(authoritative, selected, assessment, blockers)
     return ConfidenceReport(
         status,
         active_kind,
@@ -489,32 +535,30 @@ def _gate(gates: list[GateResult], name: str, passed: bool, reason: str) -> None
 
 def _status(
     authoritative: LearningStatus | None,
-    invalidated: bool,
     records: Sequence[ModelEvidenceRecord],
     assessment: CandidateAssessmentEvidence | None,
     blockers: Sequence[str],
 ) -> LearningStatus:
     if authoritative is not None:
         return authoritative
-    if invalidated:
-        return LearningStatus.SCHEMA_INVALIDATED
     if not any(record.kind is not EvidenceKind.RECORDER_GAP for record in records):
         return LearningStatus.COLLECTING
     if not isinstance(assessment, CandidateAssessmentEvidence):
         return LearningStatus.FITTING
-    if "calibration-completeness" in blockers or "identifiability" in blockers:
-        return LearningStatus.INSUFFICIENT_EXCITATION
-    return LearningStatus.READY_FOR_REVIEW if not blockers else LearningStatus.EVALUATING
+    return LearningStatus.QUALIFIED if not blockers else LearningStatus.EVALUATING
 
 
 def _authoritative_status(state: Mapping[object, object]) -> LearningStatus | None:
     value = _text(state.get("status"))
     if value in {
+        LearningStatus.WARMING.value,
+        LearningStatus.EVALUATING.value,
+        LearningStatus.INTERRUPTED.value,
+        LearningStatus.QUALIFIED.value,
         LearningStatus.ACTIVATING.value,
         LearningStatus.ACTIVE.value,
         LearningStatus.FALLBACK.value,
         LearningStatus.ERROR.value,
-        LearningStatus.SCHEMA_INVALIDATED.value,
     }:
         return LearningStatus(value)
     return None

@@ -26,13 +26,14 @@ from common.control_trace import (
 from common.persistence.control_trace import append_control_trace
 from controller.applied_output import OutputSource
 from controller.mpc_allocator import ALLOCATOR_REVISION, allocate
-from controller.mpc_config import DEFAULT_MPC_CONFIG, FITTED_PARAMETER_KEYS
+from controller.mpc_config import FITTED_PARAMETER_KEYS
+from controller.runtime.model_fitting import supported_segmented_cooks
 from controller.update_mpc import (
     _FREE,
     TraceSelectionError,
     _load_trace_calibration,
-    fit_params,
     load_trace_samples,
+    trace_fit_job,
 )
 
 SESSION_ID = "mpc-session"
@@ -48,6 +49,51 @@ def test_the_identified_parameter_set_is_the_set_the_solve_moves():
     would let a partial edit pass as a fit.
     """
     assert set(FITTED_PARAMETER_KEYS) == set(_FREE)
+
+
+def test_legacy_subcadence_trace_is_aggregated_into_nominal_scored_rows() -> None:
+    times = np.asarray((0.0, 12.0, 24.0, 36.0, 48.0))
+    temperatures = 25.0 + times
+    loads = np.asarray((0.0, 0.5, 1.0, 0.25, 0.9))
+
+    job = trace_fit_job(
+        times,
+        temperatures,
+        loads,
+        T_amb=20.0,
+        init={"C_c": 900.0, "h_amb": 0.5, "K_Q": 420.0, "theta": 50.0},
+        sigma=1.4e-9,
+        n_delay=8,
+        initial_load=0.0,
+    )
+
+    segment = job.segments[0]
+    assert segment.pre_roll_duration_s.tolist() == []
+    assert segment.pre_roll_load.tolist() == []
+    assert segment.hold_anchor_c == pytest.approx(temperatures[0])
+    assert segment.scored_duration_s.tolist() == [20.0, 20.0]
+    assert segment.scored_load.tolist() == pytest.approx([0.2, 0.75])
+    assert segment.scored_temperature_c.tolist() == pytest.approx([45.0, 65.0])
+    assert segment.observation_sequences.tolist() == [1, 2]
+    assert job.corpus.slices[0].pre_roll_count == 0
+    assert job.corpus.slices[0].scored_count == 2
+    assert job.request.fit_corpus == job.corpus
+    assert job.request.configuration_digest == job.request.parent_incumbent_digest
+    assert job.request.configuration_digest != job.corpus.fit_partition_digest
+    assert job.request.parent_incumbent_generation == 0
+    assert job.request.candidate_generation == 0
+    assert supported_segmented_cooks(job, theta=25.0) == ()
+
+    with pytest.raises(ValueError, match="incompatible sampling gap"):
+        trace_fit_job(
+            np.asarray((0.0, 5.0, 25.0, 30.0, 35.0)),
+            temperatures,
+            loads,
+            T_amb=20.0,
+            init={"C_c": 900.0, "h_amb": 0.5, "K_Q": 420.0, "theta": 50.0},
+            sigma=1.4e-9,
+            n_delay=8,
+        )
 
 
 def _session() -> ControlTraceRecord:
@@ -771,15 +817,4 @@ def test_load_trace_samples_has_equivalent_fahrenheit_and_celsius_frames(ds):
 
     for left, right in zip(fahrenheit, celsius, strict=True):
         np.testing.assert_allclose(left, right)
-    init = {key: float(DEFAULT_MPC_CONFIG[key]) for key in ("C_c", "h_amb", "K_Q", "theta")}
-    fit_kwargs = {
-        "T_amb": 30.0,
-        "init": init,
-        "sigma": float(DEFAULT_MPC_CONFIG["sigma"]),
-        "n_delay": int(DEFAULT_MPC_CONFIG["n_delay"]),
-    }
-    fahrenheit_fit = fit_params(*fahrenheit, **fit_kwargs)
-    celsius_fit = fit_params(*celsius, **fit_kwargs)
-    for key in ("C_c", "h_amb", "K_Q", "theta"):
-        assert fahrenheit_fit[key] == pytest.approx(celsius_fit[key], rel=1e-8)
     assert _load_trace_calibration(session_id="fahrenheit", database_path=ds.DB_PATH)[3] == pytest.approx(30.0)

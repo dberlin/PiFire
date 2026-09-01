@@ -323,6 +323,35 @@ def test_ensure_open_validates_identity_and_flattens_sorted_settings() -> None:
     ]
 
 
+def test_session_id_factory_is_canonical_and_invalid_values_fail_closed() -> None:
+    fixed_id = UUID("12345678-1234-5678-9abc-def012345678")
+    recorder = _Recorder()
+    session = ControlTraceSession(
+        recorder,
+        warning=lambda _: None,
+        session_id_factory=lambda: str(fixed_id).upper(),
+    )
+
+    identity = session.ensure_open(_context(), timestamp_ms=1_000)
+
+    assert identity is not None
+    assert identity.session_id == str(fixed_id)
+    assert recorder.records[0].session_id == str(fixed_id)
+
+    invalid_recorder = _Recorder()
+    warnings: list[str] = []
+    invalid = ControlTraceSession(
+        invalid_recorder,
+        warning=warnings.append,
+        session_id_factory=lambda: "not-a-uuid",
+    )
+
+    assert invalid.ensure_open(_context(), timestamp_ms=1_000) is None
+    assert invalid.identity is None
+    assert invalid_recorder.records == []
+    assert warnings == ["Control trace session identity generation failed"]
+
+
 def test_model_authority_validation_and_explicit_fallback_policy() -> None:
     recorder = _Recorder()
     warnings: list[str] = []
@@ -423,7 +452,11 @@ def test_record_update_builds_exact_controller_payloads(result, payload_type) ->
 
     update = next(record for record in recorder.records if record.event_kind is TraceEventKind.CONTROL_UPDATE)
     assert isinstance(update.payload, payload_type)
-    assert (update.schema_version, update.controller, update.ts_ms) == (TRACE_SCHEMA_VERSION, controller, 2_000)
+    assert (update.schema_version, update.controller, update.ts_ms) == (
+        TRACE_SCHEMA_VERSION,
+        controller,
+        2_000,
+    )
     assert (
         update.payload.result_revision,
         update.payload.setpoint,
@@ -474,7 +507,11 @@ def test_record_update_aligns_result_owned_learning_snapshot_with_session_record
     assert session.record_update(_update_context(result, timestamp_ms=2_345))
 
     update = next(record for record in recorder.records if record.event_kind is TraceEventKind.CONTROL_UPDATE)
-    assert (update.schema_version, update.controller, update.ts_ms) == (TRACE_SCHEMA_VERSION, controller, 2_345)
+    assert (update.schema_version, update.controller, update.ts_ms) == (
+        TRACE_SCHEMA_VERSION,
+        controller,
+        2_345,
+    )
     assert update.payload.result_revision == 7
     assert update.payload.learning is not None
     assert (update.payload.learning.schema_version, update.payload.learning.state) == (1, expected_state)

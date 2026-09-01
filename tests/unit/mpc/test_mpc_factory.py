@@ -801,7 +801,7 @@ def test_startup_recovery_migrates_every_legacy_pair_before_exact_restore() -> N
         candidate_pair_json=serialized,
         rollback_pair_json=serialized,
         origin=CandidateOrigin.PASSIVE_ONLINE,
-        policy=ActivationPolicy.PASSIVE_AUTO,
+        policy=ActivationPolicy.CAUSAL_AUTO,
         evidence_decision_id="legacy-startup",
         reason=None,
     )

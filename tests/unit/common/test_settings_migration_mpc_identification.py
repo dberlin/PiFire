@@ -2,9 +2,9 @@
 
 from copy import deepcopy
 
-from common.defaults import default_settings
 from common.settings_migration import _apply_shape_migrations, _clear_mpc_identification_choice
 from common.settings_schema import SETTINGS_SCHEMA_VERSION
+from tests.fakes.current_contracts import current_settings_payload
 
 #: A completed fit -- update_mpc's free set, all moved together. The surviving
 #: neighbour has to be one, because v10 returns anything less to the defaults,
@@ -29,13 +29,11 @@ def _v5_settings(stored):
     }
 
 
-def test_the_switch_ships_on():
-    """The default this migration exists to deliver.
+def test_learning_switches_ship_on():
+    defaults = current_settings_payload()["controller"]["config"]
 
-    Asserted here rather than only where identification is used, because the
-    migration below is pointless if the value it defers to is still off.
-    """
-    assert default_settings()["controller"]["config"]["mpc"]["enable_identification"] is True
+    assert defaults["mpc"]["enable_identification"] is True
+    assert defaults["pid_sp"]["enable_identification"] is True
 
 
 def test_current_schema_includes_v6_identification_choice_removal():
@@ -43,15 +41,19 @@ def test_current_schema_includes_v6_identification_choice_removal():
 
     assert _apply_shape_migrations(settings, SETTINGS_SCHEMA_VERSION) is True
 
-    assert SETTINGS_SCHEMA_VERSION == 11
+    assert SETTINGS_SCHEMA_VERSION == 12
     assert settings == {
-        "schema_version": 11,
+        "schema_version": 12,
         "controller": {
             "selected": "mpc",
             "config": {
                 "mpc": dict(FITTED_PASTE),
                 "pid": {"PB": 60.0, "cycle": 17},
-                "pid_sp": {"PB": 51.0, "cycle": 23},
+                "pid_sp": {
+                    "PB": 51.0,
+                    "cycle": 23,
+                    "enable_identification": True,
+                },
             },
         },
         "cycle_data": {"u_min": 0.1, "u_max": 0.9},
@@ -79,4 +81,57 @@ def test_identification_removal_is_idempotent_and_preserves_other_settings():
     assert _clear_mpc_identification_choice(settings) is True
     once = deepcopy(settings)
     assert _clear_mpc_identification_choice(settings) is False
+    assert settings == once
+
+
+def _v11_settings(pid_sp_choice=...):
+    pid_sp = {"PB": 51.0, "cycle": 23}
+    if pid_sp_choice is not ...:
+        pid_sp["enable_identification"] = pid_sp_choice
+    return {
+        "schema_version": 11,
+        "controller": {
+            "selected": "pid_sp",
+            "config": {
+                "mpc": {"enable_identification": False, **FITTED_PASTE},
+                "pid": {"PB": 60.0, "cycle": 17},
+                "pid_sp": pid_sp,
+            },
+        },
+        "cycle_data": {"u_min": 0.1, "u_max": 0.9},
+        "globals": {"grill_name": "Learning Grill"},
+    }
+
+
+def test_v12_inserts_pid_sp_learning_only_when_key_is_absent():
+    settings = _v11_settings()
+    expected = deepcopy(settings)
+    expected["schema_version"] = 12
+    expected["controller"]["config"]["pid_sp"]["enable_identification"] = True
+
+    assert _apply_shape_migrations(settings, SETTINGS_SCHEMA_VERSION) is True
+
+    assert settings == expected
+    assert settings["controller"]["config"]["mpc"]["enable_identification"] is False
+
+
+def test_v12_preserves_each_explicit_pid_sp_learning_choice():
+    for stored in (False, True):
+        settings = _v11_settings(stored)
+        expected = deepcopy(settings)
+        expected["schema_version"] = 12
+
+        assert _apply_shape_migrations(settings, SETTINGS_SCHEMA_VERSION) is True
+
+        assert settings == expected
+        assert settings["controller"]["config"]["pid_sp"]["enable_identification"] is stored
+        assert settings["controller"]["config"]["mpc"]["enable_identification"] is False
+
+
+def test_v12_pid_sp_learning_shape_migration_is_idempotent():
+    settings = _v11_settings()
+
+    assert _apply_shape_migrations(settings, SETTINGS_SCHEMA_VERSION) is True
+    once = deepcopy(settings)
+    assert _apply_shape_migrations(settings, SETTINGS_SCHEMA_VERSION) is False
     assert settings == once

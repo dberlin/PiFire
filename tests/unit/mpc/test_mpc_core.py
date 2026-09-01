@@ -457,7 +457,7 @@ def test_success_uses_applied_feedback_first_native_command_and_allocates_fan():
     assert step.baseline_allocation is step.allocation
 
 
-def test_operating_state_handoff_preserves_live_control_and_cook_history():
+def test_operating_state_handoff_preserves_live_control_state():
     source, source_estimator, _source_solver = make_core(results=(solve_result(5, 0.625),))
     source.set_output(AppliedOutput(0.45, OutputSource.CONTROLLER, 1.0))
     source.update(74.0)
@@ -468,7 +468,6 @@ def test_operating_state_handoff_preserves_live_control_and_cook_history():
     assert target.set_point_c == 110.0
     assert target.applied_combustion_load == 0.5
     assert target.last_combustion_load == 0.625
-    assert tuple(target.history) == tuple(source.history)
     assert target.estimate is not None
     assert target.estimate[:8] == pytest.approx(source_estimator.state[:8])
     assert target.estimate[8] == 74.0
@@ -842,7 +841,6 @@ def test_default_callbacks_repeat_failure_without_repeat_log_and_expose_state(ca
     assert core.estimate is not None
     assert core.consecutive_policy_failures == 2
     assert core.native_failure_diagnostics is None
-    assert len(core.history) == 2
     core.clear_estimate()
     assert core.estimate is None
 

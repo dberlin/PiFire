@@ -4,7 +4,11 @@ import itertools
 import threading
 import time
 from copy import deepcopy
+from dataclasses import replace
+from hashlib import sha256
+from math import ceil
 from types import SimpleNamespace
+from typing import ClassVar
 
 import pytest
 
@@ -19,6 +23,7 @@ from common.model_evidence import (
     ModelEvidenceRecord,
     RollbackEvidence,
 )
+from common.persistence.learning_trajectory import LearningTrajectoryRepository
 from common.persistence.model_evidence import (
     append_model_evidence,
     commit_model_activation_phase,
@@ -34,13 +39,16 @@ from controller.model_learning.activation import (
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
 from controller.mpc import Controller as MpcController
 from controller.mpc_config import DEFAULT_MPC_CONFIG as MPC_DEFAULTS
+from controller.mpc_model import EstimatorSeed
 from controller.mpc_snapshot import migrate_grey_learning_snapshot
-from controller.runtime.model_persistence import ModelPersistenceWorker
+from controller.runtime.model_persistence import EvidenceSubmission, ModelPersistenceWorker
 from controller.runtime.runner import (
     ControllerUpdateResult,
+    ModelRestoreOutcome,
     ThreadedControllerRunner,
 )
 from tests.fakes.runner import FakeControllerRunner
+from tests.unit.common._learning_trajectory_helpers import _finalize_segment, _segment
 from tests.unit.runtime._persistence_helpers import _pair_phase_state
 from tests.unit.runtime.conftest import _off, _output
 
@@ -86,6 +94,206 @@ def _framed_output():
         solve_duration_seconds=0.0,
         completed_wall_time=0.0,
     )
+
+
+class _SharedPersistence(ModelPersistenceWorker):
+    def __init__(self, *, reject_checkpoints: bool = False) -> None:
+        self.reject_checkpoints = reject_checkpoints
+        self.checkpoints = []
+        self.evidence_batches = []
+        self.trajectory_batches = []
+        self.barrier_calls = []
+        self.close_calls = []
+
+    @property
+    def evidence_blocked(self) -> bool:
+        return False
+
+    @property
+    def failed(self) -> bool:
+        return False
+
+    def submit_checkpoint(self, name, snapshot):
+        self.checkpoints.append((name, deepcopy(snapshot)))
+        return not self.reject_checkpoints
+
+    def submit_evidence_batch(self, records):
+        self.evidence_batches.append(tuple(records))
+        return EvidenceSubmission(accepted=True)
+
+    def submit_trajectory_batch(self, batch):
+        self.trajectory_batches.append(batch)
+        return SimpleNamespace(
+            accepted=True,
+            completed=True,
+            durable=True,
+            error=None,
+            gap=None,
+            wait=lambda _timeout=None: True,
+        )
+
+    def barrier(self, timeout=2.0):
+        self.barrier_calls.append(timeout)
+        return True
+
+    def close(self, timeout=2.0):
+        self.close_calls.append(timeout)
+        return True
+
+
+def _inject_process_persistence(hold, worker, repository) -> None:
+    hold.ctx.model_persistence = worker
+    hold.ctx.trajectory_repository = repository
+
+
+def test_hold_stop_barriers_shared_persistence_without_closing_it(hold_cycle) -> None:
+    worker = _SharedPersistence()
+    repository = object()
+    hold = hold_cycle(FakeControllerRunner(period=0.0), controller="pid_sp")
+    _inject_process_persistence(hold, worker, repository)
+    hold.setup()
+
+    hold.ctx.clock.advance(400.0)
+    hold.teardown(200.0)
+    hold.teardown(200.0)
+
+    assert hold._persistence_worker is worker
+    assert worker.barrier_calls == [2.0, 2.0]
+    assert worker.close_calls == []
+
+
+def test_consecutive_holds_share_exact_process_worker_and_repository(hold_cycle) -> None:
+    worker = _SharedPersistence()
+    repository = object()
+    first = hold_cycle(FakeControllerRunner(period=0.0), controller="pid_sp")
+    first.control["cook_id"] = "cook-a"
+    _inject_process_persistence(first, worker, repository)
+    first.setup()
+    assert first._hold_learning is not None
+    assert first._hold_learning._persistence is worker
+    assert first._hold_learning._trajectory_repository is repository
+    first.ctx.clock.advance(400.0)
+    first.teardown(200.0)
+
+    second = hold_cycle(FakeControllerRunner(period=0.0), controller="pid_sp")
+    second.control["cook_id"] = "cook-b"
+    _inject_process_persistence(second, worker, repository)
+    second.setup()
+    assert second._hold_learning is not None
+    assert second._hold_learning._persistence is worker
+    assert second._hold_learning._trajectory_repository is repository
+    second.ctx.clock.advance(400.0)
+    second.teardown(200.0)
+
+    assert first._persistence_worker is second._persistence_worker is worker
+    assert first.ctx.trajectory_repository is second.ctx.trajectory_repository is repository
+    assert worker.barrier_calls == [2.0, 2.0, 2.0, 2.0]
+    assert worker.close_calls == []
+
+
+def test_compatible_corpus_survives_hold_teardown_and_repository_reopen(
+    hold_cycle,
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "persistent-grey-corpus.sqlite"
+    worker = _SharedPersistence()
+    first_repository = LearningTrajectoryRepository(str(database_path))
+    first_segment = _segment("first-cook", epoch_ms=0, scored_count=2)
+    _finalize_segment(first_repository, first_segment)
+    first = hold_cycle(FakeControllerRunner(period=0.0), controller="mpc")
+    _inject_process_persistence(first, worker, first_repository)
+    first.setup()
+    first.ctx.clock.advance(400.0)
+    first.teardown(200.0)
+
+    reopened = LearningTrajectoryRepository(str(database_path))
+    second_segment = _segment("second-cook", epoch_ms=200_000, scored_count=2)
+    _finalize_segment(reopened, second_segment)
+    second = hold_cycle(FakeControllerRunner(period=0.0), controller="mpc")
+    _inject_process_persistence(second, worker, reopened)
+    second.setup()
+    second.ctx.clock.advance(400.0)
+    second.teardown(200.0)
+
+    snapshot = reopened.snapshot_fit_corpus(first_segment.fit_partition_digest)
+    assert tuple(item.segment_id for item in snapshot.identity.slices) == (
+        "first-cook",
+        "second-cook",
+    )
+    assert tuple(segment.cook_id for segment in snapshot.segments) == (
+        "cook-first-cook",
+        "cook-second-cook",
+    )
+    assert first._persistence_worker is second._persistence_worker is worker
+    assert worker.close_calls == []
+
+
+def test_persistence_failure_cannot_change_hold_actuator_outcome(hold_cycle) -> None:
+    def exercise(*, reject_checkpoints: bool):
+        worker = _SharedPersistence(reject_checkpoints=reject_checkpoints)
+        runner = FakeControllerRunner(
+            period=0.0,
+            actuation_mode=ActuationMode.FRAMED_PULSE,
+        ).script([_framed_output()])
+        hold = hold_cycle(runner, controller="pid_sp")
+        _inject_process_persistence(hold, worker, object())
+        hold.setup()
+        runner.snapshot = {"revision": 1, "K": 700.0}
+        try:
+            hold.on_tick(
+                now=100.0,
+                ptemp=200.0,
+                current_output_status=_off(),
+            )
+            learning = hold._hold_learning
+            assert learning is not None
+            evidence_available = learning.evidence_available
+            tick_outcome = (
+                deepcopy(hold.grill.get_output_status()),
+                deepcopy(hold.control),
+                deepcopy(hold.state.cycle),
+                deepcopy(hold.state.controller),
+            )
+            tick_checkpoints = deepcopy(worker.checkpoints)
+        finally:
+            hold.ctx.clock.advance(400.0)
+            hold.teardown(200.0)
+        return {
+            "evidence_available": evidence_available,
+            "final_evidence_available": learning.evidence_available,
+            "tick_outcome": tick_outcome,
+            "final_outcome": (
+                deepcopy(hold.grill.get_output_status()),
+                deepcopy(hold.control),
+                deepcopy(hold.state.cycle),
+                deepcopy(hold.state.controller),
+            ),
+            "applied": tuple(runner.applied),
+            "tick_checkpoints": tick_checkpoints,
+            "final_checkpoints": deepcopy(worker.checkpoints),
+        }
+
+    accepting = exercise(reject_checkpoints=False)
+    failing = exercise(reject_checkpoints=True)
+
+    assert accepting["applied"] == failing["applied"]
+    assert accepting["tick_outcome"] == failing["tick_outcome"]
+    assert accepting["final_outcome"] == failing["final_outcome"]
+    assert accepting["evidence_available"]
+    assert not failing["evidence_available"]
+    assert accepting["final_evidence_available"]
+    assert not failing["final_evidence_available"]
+    checkpoint = ("pid_sp", {"revision": 1, "K": 700.0})
+    assert accepting["tick_checkpoints"] == failing["tick_checkpoints"] == [checkpoint]
+    assert all(
+        attempt == checkpoint
+        for attempt in (
+            *accepting["final_checkpoints"],
+            *failing["final_checkpoints"],
+        )
+    )
+    assert len(accepting["final_checkpoints"]) == 1
+    assert len(failing["final_checkpoints"]) == 2
 
 
 def test_setup_restores_a_stored_model_before_seeding(hold_cycle):
@@ -151,7 +359,17 @@ def test_mpc_setup_migrates_v3_before_restore_and_activation_reconcile(hold_cycl
     hold.setup()
 
     assert calls[:2] == ["migrate", "restore-load"]
-    assert runner.restored[0]["version"] == 4
+    restored = runner.restored[0]
+    assert restored["version"] == 7
+    assert restored["schema"] == "pifire-grey-learning/v7"
+    assert restored["active_pair"] is None
+    assert restored["challenger_authority"] is None
+    assert restored["installation_identity_digest"] is None
+    assert restored["activation"] == {
+        "phase": "aborted",
+        "pending_persistence": False,
+        "pending_swap": False,
+    }
 
 
 def test_mpc_setup_uses_default_migration_config_when_selected_config_is_malformed(
@@ -166,7 +384,18 @@ def test_mpc_setup_uses_default_migration_config_when_selected_config_is_malform
         "migrate_mpc_learning_authority",
         lambda *, defaults: migrated_defaults.append(defaults),
     )
-    runner = FakeControllerRunner(period=0.01).script([_output(0.5)])
+    runner = FakeControllerRunner(period=0.01).script(
+        [
+            replace(
+                _output(0.5),
+                revision=1,
+                solve_start_monotonic=1.0,
+                solve_end_monotonic=1.125,
+                solve_duration_seconds=0.125,
+                completed_wall_time=1.125,
+            )
+        ]
+    )
     hold = hold_cycle(
         runner,
         model_store=_FakeModelStore(),
@@ -201,7 +430,18 @@ def test_mpc_setup_keeps_control_live_when_authority_migration_fails(
         "migrate_mpc_learning_authority",
         migration_unavailable,
     )
-    runner = FakeControllerRunner(period=0.01)
+    runner = FakeControllerRunner(period=0.01).script(
+        [
+            replace(
+                _output(0.0),
+                revision=1,
+                solve_start_monotonic=1.0,
+                solve_end_monotonic=1.125,
+                solve_duration_seconds=0.125,
+                completed_wall_time=1.125,
+            )
+        ]
+    )
     hold = hold_cycle(
         runner,
         model_store=_FakeModelStore(),
@@ -209,11 +449,14 @@ def test_mpc_setup_keeps_control_live_when_authority_migration_fails(
     )
 
     hold.setup()
+    assert runner.applied == []
+    hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
 
     learning = hold._hold_learning
     assert learning is not None
     assert learning.evidence_available is False
-    assert [applied.source for applied in runner.applied] == [OutputSource.SEED]
+    assert runner.applied[0].source is OutputSource.SEED
+    assert runner.applied[-1].source is OutputSource.CONTROLLER
 
 
 @pytest.mark.parametrize(
@@ -236,6 +479,190 @@ def test_setup_routes_new_prepared_pair_authority_without_legacy_activation_evid
     assert learning is not None
     learning.reconcile_activation()
     assert runner.activation_restores == [(persisted, ())]
+
+
+def test_rejected_mpc_checkpoint_cannot_reauthorize_stale_active_authority(
+    hold_cycle,
+    monkeypatch,
+):
+    from controller.runtime.modes import hold_learning as hold_learning_module
+
+    persisted, _record = _pair_phase_state(ActivationPhase.ACTIVE)
+    monkeypatch.setattr(hold_learning_module, "read_model_activation", lambda: persisted)
+    monkeypatch.setattr(hold_learning_module, "read_model_evidence", list)
+
+    class RefusingRunner(FakeControllerRunner):
+        def restore_model(self, snapshot, *, restore_token=None):
+            self.restore_token = restore_token
+            self.restored.append(snapshot)
+            self.calls.append(("restore", snapshot))
+            return ModelRestoreOutcome(
+                restore_token=restore_token,
+                accepted=False,
+                effective_authority=self.snapshot,
+            )
+
+    checkpoint = {"version": 7, "installation_identity_digest": "a" * 64}
+    runner = RefusingRunner(period=0.01)
+    hold = hold_cycle(
+        runner,
+        model_store=_FakeModelStore({"mpc": checkpoint}),
+        controller="mpc",
+    )
+
+    hold.setup()
+
+    assert runner.restored == [checkpoint]
+    assert runner.activation_restores == []
+    learning = hold._hold_learning
+    assert learning is not None
+    learning.reconcile_activation()
+    assert runner.activation_restores == []
+
+
+def test_async_checkpoint_cannot_reconcile_stale_authority_before_restore_verdict(
+    hold_cycle,
+    monkeypatch,
+):
+    from controller.runtime.modes import hold_learning as hold_learning_module
+
+    persisted, _record = _pair_phase_state(ActivationPhase.ACTIVE)
+    monkeypatch.setattr(hold_learning_module, "read_model_activation", lambda: persisted)
+    monkeypatch.setattr(hold_learning_module, "read_model_evidence", list)
+    checkpoint = {"version": 7, "installation_identity_digest": "a" * 64}
+    runner = FakeControllerRunner(period=0.01, wants_async=True)
+    hold = hold_cycle(
+        runner,
+        model_store=_FakeModelStore({"mpc": checkpoint}),
+        controller="mpc",
+    )
+
+    hold.setup()
+
+    assert runner.restored == [checkpoint]
+    assert runner.activation_restores == []
+    runner.restore_outcome = False
+    learning = hold._hold_learning
+    assert learning is not None
+    learning.reconcile_outcomes(1.0)
+    learning.reconcile_activation()
+    assert runner.activation_restores == []
+
+
+def test_async_checkpoint_reconciles_activation_only_after_successful_restore_verdict(
+    hold_cycle,
+    monkeypatch,
+):
+    from controller.runtime.modes import hold_learning as hold_learning_module
+
+    persisted, _record = _pair_phase_state(ActivationPhase.ACTIVE)
+    monkeypatch.setattr(hold_learning_module, "read_model_activation", lambda: persisted)
+    monkeypatch.setattr(hold_learning_module, "read_model_evidence", list)
+    runner = FakeControllerRunner(period=0.01, wants_async=True)
+    hold = hold_cycle(
+        runner,
+        model_store=_FakeModelStore({"mpc": {"version": 7, "installation_identity_digest": "a" * 64}}),
+        controller="mpc",
+    )
+
+    hold.setup()
+    assert runner.activation_restores == []
+    runner.restore_outcome = True
+    learning = hold._hold_learning
+    assert learning is not None
+    learning.reconcile_outcomes(1.0)
+    learning.reconcile_activation()
+    assert runner.activation_restores == [(persisted, ())]
+
+
+def test_overlapping_async_restore_verdicts_are_correlated_to_submission(
+    hold_cycle,
+    monkeypatch,
+):
+    from controller.runtime.modes import hold_learning as hold_learning_module
+
+    persisted, _record = _pair_phase_state(ActivationPhase.ACTIVE)
+    monkeypatch.setattr(hold_learning_module, "read_model_activation", lambda: persisted)
+    monkeypatch.setattr(hold_learning_module, "read_model_evidence", list)
+    first = {"version": 7, "revision": 1}
+    second = {"version": 7, "revision": 2}
+    store = _FakeModelStore({"mpc": first})
+    runner = FakeControllerRunner(period=0.01, wants_async=True)
+    hold = hold_cycle(runner, model_store=store, controller="mpc")
+    hold.setup()
+    first_token = runner.restore_token
+    learning = hold._hold_learning
+    assert learning is not None
+
+    store.models["mpc"] = second
+    learning.restore_model(timestamp_ms=2_000)
+    second_token = runner.restore_token
+
+    assert runner.restored == [first, second]
+    assert first_token is not None and second_token is not None
+    assert first_token != second_token
+    runner.restore_outcome = ModelRestoreOutcome(
+        restore_token=first_token,
+        accepted=True,
+        effective_authority=first,
+    )
+    learning.reconcile_outcomes(3.0)
+    learning.reconcile_activation()
+    assert runner.activation_restores == []
+
+    runner.restore_outcome = ModelRestoreOutcome(
+        restore_token=second_token,
+        accepted=True,
+        effective_authority=second,
+    )
+    learning.reconcile_outcomes(4.0)
+    learning.reconcile_activation()
+    assert runner.activation_restores == [(persisted, ())]
+
+
+def test_rejected_superseding_restore_cannot_adopt_an_older_async_verdict(
+    hold_cycle,
+    monkeypatch,
+) -> None:
+    from controller.runtime.modes import hold_learning as hold_learning_module
+
+    persisted, _record = _pair_phase_state(ActivationPhase.ACTIVE)
+    monkeypatch.setattr(hold_learning_module, "read_model_activation", lambda: persisted)
+    monkeypatch.setattr(hold_learning_module, "read_model_evidence", list)
+    first = {"version": 7, "revision": 1}
+    second = {"version": 7, "revision": 2}
+    store = _FakeModelStore({"mpc": first})
+
+    class RejectSecondRestore(FakeControllerRunner):
+        def restore_model(self, snapshot, *, restore_token=None):
+            super().restore_model(snapshot, restore_token=restore_token)
+            accepted = len(self.restored) == 1
+            return ModelRestoreOutcome(
+                restore_token=restore_token,
+                accepted=accepted,
+                effective_authority=(None if accepted else self.snapshot),
+                pending=accepted,
+            )
+
+    runner = RejectSecondRestore(period=0.01, wants_async=True)
+    hold = hold_cycle(runner, model_store=store, controller="mpc")
+    hold.setup()
+    first_token = runner.restore_token
+    learning = hold._hold_learning
+    assert learning is not None
+
+    store.models["mpc"] = second
+    learning.restore_model(timestamp_ms=2_000)
+    runner.restore_outcome = ModelRestoreOutcome(
+        restore_token=first_token,
+        accepted=True,
+        effective_authority=first,
+    )
+    learning.reconcile_outcomes(3.0)
+    learning.reconcile_activation()
+
+    assert runner.restored == [first, second]
+    assert runner.activation_restores == []
 
 
 def test_per_tick_saves_the_controller_snapshot(hold_cycle):
@@ -324,6 +751,8 @@ def test_checkpoint_writer_does_not_block_hold_or_teardown_and_finishes_latest_s
     runner = FakeControllerRunner(period=0.01).script([_output(0.5)])
     store = _BlockingStore()
     hold = hold_cycle(runner, model_store=store, controller="pid_sp")
+    worker = ModelPersistenceWorker(store, hold.ctx.event_log)
+    _inject_process_persistence(hold, worker, object())
     hold.setup()
     runner.snapshot = {"revision": 1, "K": 700.0}
     tick_finished = threading.Event()
@@ -386,19 +815,15 @@ def test_checkpoint_writer_does_not_block_hold_or_teardown_and_finishes_latest_s
             hold.teardown(200.0)
         else:
             teardown_thread.join(timeout=1.0)
+        assert worker.close(timeout=5.0)
 
     assert not tick_thread.is_alive()
     assert teardown_thread is not None and not teardown_thread.is_alive()
     assert store.models["pid_sp"] == {"revision": 2, "K": 701.0}
     assert [snapshot["revision"] for _, snapshot in store.saved_snapshots] == [1, 2]
-    #  store.latest_saved firing only proves save_outcome returned -- the
-    #  persistence worker's own run loop still needs a moment afterward to
-    #  notice flush_and_stop's earlier stop request and let its thread exit.
-    #  Join (bounded, as a deadlock safety net -- see the module docstring
-    #  above) before checking is_alive() instead of checking instantaneously,
-    #  the same way tick_thread/teardown_thread are joined above: an
-    #  un-joined check here is itself a wall-clock race, just one that only
-    #  shows up under enough concurrent load to widen the window.
+    # Hold's bounded barrier deliberately left the process worker alive. The
+    # explicit process-owner close above is what joins it after the blocked
+    # write is released.
     for writer_thread in {*store.writer_threads}:
         writer_thread.join(timeout=5.0)
     assert store.writer_threads and all(not thread.is_alive() for thread in store.writer_threads)
@@ -588,13 +1013,13 @@ def test_new_store_loads_owned_checkpoint_while_prior_writer_is_blocked():
         assert load_finished.wait(0.2), "replacement Hold blocked behind checkpoint I/O"
         assert loaded == [{"revision": 2}]
         release_write.set()
-        assert worker.flush_and_stop(timeout=1.0)
+        assert worker.close(timeout=1.0)
         assert replacement_store.save("mpc", {"revision": 2}) is True
         assert state["models"]["mpc"] == {"revision": 2}
     finally:
         release_write.set()
         load_thread.join(timeout=1.0)
-        worker.flush_and_stop()
+        worker.close()
 
 
 def test_checkpoint_worker_preserves_a_pending_checkpoint_when_b_is_submitted():
@@ -635,7 +1060,7 @@ def test_checkpoint_worker_preserves_a_pending_checkpoint_when_b_is_submitted():
         store.allow_first_write.set()
         if pending_submission_thread is not None:
             pending_submission_thread.join(timeout=1.0)
-        worker.flush_and_stop()
+        worker.close()
 
     assert pending_submission_thread is not None and not pending_submission_thread.is_alive()
     assert not logger.errors
@@ -689,7 +1114,7 @@ def test_checkpoint_worker_coalesces_pending_revisions_per_controller():
         store.allow_first_write.set()
         if pending_submission_thread is not None:
             pending_submission_thread.join(timeout=1.0)
-        worker.flush_and_stop()
+        worker.close()
 
     assert pending_submission_thread is not None and not pending_submission_thread.is_alive()
     assert not logger.errors
@@ -704,6 +1129,7 @@ def test_timed_out_checkpoint_worker_cannot_overwrite_newer_replacement_checkpoi
     state = {}
     first_write_started = threading.Event()
     release_old_write = threading.Event()
+    old_write_finished = threading.Event()
 
     def read(_key):
         if not state:
@@ -720,6 +1146,7 @@ def test_timed_out_checkpoint_worker_cannot_overwrite_newer_replacement_checkpoi
             assert release_old_write.wait(1.0)
         existing = state.get("models", {}).get(name)
         if existing is not None and existing["revision"] >= snapshot["revision"]:
+            old_write_finished.set()
             return False
         state.clear()
         state.update({"version": 1, "models": {name: deepcopy(snapshot)}})
@@ -732,23 +1159,23 @@ def test_timed_out_checkpoint_worker_cannot_overwrite_newer_replacement_checkpoi
     try:
         assert old_worker.submit_checkpoint("mpc", {"revision": 1})
         assert first_write_started.wait(timeout=1.0)
-        assert not old_worker.flush_and_stop(timeout=0.01)
+        assert not old_worker.close(timeout=0.01)
 
         assert new_worker.submit_checkpoint("mpc", {"revision": 2})
-        assert new_worker.flush_and_stop(timeout=0.2)
+        assert new_worker.close(timeout=0.2)
         assert state["models"]["mpc"] == {"revision": 2}
 
         release_old_write.set()
-        assert old_worker.flush_and_stop(timeout=1.0)
+        assert old_write_finished.wait(timeout=1.0)
         assert new_store.load("mpc") == {"revision": 2}
     finally:
         release_old_write.set()
-        old_worker.flush_and_stop(timeout=1.0)
-        new_worker.flush_and_stop(timeout=1.0)
+        old_worker.close(timeout=1.0)
+        new_worker.close(timeout=1.0)
 
 
 class _CrashRecoveryEstimator:
-    created = []
+    created: ClassVar[list[_CrashRecoveryEstimator]] = []
 
     def __init__(self, **_kwargs):
         self.closed = 0
@@ -775,8 +1202,8 @@ class _CrashRecoveryEstimator:
 
 
 class _CrashRecoverySolver:
-    created = []
-    solve_order = []
+    created: ClassVar[list[_CrashRecoverySolver]] = []
+    solve_order: ClassVar[list[_CrashRecoverySolver]] = []
 
     def __init__(self, config):
         self.config = config
@@ -968,6 +1395,7 @@ class _CrashRecoveryRunnerGate:
 )
 def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
     hold_cycle,
+    ds,
     monkeypatch,
     tmp_path,
     crash_boundary,
@@ -1018,6 +1446,20 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
     )
     incumbent_pair = first_core.active_control_pair
     incumbent = incumbent_pair.descriptor
+    incumbent_theta = float(first_core.cfg["theta"])
+    incumbent_seed_frames = ceil(3.0 * incumbent_theta / 20.0)
+    incumbent_pair.core.seed_from_trajectory(
+        EstimatorSeed(
+            delay_states=(0.0,) * int(first_core.cfg["n_delay"]),
+            chamber_temperature_c=225.0,
+            disturbance=0.0,
+            segment_id="crash-recovery-incumbent",
+            pre_roll_digest=sha256(f"crash-recovery:{incumbent.model_digest}".encode()).hexdigest(),
+            pre_roll_frame_count=incumbent_seed_frames,
+            required_frame_count=incumbent_seed_frames,
+            status="exact",
+        )
+    )
     candidate_controller_config = dict(first_core.cfg)
     candidate_controller_config["theta"] = float(candidate_controller_config["theta"]) + 1.0
     candidate_estimator, candidate_solver = _mpc_core.MpcCore.build_components(
@@ -1037,12 +1479,26 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
         candidate_solver,
         authorized=False,
     )
+    candidate_theta = float(candidate_controller_config["theta"])
+    required_seed_frames = ceil(3.0 * candidate_theta / 20.0)
+    candidate_pair.core.seed_from_trajectory(
+        EstimatorSeed(
+            delay_states=(0.0,) * int(candidate_controller_config["n_delay"]),
+            chamber_temperature_c=225.0,
+            disturbance=0.0,
+            segment_id="crash-recovery-test",
+            pre_roll_digest=sha256(f"crash-recovery:{candidate.model_digest}".encode()).hexdigest(),
+            pre_roll_frame_count=required_seed_frames,
+            required_frame_count=required_seed_frames,
+            status="exact",
+        )
+    )
     prepared = PreparedActivationRecord.prepared(
         timestamp_ms=1_000,
         incumbent=incumbent,
         candidate=candidate,
         origin=CandidateOrigin.PASSIVE_ONLINE,
-        policy=ActivationPolicy.PASSIVE_AUTO,
+        policy=ActivationPolicy.CAUSAL_AUTO,
         decision_id=f"crash-{crash_boundary}",
     )
 
@@ -1184,13 +1640,32 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
     assert first_core.active_control_pair is expected_precrash_pair
     assert first_core.activation_output_authorized is precrash_authorized
     assert (first_core.rollback_control_pair is incumbent_pair) is precrash_has_rollback
+    expected_durable_owner = candidate if durable_phase is ActivationPhase.ACTIVE else incumbent
     precrash_authority = read_model_activation(database_path=database_path)
     if durable_phase is None:
         assert precrash_authority is None
     else:
         assert precrash_authority is not None
         assert precrash_authority.phase == durable_phase.value
+        assert precrash_authority.origin == CandidateOrigin.PASSIVE_ONLINE.value
+        assert precrash_authority.policy == ActivationPolicy.CAUSAL_AUTO.value
+        assert precrash_authority.active_pair == expected_durable_owner
+        assert precrash_authority.incumbent_pair == incumbent
+        assert precrash_authority.candidate_pair == candidate
+        assert precrash_authority.rollback_pair == incumbent
     precrash_records = tuple(read_model_evidence(database_path=database_path))
+    if durable_phase is not None:
+        confidence_records = tuple(
+            record for record in precrash_records if isinstance(record.payload, ConfidenceDecisionEvidence)
+        )
+        assert len(confidence_records) == 1
+        confidence_authority = confidence_records[0]
+        assert confidence_authority.role_generation == incumbent.role_generation
+        assert confidence_authority.model_digest == candidate.model_digest
+        assert confidence_authority.provenance_digest == incumbent.model_digest
+        assert confidence_authority.payload.decision_id == prepared.decision_id
+        assert confidence_authority.payload.blocked is False
+        assert confidence_authority.payload.reason is None
     if not installs_candidate:
         candidate_pair.close()
     if first_boundary_runner is None:
@@ -1199,6 +1674,7 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
         assert first_boundary_gate is not None
         first_boundary_gate.open()
         first_boundary_runner.stop()
+    assert persistence_worker.close(timeout=1.0)
     first_runtime_handles = (
         incumbent_pair.estimator,
         incumbent_pair.solver,
@@ -1288,13 +1764,21 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
         elif durable_phase is not None:
             assert converged is not None
             assert converged.phase == durable_phase.value
+            assert converged.active_pair == expected_durable_owner
     finally:
         restart_gate.open()
         hold.ctx.clock.advance(400.0)
         hold.teardown(225.0)
+        runner.stop()
+        assert restart_worker.close(timeout=1.0)
     handles = (
         *_CrashRecoveryEstimator.created,
         *_CrashRecoverySolver.created,
     )
+    deadline = time.monotonic() + 1.0
+    while any(handle.closed == 0 for handle in handles) and time.monotonic() < deadline:
+        time.sleep(0.01)
     assert handles
-    assert all(type(handle.closed) is int and handle.closed == 1 for handle in handles)
+    assert all(type(handle.closed) is int and handle.closed == 1 for handle in handles), [
+        handle.closed for handle in handles
+    ]

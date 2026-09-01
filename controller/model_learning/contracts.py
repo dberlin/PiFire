@@ -10,6 +10,7 @@ import numpy as np
 import numpy.typing as npt
 
 from common.control_trace import AllocationClampReason, AmbientSource, AmbientUncertainty
+from common.learning_trajectory import FitCorpusIdentity
 from controller.mpc_allocator import AllocationResult
 
 FloatArray = npt.NDArray[np.float64]
@@ -49,26 +50,30 @@ def _owned_array(values: npt.ArrayLike, name: str) -> FloatArray:
 class CandidateOrigin(StrEnum):
     PASSIVE_ONLINE = "passive-online"
     OPERATOR_CALIBRATION = "operator-calibration"
-    COOK_REFIT = "cook-refit"
 
 
 class ActivationPolicy(StrEnum):
-    PASSIVE_AUTO = "passive-auto"
-    OPERATOR_REVIEWED = "operator-reviewed"
-    COOK_REFIT = "cook-refit"
+    CAUSAL_AUTO = "causal-auto"
+
+
+def activation_policy_for_origin(origin: CandidateOrigin) -> ActivationPolicy:
+    """Return the only policy admitted for a newly created challenger."""
+    if not isinstance(origin, CandidateOrigin):
+        raise TypeError("origin must be a CandidateOrigin")
+    return ActivationPolicy.CAUSAL_AUTO
 
 
 class LearningStatus(StrEnum):
+    WARMING = "warming"
     COLLECTING = "collecting"
-    INSUFFICIENT_EXCITATION = "insufficient-excitation"
     FITTING = "fitting"
     EVALUATING = "evaluating"
-    READY_FOR_REVIEW = "ready-for-review"
+    INTERRUPTED = "interrupted"
+    QUALIFIED = "qualified"
     ACTIVATING = "activating"
     ACTIVE = "active"
     FALLBACK = "fallback"
     ERROR = "error"
-    SCHEMA_INVALIDATED = "schema-invalidated"
 
 
 class FitStatus(StrEnum):
@@ -88,38 +93,15 @@ class CheckStatus(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class FitWindowIdentity:
-    """Exact immutable observation window submitted to the fitting worker."""
-
-    session_id: str
-    cook_id: str | None
-    first_observation_sequence: int
-    last_observation_sequence: int
-    configuration_digest: str
-    incumbent_digest: str
-    role_generation: int
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.session_id, str) or not self.session_id.strip():
-            raise ValueError("session_id must be non-blank")
-        if self.cook_id is not None and (not isinstance(self.cook_id, str) or not self.cook_id.strip()):
-            raise ValueError("cook_id must be non-blank when present")
-        first = _nonnegative_int(self.first_observation_sequence, "first_observation_sequence")
-        last = _nonnegative_int(self.last_observation_sequence, "last_observation_sequence")
-        if last < first:
-            raise ValueError("last_observation_sequence must not precede first_observation_sequence")
-        object.__setattr__(self, "first_observation_sequence", first)
-        object.__setattr__(self, "last_observation_sequence", last)
-        _require_digest(self.configuration_digest, "configuration_digest")
-        _require_digest(self.incumbent_digest, "incumbent_digest")
-        object.__setattr__(self, "role_generation", _nonnegative_int(self.role_generation, "role_generation"))
-
-
-@dataclass(frozen=True, slots=True)
 class FitRequest:
+    """Exact immutable request identity for one cumulative-corpus fit."""
+
     request_id: str
     origin: CandidateOrigin
-    window: FitWindowIdentity
+    fit_corpus: FitCorpusIdentity
+    configuration_digest: str
+    parent_incumbent_digest: str
+    parent_incumbent_generation: int
     candidate_generation: int
 
     def __post_init__(self) -> None:
@@ -127,8 +109,18 @@ class FitRequest:
             raise ValueError("request_id must be non-blank")
         if not isinstance(self.origin, CandidateOrigin):
             raise TypeError("origin must be a CandidateOrigin")
-        if not isinstance(self.window, FitWindowIdentity):
-            raise TypeError("window must be a FitWindowIdentity")
+        if not isinstance(self.fit_corpus, FitCorpusIdentity):
+            raise TypeError("fit_corpus must be a FitCorpusIdentity")
+        _require_digest(self.configuration_digest, "configuration_digest")
+        _require_digest(self.parent_incumbent_digest, "parent_incumbent_digest")
+        object.__setattr__(
+            self,
+            "parent_incumbent_generation",
+            _nonnegative_int(
+                self.parent_incumbent_generation,
+                "parent_incumbent_generation",
+            ),
+        )
         object.__setattr__(
             self,
             "candidate_generation",
@@ -138,25 +130,15 @@ class FitRequest:
 
 @dataclass(frozen=True, slots=True)
 class FitResult:
-    request_id: str
-    origin: CandidateOrigin
-    window: FitWindowIdentity
-    candidate_generation: int
+    """Terminal result bound to the exact request returned by the worker."""
+
+    request: FitRequest
     status: FitStatus
     candidate_digest: str | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.request_id, str) or not self.request_id.strip():
-            raise ValueError("request_id must be non-blank")
-        if not isinstance(self.origin, CandidateOrigin):
-            raise TypeError("origin must be a CandidateOrigin")
-        if not isinstance(self.window, FitWindowIdentity):
-            raise TypeError("window must be a FitWindowIdentity")
-        object.__setattr__(
-            self,
-            "candidate_generation",
-            _nonnegative_int(self.candidate_generation, "candidate_generation"),
-        )
+        if not isinstance(self.request, FitRequest):
+            raise TypeError("request must be a FitRequest")
         if not isinstance(self.status, FitStatus):
             raise TypeError("status must be a FitStatus")
         if self.candidate_digest is not None:

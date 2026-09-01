@@ -36,9 +36,9 @@ def test_later_schema_versions_preserve_the_v4_logging_cutover():
 
     assert _apply_shape_migrations(settings, SETTINGS_SCHEMA_VERSION) is True
 
-    assert SETTINGS_SCHEMA_VERSION == 11
+    assert SETTINGS_SCHEMA_VERSION == 12
     assert settings == {
-        "schema_version": 11,
+        "schema_version": 12,
         "controller": {
             "selected": "mpc",
             "config": {

@@ -1,18 +1,23 @@
 import json
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from common.control_trace import ActuationMode, ResultStaleState
+import controller.runtime.runner as runner_module
+from common.control_trace import ActuationMode, AllocationClampReason, ResultStaleState
 from common.model_evidence import SessionSummaryEvidence
 from controller.applied_output import AppliedOutput, OutputSource
-from controller.base import ControllerLearningDiagnostics
-from controller.model_learning.contracts import FrameObservation
+from controller.base import ControllerLearningDiagnostics, PidTraceDiagnostics
+from controller.model_learning.contracts import CandidateOrigin, FrameObservation
+from controller.mpc_allocator import AllocationResult
 from controller.pid_sp import Controller as PidSpController
 from controller.runtime.runner import (
     ControllerUpdateResult,
+    ModelRestoreOutcome,
     SyncControllerRunner,
     _build_core,
     _capture_completed_result,
@@ -107,6 +112,104 @@ def test_sync_runner_float_output_has_no_fan():
 
     out = SyncControllerRunner(FloatCore()).latest_from(190.0)
     assert out.cycle_ratio == 0.25 and out.fan is None
+
+@pytest.mark.parametrize(
+    ("raw_output", "allocated_duty", "clamp_reason"),
+    [
+        pytest.param(-0.15963, 0.0, AllocationClampReason.AUGER_MIN, id="lower-bound"),
+        pytest.param(1.25, 1.0, AllocationClampReason.AUGER_MAX, id="upper-bound"),
+    ],
+)
+def test_sync_runner_uses_allocation_duty_and_preserves_raw_diagnostics(
+    raw_output,
+    allocated_duty,
+    clamp_reason,
+):
+    diagnostics = PidTraceDiagnostics(
+        observed_dt_seconds=5.0,
+        error=1.0,
+        proportional_term=raw_output,
+        integral_term=0.0,
+        derivative_term=0.0,
+        integral_accumulator=0.0,
+        integral_clamped=False,
+        derivative_input=0.0,
+        derivative_state=0.0,
+        proportional_band=100.0,
+        kp=1.0,
+        ki=0.0,
+        kd=0.0,
+        center=0.0,
+        previous_temperature=190.0,
+        previous_update_time=0.0,
+        raw_output=raw_output,
+        final_output=allocated_duty,
+    )
+    allocation = AllocationResult(
+        normalized_combustion_load=allocated_duty,
+        auger_duty=allocated_duty,
+        fan_duty=None,
+        u_max=1.0,
+        fan_min_pct=0.0,
+        fan_max_pct=0.0,
+        fan_enabled=False,
+        auger_clamp_reason=clamp_reason,
+        fan_clamp_reason=AllocationClampReason.NONE,
+    )
+
+    class AllocatedCore(_Core):
+        def update(self, temp):
+            return raw_output
+
+        def trace_diagnostics(self):
+            return diagnostics
+
+        def trace_allocation(self):
+            return allocation
+
+    out = SyncControllerRunner(AllocatedCore()).latest_from(190.0)
+
+    assert out.cycle_ratio == allocated_duty
+    assert out.diagnostics is diagnostics
+    assert out.diagnostics.raw_output == raw_output
+    assert out.allocation is allocation
+
+
+def test_sync_runner_preserves_normalized_fan_when_allocation_supplies_duty():
+    allocation = AllocationResult(
+        normalized_combustion_load=0.2,
+        auger_duty=0.2,
+        fan_duty=60.0,
+        u_max=1.0,
+        fan_min_pct=50.0,
+        fan_max_pct=100.0,
+        fan_enabled=True,
+        auger_clamp_reason=AllocationClampReason.NONE,
+        fan_clamp_reason=AllocationClampReason.NONE,
+    )
+
+    class FanCore(_Core):
+        def update(self, temp):
+            return {"cycle_ratio": 0.9, "fan": {"duty": 60.0}}
+
+        def trace_allocation(self):
+            return allocation
+
+    out = SyncControllerRunner(FanCore()).latest_from(190.0)
+
+    assert out.cycle_ratio == 0.2
+    assert out.fan == {"duty": 60.0}
+
+
+def test_sync_runner_uses_normalized_raw_demand_when_no_allocation():
+    class NoAllocationCore(_Core):
+        def update(self, temp):
+            return 0.4
+
+    out = SyncControllerRunner(NoAllocationCore()).latest_from(190.0)
+
+    assert out.cycle_ratio == 0.4
+    assert out.allocation is None
 
 
 def test_sync_runner_forwards_safety_cancellation_without_an_operator_command():
@@ -256,6 +359,87 @@ def test_sync_pid_sp_completed_update_captures_one_aligned_learning_status_snaps
     assert result.learning.as_json()["capture_sequence"] == 1
     assert result.status is not None
     assert runner.controller_state()["learning"] == result.learning.as_json()
+    assert result.allocation is not None
+    assert (
+        result.cycle_ratio,
+        result.allocation.normalized_combustion_load,
+        result.allocation.auger_duty,
+    ) == pytest.approx((result.cycle_ratio,) * 3)
+    assert result.allocation.fan_duty is None
+    assert result.allocation.u_max == 1.0
+    assert result.allocation.fan_enabled is False
+    assert result.allocation.auger_clamp_reason is AllocationClampReason.NONE
+    assert result.allocation.fan_clamp_reason is AllocationClampReason.NONE
+
+
+def test_sync_pid_sp_completed_frame_drains_one_observation_outcome():
+    settings = {
+        "controller": {
+            "selected": "pid_sp",
+            "config": {
+                "pid_sp": {
+                    "PB": 60.0,
+                    "Ti": 180.0,
+                    "Td": 45.0,
+                    "stable_window": 12,
+                    "center_factor": 0.001,
+                }
+            },
+        },
+        "globals": {"units": "F"},
+        "cycle_data": {"u_min": 0.1, "u_max": 0.9},
+    }
+    runner, status = build_runner(settings, {"primary_setpoint": 225.0})
+    assert status == "Active"
+    assert isinstance(runner, SyncControllerRunner)
+    runner.bind_evidence_context(0, "session", "cook")
+    observation = _frame(0)
+
+    submission = runner.complete_frame(
+        AppliedOutput(0.25, OutputSource.CONTROLLER, 20.0, requested=0.25),
+        observation,
+    )
+    drain = runner.drain_observation_outcomes()
+
+    assert drain.terminal_drops == (), tuple(drop.reason for drop in drain.terminal_drops)
+    assert [(envelope.submission_sequence, envelope.observation) for envelope in drain.envelopes] == [
+        (submission.submission_sequence, observation)
+    ]
+
+
+def test_build_core_injects_controller_owned_learning_dependencies_into_pid_sp():
+    settings = {
+        "controller": {
+            "selected": "pid_sp",
+            "config": {
+                "pid_sp": {
+                    "PB": 60.0,
+                    "Ti": 180.0,
+                    "Td": 45.0,
+                    "stable_window": 12,
+                    "center_factor": 0.001,
+                }
+            },
+        },
+        "globals": {"units": "F"},
+        "cycle_data": {},
+    }
+    persistence = object()
+    repository = object()
+    partition = lambda: "a" * 64
+
+    core, status = _build_core(
+        settings,
+        {"primary_setpoint": 225.0},
+        model_persistence=persistence,
+        trajectory_repository=repository,
+        fit_partition_digest=partition,
+    )
+
+    assert status == "Active"
+    assert core._model_persistence is persistence
+    assert core._trajectory_repository is repository
+    assert core._fit_partition_digest is partition
 
 
 def test_completed_result_rejects_an_invalid_learning_capability_value():
@@ -351,6 +535,58 @@ def test_build_core_logs_on_load_failure_when_logger_given():
     assert len(logger.exceptions) == 1
 
 
+def test_non_mpc_local_core_keeps_neutral_optional_projections(monkeypatch) -> None:
+    class LocalCore:
+        def __init__(self, config, units, cycle_data, *, logger=None):
+            del config, units, cycle_data, logger
+            self.target = None
+
+        def set_target(self, value):
+            self.target = value
+
+        def update(self, _temperature):
+            return 0.25
+
+        def wants_async(self):
+            return False
+
+        def commands_fan(self):
+            return False
+
+        def actuation_mode(self):
+            return ActuationMode.FRAMED_PULSE
+
+        def get_control_period(self):
+            return None
+
+    monkeypatch.setattr(
+        runner_module.importlib,
+        "import_module",
+        lambda _name: SimpleNamespace(Controller=LocalCore),
+    )
+    settings = {
+        "controller": {"selected": "local", "config": {"local": {}}},
+        "globals": {"units": "C"},
+        "cycle_data": {},
+    }
+
+    core, status = _build_core(settings, {"primary_setpoint": 100})
+    result = _capture_completed_result(
+        core,
+        90.0,
+        1,
+        monotonic_clock=iter((1.0, 1.1)).__next__,
+        wall_clock=lambda: 2.0,
+    )
+
+    assert status == "Active"
+    assert result.diagnostics is None
+    assert result.learning is None
+    assert result.allocation is None
+    assert result.baseline_allocation is None
+    assert result.calibration is None
+
+
 def test_build_core_never_returns_active_when_set_target_raises():
     """Pins the contract ControllerBase.get_status() (controller/base.py) relies
     on: a core only reaches "Active" -- and only then gets wrapped in a runner
@@ -440,6 +676,7 @@ class _RecordingCore:
 
     def restore_model(self, snapshot):
         self.restored = snapshot
+        self.snapshot = snapshot
         return True
 
     def trace_diagnostics(self):
@@ -447,6 +684,246 @@ class _RecordingCore:
 
     def trace_allocation(self):
         return None
+
+
+class _RecordingMpcCoreWithoutObservationFailure(_RecordingCore):
+    def __init__(
+        self,
+        config=None,
+        units=None,
+        cycle_data=None,
+        *,
+        activation_persistence=None,
+        trajectory_repository=None,
+        fit_partition_digest=None,
+        grey_learning_process=None,
+        logger=None,
+    ):
+        del (
+            config,
+            units,
+            cycle_data,
+            activation_persistence,
+            trajectory_repository,
+            fit_partition_digest,
+            grey_learning_process,
+            logger,
+        )
+        super().__init__()
+        self.learning_calls = []
+        self.observation_outcome = {
+            "eligible": False,
+            "rejection_reasons": ("recorded-rejection",),
+            "forecast_origin_evidence": (),
+        }
+        self.schedule_result = True
+
+    def estimator_seed_requirements(self) -> tuple[float, int]:
+        self.learning_calls.append(("estimator_seed_requirements",))
+        return 60.0, 8
+
+    def bind_estimator_seed_source(
+        self,
+        source: Callable[[float, int], object] | None,
+    ) -> None:
+        self.learning_calls.append(("bind_estimator_seed_source", source))
+
+    def bind_learning_identity(
+        self,
+        session_id: str,
+        cook_id: str | None,
+        role_generation: int,
+    ) -> None:
+        self.learning_calls.append(
+            (
+                "bind_learning_identity",
+                session_id,
+                cook_id,
+                role_generation,
+            )
+        )
+
+    def observe_frame(self, observation: FrameObservation) -> object:
+        self.learning_calls.append(("observe_frame", observation))
+        return self.observation_outcome
+
+    def poll_learning_off_path(
+        self,
+        *,
+        live_origin: CandidateOrigin | None = None,
+    ) -> object:
+        self.learning_calls.append(("poll_learning_off_path", live_origin))
+        return object()
+
+    def schedule_corpus_fit(self, origin: CandidateOrigin) -> bool:
+        self.learning_calls.append(("schedule_corpus_fit", origin))
+        return self.schedule_result
+
+    def _schedule_corpus_fit_ticket(
+        self,
+        origin: CandidateOrigin,
+    ) -> str | None:
+        self.learning_calls.append(("_schedule_corpus_fit_ticket", origin))
+        return "fit-ticket"
+
+    def _consume_terminal_corpus_fit_ticket(
+        self,
+        ticket: str,
+        origin: CandidateOrigin,
+    ) -> bool:
+        self.learning_calls.append(
+            (
+                "_consume_terminal_corpus_fit_ticket",
+                ticket,
+                origin,
+            )
+        )
+        return True
+
+    def fail_corpus_fit(
+        self,
+        ticket: str,
+        error: BaseException | str,
+    ) -> None:
+        self.learning_calls.append(("fail_corpus_fit", ticket, error))
+
+    def get_learning_diagnostics(self) -> ControllerLearningDiagnostics:
+        self.learning_calls.append(("get_learning_diagnostics",))
+        return ControllerLearningDiagnostics(schema_version=1, state={})
+
+
+class _CompleteRecordingMpcCore(_RecordingMpcCoreWithoutObservationFailure):
+    def observation_failure(
+        self,
+        observation: FrameObservation,
+        error: BaseException,
+    ) -> object:
+        self.learning_calls.append(("observation_failure", observation, error))
+        return self.observation_outcome
+
+
+def test_sync_runner_installs_complete_mpc_learning_capability_once():
+    core = _CompleteRecordingMpcCore()
+
+    runner = SyncControllerRunner(core)
+
+    assert runner._learning_core is core
+
+
+def test_sync_runner_binds_mpc_identity_and_evidence_context_directly():
+    core = _CompleteRecordingMpcCore()
+    runner = SyncControllerRunner(core)
+    observation = _frame(0)
+
+    runner.bind_evidence_context(0, "session", "cook")
+    runner.observe_frame(observation)
+    envelope = runner.drain_observation_outcomes().envelopes[0]
+
+    assert core.learning_calls == [
+        ("bind_learning_identity", "session", "cook", 0),
+        ("observe_frame", observation),
+    ]
+    assert [(record.session_id, record.cook_id) for record in envelope.evidence] == [("session", "cook")]
+
+
+def test_sync_runner_observes_frame_through_mpc_capability_directly():
+    core = _CompleteRecordingMpcCore()
+    runner = SyncControllerRunner(core)
+    observation = _frame(0)
+
+    runner.observe_frame(observation)
+
+    assert core.learning_calls == [("observe_frame", observation)]
+
+
+def test_sync_runner_schedules_corpus_fit_through_mpc_capability_directly():
+    core = _CompleteRecordingMpcCore()
+    runner = SyncControllerRunner(core)
+
+    scheduled = runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+
+    assert scheduled is True
+    assert core.learning_calls == [("schedule_corpus_fit", CandidateOrigin.PASSIVE_ONLINE)]
+
+
+def test_sync_runner_reads_and_binds_estimator_seed_through_mpc_capability_directly():
+    core = _CompleteRecordingMpcCore()
+    runner = SyncControllerRunner(core)
+
+    def seed_source(window_seconds: float, minimum_samples: int) -> object:
+        return (window_seconds, minimum_samples)
+
+    requirements = runner.estimator_seed_requirements()
+    runner.bind_estimator_seed_source(seed_source)
+
+    assert requirements == (60.0, 8)
+    assert core.learning_calls == [
+        ("estimator_seed_requirements",),
+        ("bind_estimator_seed_source", seed_source),
+    ]
+
+
+def test_sync_runner_buffers_non_mpc_evidence_without_learning_calls():
+    runner = SyncControllerRunner(_RecordingCore())
+    observation = _frame(0)
+
+    submission = runner.observe_frame(observation)
+    assert runner.drain_observation_outcomes().terminal_drops == ()
+
+    runner.bind_evidence_context(0, "session", "cook")
+    drain = runner.drain_observation_outcomes()
+
+    assert [
+        (
+            drop.submission_sequence,
+            drop.configuration_generation,
+            drop.observation,
+            drop.reason,
+        )
+        for drop in drain.terminal_drops
+    ] == [
+        (
+            submission.submission_sequence,
+            0,
+            observation,
+            "runner-no-observation-outcome",
+        )
+    ]
+    assert runner._learning_core is None
+
+
+def test_build_core_rejects_selected_mpc_missing_observation_failure_before_observation(
+    monkeypatch,
+):
+    observation_calls = []
+
+    class MissingObservationFailureMpcCore(_RecordingMpcCoreWithoutObservationFailure):
+        def observe_frame(self, observation: FrameObservation) -> object:
+            observation_calls.append(observation)
+            raise RuntimeError("observation failure must never be reached")
+
+    monkeypatch.setattr(
+        runner_module.importlib,
+        "import_module",
+        lambda _name: SimpleNamespace(Controller=MissingObservationFailureMpcCore),
+    )
+    logger = _RecordingLogger()
+    settings = {
+        "controller": {"selected": "mpc", "config": {"mpc": {}}},
+        "globals": {"units": "C"},
+        "cycle_data": {},
+    }
+
+    core, status = _build_core(
+        settings,
+        {"primary_setpoint": 100},
+        logger=logger,
+    )
+
+    assert core is None
+    assert status == "Inactive"
+    assert observation_calls == []
+    assert any("missing required MPC learning capability" in message for message in logger.exceptions)
 
 
 def test_sync_runner_forwards_set_output():
@@ -457,35 +934,11 @@ def test_sync_runner_forwards_set_output():
     assert core.applied == [applied]
 
 
-def test_sync_runner_forwards_completed_frame_observations_immediately():
-    class ObservingCore(_RecordingCore):
-        def __init__(self):
-            super().__init__()
-            self.observations = []
-
-        def observe_frame(self, observation):
-            self.observations.append(observation)
-
-    core = ObservingCore()
-    observation = _frame(0)
-
-    SyncControllerRunner(core).observe_frame(observation)
-
-    assert core.observations == [observation]
-
-
-def test_sync_runner_ignores_observations_for_a_core_without_a_learner():
-    SyncControllerRunner(_RecordingCore()).observe_frame(_frame(0))
-
-
 def test_sync_runner_drains_the_exact_observation_outcome_once():
     outcome = {"role_generation": 0, "eligible": False}
-
-    class ObservingCore(_RecordingCore):
-        def observe_frame(self, observation):
-            return outcome
-
-    runner = SyncControllerRunner(ObservingCore())
+    core = _CompleteRecordingMpcCore()
+    core.observation_outcome = outcome
+    runner = SyncControllerRunner(core)
     runner.bind_evidence_context(0, "session", "cook")
     observation = _frame(0)
 
@@ -568,13 +1021,9 @@ def test_fake_runner_resets_only_delivered_eviction_counters():
 
 
 def test_sync_runner_reports_exact_outcome_evictions():
-    outcome = {"role_generation": 0, "eligible": False}
-
-    class ObservingCore(_RecordingCore):
-        def observe_frame(self, observation):
-            return outcome
-
-    runner = SyncControllerRunner(ObservingCore())
+    core = _CompleteRecordingMpcCore()
+    core.observation_outcome = {"role_generation": 0, "eligible": False}
+    runner = SyncControllerRunner(core)
     runner.bind_evidence_context(0, "session", "cook")
     for index in range(31):
         runner.observe_frame(_frame(index))
@@ -587,13 +1036,9 @@ def test_sync_runner_reports_exact_outcome_evictions():
 
 
 def test_sync_runner_bounds_exact_eviction_metadata_to_unresolved_capacity():
-    outcome = {"role_generation": 0, "eligible": False}
-
-    class ObservingCore(_RecordingCore):
-        def observe_frame(self, observation):
-            return outcome
-
-    runner = SyncControllerRunner(ObservingCore())
+    core = _CompleteRecordingMpcCore()
+    core.observation_outcome = {"role_generation": 0, "eligible": False}
+    runner = SyncControllerRunner(core)
     for index in range(91):
         runner.observe_frame(_frame(index))
 
@@ -610,23 +1055,62 @@ def test_sync_runner_bounds_exact_eviction_metadata_to_unresolved_capacity():
     assert released.dropped_sequences == tuple(range(2, 62))
 
 
-def test_sync_runner_forwards_snapshot_and_restore():
+def test_sync_runner_reports_restored_snapshot_as_effective_authority():
     core = _RecordingCore()
     runner = SyncControllerRunner(core)
     assert runner.get_model_snapshot() == {"revision": 3, "K": 700.0}
-    assert runner.restore_model({"revision": 9}) is True
+
+    outcome = runner.restore_model({"revision": 9})
+
+    assert outcome == ModelRestoreOutcome(
+        restore_token=None,
+        accepted=True,
+        effective_authority={"revision": 9},
+    )
     assert core.restored == {"revision": 9}
 
 
-def test_sync_runner_restore_model_propagates_rejection():
+def test_sync_runner_reports_configured_fallback_when_restore_is_rejected():
     class _RejectingCore(_RecordingCore):
         def restore_model(self, snapshot):
             self.restored = snapshot
             return False
 
     core = _RejectingCore()
-    assert SyncControllerRunner(core).restore_model({"revision": 1}) is False
+
+    outcome = SyncControllerRunner(core).restore_model({"revision": 1})
+
+    assert outcome == ModelRestoreOutcome(
+        restore_token=None,
+        accepted=False,
+        effective_authority={"revision": 3, "K": 700.0},
+    )
     assert core.restored == {"revision": 1}
+
+
+def test_sync_runner_reports_configured_fallback_while_legacy_restore_is_staged():
+    class _StagingCore(_RecordingCore):
+        def restore_model(self, snapshot):
+            self.restored = snapshot
+            self.snapshot = {
+                **self.snapshot,
+                "staged_candidate_revision": snapshot["revision"],
+            }
+            return True
+
+    core = _StagingCore()
+    configured = core.get_model_snapshot()
+    candidate = {"revision": 9, "installation_identity_digest": None}
+
+    outcome = SyncControllerRunner(core).restore_model(candidate)
+
+    assert outcome == ModelRestoreOutcome(
+        restore_token=None,
+        accepted=True,
+        effective_authority=configured,
+        staged_for_revalidation=True,
+    )
+    assert core.restored == candidate
 
 
 def test_controller_state_prefers_get_status():
@@ -675,12 +1159,28 @@ def test_sync_reconfigure_installs_complete_core_before_closing_replaced_core(mo
 
     old = CloseCore("old")
     new = CloseCore("new")
-    runner = SyncControllerRunner(old)
-    monkeypatch.setattr(
-        runner_module,
-        "_build_core",
-        lambda settings, control, logger=None: (new, "Active"),
-    )
+    process_owner = object()
+    runner = SyncControllerRunner(old, grey_learning_process=process_owner)
+
+    def build_core(
+        settings,
+        control,
+        *,
+        logger=None,
+        model_persistence=None,
+        trajectory_repository=None,
+        fit_partition_digest=None,
+        grey_learning_process=None,
+    ):
+        del settings, control
+        assert logger is None
+        assert model_persistence is None
+        assert trajectory_repository is None
+        assert fit_partition_digest is None
+        assert grey_learning_process is process_owner
+        return new, "Active"
+
+    monkeypatch.setattr(runner_module, "_build_core", build_core)
 
     assert runner.reconfigure({"controller": {"selected": "mpc"}}, {}) == "Active"
 

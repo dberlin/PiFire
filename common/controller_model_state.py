@@ -146,6 +146,15 @@ class ControllerModelStore:
             persisted = models.get(name)
             if persisted is None:
                 return None
+            if name == "pid_sp":
+                from controller.pid_sp_model_selection import (
+                    project_pid_sp_persisted_checkpoint,
+                )
+
+                try:
+                    project_pid_sp_persisted_checkpoint(persisted)
+                except (KeyError, TypeError, ValueError) as error:
+                    raise ValueError("malformed stored snapshot for controller 'pid_sp'") from error
             self._remember_owned(name, persisted, committed=True)
             snapshot = deepcopy(persisted)
             self._revisions[name] = persisted["revision"]
@@ -283,12 +292,15 @@ class ControllerModelStore:
         revision = owned_snapshot["revision"]
         with self._backend.latest_lock:
             latest = self._backend.latest.get(name)
-            if latest is None or revision > latest["revision"]:
+            committed_revision = self._backend.committed.get(name)
+            if (
+                latest is None
+                or revision > latest["revision"]
+                or (committed and revision == latest["revision"] and committed_revision == revision)
+            ):
                 self._backend.latest[name] = owned_snapshot
-            if committed:
-                committed_revision = self._backend.committed.get(name)
-                if committed_revision is None or revision > committed_revision:
-                    self._backend.committed[name] = revision
+            if committed and (committed_revision is None or revision > committed_revision):
+                self._backend.committed[name] = revision
 
     @staticmethod
     def _log_non_advancing(name, revision, baseline):

@@ -1,9 +1,12 @@
 export const LEARNING_SECTION_CLASS = "min-w-0 rounded-card border border-card-border bg-inset p-4";
 
 const STATUS_TONE: Record<string, string> = {
+  warming: "text-accent",
   "insufficient excitation": "text-warn",
   fitting: "text-accent",
   evaluating: "text-accent",
+  interrupted: "text-warn",
+  qualified: "text-ok",
   "ready for review": "text-ok",
   activating: "text-accent",
   active: "text-ok",

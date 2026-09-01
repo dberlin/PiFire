@@ -60,11 +60,9 @@ from common.web_contracts.core import (
     DismissWarningsResponse,
 )
 from common.web_contracts.learning import (
-    ModelActionRejected,
-    ModelActivationAccepted,
-    ModelActivationRequest,
     ModelEvidenceReport,
     ModelRollbackAccepted,
+    ModelRollbackRejected,
     ModelRollbackRequest,
     MpcCalibrationCommand,
     MpcCalibrationCommandResponse,
@@ -85,16 +83,13 @@ from common.web_contracts.wizard import (
     ProbeMapRequest,
     ProbeModuleCatalog,
 )
-from controller.model_learning.activation_service import (
-    ActivationAccepted,
-    ActivationRejected,
-    ActivationRejectionCategory,
-    ModelActivationService,
+from controller.model_learning.report import backend_learning_report, build_learning_artifact
+from controller.model_learning.rollback_service import (
+    ModelRollbackService,
     RollbackAccepted,
     RollbackRejected,
     RollbackRejectionCategory,
 )
-from controller.model_learning.report import backend_learning_report, build_learning_artifact
 from controller.pid_sp_learning import backend_pid_sp_learning_report
 
 from . import api_bp
@@ -294,22 +289,15 @@ def api_model_evidence_artifact():
     return Response(artifact, status=200, content_type="application/json; charset=utf-8")
 
 
-def _model_action_rejection(reason: str, status: int):
-    payload = ModelActionRejected(
+def _model_rollback_rejection(reason: str, status: int):
+    payload = ModelRollbackRejected(
         accepted=False,
         active_kind="grey-box",
-        error="model-activation-rejected",
+        error="model-rollback-rejected",
         detail=reason,
     )
     return jsonify(payload.model_dump(mode="json")), status
 
-
-_ACTIVATION_REJECTION_STATUS = {
-    ActivationRejectionCategory.CONFLICT: 409,
-    ActivationRejectionCategory.INVALID_DATA: 422,
-    ActivationRejectionCategory.PERSISTENCE_UNAVAILABLE: 503,
-    ActivationRejectionCategory.CLEANUP_FAILED: 503,
-}
 
 _ROLLBACK_REJECTION_STATUS = {
     RollbackRejectionCategory.CONFLICT: 409,
@@ -317,58 +305,23 @@ _ROLLBACK_REJECTION_STATUS = {
 }
 
 
-@api_bp.post("/model-evidence/activate")
-def api_model_evidence_activate():
-    """Durably prepare the exact reviewed grey pair; runtime alone may activate it."""
-    body = request.get_json(silent=True)
-    if not isinstance(body, dict) or set(body) != {"candidate_digest", "decision_id"}:
-        return _model_action_rejection(
-            "request must contain exactly candidate_digest and decision_id",
-            422,
-        )
-    try:
-        activation_request = ModelActivationRequest.model_validate(body, strict=True)
-    except ValidationError as error:
-        return _model_action_rejection(str(error), 422)
-
-    outcome = ModelActivationService().activate(
-        activation_request,
-        now_ms=int(time.time() * 1_000),
-    )
-    if isinstance(outcome, ActivationRejected):
-        return _model_action_rejection(
-            outcome.reason,
-            _ACTIVATION_REJECTION_STATUS[outcome.category],
-        )
-    assert isinstance(outcome, ActivationAccepted)
-    payload = ModelActivationAccepted(
-        accepted=True,
-        phase="prepared",
-        transaction_id=outcome.transaction_id,
-        decision_id=outcome.decision_id,
-        candidate_digest=outcome.candidate_digest,
-        role_generation=outcome.role_generation,
-    )
-    return jsonify(payload.model_dump(mode="json")), 200
-
-
 @api_bp.post("/model-evidence/rollback")
 def api_model_evidence_rollback():
     """Record an explicit operator rollback reason for immediate runtime fallback."""
     body = request.get_json(silent=True)
     if not isinstance(body, dict) or set(body) != {"reason"}:
-        return _model_action_rejection("request must contain exactly reason", 422)
+        return _model_rollback_rejection("request must contain exactly reason", 422)
     try:
         rollback_request = ModelRollbackRequest.model_validate(body, strict=True)
     except ValidationError as error:
-        return _model_action_rejection(str(error), 422)
+        return _model_rollback_rejection(str(error), 422)
 
-    outcome = ModelActivationService().rollback(
+    outcome = ModelRollbackService().rollback(
         rollback_request,
         now_ms=int(time.time() * 1_000),
     )
     if isinstance(outcome, RollbackRejected):
-        return _model_action_rejection(
+        return _model_rollback_rejection(
             outcome.reason,
             _ROLLBACK_REJECTION_STATUS[outcome.category],
         )

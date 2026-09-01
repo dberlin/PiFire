@@ -1,5 +1,6 @@
 """Behavioral contracts for the durable compact model-evidence ledger."""
 
+import json
 import sqlite3
 from dataclasses import replace
 from types import SimpleNamespace
@@ -11,6 +12,7 @@ from common.control_trace import AllocationClampReason, AmbientSource
 from common.model_evidence import (
     MODEL_EVIDENCE_SCHEMA_VERSION,
     ActivationEvidence,
+    ActivationLifecycleEvidence,
     AllocationEvidence,
     CalibrationSummaryEvidence,
     CandidateAssessmentEvidence,
@@ -19,8 +21,11 @@ from common.model_evidence import (
     FallbackEvidence,
     FitLifecycleEvidence,
     ForecastOriginEvidence,
+    ModelEvidenceDbRow,
     ModelEvidenceRecord,
+    PidSpFitDecisionEvidence,
     RollbackEvidence,
+    SchemaInvalidationEvidence,
     TimingDistributionEvidence,
 )
 from common.persistence.model_evidence import (
@@ -37,6 +42,47 @@ from common.persistence.model_evidence import (
 
 _DIGEST = "a" * 64
 _OTHER_DIGEST = "b" * 64
+
+
+_RETIRED_LIFECYCLE_EVIDENCE = (
+    (
+        EvidenceKind.FIT_LIFECYCLE,
+        FitLifecycleEvidence(
+            request_id="legacy-fit",
+            status="succeeded",
+            origin="passive-online",
+            policy="passive-auto",
+            fit_corpus_digest="legacy-window",
+        ),
+    ),
+    (
+        EvidenceKind.CANDIDATE_ASSESSMENT,
+        CandidateAssessmentEvidence(
+            decision_id="legacy-assessment",
+            origin="operator-calibration",
+            policy="operator-reviewed",
+            fit_accepted=True,
+            identifiability_accepted=True,
+            native_build="passed",
+            native_dry_solve="passed",
+            target_timing="passed",
+            confidence_accepted=True,
+        ),
+    ),
+    (
+        EvidenceKind.ACTIVATION_LIFECYCLE,
+        ActivationLifecycleEvidence(
+            decision_id="legacy-activation",
+            phase="prepared",
+            origin="cook-refit",
+            policy="cook-refit",
+        ),
+    ),
+    (
+        EvidenceKind.SCHEMA_INVALIDATION,
+        SchemaInvalidationEvidence(previous_schema_version=2, reason="legacy-schema"),
+    ),
+)
 
 
 def _forecast(evidence_id: str, timestamp_ms: int, *, sequence: int = 1) -> ModelEvidenceRecord:
@@ -387,7 +433,7 @@ def test_v1_timing_row_reads_with_unavailable_new_measurements(ds) -> None:
 
     record = read_model_evidence(session_id="session-a")[0]
 
-    assert MODEL_EVIDENCE_SCHEMA_VERSION == 3
+    assert MODEL_EVIDENCE_SCHEMA_VERSION == 4
     assert record.schema_version == 1
     assert isinstance(record.payload, TimingDistributionEvidence)
     assert record.payload.p99_ms is None
@@ -408,8 +454,8 @@ def test_current_grey_fit_and_candidate_evidence_round_trip_without_state_space_
             request_id="fit-request-a",
             status="succeeded",
             origin="passive-online",
-            policy="passive-auto",
-            window_id="window-a",
+            policy="causal-auto",
+            fit_corpus_digest="c" * 64,
         ),
     )
     assessment = ModelEvidenceRecord(
@@ -424,7 +470,7 @@ def test_current_grey_fit_and_candidate_evidence_round_trip_without_state_space_
         payload=CandidateAssessmentEvidence(
             decision_id="decision-a",
             origin="passive-online",
-            policy="passive-auto",
+            policy="causal-auto",
             fit_accepted=True,
             identifiability_accepted=True,
             native_build="passed",
@@ -438,6 +484,267 @@ def test_current_grey_fit_and_candidate_evidence_round_trip_without_state_space_
     assert read_model_evidence(session_id="session-a")[-2:] == [fit, assessment]
     assert "pole_magnitude" not in assessment.payload.__dataclass_fields__
     assert "state_space" not in assessment.model_dump_json()
+
+
+def test_current_fit_lifecycle_requires_a_corpus_sha256() -> None:
+    with pytest.raises(ValidationError, match="current fit corpus digest"):
+        ModelEvidenceRecord(
+            evidence_id="fit-invalid-corpus",
+            kind=EvidenceKind.FIT_LIFECYCLE,
+            session_id="session-a",
+            cook_id="cook-a",
+            timestamp_ms=399,
+            role_generation=4,
+            model_digest=_DIGEST,
+            provenance_digest=_OTHER_DIGEST,
+            payload=FitLifecycleEvidence(
+                request_id="fit-invalid-corpus",
+                status="succeeded",
+                origin="passive-online",
+                policy="causal-auto",
+                fit_corpus_digest="legacy-window",
+            ),
+        )
+
+
+@pytest.mark.parametrize(("kind", "payload"), _RETIRED_LIFECYCLE_EVIDENCE)
+def test_current_schema_rejects_retired_lifecycle_authority(kind, payload) -> None:
+    with pytest.raises(ValidationError, match="retired"):
+        ModelEvidenceRecord(
+            evidence_id=f"current-{kind.value}",
+            kind=kind,
+            session_id="session-a",
+            cook_id="cook-a",
+            timestamp_ms=400,
+            role_generation=4,
+            model_digest=_DIGEST,
+            provenance_digest=_OTHER_DIGEST,
+            payload=payload,
+        )
+
+
+def test_current_writer_revalidates_copied_retired_lifecycle_payload() -> None:
+    valid = ModelEvidenceRecord(
+        evidence_id="fit-current",
+        kind=EvidenceKind.FIT_LIFECYCLE,
+        session_id="session-a",
+        cook_id="cook-a",
+        timestamp_ms=400,
+        role_generation=4,
+        model_digest=_DIGEST,
+        provenance_digest=_OTHER_DIGEST,
+        payload=FitLifecycleEvidence(
+            request_id="fit-current",
+            status="succeeded",
+            origin="passive-online",
+            policy="causal-auto",
+            fit_corpus_digest="c" * 64,
+        ),
+    )
+    copied = valid.model_copy(update={"payload": _RETIRED_LIFECYCLE_EVIDENCE[0][1]})
+
+    with pytest.raises(ValueError, match="retired"):
+        copied.to_db_row()
+
+
+@pytest.mark.parametrize("schema_version", (1, 2, 3))
+@pytest.mark.parametrize(("kind", "payload"), _RETIRED_LIFECYCLE_EVIDENCE)
+def test_old_schemas_explicitly_round_trip_retired_lifecycle_vocabulary(
+    schema_version,
+    kind,
+    payload,
+) -> None:
+    record = ModelEvidenceRecord(
+        evidence_id=f"legacy-{schema_version}-{kind.value}",
+        kind=kind,
+        session_id="session-a",
+        cook_id="cook-a",
+        timestamp_ms=400,
+        role_generation=4,
+        model_digest=_DIGEST,
+        provenance_digest=_OTHER_DIGEST,
+        schema_version=schema_version,
+        payload=payload,
+    )
+
+    assert ModelEvidenceRecord.from_db_row(record.to_db_row()) == record
+
+
+@pytest.mark.parametrize("schema_version", (1, 2, 3, 4))
+def test_extended_payload_union_preserves_historical_evidence_round_trip(
+    schema_version,
+) -> None:
+    record = ModelEvidenceRecord(
+        evidence_id=f"historical-confidence-{schema_version}",
+        kind=EvidenceKind.CONFIDENCE_DECISION,
+        session_id="session-a",
+        cook_id="cook-a",
+        timestamp_ms=400,
+        role_generation=4,
+        model_digest=_DIGEST,
+        provenance_digest=_OTHER_DIGEST,
+        schema_version=schema_version,
+        payload=ConfidenceDecisionEvidence(
+            decision_id="historical-decision",
+            blocked=True,
+            reason="historical-reason",
+        ),
+    )
+
+    assert ModelEvidenceRecord.from_db_row(record.to_db_row()) == record
+
+
+def test_current_pid_sp_fit_decision_round_trips_exact_lineage() -> None:
+    payload = PidSpFitDecisionEvidence(
+        request_id="request-a",
+        controller="pid_sp",
+        origin="passive-online",
+        outcome="rejected",
+        reason="confirmation-pending:1/20",
+        request_bound=True,
+        fit_corpus_digest="c" * 64,
+        configuration_digest="d" * 64,
+        selected_form="fopdt",
+        candidate_digest="e" * 64,
+        parent_incumbent_digest="f" * 64,
+        parent_incumbent_generation=4,
+        candidate_generation=5,
+        confirmation_observed=1,
+        confirmation_candidate_digest="a" * 64,
+        episode_ids=("episode-a", "episode-b"),
+    )
+    record = ModelEvidenceRecord(
+        evidence_id="pid-sp-decision",
+        kind=EvidenceKind.PID_SP_FIT_DECISION,
+        session_id="session-a",
+        cook_id="cook-a",
+        timestamp_ms=401,
+        role_generation=7,
+        model_digest="e" * 64,
+        provenance_digest="c" * 64,
+        payload=payload,
+    )
+
+    assert ModelEvidenceRecord.from_db_row(record.to_db_row()) == record
+
+
+@pytest.mark.parametrize(
+    ("request_bound", "fit_corpus_digest"),
+    (
+        (False, "c" * 64),
+        (True, None),
+    ),
+)
+def test_pid_sp_request_binding_exactly_matches_corpus_attribution(
+    request_bound,
+    fit_corpus_digest,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match="request binding must match corpus attribution",
+    ):
+        PidSpFitDecisionEvidence(
+            request_id="request-a",
+            controller="pid_sp",
+            origin="passive-online",
+            outcome="disabled",
+            reason="identification-disabled",
+            request_bound=request_bound,
+            fit_corpus_digest=fit_corpus_digest,
+            configuration_digest="d" * 64,
+            selected_form=None,
+            candidate_digest=None,
+            parent_incumbent_digest=None,
+            confirmation_observed=0,
+        )
+
+
+def test_pid_sp_pre_request_terminal_has_no_fabricated_corpus_provenance() -> None:
+    payload = PidSpFitDecisionEvidence(
+        request_id="disabled-ticket",
+        controller="pid_sp",
+        origin="passive-online",
+        outcome="disabled",
+        reason="identification-disabled",
+        request_bound=False,
+        fit_corpus_digest=None,
+        configuration_digest="d" * 64,
+        selected_form=None,
+        candidate_digest=None,
+        parent_incumbent_digest=None,
+        confirmation_observed=0,
+    )
+    record = ModelEvidenceRecord(
+        evidence_id="pid-sp-disabled",
+        kind=EvidenceKind.PID_SP_FIT_DECISION,
+        session_id="session-a",
+        cook_id="cook-a",
+        timestamp_ms=401,
+        role_generation=7,
+        model_digest=None,
+        provenance_digest=None,
+        payload=payload,
+    )
+
+    restored = ModelEvidenceRecord.from_db_row(record.to_db_row())
+
+    assert restored == record
+    assert restored.provenance_digest is None
+    assert restored.payload.fit_corpus_digest is None
+
+
+def test_pid_sp_pre_request_terminal_cannot_claim_candidate_decision() -> None:
+    with pytest.raises(
+        ValueError,
+        match="only pre-request PID-SP terminal outcomes",
+    ):
+        PidSpFitDecisionEvidence(
+            request_id="request-a",
+            controller="pid_sp",
+            origin="passive-online",
+            outcome="rejected",
+            reason="confirmation-pending",
+            request_bound=False,
+            fit_corpus_digest=None,
+            configuration_digest="d" * 64,
+            selected_form=None,
+            candidate_digest=None,
+            parent_incumbent_digest=None,
+            confirmation_observed=0,
+        )
+
+
+def test_old_fit_window_row_migrates_to_corpus_lifecycle_identity() -> None:
+    row = ModelEvidenceDbRow(
+        evidence_id="legacy-fit-window",
+        session_id="session-a",
+        cook_id="cook-a",
+        timestamp_ms=401,
+        kind=EvidenceKind.FIT_LIFECYCLE.value,
+        role_generation=4,
+        model_digest=_DIGEST,
+        provenance_digest=_OTHER_DIGEST,
+        schema_version=3,
+        payload=json.dumps(
+            {
+                "request_id": "legacy-fit",
+                "status": "succeeded",
+                "origin": "passive-online",
+                "policy": "passive-auto",
+                "window_id": "session-a:1:99",
+                "error": None,
+                "payload_type": "fit_lifecycle",
+            }
+        ),
+    )
+
+    restored = ModelEvidenceRecord.from_db_row(row)
+
+    assert isinstance(restored.payload, FitLifecycleEvidence)
+    assert restored.payload.fit_corpus_digest == "session-a:1:99"
+    migrated_payload = json.loads(restored.to_db_row().payload)
+    assert migrated_payload["fit_corpus_digest"] == "session-a:1:99"
+    assert "window_id" not in migrated_payload
 
 
 def test_retired_schema_confidence_remains_audit_history_but_cannot_authorize_activation(ds):

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import collections
 import logging
 import math
 import time
@@ -33,11 +32,15 @@ from controller.mpc_config import (
     normalize_config,
     to_celsius,
 )
-from controller.mpc_model import GreyBoxEKF, GreyBoxKF, steady_combustion_load
+from controller.mpc_model import (
+    EstimatorSeed,
+    GreyBoxEKF,
+    GreyBoxKF,
+    steady_combustion_load,
+)
 from controller.runtime.context import EVENT_LOG_NAME
 
 _NATIVE_BOUND_TOLERANCE = 1e-6
-_HISTORY_MAX = 8640
 _LEARNED_RESIDUAL_WEIGHT = 1_000.0
 
 
@@ -179,7 +182,7 @@ class MpcStep:
 
 @dataclass(frozen=True, slots=True)
 class MpcOperatingState:
-    """Live physical/control state that survives numerical pair replacement."""
+    """Complete estimator-bearing state for same-model capture and restore."""
 
     set_point_c: float
     applied_combustion_load: float
@@ -187,7 +190,16 @@ class MpcOperatingState:
     measured_temperature_c: float | None
     delay_states: tuple[float, ...] | None
     disturbance: float
-    history: tuple[tuple[float, float, float], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class MpcModelIndependentState:
+    """Physical/control state transferable without assuming a model structure."""
+
+    set_point_c: float
+    applied_combustion_load: float
+    last_safe_combustion_load: float
+    measured_temperature_c: float | None
 
 
 def _authorized() -> bool:
@@ -320,8 +332,9 @@ class MpcCore:
         self._x_hat: npt.NDArray[np.float64] | None = None
         self._consecutive_policy_failures = 0
         self._native_failure_diagnostics: SolverDiagnostics | None = None
-        self._history: collections.deque[tuple[float, float, float]] = collections.deque(maxlen=_HISTORY_MAX)
         self._last_measured_temperature_c: float | None = None
+        self._trajectory_seed: EstimatorSeed | None = None
+        self._seed_anchor_pending = False
         self._model_revision = revision
 
     @classmethod
@@ -458,6 +471,50 @@ class MpcCore:
         self._close_resources = _RetryableResourceClose((close_resources,))
         if reset_estimate:
             self._x_hat = None
+            self._trajectory_seed = None
+            self._seed_anchor_pending = False
+
+    def estimator_seed_requirements(self) -> tuple[float, int]:
+        return (
+            _float_setting(self.config, "theta"),
+            _int_setting(self.config, "n_delay"),
+        )
+
+    def seed_from_trajectory(self, seed: EstimatorSeed) -> None:
+        """Reset model-dependent estimate state before its first solve."""
+
+        if not isinstance(seed, EstimatorSeed):
+            raise TypeError("seed must be an EstimatorSeed")
+        n_delay = _int_setting(self.config, "n_delay")
+        replayed_states = seed.delay_states
+        if seed.status in {"exact", "short"}:
+            if len(replayed_states) != n_delay:
+                raise ValueError("trajectory seed delay chain does not match configured MPC model")
+            delay_states: tuple[float, ...] | None = replayed_states
+        else:
+            if replayed_states:
+                raise ValueError("non-replayable trajectory seed cannot contain delay state")
+            delay_states = None
+        self._x_hat = self._estimator.reset(
+            self._applied_combustion_load,
+            seed.chamber_temperature_c,
+            delay_states=delay_states,
+            disturbance=seed.disturbance,
+        )
+        self._solver.reset()
+        self._last_measured_temperature_c = seed.chamber_temperature_c
+        self._consecutive_policy_failures = 0
+        self._native_failure_diagnostics = None
+        self._trajectory_seed = seed
+        self._seed_anchor_pending = True
+
+    @property
+    def estimator_seed_status(self) -> str | None:
+        return None if self._trajectory_seed is None else self._trajectory_seed.status
+
+    @property
+    def estimator_seed(self) -> EstimatorSeed | None:
+        return self._trajectory_seed
 
     def set_target(self, set_point: float) -> None:
         self._set_point_c = to_celsius(set_point, self.units)
@@ -531,7 +588,6 @@ class MpcCore:
         n_delay = _int_setting(self.config, "n_delay")
         state_names = tuple(f"q{index}" for index in range(n_delay)) + ("T_c", "d")
         self._last_measured_temperature_c = measured_c
-        self._history.append((time.time(), measured_c, applied_load))
         revision, metadata = self._model_authority()
         model_provenance = "adopted" if metadata is not None else "configured"
         identified = model_is_identified(self.config, metadata)
@@ -545,10 +601,14 @@ class MpcCore:
         raw_firing_load: float | None = None
         estimate_valid = False
         try:
-            x_hat = self._validated_estimate(
-                self._estimator.update(applied_load, measured_c),
-                n_delay,
-            )
+            if self._seed_anchor_pending:
+                x_hat = self._validated_estimate(self._x_hat, n_delay)
+                self._seed_anchor_pending = False
+            else:
+                x_hat = self._validated_estimate(
+                    self._estimator.update(applied_load, measured_c),
+                    n_delay,
+                )
             estimate_valid = True
             self._x_hat = x_hat
             disturbance = float(x_hat[-1])
@@ -704,8 +764,42 @@ class MpcCore:
             measured_temperature_c=self._last_measured_temperature_c,
             delay_states=delay_states,
             disturbance=disturbance,
-            history=tuple(self._history),
         )
+
+    def capture_model_independent_state(self) -> MpcModelIndependentState:
+        return MpcModelIndependentState(
+            set_point_c=self._set_point_c,
+            applied_combustion_load=self._applied_combustion_load,
+            last_safe_combustion_load=self._last_combustion_load,
+            measured_temperature_c=self._last_measured_temperature_c,
+        )
+
+    def adopt_model_independent_state(self, state: MpcModelIndependentState) -> None:
+        """Transfer physical control fields while retaining this model's delay state."""
+
+        if not isinstance(state, MpcModelIndependentState):
+            raise TypeError("state must be an MpcModelIndependentState")
+        estimate = self._x_hat
+        n_delay = _int_setting(self.config, "n_delay")
+        delay_states = None if estimate is None else tuple(float(value) for value in estimate[:n_delay])
+        disturbance = 0.0 if estimate is None else float(estimate[-1])
+        self._set_point_c = state.set_point_c
+        self._applied_combustion_load = state.applied_combustion_load
+        self._last_combustion_load = state.last_safe_combustion_load
+        self._last_raw_combustion_load = state.last_safe_combustion_load
+        self._last_equilibrium_load = None
+        self._last_residual_load = None
+        self._last_feasibility = None
+        self._last_measured_temperature_c = state.measured_temperature_c
+        self._x_hat = self._estimator.reset(
+            state.applied_combustion_load,
+            state.measured_temperature_c,
+            delay_states=delay_states,
+            disturbance=disturbance,
+        )
+        self._solver.reset()
+        self._consecutive_policy_failures = 0
+        self._native_failure_diagnostics = None
 
     def adopt_operating_state(self, state: MpcOperatingState) -> None:
         if not isinstance(state, MpcOperatingState):
@@ -721,8 +815,6 @@ class MpcCore:
         self._last_residual_load = None
         self._last_feasibility = None
         self._last_measured_temperature_c = state.measured_temperature_c
-        self._history.clear()
-        self._history.extend(state.history)
         self._x_hat = self._estimator.reset(
             state.applied_combustion_load,
             state.measured_temperature_c,
@@ -735,6 +827,8 @@ class MpcCore:
 
     def clear_estimate(self) -> None:
         self._x_hat = None
+        self._trajectory_seed = None
+        self._seed_anchor_pending = False
 
     @property
     def estimator(self) -> MpcEstimator:
@@ -787,10 +881,6 @@ class MpcCore:
     @property
     def close_complete(self) -> bool:
         return self._closed and self._close_resources is None
-
-    @property
-    def history(self) -> collections.deque[tuple[float, float, float]]:
-        return self._history
 
     def close(self) -> None:
         if self._closed and self._close_resources is None:

@@ -14,7 +14,6 @@ from controller.model_learning.contracts import (
     FitRequest,
     FitResult,
     FitStatus,
-    FitWindowIdentity,
     LearningStatus,
 )
 from controller.model_learning.evaluation import (
@@ -23,6 +22,7 @@ from controller.model_learning.evaluation import (
     ForecastOrigin,
     evaluate_forecasts,
 )
+from tests.unit.common._model_challenger_helpers import _corpus
 
 _INCUMBENT = "1" * 64
 _CHALLENGER = "2" * 64
@@ -69,62 +69,50 @@ def _winning_window(*, generation: int = 9) -> tuple[CompletedForecastOrigin, ..
     )
 
 
-def test_locked_model_learning_vocabularies_are_serialized_once() -> None:
+def test_current_model_learning_vocabularies_expose_only_causal_progress() -> None:
     assert {value.value for value in CandidateOrigin} == {
         "passive-online",
         "operator-calibration",
-        "cook-refit",
     }
-    assert {value.value for value in ActivationPolicy} == {
-        "passive-auto",
-        "operator-reviewed",
-        "cook-refit",
-    }
+    assert {value.value for value in ActivationPolicy} == {"causal-auto"}
     assert {value.value for value in LearningStatus} == {
+        "warming",
         "collecting",
-        "insufficient-excitation",
         "fitting",
         "evaluating",
-        "ready-for-review",
+        "interrupted",
+        "qualified",
         "activating",
         "active",
         "fallback",
         "error",
-        "schema-invalidated",
     }
     assert {value.value for value in FitStatus} == {"idle", "queued", "running", "succeeded", "failed", "stale"}
     assert {value.value for value in CheckStatus} == {"not-run", "pending", "passed", "failed"}
 
 
-def test_fit_request_and_result_preserve_the_exact_window_origin_and_generations() -> None:
-    window = FitWindowIdentity(
-        session_id="session-a",
-        cook_id="cook-a",
-        first_observation_sequence=17,
-        last_observation_sequence=81,
-        configuration_digest="3" * 64,
-        incumbent_digest=_INCUMBENT,
-        role_generation=4,
-    )
+def test_fit_request_and_result_preserve_exact_corpus_origin_and_generations() -> None:
+    corpus = _corpus("online-adaptation")
     request = FitRequest(
-        request_id="fit-17-81",
+        request_id="fit-corpus",
         origin=CandidateOrigin.OPERATOR_CALIBRATION,
-        window=window,
+        fit_corpus=corpus,
+        configuration_digest="3" * 64,
+        parent_incumbent_digest=_INCUMBENT,
+        parent_incumbent_generation=4,
         candidate_generation=9,
     )
     result = FitResult(
-        request_id=request.request_id,
-        origin=request.origin,
-        window=request.window,
-        candidate_generation=request.candidate_generation,
+        request=request,
         status=FitStatus.SUCCEEDED,
         candidate_digest=_CHALLENGER,
     )
 
-    assert result.window is window
-    assert result.origin is CandidateOrigin.OPERATOR_CALIBRATION
-    assert result.window.role_generation == 4
-    assert result.candidate_generation == 9
+    assert result.request is request
+    assert request.fit_corpus is corpus
+    assert request.origin is CandidateOrigin.OPERATOR_CALIBRATION
+    assert request.parent_incumbent_generation == 4
+    assert request.candidate_generation == 9
     with pytest.raises(FrozenInstanceError):
         request.candidate_generation = 10  # type: ignore[misc]
 

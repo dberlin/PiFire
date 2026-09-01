@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Protocol
 
 from common.model_evidence import ModelEvidenceRecord
 from common.persistence.model_evidence import ModelActivationState
-from controller.runtime.model_fitting import TeardownRefitOutcome
+from controller.model_learning.contracts import CandidateOrigin
 from controller.runtime.model_persistence import DurableActivationReceipt
 
 
@@ -26,8 +26,20 @@ class ModelLifecycleRunner(Protocol):
 
     def submit_activation_confidence(self, record: ModelEvidenceRecord) -> DurableActivationReceipt | None: ...
 
-    def stop_for_refit(self) -> bool | None: ...
+    def stop_and_retain_for_teardown(self) -> bool | None: ...
 
-    def finalize_cook_refit(self, outcome: TeardownRefitOutcome) -> bool: ...
+    def schedule_corpus_fit(self, origin: CandidateOrigin) -> bool: ...
 
-    def finish_teardown(self) -> None: ...
+    def record_corpus_fit_disabled(
+        self,
+        origin: CandidateOrigin,
+        reason: str,
+    ) -> bool: ...
+
+    def record_corpus_fit_failed(
+        self,
+        origin: CandidateOrigin,
+        reason: str,
+    ) -> bool: ...
+
+    def finish_teardown(self, finalizer: Callable[[], None] | None = None) -> None: ...

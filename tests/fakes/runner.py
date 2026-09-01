@@ -5,11 +5,11 @@ from typing import Any
 from common.control_trace import ActuationMode, ControllerType
 from common.model_evidence import ModelEvidenceRecord
 from common.persistence.model_evidence import ModelActivationState
-from controller.model_learning.contracts import FrameObservation
-from controller.runtime.model_fitting import TeardownRefitOutcome
+from controller.model_learning.contracts import CandidateOrigin, FrameObservation
 from controller.runtime.model_persistence import DurableActivationReceipt
 from controller.runtime.observation_buffer import ObservationOutcomeBuffer
 from controller.runtime.runner import (
+    ModelRestoreOutcome,
     ObservationOutcomeEnvelope,
     ObservationSubmission,
 )
@@ -30,6 +30,7 @@ class FakeControllerRunner:
         self._period = period
         self.submitted_temps = []
         self.restore_outcome = None
+        self.restore_token: str | None = None
         self.calibration_requests = []
         self.calibration_cancellations = []
         self._commands_fan = commands_fan
@@ -39,12 +40,13 @@ class FakeControllerRunner:
         self._configuration_revision = 0
         self.applied = []
         self.restored = []
+        self.seeds = []
         self.activation_restores = []
         self.activation_failures = []
         self.activation_rollbacks = []
         self.activation_events = []
         self.activation_confidences = []
-        self.finalized_refits = []
+        self.fit_requests = []
         self.finished_teardowns = 0
         self.snapshot: dict[str, Any] | None = None
         self.observations = []
@@ -56,14 +58,7 @@ class FakeControllerRunner:
         # `restored` and `applied` are separate lists and so cannot express
         # relative ordering between a restore and the report that follows it.
         self.calls = []
-        self.refits = 0
-        self.refit_raises = None
-        self.refit_verdict: object | None = None
         self.stops = 0
-        # How many stop() calls had happened at each refit_from_cook() call, so
-        # a test can hold the refit to after the worker was asked to stop
-        # without reading the two counters as if they were ordered.
-        self.stops_before_each_refit = []
         self.safety_ceiling_c = None
 
     def script(self, outputs):
@@ -73,6 +68,10 @@ class FakeControllerRunner:
 
     def set_target(self, setpoint):
         self.target = setpoint
+
+    def seed_operating_state(self, seed):
+        self.seeds.append(seed)
+        self.calls.append(("seed", seed))
 
     def set_safety_ceiling_c(self, ceiling_c):
         self.safety_ceiling_c = ceiling_c
@@ -141,6 +140,13 @@ class FakeControllerRunner:
     def drain_restore_outcome(self):
         outcome = self.restore_outcome
         self.restore_outcome = None
+        if isinstance(outcome, bool):
+            effective_authority = self.restored[-1] if outcome and self.restored else self.snapshot
+            return ModelRestoreOutcome(
+                restore_token=self.restore_token,
+                accepted=outcome,
+                effective_authority=effective_authority,
+            )
         return outcome
 
     def runs_async(self):
@@ -155,16 +161,23 @@ class FakeControllerRunner:
     def stop(self):
         self.stops += 1
 
-    def stop_for_refit(self) -> bool | None:
+    def stop_and_retain_for_teardown(self) -> bool | None:
         self.stop()
         return None
 
-    def finalize_cook_refit(self, outcome: TeardownRefitOutcome) -> bool:
-        self.finalized_refits.append(outcome)
+    def schedule_corpus_fit(self, origin: CandidateOrigin) -> bool:
+        return self._schedule_corpus_fit_after_barrier(origin, None)
+
+    def _schedule_corpus_fit_after_barrier(self, origin, before_schedule) -> bool:
+        if before_schedule is not None and not before_schedule():
+            return False
+        self.fit_requests.append(origin)
         return True
 
-    def finish_teardown(self) -> None:
+    def finish_teardown(self, finalizer=None) -> None:
         self.finished_teardowns += 1
+        if finalizer is not None:
+            finalizer()
 
     def set_output(self, applied):
         self.applied.append(applied)
@@ -202,17 +215,25 @@ class FakeControllerRunner:
     def get_model_snapshot(self):
         return self.snapshot
 
-    def restore_model(self, snapshot):
+    def restore_model(self, snapshot, *, restore_token: str | None = None):
+        self.restore_token = restore_token
         self.restored.append(snapshot)
         self.calls.append(("restore", snapshot))
-        return snapshot is not None
-
-    def refit_from_cook(self):
-        self.refits += 1
-        self.stops_before_each_refit.append(self.stops)
-        if self.refit_raises:
-            raise self.refit_raises
-        return self.refit_verdict
+        accepted = snapshot is not None
+        if self._wants_async and accepted:
+            return ModelRestoreOutcome(
+                restore_token=restore_token,
+                accepted=True,
+                effective_authority=None,
+                pending=True,
+            )
+        if accepted:
+            self.snapshot = snapshot
+        return ModelRestoreOutcome(
+            restore_token=restore_token,
+            accepted=accepted,
+            effective_authority=self.snapshot,
+        )
 
     def controller_state(self):
         return {"fake": True}

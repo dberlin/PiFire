@@ -96,59 +96,85 @@ interface ModelTableProps {
 }
 
 function ModelTable({ heading, model }: ModelTableProps) {
+  const parameters = model.selected.parameters;
   const rows =
-    model.form === "fopdt"
+    "K_i" in parameters
       ? [
           {
-            name: "K",
-            value: model.K,
-            unit: "°F per duty ratio",
-            meaning: "Steady-state temperature gain",
-          },
-          {
-            name: "tau",
-            value: model.tau,
-            unit: "seconds",
-            meaning: "Process time constant",
-          },
-          {
-            name: "theta",
-            value: model.theta,
-            unit: "seconds",
-            meaning: "Transport delay",
-          },
-        ]
-      : [
-          {
             name: "K_i",
-            value: model.K_i,
+            value: parameters.K_i,
             unit: "°F/s per duty ratio",
             meaning: "Integrating temperature gain",
           },
           {
             name: "c0",
-            value: model.c0,
+            value: parameters.c0,
             unit: "°F/s",
             meaning: "Integrating drift offset",
           },
           {
             name: "theta",
-            value: model.theta,
+            value: parameters.theta,
             unit: "seconds",
             meaning: "Transport delay",
           },
-        ];
+        ]
+      : "tau_1" in parameters
+        ? [
+            {
+              name: "K",
+              value: parameters.K,
+              unit: "°F per duty ratio",
+              meaning: "Steady-state temperature gain",
+            },
+            {
+              name: "tau_1",
+              value: parameters.tau_1,
+              unit: "seconds",
+              meaning: "Fast process time constant",
+            },
+            {
+              name: "tau_2",
+              value: parameters.tau_2,
+              unit: "seconds",
+              meaning: "Slow process time constant",
+            },
+            {
+              name: "theta",
+              value: parameters.theta,
+              unit: "seconds",
+              meaning: "Transport delay",
+            },
+          ]
+        : [
+            {
+              name: "K",
+              value: parameters.K,
+              unit: "°F per duty ratio",
+              meaning: "Steady-state temperature gain",
+            },
+            {
+              name: "tau",
+              value: parameters.tau,
+              unit: "seconds",
+              meaning: "Process time constant",
+            },
+            {
+              name: "theta",
+              value: parameters.theta,
+              unit: "seconds",
+              meaning: "Transport delay",
+            },
+          ];
 
   return (
     <section className={LEARNING_SECTION_CLASS}>
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h3 className="font-bold">{heading}</h3>
-        <p className="text-sm uppercase tracking-wide text-probe-label">{model.form}</p>
+        <p className="text-sm uppercase tracking-wide text-probe-label">{model.selected.form}</p>
       </div>
       <p className="mt-2 text-sm text-probe-label">Revision {model.revision}</p>
-      {model.identified_at_f !== undefined && (
-        <p className="mt-1 text-sm text-probe-label">Identified at: {model.identified_at_f} °F</p>
-      )}
+      <p className="mt-1 text-sm text-probe-label">Provenance: {model.provenance}</p>
       <div className="mt-3 overflow-x-auto">
         <table className="w-full border-collapse text-left text-sm">
           <thead className="text-probe-label">
@@ -286,6 +312,60 @@ function ActivePidSpLearningView({
               </p>
             </section>
           )}
+          {report.active_model && (
+            <section className={LEARNING_SECTION_CLASS}>
+              <h3 className="font-bold">Active learned model</h3>
+              <p className="mt-2">Active learned model: {report.active_model.form}</p>
+              <p className="mt-1 break-all font-mono text-xs text-probe-label">
+                {report.active_model.model_digest}
+              </p>
+            </section>
+          )}
+
+          {report.delay_evidence && (
+            <section className={LEARNING_SECTION_CLASS}>
+              <h3 className="font-bold">Delay evidence</h3>
+              <p className="mt-2">{report.delay_evidence.status}</p>
+              <p className="mt-1 text-sm text-probe-label">
+                Episodes: {report.delay_evidence.completed_episode_count}; evaluated through{" "}
+                {report.delay_evidence.evaluated_bound_s} seconds
+              </p>
+              {report.delay_evidence.raw_basin_lower_s === null ? (
+                <p className="mt-2">
+                  {report.delay_evidence.status === "no-physically-valid-delay-candidate" ||
+                  report.delay_evidence.blockers.includes("no-physically-valid-delay-candidate")
+                    ? "No physically valid delay basin"
+                    : "Delay basin not yet available"}
+                </p>
+              ) : (
+                <p className="mt-2">
+                  Basin: {report.delay_evidence.raw_basin_lower_s}–
+                  {report.delay_evidence.raw_basin_upper_s} seconds
+                </p>
+              )}
+            </section>
+          )}
+
+          {report.comparison && (
+            <section className={LEARNING_SECTION_CLASS}>
+              <h3 className="font-bold">Model comparison</h3>
+              <ul className="mt-2 grid gap-1">
+                {report.comparison.forms.map((form) => (
+                  <li key={form.form}>
+                    <span className="uppercase">{form.form}</span>:{" "}
+                    {form.basin_lower_s === null
+                      ? "Basin unavailable"
+                      : `${form.basin_lower_s}–${form.basin_upper_s} seconds`}
+                  </li>
+                ))}
+              </ul>
+              {report.comparison.primary_blocker && (
+                <p className="mt-2 text-sm text-probe-label">
+                  Blocker: {report.comparison.primary_blocker}
+                </p>
+              )}
+            </section>
+          )}
 
           {report.checkpoint && (
             <ModelTable heading="Durable checkpoint" model={report.checkpoint} />
@@ -331,7 +411,7 @@ function ActivePidSpLearningView({
                 </div>
                 <div>
                   <dt className="text-probe-label">Candidate count</dt>
-                  <dd>Candidates passing: {report.identifier.candidates_passing}</dd>
+                  <dd>Candidates passing: {report.identifier.raw_candidates_passing}</dd>
                 </div>
                 {report.confirmation && (
                   <div>
@@ -344,11 +424,11 @@ function ActivePidSpLearningView({
                 )}
                 <div>
                   <dt className="text-probe-label">Best residual</dt>
-                  <dd>Best residual: {report.identifier.best_residual}</dd>
+                  <dd>Best residual: {report.identifier.raw_best_residual}</dd>
                 </div>
                 <div>
                   <dt className="text-probe-label">Runner-up residual</dt>
-                  <dd>Runner-up residual: {report.identifier.runner_up_residual}</dd>
+                  <dd>Runner-up residual: {report.identifier.raw_runner_up_residual}</dd>
                 </div>
                 <div>
                   <dt className="text-probe-label">Distrust count</dt>
@@ -361,9 +441,7 @@ function ActivePidSpLearningView({
               </dl>
               <p className="mt-3 text-sm text-probe-label">
                 Trusted model:{" "}
-                {report.identifier.trusted === null
-                  ? "none"
-                  : `${report.identifier.trusted.form} revision ${report.identifier.trusted.revision}`}
+                {report.identifier.trusted === null ? "none" : report.identifier.trusted.form}
               </p>
             </section>
           )}
@@ -395,6 +473,14 @@ function ActivePidSpLearningView({
                 <div>
                   <dt className="text-probe-label">xd</dt>
                   <dd>xd: {report.predictor.xd} °F</dd>
+                </div>
+                <div>
+                  <dt className="text-probe-label">z0</dt>
+                  <dd>z0: {report.predictor.z0} °F</dd>
+                </div>
+                <div>
+                  <dt className="text-probe-label">zd</dt>
+                  <dd>zd: {report.predictor.zd} °F</dd>
                 </div>
               </dl>
               <p className="mt-3 text-sm text-probe-label">
