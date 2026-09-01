@@ -1,6 +1,7 @@
 import type { CookFileEvent, CookFileTotals } from "@pifire/core/contracts/content";
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { cleanup, render, screen, within } from "@testing-library/react";
+
 import { EventsTable } from "../../../../src/components/cookfiles/EventsTable";
 
 afterEach(cleanup);

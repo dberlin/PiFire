@@ -1,5 +1,6 @@
 import type { CookFileAsset } from "@pifire/core/contracts/content";
 import { useId, useState } from "react";
+
 import {
   assetThumbUrl,
   assetUrl,

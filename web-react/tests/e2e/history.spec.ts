@@ -1,6 +1,8 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
+
 import { expect, type Page, test } from "@playwright/test";
+
 import { API } from "./helpers";
 
 // Requires the prototype backend running (control.py + gunicorn on :5000).

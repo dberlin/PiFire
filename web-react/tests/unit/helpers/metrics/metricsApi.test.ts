@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
+
 import { fetchMetrics, metricsExportUrl } from "../../../../src/helpers/metrics/metricsApi";
 
 const fetchMock = rs.fn();

@@ -1,5 +1,6 @@
 import type { ProbeMap, ProbeModuleData } from "@pifire/core/contracts/wizard";
 import { expect, it } from "@rstest/core";
+
 import {
   addDevice,
   alnum,

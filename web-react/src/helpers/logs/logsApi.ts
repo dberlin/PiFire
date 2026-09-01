@@ -8,6 +8,7 @@
 
 import type { ApiEnvelope } from "@pifire/core/contracts/core";
 import type { LogFamily, LogsMetadata } from "@pifire/core/contracts/operations";
+
 import type { LogDelta } from "./logTypes";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";

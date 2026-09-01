@@ -2,6 +2,7 @@ import type { SaveFieldError, SettingsFlag } from "@pifire/core/settings/control
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 import { useRevalidator } from "react-router";
+
 import { normalizeApiBase, queryKeys } from "../query/keys";
 import { applySettings } from "./settingsApi";
 

@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+
 import type { Page } from "@playwright/test";
 
 // Landmark geometry for the dashboard's authored 1280x720 layout.

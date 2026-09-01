@@ -182,7 +182,12 @@ body,
 body {
   background: var(--page);
   color: var(--text);
-  font-family: "Barlow", "Barlow Semi Condensed", system-ui, -apple-system, sans-serif;
+  font-family:
+    "Barlow",
+    "Barlow Semi Condensed",
+    system-ui,
+    -apple-system,
+    sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 

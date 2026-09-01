@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+
 import { LearningDialog } from "../../../../src/components/dashboard/learning/LearningDialog";
 
 const DEFAULT_PROPS: React.ComponentProps<typeof LearningDialog> = {

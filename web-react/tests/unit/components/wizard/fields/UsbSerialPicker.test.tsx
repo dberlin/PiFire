@@ -1,6 +1,7 @@
 import type { SettingsDependency } from "@pifire/core/contracts/wizard";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+
 import { UsbSerialPicker } from "../../../../../src/components/wizard/fields/UsbSerialPicker";
 import { scan } from "../../../../../src/helpers/wizard/wizardApi";
 

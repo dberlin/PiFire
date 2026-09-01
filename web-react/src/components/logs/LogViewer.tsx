@@ -1,6 +1,8 @@
 import { LazyLog } from "@melloware/react-logviewer";
 import { useCallback, useEffect, useRef, useState } from "react";
+
 import { fetchLogDelta, fetchLogWhole } from "../../helpers/logs/logsApi";
+
 import "./logs.css";
 
 const POLL_MS = 3000;

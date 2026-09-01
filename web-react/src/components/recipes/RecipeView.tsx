@@ -1,5 +1,6 @@
 import type { RecipeDetail, RecipeStep } from "@pifire/core/contracts/content";
 import { Fragment, useEffect, useRef } from "react";
+
 import { FALLBACK_THUMB } from "../../helpers/files/fileTypes";
 import { assetUrl } from "../../helpers/files/recipeApi";
 

@@ -4,6 +4,7 @@ import type {
   SmartStartProfile,
 } from "@pifire/core/settings/settingsTypes";
 import { useOutletContext } from "react-router";
+
 import { setPath } from "../../../helpers/settings/delta";
 import { SettingsFieldErrorsProvider } from "../../../helpers/settings/fieldErrorContext";
 import { hasDcFan } from "../../../helpers/settings/platform";

@@ -5,6 +5,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { createMemoryRouter, Outlet, RouterProvider } from "react-router";
+
 import { ProbesTab } from "../../../../../src/components/settings/tabs/ProbesTab";
 import { testQueryClient } from "../../../test-utils";
 

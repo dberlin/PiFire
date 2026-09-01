@@ -6,6 +6,7 @@ import type {
   TunerPoint,
 } from "@pifire/core/contracts/operations";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
 import { useSettings } from "../../helpers/settings/useSettings";
 import {
   computeCoefficients,
@@ -18,6 +19,7 @@ import { AutoTuneCard } from "./AutoTuneCard";
 import { ProfileForm } from "./ProfileForm";
 import { SegmentCard } from "./SegmentCard";
 import { TunerChart } from "./TunerChart";
+
 import "./tuner.css";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";

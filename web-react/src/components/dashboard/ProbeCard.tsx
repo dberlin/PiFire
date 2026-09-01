@@ -1,5 +1,6 @@
 import type { ProbeCardView } from "@pifire/core/dashboard/deriveView";
 import type { CSSProperties } from "react";
+
 import { NotifyBell } from "./NotifyBell";
 
 /** Flask's four battery icons, as text: empty / half / three-quarters / full. */

@@ -1,4 +1,5 @@
 import { Navigate, type RouteObject } from "react-router";
+
 import { probeModulesLoader } from "../helpers/probes/probeMapRoutes";
 import { settingsLoader } from "../helpers/settings/settingsRoutes";
 import type { SettingsTabId } from "../helpers/settings/settingsTabs";
@@ -7,8 +8,8 @@ import { wizardLoader } from "../helpers/wizard/wizardRoutes";
 import { AdminPage } from "./admin/AdminPage";
 import { CookFilePage } from "./cookfiles/CookFilePage";
 import { DashboardRoute } from "./DashboardRoute";
-import { HydrateFallback } from "./HydrateFallback";
 import { HistoryPage } from "./history/HistoryPage";
+import { HydrateFallback } from "./HydrateFallback";
 import { EventsPage } from "./logs/EventsPage";
 import { MetricsPage } from "./metrics/MetricsPage";
 import { PelletsPage } from "./pellets/PelletsPage";

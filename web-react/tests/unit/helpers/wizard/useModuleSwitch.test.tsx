@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, renderHook, waitFor } from "@testing-library/react";
+
 import { useModuleSwitch } from "../../../../src/helpers/wizard/useModuleSwitch";
 
 const fetchModuleValues = rs.fn();

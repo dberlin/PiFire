@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
+
 import { AppPrefsProvider } from "../../../../src/components/AppPrefs";
 import { HydrateFallback } from "../../../../src/components/HydrateFallback";
 import { SettingsShell } from "../../../../src/components/settings/SettingsShell";

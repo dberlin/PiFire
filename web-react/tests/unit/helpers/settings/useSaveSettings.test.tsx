@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { createMemoryRouter, RouterProvider, useLoaderData } from "react-router";
+
 import { queryKeys } from "../../../../src/helpers/query/keys";
 import { queryClient } from "../../../../src/helpers/query/queryClient";
 
@@ -25,9 +26,8 @@ rs.mock("../../../../src/helpers/settings/settingsApi", () => ({
 
 // Imported after the mock is registered so useSaveSettings resolves its
 // `./settingsApi` dependency to the mocked module (mirrors settingsRoutes.test.ts).
-const { useSaveSettings, normalizeSaveError } = await import(
-  "../../../../src/helpers/settings/useSaveSettings"
-);
+const { useSaveSettings, normalizeSaveError } =
+  await import("../../../../src/helpers/settings/useSaveSettings");
 const { settingsLoader } = await import("../../../../src/helpers/settings/settingsRoutes");
 
 beforeEach(() => {

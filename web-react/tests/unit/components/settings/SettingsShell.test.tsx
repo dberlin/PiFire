@@ -10,6 +10,7 @@ import {
   useRevalidator,
   useRouteLoaderData,
 } from "react-router";
+
 import { AppPrefsProvider, useAppPrefs } from "../../../../src/components/AppPrefs";
 import { HydrateFallback } from "../../../../src/components/HydrateFallback";
 import { SettingsShell } from "../../../../src/components/settings/SettingsShell";

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
+
 import { behindText } from "../../../../src/helpers/update/behindText";
 
 describe("behindText", () => {

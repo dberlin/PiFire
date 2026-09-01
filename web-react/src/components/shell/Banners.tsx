@@ -1,6 +1,8 @@
 import type { ProbeHealthSummary } from "@pifire/core/dashboard/probeHealth";
 import { useState } from "react";
+
 import { dismissWarnings } from "../../helpers/shell/warningsApi";
+
 import "./shell.css";
 
 // Errors/warnings/critical strip. Source: dash.errors / dash.warnings /

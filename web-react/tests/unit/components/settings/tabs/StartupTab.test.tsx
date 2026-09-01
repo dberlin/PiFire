@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
+
 import { StartupTab } from "../../../../../src/components/settings/tabs/StartupTab";
 import { renderRoute } from "../../../test-utils";
 

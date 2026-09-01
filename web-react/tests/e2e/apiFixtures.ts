@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+
 import type { Page, Route } from "@playwright/test";
 
 const DIR = join("tests", "e2e", "fixtures");

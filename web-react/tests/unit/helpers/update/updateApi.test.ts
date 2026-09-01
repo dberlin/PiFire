@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
+
 import {
   changeBranch,
   fetchUpdateCheck,

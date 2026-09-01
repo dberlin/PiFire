@@ -6,6 +6,7 @@ import type {
   UpdateStatus,
 } from "@pifire/core/contracts/operations";
 import { useCallback, useEffect, useState } from "react";
+
 import { adminErrorText, systemAction } from "../../helpers/admin/adminApi";
 import { behindText } from "../../helpers/update/behindText";
 import {
@@ -25,6 +26,7 @@ import {
 import type { UpdateResult } from "../../helpers/update/updateTypes";
 import { ConfirmAction } from "../dashboard/ConfirmAction";
 import { StreamingLogPanel } from "../logs/StreamingLogPanel";
+
 import "./update.css";
 
 const refusalText = (r: UpdateResult<unknown>): string => {

@@ -1,6 +1,7 @@
 import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { cleanup, screen } from "@testing-library/react";
+
 import { PlatformTab } from "../../../../../src/components/settings/tabs/PlatformTab";
 import { renderRoute } from "../../../test-utils";
 

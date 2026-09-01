@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { computeAccessibleName } from "dom-accessibility-api";
+
 import { ColorField } from "../../../../../src/components/settings/fields/ColorField";
 import { SecretField } from "../../../../../src/components/settings/fields/SecretField";
 import { Select } from "../../../../../src/components/settings/fields/Select";

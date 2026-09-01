@@ -5,6 +5,7 @@ import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useLoaderData, useOutletContext, useRevalidator } from "react-router";
+
 import {
   applyProbeMap,
   readLiveProbeMap,

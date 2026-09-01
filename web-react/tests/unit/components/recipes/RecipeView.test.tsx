@@ -1,6 +1,7 @@
 import type { RecipeDetail } from "@pifire/core/contracts/content";
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { render, screen } from "@testing-library/react";
+
 import { RecipeView } from "../../../../src/components/recipes/RecipeView";
 
 const DETAIL: RecipeDetail = {

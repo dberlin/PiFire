@@ -6,7 +6,7 @@ UI, delivered as a **remote browser app**. Plan:
 
 This spike is the highest-signal slice — it de-risks the two hard problems:
 
-1. **The data/command contract** — it binds to PiFire's *existing* API (no backend
+1. **The data/command contract** — it binds to PiFire's _existing_ API (no backend
    change) with a read/write split: `listen_app_data` → `socket_dash_data` (SocketIO)
    for live data, and the REST command grammar `POST /api/set|cmd/…` → `process_command`
    → validated control deltas for commands. The connection and command-building
@@ -45,7 +45,7 @@ splash/sleep, responsive breakpoints — see the plan.
   `controlButtons.ts` next to `ControlButtons.tsx` is forbidden. On
   case-insensitive filesystems (macOS/Windows) both match `./ControlButtons`,
   and TypeScript's extension priority (`.ts` before `.tsx`) silently resolves
-  the import to the *logic* file — so the code builds on Linux and breaks on a
+  the import to the _logic_ file — so the code builds on Linux and breaks on a
   Mac. When a component's logic wants its own module, name it after what it
   exports (`buttonsForMode.ts`), never a case-variant of the component.
 - Tests: `*.test.tsx` = component tests (jsdom project), `*.test.ts` = pure

@@ -1,6 +1,7 @@
 import type { UpdateCheck } from "@pifire/core/contracts/operations";
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
+
 import { behindText } from "../../helpers/update/behindText";
 import { fetchUpdateCheck } from "../../helpers/update/updateApi";
 

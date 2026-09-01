@@ -1,6 +1,8 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+
 import type { APIRequestContext } from "@playwright/test";
 import { expect, test } from "@playwright/test";
+
 import {
   baselinePath,
   CAPTURING,

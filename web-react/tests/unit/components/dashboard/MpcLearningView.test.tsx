@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, type Mock, rs } from "@rst
 import { QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+
 import { MpcLearningView } from "../../../../src/components/dashboard/learning/MpcLearningView";
 import { testQueryClient } from "../../test-utils";
 

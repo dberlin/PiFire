@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
+
 import { BASE_URL, probeModulesLoader } from "../../../../src/helpers/probes/probeMapRoutes";
 
 let fetchMock: ReturnType<typeof rs.fn>;

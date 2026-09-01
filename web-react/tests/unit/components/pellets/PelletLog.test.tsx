@@ -1,6 +1,7 @@
 import type { PelletLogEntry, PelletProfile } from "@pifire/core/contracts/control";
 import { describe, expect, it, rs } from "@rstest/core";
 import { fireEvent, render, screen } from "@testing-library/react";
+
 import { PelletLog } from "../../../../src/components/pellets/PelletLog";
 
 const ARCHIVE: Record<string, PelletProfile> = {

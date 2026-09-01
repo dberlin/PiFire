@@ -14,11 +14,11 @@
     "src/helpers/settings/settingsDefaults.gen.ts",
     // Written by the registered Pydantic web-contract exporter. Formatting it
     // here would only be undone by the next `bun run gen:types`.
-    "schema/**"
+    "schema/**",
   ],
   // Import sorting is a gate, not a nicety: it was previously enforced and the
   // codebase is already sorted. Leaving this off would let imports drift.
   "sortImports": {},
   // On by default. Reordering hand-maintained package.json files is churn.
-  "sortPackageJson": false
+  "sortPackageJson": false,
 }

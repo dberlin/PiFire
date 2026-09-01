@@ -1,5 +1,6 @@
 import type { CookFileChartData } from "@pifire/core/contracts/content";
 import { describe, expect, test } from "@rstest/core";
+
 import {
   hasNumericTimes,
   toChartAnnotations,

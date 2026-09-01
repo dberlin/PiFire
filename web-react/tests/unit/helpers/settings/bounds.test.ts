@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
+
 import { clampToBounds } from "../../../../src/helpers/settings/bounds";
 
 describe("clampToBounds", () => {

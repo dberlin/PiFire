@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { cleanup, render, screen } from "@testing-library/react";
+
 import { PlaceholderStep } from "../../../../../src/components/wizard/steps/PlaceholderStep";
 
 afterEach(cleanup);

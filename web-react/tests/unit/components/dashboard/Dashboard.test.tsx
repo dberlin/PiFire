@@ -13,6 +13,7 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { type ReactElement, useState } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
+
 import { TimerBar } from "../../../../src/components/shell/TimerBar";
 import { queryKeys } from "../../../../src/helpers/query/keys";
 import { createQueryClient } from "../../../../src/helpers/query/queryClient";

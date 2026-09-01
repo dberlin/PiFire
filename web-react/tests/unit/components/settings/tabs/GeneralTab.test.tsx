@@ -3,6 +3,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useEffect, useState } from "react";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router";
+
 import { AppPrefsProvider } from "../../../../../src/components/AppPrefs";
 import { GeneralTab } from "../../../../../src/components/settings/tabs/GeneralTab";
 import { useSettingsDraftStore } from "../../../../../src/helpers/settings/settingsDrafts";

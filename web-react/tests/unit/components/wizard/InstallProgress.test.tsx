@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+
 import { InstallProgress } from "../../../../src/components/wizard/InstallProgress";
 
 const getStatusMock = rs.fn();
@@ -87,8 +88,11 @@ describe("InstallProgress", () => {
 
   it("ignores an in-flight getInstallStatus response that resolves after unmount", async () => {
     rs.useFakeTimers();
-    let resolveStatus: (value: { percent: number; status: string; output: string }) => void =
-      () => {};
+    let resolveStatus: (value: {
+      percent: number;
+      status: string;
+      output: string;
+    }) => void = () => {};
     getStatusMock.mockReturnValueOnce(
       new Promise((resolve) => {
         resolveStatus = resolve;

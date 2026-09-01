@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
+
 import { queryKeys } from "../../../../src/helpers/query/keys";
 
 // These tests pin the per-origin relationship that settings invalidation

@@ -2,6 +2,7 @@ import { type CommandClient, type CommandResult, createCommand } from "@pifire/c
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+
 import { TimerModal } from "../../../../src/components/shell/TimerModal";
 
 const OK: CommandResult = { ok: true, message: "" };

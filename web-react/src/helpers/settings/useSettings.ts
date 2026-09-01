@@ -1,5 +1,6 @@
 import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
 import { useQuery } from "@tanstack/react-query";
+
 import { normalizeApiBase, queryKeys } from "../query/keys";
 import { getSettings } from "./settingsApi";
 

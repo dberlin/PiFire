@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, normalize, parse, relative, resolve } from "node:path";
+
 import { describe, expect, it } from "@rstest/core";
 
 // Guard against case-insensitive-filesystem breakage (macOS/Windows): two

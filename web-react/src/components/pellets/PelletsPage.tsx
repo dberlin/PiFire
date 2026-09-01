@@ -1,5 +1,6 @@
 import type { PelletProfileFields } from "@pifire/core/contracts/control";
 import { useState } from "react";
+
 import {
   addProfile,
   deleteLog,
@@ -14,6 +15,7 @@ import {
 import { useShellState } from "../../helpers/shellContext";
 import { CurrentLoadCard } from "./CurrentLoadCard";
 import { PelletLog } from "./PelletLog";
+
 import "./pellets.css";
 import { ProfileEditor } from "./ProfileEditor";
 import { VocabTable } from "./VocabTable";

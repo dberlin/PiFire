@@ -1,5 +1,6 @@
 import type { ProbeMap, ProbeProfile } from "@pifire/core/contracts/wizard";
 import { useState } from "react";
+
 import {
   addProbe,
   deleteProbe,
@@ -8,6 +9,7 @@ import {
 } from "../../../helpers/wizard/probeReducer";
 import { ConfirmAction } from "../../dashboard/ConfirmAction";
 import { PortForm } from "./PortForm";
+
 import "./probes.css";
 
 export interface PortsCardProps {

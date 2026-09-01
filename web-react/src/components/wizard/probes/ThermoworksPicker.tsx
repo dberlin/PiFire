@@ -1,5 +1,6 @@
 import type { ThermoworksRow } from "@pifire/core/contracts/wizard";
 import { useState } from "react";
+
 import { scanThermoworks } from "../../../helpers/wizard/wizardApi";
 
 export interface ThermoworksPickerProps {

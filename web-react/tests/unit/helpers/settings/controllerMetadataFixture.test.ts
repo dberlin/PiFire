@@ -1,5 +1,6 @@
 import type { ControllerCatalog } from "@pifire/core/settings/controllerTypes";
 import { describe, expect, it } from "@rstest/core";
+
 import fixture from "../../../e2e/fixtures/controller-metadata.json";
 
 /**

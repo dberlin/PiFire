@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
+
 // The two pure helpers this component also uses -- thumbnailUrl and
 // cookFileDownloadUrl -- are kept REAL, so the URL contract the server enforces
 // is asserted here rather than restated by a stub.

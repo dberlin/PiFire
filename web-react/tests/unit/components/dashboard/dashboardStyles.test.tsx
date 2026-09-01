@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+
 import type { CommandClient, CommandResult } from "@pifire/core/command";
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
 import { CSS_TOKEN_NAME, SCALE, type SizeTokens } from "@pifire/core/dashboard/scale";
@@ -7,6 +8,7 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
+
 import { Dashboard } from "../../../../src/components/dashboard/Dashboard";
 import { FIT_QUERY } from "../../../../src/helpers/dashboard/hooks";
 import { testQueryClient } from "../../test-utils";

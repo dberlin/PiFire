@@ -2,6 +2,7 @@ import type { WizardState } from "@pifire/core/contracts/wizard";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useLoaderData, useNavigate } from "react-router";
+
 import { systemAction } from "../../helpers/admin/adminApi";
 import { queryKeys } from "../../helpers/query/keys";
 import { cancelWizard, finishWizard, saveDraft } from "../../helpers/wizard/wizardApi";
@@ -13,6 +14,7 @@ import { DisplayStep } from "./steps/DisplayStep";
 import { DistanceStep } from "./steps/DistanceStep";
 import { GrillPlatformStep } from "./steps/GrillPlatformStep";
 import { ProbesStep } from "./steps/ProbesStep";
+
 import "./wizard.css";
 
 const STEPS = ["welcome", "grillplatform", "probes", "display", "distance", "finish"] as const;

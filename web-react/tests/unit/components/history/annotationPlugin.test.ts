@@ -1,6 +1,7 @@
 import type { HistoryAnnotation } from "@pifire/core/contracts/content";
 import { describe, expect, rs, test } from "@rstest/core";
 import type uPlot from "uplot";
+
 import { annotationPlugin } from "../../../../src/components/history/annotationPlugin";
 
 // jsdom has no canvas, so the plot is a hand-built stand-in: a ctx of spies, a

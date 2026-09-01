@@ -1,5 +1,6 @@
 import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
 import { describe, expect, it } from "@rstest/core";
+
 import { hasDcFan } from "../../../../src/helpers/settings/platform";
 
 describe("hasDcFan", () => {

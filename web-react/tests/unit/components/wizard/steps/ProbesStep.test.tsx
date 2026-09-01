@@ -1,6 +1,7 @@
 import type { WizardState } from "@pifire/core/contracts/wizard";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+
 import { ProbesStep } from "../../../../../src/components/wizard/steps/ProbesStep";
 import type { WizardWorking } from "../../../../../src/helpers/wizard/wizardTypes";
 

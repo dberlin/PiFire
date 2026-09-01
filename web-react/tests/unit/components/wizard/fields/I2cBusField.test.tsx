@@ -1,6 +1,7 @@
 import type { I2CBusValue } from "@pifire/core/contracts/wizard";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+
 import { I2cBusField } from "../../../../../src/components/wizard/fields/I2cBusField";
 import { allStylesheets, classesStylingButtons } from "../../../../../src/helpers/cssCoverage";
 

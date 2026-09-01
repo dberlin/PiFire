@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import type uPlot from "uplot";
+
 import { tooltipPlugin } from "../../../../src/components/history/tooltipPlugin";
 
 describe("tooltipPlugin", () => {

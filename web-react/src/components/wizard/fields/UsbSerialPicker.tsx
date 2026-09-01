@@ -1,5 +1,6 @@
 import type { ScanResult, SettingsDependency } from "@pifire/core/contracts/wizard";
 import { useId, useState } from "react";
+
 import { DiscoveryPanel } from "../DiscoveryPanel";
 
 export interface UsbSerialPickerProps {

@@ -1,5 +1,6 @@
 import type { MetricRecord } from "@pifire/core/contracts/content";
 import { describe, expect, it } from "@rstest/core";
+
 import { metricRows, modeAccent } from "../../../../src/components/metrics/metricFields";
 
 //  A 90-second span, so timeinmode takes the minute form. Exactly 60 000 ms

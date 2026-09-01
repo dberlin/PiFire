@@ -1,9 +1,11 @@
 import type { CommandClient } from "@pifire/core/command";
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
 import { useState } from "react";
+
 import { useNow } from "../../helpers/clock";
 import { deriveTimer, formatRemaining } from "../../helpers/timer/timerState";
 import { TimerModal } from "./TimerModal";
+
 import "./shell.css";
 
 // Ported from templates/_macro_timer.html:1-29. Like the Flask bar this one is

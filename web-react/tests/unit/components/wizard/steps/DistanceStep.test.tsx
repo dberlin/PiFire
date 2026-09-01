@@ -1,6 +1,7 @@
 import type { WizardState } from "@pifire/core/contracts/wizard";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+
 import { DistanceStep } from "../../../../../src/components/wizard/steps/DistanceStep";
 import type { WizardWorking } from "../../../../../src/helpers/wizard/wizardTypes";
 

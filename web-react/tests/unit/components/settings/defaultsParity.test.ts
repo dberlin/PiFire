@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
+
 import { SETTINGS_DEFAULTS } from "../../../../src/helpers/settings/settingsDefaults.gen";
 
 // A sample of the values the tabs fall back to when the store carries no key

@@ -3,6 +3,7 @@ import { FIXTURE_DASH } from "@pifire/core/fixture";
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
+
 import { HopperGauge } from "../../../../src/components/dashboard/HopperGauge";
 
 afterEach(cleanup);

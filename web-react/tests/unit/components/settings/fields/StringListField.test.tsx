@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it, rs } from "@rstest/core";
 import { fireEvent, render, screen } from "@testing-library/react";
+
 import { StringListField } from "../../../../../src/components/settings/fields/StringListField";
 
 describe("StringListField", () => {

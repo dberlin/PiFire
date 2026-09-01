@@ -8,6 +8,7 @@
 //                                        output against the committed file
 import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+
 import { emitSettingsDefaults } from "./emitSettingsDefaults";
 import { emitWebContracts } from "./emitWebContracts";
 
@@ -21,14 +22,21 @@ interface Artifact {
 const ARTIFACTS: Artifact[] = [
   {
     out: "src/helpers/settings/settingsDefaults.gen.ts",
-    generate: async () =>
-      emitSettingsDefaults(JSON.parse(await readFile(SCHEMA_PATH, "utf8"))),
+    generate: async () => emitSettingsDefaults(JSON.parse(await readFile(SCHEMA_PATH, "utf8"))),
   },
 ];
 
 async function exportPydanticSchemas(check: boolean): Promise<void> {
   const child = Bun.spawn(
-    ["uv", "run", "--no-sync", "python", "-m", "common.web_contracts.export", check ? "--check" : "--write"],
+    [
+      "uv",
+      "run",
+      "--no-sync",
+      "python",
+      "-m",
+      "common.web_contracts.export",
+      check ? "--check" : "--write",
+    ],
     {
       cwd: REPOSITORY_ROOT,
       stdout: "inherit",

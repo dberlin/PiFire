@@ -2,12 +2,14 @@ import { projectProbeHealthList, summarizeProbeHealth } from "@pifire/core/dashb
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef } from "react";
 import { Outlet } from "react-router";
+
 import { normalizeApiBase, queryKeys } from "../../helpers/query/keys";
 import { useTimerVisibility } from "../../helpers/timer/timerVisibility";
 import { useLiveState } from "../../helpers/useLiveState";
 import { Banners } from "./Banners";
 import { NavBar } from "./NavBar";
 import { TimerBar } from "./TimerBar";
+
 import "./shell.css";
 
 const BASE_URL = normalizeApiBase(import.meta.env.PUBLIC_PIFIRE_URL || "");

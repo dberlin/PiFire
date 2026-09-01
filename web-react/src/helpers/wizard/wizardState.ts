@@ -6,6 +6,7 @@ import type {
   WizardSection,
   WizardState,
 } from "@pifire/core/contracts/wizard";
+
 import type { WizardWorking } from "./wizardTypes";
 
 export function initialWorking(state: WizardState): WizardWorking {

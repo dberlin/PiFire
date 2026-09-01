@@ -5,6 +5,7 @@ import type {
   WizardModuleData,
   WizardSection,
 } from "@pifire/core/contracts/wizard";
+
 import { type BusKind, isI2CBusValue } from "../../helpers/wizard/i2cBusTypes";
 import { scan } from "../../helpers/wizard/wizardApi";
 import { moduleImageUrl } from "../../helpers/wizard/wizardAssets";

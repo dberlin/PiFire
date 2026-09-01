@@ -1,9 +1,11 @@
 import type { LogFamily } from "@pifire/core/contracts/operations";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router";
+
 import { fetchLogFamilies } from "../../helpers/logs/logsApi";
 import { LogFilesTab } from "./LogFilesTab";
 import { LogViewer } from "./LogViewer";
+
 import "./logs.css";
 
 const EVENTS_STEM = "events";

@@ -1,5 +1,6 @@
 import type { WebUiBuildResponse } from "@pifire/core/contracts/core";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
+
 import { fetchBuildId } from "../../../src/helpers/useWebUiBuild";
 
 afterEach(() => {

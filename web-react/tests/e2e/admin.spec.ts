@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+
 import { stubAdmin } from "./apiFixtures";
 import { ensureStopped } from "./helpers";
 

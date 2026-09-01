@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { act, cleanup, renderHook } from "@testing-library/react";
+
 import { useTimerVisibility } from "../../../../src/helpers/timer/timerVisibility";
 
 afterEach(cleanup);

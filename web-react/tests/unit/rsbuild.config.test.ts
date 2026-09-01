@@ -1,5 +1,7 @@
 import { Agent } from "node:http";
+
 import { expect, test } from "@rstest/core";
+
 import config from "../../rsbuild.config";
 
 test("the API proxy never reuses a backend socket past Gunicorn's keep-alive", () => {

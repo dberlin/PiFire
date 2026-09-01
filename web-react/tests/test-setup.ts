@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect } from "@rstest/core";
 import * as matchers from "@testing-library/jest-dom/matchers";
 import { cleanup } from "@testing-library/react";
+
 import { assertConsoleClean, installConsoleGuard } from "./consoleGuard";
 
 expect.extend(matchers);

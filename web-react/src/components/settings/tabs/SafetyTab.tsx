@@ -1,4 +1,5 @@
 import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
+
 import { setPath } from "../../../helpers/settings/delta";
 import { SettingsFieldErrorsProvider } from "../../../helpers/settings/fieldErrorContext";
 import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";

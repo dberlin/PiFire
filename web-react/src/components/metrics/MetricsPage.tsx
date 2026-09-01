@@ -1,8 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
+
 import { fetchMetrics, metricsExportUrl } from "../../helpers/metrics/metricsApi";
 import { queryKeys } from "../../helpers/query/keys";
 import { unwrap } from "../../helpers/query/unwrap";
 import { MetricCard } from "./MetricCard";
+
 import "./metrics.css";
 
 // Same-origin, matching every other module. Deliberately NOT `targetUrl` from

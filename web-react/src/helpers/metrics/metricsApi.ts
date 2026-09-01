@@ -5,6 +5,7 @@
 
 import type { MetricsPayload } from "@pifire/core/contracts/content";
 import type { ApiEnvelope } from "@pifire/core/contracts/core";
+
 import type { MetricsResult } from "./metricsTypes";
 
 const BASE_URL = import.meta.env.PUBLIC_PIFIRE_URL || "";

@@ -4,6 +4,7 @@ import type {
   PelletProfileFields,
 } from "@pifire/core/contracts/control";
 import { useState } from "react";
+
 import { ConfirmAction } from "../dashboard/ConfirmAction";
 import { Select } from "../settings/fields/Select";
 

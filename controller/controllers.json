@@ -76,9 +76,7 @@
         }
       },
       "dependencies": {
-        "modules": [
-          "numpy"
-        ]
+        "modules": ["numpy"]
       },
       "config": [
         {

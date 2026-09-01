@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
+
 import { stripLoggerPrefix } from "../../../../src/helpers/logs/loggerPrefix";
 
 describe("stripLoggerPrefix", () => {

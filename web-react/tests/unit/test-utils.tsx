@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { createMemoryRouter, Outlet, RouterProvider } from "react-router";
+
 import { AppPrefsProvider } from "../../src/components/AppPrefs";
 import { useSettingsDraftStore } from "../../src/helpers/settings/settingsDrafts";
 

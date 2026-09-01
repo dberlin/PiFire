@@ -1,4 +1,5 @@
 import type { ConfigOption, WireValue } from "@pifire/core/contracts/wizard";
+
 import { Field } from "../settings/fields/Field";
 
 export interface ConfigOptionFieldProps {

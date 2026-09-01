@@ -1,5 +1,6 @@
 import type { I2CBusValue, ScanResult, SettingsDependency } from "@pifire/core/contracts/wizard";
 import { useId, useState } from "react";
+
 import {
   BUS_KIND_LABELS,
   BUS_KINDS,

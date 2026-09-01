@@ -1,6 +1,7 @@
 import type { ControllerCatalog } from "@pifire/core/settings/controllerTypes";
 import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
 import { describe, expect, it } from "@rstest/core";
+
 import { readSelected } from "../../../../src/helpers/settings/controllerSelection";
 
 const definitionFields = {

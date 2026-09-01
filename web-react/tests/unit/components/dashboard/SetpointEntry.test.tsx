@@ -1,6 +1,7 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+
 import { SetpointEntry } from "../../../../src/components/dashboard/SetpointEntry";
 
 /** The number the modal is currently showing. */

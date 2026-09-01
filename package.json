@@ -1,7 +1,11 @@
 {
   "name": "pifire",
   "private": true,
-  "workspaces": ["web-react", "packages/*", "mobile"],
+  "workspaces": [
+    "web-react",
+    "packages/*",
+    "mobile"
+  ],
   "scripts": {
     "typecheck": "bun run --filter '*' typecheck",
     "test": "bun run --filter '*' test",

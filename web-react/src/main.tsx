@@ -1,5 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+
 // Self-hosted Barlow, bundled by rsbuild -- was loaded from fonts.googleapis.com
 // (index.html), which an offline Pi cannot reach: the UI silently fell back to
 // system-ui and the screenshot fidelity gates saw the wrong glyphs. Weights match
@@ -13,6 +14,7 @@ import "@fontsource/barlow-semi-condensed/600.css";
 import "@fontsource/barlow-semi-condensed/700.css";
 import "@fontsource/barlow-semi-condensed/800.css";
 import App from "./components/App";
+
 import "./theme.css";
 import "./components/dashboard/dashboard.css";
 import "./components/settings/settings.css";

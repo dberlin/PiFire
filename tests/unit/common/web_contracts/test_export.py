@@ -142,7 +142,7 @@ def test_typescript_write_removes_nested_unexpected_generated_files(tmp_path):
     assert check_result.returncode == 0, check_result.stderr
 
 
-def test_typescript_output_is_biome_clean(tmp_path):
+def test_typescript_output_is_formatter_clean(tmp_path):
     web_react_root = tmp_path / "web-react"
     manifest_path = web_react_root / "schema/contracts/manifest.json"
     manifest_path.parent.mkdir(parents=True)
@@ -184,27 +184,28 @@ def test_typescript_output_is_biome_clean(tmp_path):
         text=True,
     )
     assert write_result.returncode == 0, write_result.stdout + write_result.stderr
-    # `biome check <path>` resolves a real on-disk path to an absolute path
-    # via cwd before matching it against the config's includes, so a plain
-    # tmp-dir target (unrelated to either biome.jsonc's directory or any
-    # discoverable VCS root) never matches and silently falls back to Biome's
-    # built-in defaults (e.g. tabs) instead of this project's. stdin mode
-    # sidesteps that — no real file is read or written, `--write` just
-    # controls whether fixes land on stdout — but Biome's config/root
+    # A formatter resolves a real on-disk path against cwd before matching it
+    # to a config, so a plain tmp-dir target (unrelated to .oxfmtrc.jsonc's
+    # directory or any discoverable VCS root) never matches and silently falls
+    # back to built-in defaults (e.g. tabs) instead of this project's. stdin
+    # mode sidesteps that — no real file is read or written — but config
     # resolution still keys off `cwd`, so run it from the REAL web-react
     # directory (like the emitter itself does) with the same "../packages/..."
-    # relative shape, and compare the (auto-fixed) output back against the
+    # relative shape, and compare the formatted output back against the
     # sandboxed input: identical means clean.
+    #
+    # Only formatting is asserted. oxlint has no stdin mode, and these files
+    # open with `/* oxlint-disable */` anyway, so a lint assertion here would
+    # pass for every possible input — which is what the eslint half of this
+    # test used to do.
     generated_content = generated.read_text(encoding="utf-8")
-    biome_result = subprocess.run(
+    format_result = subprocess.run(
         [
-            str(repository_root / "web-react/node_modules/.bin/biome"),
-            "check",
-            "--config-path",
-            str(repository_root / "web-react/biome.jsonc"),
-            "--stdin-file-path",
+            str(repository_root / "web-react/node_modules/.bin/oxfmt"),
+            "-c",
+            str(repository_root / "web-react/.oxfmtrc.jsonc"),
+            "--stdin-filepath",
             "../packages/pifire-core/src/contracts/lint.gen.ts",
-            "--write",
         ],
         cwd=repository_root / "web-react",
         input=generated_content,
@@ -212,23 +213,7 @@ def test_typescript_output_is_biome_clean(tmp_path):
         capture_output=True,
         text=True,
     )
-    biome_clean = biome_result.returncode == 0 and biome_result.stdout == generated_content
-    eslint_result = subprocess.run(
-        [
-            str(repository_root / "web-react/node_modules/.bin/eslint"),
-            "--stdin",
-            "--stdin-filename",
-            "lint.gen.ts",
-            "--max-warnings",
-            "0",
-        ],
-        cwd=repository_root / "web-react",
-        input=generated_content,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    formatter_clean = format_result.returncode == 0 and format_result.stdout == generated_content
 
     assert write_result.returncode == 0, write_result.stderr
-    assert biome_clean, biome_result.stdout + biome_result.stderr
-    assert eslint_result.returncode == 0, eslint_result.stdout + eslint_result.stderr
+    assert formatter_clean, format_result.stdout + format_result.stderr

@@ -1,6 +1,7 @@
 import type { ControllerCatalog } from "@pifire/core/settings/controllerTypes";
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
+
 import { WorkModeTab } from "../../../../../src/components/settings/tabs/WorkModeTab";
 import { renderRoute } from "../../../test-utils";
 

@@ -2,6 +2,7 @@ import type { Ingredient, Instruction, RecipeStep } from "@pifire/core/contracts
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+
 import * as actualRecipeApi from "../../../../src/helpers/files/recipeApi" with {
   rstest: "importActual",
 };
@@ -16,9 +17,8 @@ rs.mock("../../../../src/helpers/files/recipeApi", () => ({
   deleteInstruction: (...args: unknown[]) => deleteInstructionMock(...args),
 }));
 
-const { InstructionsEditor } = await import(
-  "../../../../src/components/recipes/InstructionsEditor"
-);
+const { InstructionsEditor } =
+  await import("../../../../src/components/recipes/InstructionsEditor");
 
 function ingredient(overrides: Partial<Ingredient> = {}): Ingredient {
   return { name: "Salt", quantity: "1 tsp", assets: [], ...overrides };

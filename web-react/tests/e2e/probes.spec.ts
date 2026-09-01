@@ -12,6 +12,7 @@
 // or carries exact: true. "Save probe configuration" and "Save" are different
 // buttons on this page; do not shorten the name.
 import { expect, test } from "@playwright/test";
+
 import { ensureStopped, expectCurrentMatchesProbeMap } from "./helpers";
 
 let original: unknown;

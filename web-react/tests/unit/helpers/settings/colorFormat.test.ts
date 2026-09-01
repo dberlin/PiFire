@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
+
 import { hexToRgbString, rgbStringToHex } from "../../../../src/helpers/settings/colorFormat";
 
 describe("colorFormat", () => {

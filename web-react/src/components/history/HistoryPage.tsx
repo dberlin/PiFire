@@ -2,6 +2,7 @@ import { hasPlottableHistory, toChartInput } from "@pifire/core/history/historyA
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router";
+
 import { fetchHistoryChart } from "../../helpers/history/historyApi";
 import { queryKeys } from "../../helpers/query/keys";
 import { useSettings } from "../../helpers/settings/useSettings";

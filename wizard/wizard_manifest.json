@@ -3451,9 +3451,7 @@
         "image": "ili9341-ky040.png",
         "py_dependencies": ["luma.lcd>=2.11.0", "pyky040>=0.1.4", "pillow>=11.1.0"],
         "apt_dependencies": [],
-        "command_list": [
-          ["sudo", "python", "board-config.py", "-s"]
-        ],
+        "command_list": [["sudo", "python", "board-config.py", "-s"]],
         "settings_dependencies": {},
         "config": [
           {
@@ -3487,9 +3485,7 @@
         "image": "ili9341-ky040.png",
         "py_dependencies": ["luma.lcd>=2.11.0", "pyky040>=0.1.4", "pillow>=11.1.0"],
         "apt_dependencies": [],
-        "command_list": [
-          ["sudo", "python", "board-config.py", "-s"]
-        ],
+        "command_list": [["sudo", "python", "board-config.py", "-s"]],
         "settings_dependencies": {},
         "config": [
           {
@@ -3603,9 +3599,7 @@
           "pyky040>=0.1.4"
         ],
         "apt_dependencies": [],
-        "command_list": [
-          ["sudo", "python", "board-config.py", "-s"]
-        ],
+        "command_list": [["sudo", "python", "board-config.py", "-s"]],
         "settings_dependencies": {
           "buttonslevel": {
             "friendly_name": "Button Level",
@@ -3680,9 +3674,7 @@
         "image": "ili9488-ky040.png",
         "py_dependencies": ["luma.lcd>=2.11.0", "pyky040>=0.1.4", "pillow>=11.1.0"],
         "apt_dependencies": [],
-        "command_list": [
-          ["sudo", "python", "board-config.py", "-s"]
-        ],
+        "command_list": [["sudo", "python", "board-config.py", "-s"]],
         "settings_dependencies": {},
         "config": [
           {
@@ -3716,9 +3708,7 @@
         "image": "ili9488-ky040.png",
         "py_dependencies": ["luma.lcd>=2.11.0", "pyky040>=0.1.4", "pillow>=11.1.0"],
         "apt_dependencies": [],
-        "command_list": [
-          ["sudo", "python", "board-config.py", "-s"]
-        ],
+        "command_list": [["sudo", "python", "board-config.py", "-s"]],
         "settings_dependencies": {},
         "config": [
           {
@@ -3868,9 +3858,7 @@
         "image": "st7789e.png",
         "py_dependencies": ["numpy>=1.26.4", "st7789>=1.0.1", "pyky040>=0.1.4", "pillow>=11.1.0"],
         "apt_dependencies": [],
-        "command_list": [
-          ["sudo", "python", "board-config.py", "-s"]
-        ],
+        "command_list": [["sudo", "python", "board-config.py", "-s"]],
         "settings_dependencies": {},
         "config": [
           {
@@ -3976,9 +3964,7 @@
           "pyky040>=0.1.4"
         ],
         "apt_dependencies": [],
-        "command_list": [
-          ["sudo", "python", "board-config.py", "-s"]
-        ],
+        "command_list": [["sudo", "python", "board-config.py", "-s"]],
         "settings_dependencies": {},
         "config": [
           {
@@ -4125,9 +4111,7 @@
         "image": "st7789p.png",
         "py_dependencies": ["luma.lcd>=2.11.0", "pyky040>=0.1.4", "pillow>=11.1.0"],
         "apt_dependencies": [],
-        "command_list": [
-          ["sudo", "python", "board-config.py", "-s"]
-        ],
+        "command_list": [["sudo", "python", "board-config.py", "-s"]],
         "settings_dependencies": {},
         "config": [
           {
@@ -4262,12 +4246,7 @@
           "pygame-ce>=2.5.7",
           "pyside6>=6.11.1"
         ],
-        "apt_dependencies": [
-          "lightdm",
-          "libsdl2-2.0-0",
-          "libgl1",
-          "libxcb-cursor0"
-        ],
+        "apt_dependencies": ["lightdm", "libsdl2-2.0-0", "libgl1", "libxcb-cursor0"],
         "command_list": [["sudo", "python", "board-config.py", "-bl"]],
         "settings_dependencies": {
           "buttonslevel": {
@@ -4345,12 +4324,7 @@
           "pygame-ce>=2.5.7",
           "pyside6>=6.11.1"
         ],
-        "apt_dependencies": [
-          "lightdm",
-          "libsdl2-2.0-0",
-          "libgl1",
-          "libxcb-cursor0"
-        ],
+        "apt_dependencies": ["lightdm", "libsdl2-2.0-0", "libgl1", "libxcb-cursor0"],
         "command_list": [["sudo", "python", "board-config.py", "-bl"]],
         "settings_dependencies": {
           "buttonslevel": {
@@ -4431,12 +4405,7 @@
           "pygame-ce>=2.5.7",
           "pyside6>=6.11.1"
         ],
-        "apt_dependencies": [
-          "lightdm",
-          "libsdl2-2.0-0",
-          "libgl1",
-          "libxcb-cursor0"
-        ],
+        "apt_dependencies": ["lightdm", "libsdl2-2.0-0", "libgl1", "libxcb-cursor0"],
         "command_list": [["sudo", "python", "board-config.py", "-bl"]],
         "settings_dependencies": {
           "buttonslevel": {

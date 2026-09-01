@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
+
 import { createQueryClient } from "../../../../src/helpers/query/queryClient";
 
 describe("createQueryClient", () => {

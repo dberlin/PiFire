@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, Outlet, RouterProvider } from "react-router";
+
 // The module-singleton client, NOT testQueryClient(): WizardShell's exit
 // handler invalidates settingsRoot on that exact singleton (the same one
 // useSaveSettings.ts writes through -- see useSaveSettings.test.tsx for the

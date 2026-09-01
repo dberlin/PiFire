@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
+
 import { shouldResetScales } from "../../../../src/components/history/scaleReset";
 
 describe("shouldResetScales", () => {

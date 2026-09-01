@@ -1,5 +1,6 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { fireEvent, render, screen } from "@testing-library/react";
+
 import { VocabTable } from "../../../../src/components/pellets/VocabTable";
 
 function renderTable(over: Partial<Parameters<typeof VocabTable>[0]> = {}) {

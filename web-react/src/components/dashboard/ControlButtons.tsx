@@ -7,6 +7,7 @@ import {
   type MenuItem,
 } from "@pifire/core/dashboard/buttonsForMode";
 import { useState } from "react";
+
 import { applySettings } from "../../helpers/settings/settingsApi";
 import { ActionMenu } from "./ActionMenu";
 import { ConfirmAction } from "./ConfirmAction";

@@ -1,6 +1,7 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { createBrowserRouter, RouterProvider } from "react-router";
+
 import { queryClient } from "../helpers/query/queryClient";
 import { useWebUiBuild } from "../helpers/useWebUiBuild";
 import { AppPrefsProvider } from "./AppPrefs";

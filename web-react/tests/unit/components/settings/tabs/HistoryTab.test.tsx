@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+
 import { HistoryTab } from "../../../../../src/components/settings/tabs/HistoryTab";
 import { renderRoute } from "../../../test-utils";
 

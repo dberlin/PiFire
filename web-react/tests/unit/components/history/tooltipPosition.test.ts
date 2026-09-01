@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
+
 import { computeTooltipPosition } from "../../../../src/components/history/tooltipPosition";
 
 describe("computeTooltipPosition", () => {

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
+
 import { errorFor, unmatchedErrors } from "../../../../src/helpers/settings/fieldErrors";
 
 const ERRORS = [

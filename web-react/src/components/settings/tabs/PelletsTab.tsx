@@ -1,6 +1,7 @@
 import type { SettingsFlag } from "@pifire/core/settings/controllerTypes";
 import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
 import { useOutletContext } from "react-router";
+
 import { setPath } from "../../../helpers/settings/delta";
 import { SettingsFieldErrorsProvider } from "../../../helpers/settings/fieldErrorContext";
 import { SETTINGS_DEFAULTS } from "../../../helpers/settings/settingsDefaults.gen";

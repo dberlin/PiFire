@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+
 import { stubMetrics } from "./apiFixtures";
 
 // The metrics page against the real backend, reading only.

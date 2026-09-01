@@ -1,5 +1,6 @@
 import type { NotifyUpdate } from "@pifire/core/contracts/control";
 import type { ProbeDataPayload } from "@pifire/core/contracts/core";
+
 import { postNotifyUpdates } from "./notifyApi";
 
 // The backend runs `if shutdown: ... elif keep_warm: ...`

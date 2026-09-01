@@ -2,6 +2,7 @@ import type { HistoryAnnotation } from "@pifire/core/contracts/content";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render } from "@testing-library/react";
 import type uPlot from "uplot";
+
 import { formatTooltipValue } from "../../../../src/components/history/tooltipFormat";
 import { createTooltipRow } from "../../../../src/components/history/tooltipRow";
 

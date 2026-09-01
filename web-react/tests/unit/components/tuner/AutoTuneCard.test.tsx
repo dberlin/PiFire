@@ -2,6 +2,7 @@ import type { AutoStatus } from "@pifire/core/contracts/operations";
 import { describe, expect, it, rs } from "@rstest/core";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+
 import { AutoTuneCard } from "../../../../src/components/tuner/AutoTuneCard";
 
 const STATUS: AutoStatus = {

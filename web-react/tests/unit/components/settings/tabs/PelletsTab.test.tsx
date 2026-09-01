@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+
 import { PelletsTab } from "../../../../../src/components/settings/tabs/PelletsTab";
 import { renderRoute } from "../../../test-utils";
 

@@ -2,6 +2,7 @@ import type { ControllerCatalog } from "@pifire/core/settings/controllerTypes";
 import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
 import { useEffect, useRef } from "react";
 import { NavLink, Outlet, useLoaderData, useNavigate, useOutletContext } from "react-router";
+
 import { readAccent } from "../../helpers/settings/accent";
 import { hasDcFan } from "../../helpers/settings/platform";
 import { useSettingsDraftStore } from "../../helpers/settings/settingsDrafts";

@@ -1,4 +1,5 @@
 import type uPlot from "uplot";
+
 import { computeTooltipPosition } from "./tooltipPosition";
 import { createTooltipRow } from "./tooltipRow";
 

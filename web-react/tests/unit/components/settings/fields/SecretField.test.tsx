@@ -1,5 +1,6 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { fireEvent, render, screen } from "@testing-library/react";
+
 import { SecretField } from "../../../../../src/components/settings/fields/SecretField";
 
 describe("SecretField", () => {

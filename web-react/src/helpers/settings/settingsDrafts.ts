@@ -1,6 +1,7 @@
 import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
 import { type Dispatch, type SetStateAction, useCallback, useState } from "react";
 import { useOutletContext } from "react-router";
+
 import type { EditableSettingsTabId } from "./settingsTabs";
 
 /**

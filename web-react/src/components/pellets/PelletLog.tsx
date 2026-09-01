@@ -1,5 +1,6 @@
 import type { PelletDbSchema } from "@pifire/core/contracts/control";
 import { useState } from "react";
+
 import { ConfirmAction } from "../dashboard/ConfirmAction";
 import { Rating } from "./Rating";
 

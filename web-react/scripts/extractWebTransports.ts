@@ -3,12 +3,17 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
 import ts from "typescript";
 
 export interface ExtractedWebTransport {
   transport: "browser" | "http" | "socketio";
   name: string;
-  category?: "browser_file_handles" | "downloaded_bytes" | "multipart_form_data" | "text_range_streams";
+  category?:
+    | "browser_file_handles"
+    | "downloaded_bytes"
+    | "multipart_form_data"
+    | "text_range_streams";
   body_fields?: string[];
 }
 
@@ -30,7 +35,8 @@ function sourceFilesBelow(root: string): string[] {
 
 function propertyName(name: ts.PropertyName | ts.BindingName | undefined): string | null {
   if (!name) return null;
-  if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) return name.text;
+  if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name))
+    return name.text;
   return null;
 }
 
@@ -109,7 +115,10 @@ export function extractFrontendWebTransports(root?: string): {
         variables.set(node.name.text, declarations);
         if (node.initializer) constants.set(node.name.text, node.initializer);
       } else if (ts.isParameter(node) && ts.isIdentifier(node.name)) {
-        if (node.type?.getText(sourceFile) === "File" || node.type?.getText(sourceFile) === "File[]") {
+        if (
+          node.type?.getText(sourceFile) === "File" ||
+          node.type?.getText(sourceFile) === "File[]"
+        ) {
           hasBrowserFiles = true;
         }
       }
@@ -127,10 +136,7 @@ export function extractFrontendWebTransports(root?: string): {
       }
       return expression;
     };
-    const nearestVariable = (
-      name: string,
-      position: number,
-    ): ts.VariableDeclaration | undefined =>
+    const nearestVariable = (name: string, position: number): ts.VariableDeclaration | undefined =>
       variables
         .get(name)
         ?.filter((declaration) => declaration.pos < position)
@@ -155,7 +161,11 @@ export function extractFrontendWebTransports(root?: string): {
       return rendered;
     };
     const isParameterInScope = (identifier: ts.Identifier): boolean => {
-      for (let current: ts.Node | undefined = identifier.parent; current; current = current.parent) {
+      for (
+        let current: ts.Node | undefined = identifier.parent;
+        current;
+        current = current.parent
+      ) {
         if (
           ts.isFunctionDeclaration(current) ||
           ts.isFunctionExpression(current) ||
@@ -163,7 +173,8 @@ export function extractFrontendWebTransports(root?: string): {
           ts.isMethodDeclaration(current)
         ) {
           return current.parameters.some(
-            (parameter) => ts.isIdentifier(parameter.name) && parameter.name.text === identifier.text,
+            (parameter) =>
+              ts.isIdentifier(parameter.name) && parameter.name.text === identifier.text,
           );
         }
       }
@@ -267,10 +278,7 @@ export function extractFrontendWebTransports(root?: string): {
           const queryFragment =
             ts.isIdentifier(span.expression) && span.expression.text === "qs" ? "" : null;
           const replacements = finiteValues(span.expression) ?? [
-            literalText(span.expression) ??
-              nestedRoutes[0] ??
-              queryFragment ??
-              "<dynamic>",
+            literalText(span.expression) ?? nestedRoutes[0] ?? queryFragment ?? "<dynamic>",
           ];
           rendered = rendered.flatMap((prefix) =>
             replacements.map((replacement) => `${prefix}${replacement}${span.literal.text}`),
@@ -313,7 +321,9 @@ export function extractFrontendWebTransports(root?: string): {
         return;
       }
       if (!ts.isArrayLiteralExpression(value)) return;
-      const segments = value.elements.map((segment) => literalText(segment as ts.Expression) ?? "<>");
+      const segments = value.elements.map(
+        (segment) => literalText(segment as ts.Expression) ?? "<>",
+      );
       addJson("POST", `/api/${segments.join("/")}`);
     };
 
@@ -335,7 +345,8 @@ export function extractFrontendWebTransports(root?: string): {
           if (route) {
             if (callee === "read") addJson("GET", route);
             else if (callee === "postForm") addNonJson("POST", route, "multipart_form_data");
-            else addJson("POST", route, node.arguments[2] ? bodyFields(node.arguments[2]) : undefined);
+            else
+              addJson("POST", route, node.arguments[2] ? bodyFields(node.arguments[2]) : undefined);
           }
         } else if (callee === "post" || callee === "get") {
           const path = node.arguments[1] ? staticText(node.arguments[1]) : null;
@@ -356,7 +367,12 @@ export function extractFrontendWebTransports(root?: string): {
           }
         } else if (callee === "postModelAction" && node.arguments[0]) {
           const path = literalText(node.arguments[0]);
-          if (path) addJson("POST", `/api/${path}`, node.arguments[1] ? bodyFields(node.arguments[1]) : undefined);
+          if (path)
+            addJson(
+              "POST",
+              `/api/${path}`,
+              node.arguments[1] ? bodyFields(node.arguments[1]) : undefined,
+            );
         } else if (
           ts.isPropertyAccessExpression(node.expression) &&
           node.expression.name.text === "on" &&
@@ -391,7 +407,6 @@ export function extractFrontendWebTransports(root?: string): {
       ts.forEachChild(node, visit);
     };
     visit(sourceFile);
-
   }
 
   if (hasBrowserFiles) {
@@ -403,7 +418,8 @@ export function extractFrontendWebTransports(root?: string): {
   }
 
   const byName = (left: ExtractedWebTransport, right: ExtractedWebTransport) =>
-    left.name.localeCompare(right.name) || JSON.stringify(left).localeCompare(JSON.stringify(right));
+    left.name.localeCompare(right.name) ||
+    JSON.stringify(left).localeCompare(JSON.stringify(right));
   return {
     json: [...json.values()].sort(byName),
     non_json: [...nonJson.values()].sort(byName),
@@ -411,6 +427,7 @@ export function extractFrontendWebTransports(root?: string): {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  if (!process.argv.includes("--json")) throw new Error("Usage: bun extractWebTransports.ts --json");
+  if (!process.argv.includes("--json"))
+    throw new Error("Usage: bun extractWebTransports.ts --json");
   process.stdout.write(`${JSON.stringify(extractFrontendWebTransports(), null, 2)}\n`);
 }

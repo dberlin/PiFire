@@ -2,6 +2,7 @@ import type { Ingredient, Instruction, RecipeAsset } from "@pifire/core/contract
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+
 import * as actualRecipeApi from "../../../../src/helpers/files/recipeApi" with {
   rstest: "importActual",
 };
@@ -16,9 +17,8 @@ rs.mock("../../../../src/helpers/files/recipeApi", () => ({
   setRecipeAssets: (...args: unknown[]) => setRecipeAssetsMock(...args),
 }));
 
-const { RecipeAssetManager } = await import(
-  "../../../../src/components/recipes/RecipeAssetManager"
-);
+const { RecipeAssetManager } =
+  await import("../../../../src/components/recipes/RecipeAssetManager");
 
 const ASSETS: RecipeAsset[] = [
   { id: "a1", filename: "a1.jpg", type: "image/jpeg" },

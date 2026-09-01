@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
+
 import { expectConsole } from "../../../consoleGuard";
 import { testQueryClient } from "../../test-utils";
 
@@ -24,9 +25,8 @@ rs.mock("../../../../src/helpers/wizard/wizardApi", () => ({
   cancelWizard: (...args: unknown[]) => cancelWizardMock(...args),
 }));
 
-const { WizardShell, HydrateFallback } = await import(
-  "../../../../src/components/wizard/WizardShell"
-);
+const { WizardShell, HydrateFallback } =
+  await import("../../../../src/components/wizard/WizardShell");
 
 afterEach(() => {
   cleanup();

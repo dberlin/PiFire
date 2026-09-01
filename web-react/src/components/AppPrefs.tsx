@@ -1,4 +1,5 @@
 import { createContext, type ReactNode, useContext, useEffect, useState } from "react";
+
 import { readAccent } from "../helpers/settings/accent";
 import { useSettings } from "../helpers/settings/useSettings";
 import type { AccentName } from "../helpers/types";

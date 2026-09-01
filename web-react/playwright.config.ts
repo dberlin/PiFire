@@ -1,4 +1,5 @@
 import { defineConfig } from "@playwright/test";
+
 import { ports } from "./ports";
 
 export default defineConfig({

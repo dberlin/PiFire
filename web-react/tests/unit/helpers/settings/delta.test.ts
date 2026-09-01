@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
+
 import { setPath } from "../../../../src/helpers/settings/delta";
 
 describe("setPath", () => {

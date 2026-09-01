@@ -1,6 +1,7 @@
 import { mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
 import { compileFromFile } from "json-schema-to-typescript";
 import ts from "typescript";
 
@@ -60,10 +61,7 @@ function exposeOwnedDeclarations(generated: string, owned: ReadonlySet<string>):
     true,
     ts.ScriptKind.TS,
   );
-  const declarations = new Map<
-    string,
-    ts.InterfaceDeclaration | ts.TypeAliasDeclaration
-  >();
+  const declarations = new Map<string, ts.InterfaceDeclaration | ts.TypeAliasDeclaration>();
   for (const statement of sourceFile.statements) {
     if (ts.isInterfaceDeclaration(statement) || ts.isTypeAliasDeclaration(statement)) {
       declarations.set(statement.name.text, statement);
@@ -226,7 +224,11 @@ export async function emitWebContracts(check: boolean): Promise<boolean> {
 
   for (const [schema, output] of Object.entries(manifest)) {
     const schemaPath = resolveManifestPath(SCHEMA_DIRECTORY, "schema", schema);
-    const outputPath = resolveManifestPath(TYPESCRIPT_DIRECTORY, "../packages/pifire-core/src", output);
+    const outputPath = resolveManifestPath(
+      TYPESCRIPT_DIRECTORY,
+      "../packages/pifire-core/src",
+      output,
+    );
     const compilerOptions = RECURSIVE_SCHEMA_NAMES[schema]
       ? { ...COMPILER_OPTIONS, strictIndexSignatures: false }
       : COMPILER_OPTIONS;

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
+
 import { formatUsage } from "../../../../src/helpers/pellets/usage";
 
 describe("formatUsage", () => {

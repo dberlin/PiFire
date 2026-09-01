@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
+
 import { emitSettingsDefaults } from "../../../scripts/emitSettingsDefaults";
 
 const SCHEMA = {

@@ -1,5 +1,6 @@
 import type { Config, ProbeMap, ProbeModuleData } from "@pifire/core/contracts/wizard";
 import { useState } from "react";
+
 import {
   addDevice,
   alnum,
@@ -11,6 +12,7 @@ import { validateBusKinds } from "../../../helpers/wizard/wizardApi";
 import { moduleImageUrl } from "../../../helpers/wizard/wizardAssets";
 import { ConfirmAction } from "../../dashboard/ConfirmAction";
 import { DeviceForm } from "./DeviceForm";
+
 import "./probes.css";
 
 export interface DevicesCardProps {

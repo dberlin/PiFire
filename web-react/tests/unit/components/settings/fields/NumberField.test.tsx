@@ -1,5 +1,6 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { fireEvent, render, screen } from "@testing-library/react";
+
 import { NumberField } from "../../../../../src/components/settings/fields/NumberField";
 
 describe("NumberField", () => {

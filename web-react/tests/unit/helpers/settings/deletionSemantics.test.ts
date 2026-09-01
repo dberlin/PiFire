@@ -1,6 +1,8 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
+
 import { describe, expect, it } from "@rstest/core";
+
 import { SETTINGS_DELTA_KEY, settingsDelta } from "../../../../src/helpers/settings/settingsDelta";
 
 type Tree = Record<string, unknown>;

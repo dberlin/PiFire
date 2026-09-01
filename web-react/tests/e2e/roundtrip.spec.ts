@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+
 import { API, ensureStopped } from "./helpers";
 
 // Requires the prototype backend running: `uv run python control.py` + `uv run python app.py`.

@@ -1,4 +1,5 @@
 import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
+
 import { hasDcFan } from "./platform";
 import type { SettingsDrafts } from "./settingsDrafts";
 

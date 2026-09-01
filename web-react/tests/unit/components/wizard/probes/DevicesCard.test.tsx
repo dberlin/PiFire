@@ -1,6 +1,7 @@
 import type { ProbeMap, ProbeModuleData } from "@pifire/core/contracts/wizard";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+
 import { DevicesCard } from "../../../../../src/components/wizard/probes/DevicesCard";
 import { expectConsole } from "../../../../consoleGuard";
 

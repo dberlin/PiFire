@@ -9,6 +9,7 @@ import type {
   ProbeProfile,
 } from "@pifire/core/contracts/wizard";
 import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
+
 import type { ApplyProbeMapResult } from "./probeMapTypes";
 
 export async function getProbeModules(baseUrl: string): Promise<ProbeModuleCatalog> {

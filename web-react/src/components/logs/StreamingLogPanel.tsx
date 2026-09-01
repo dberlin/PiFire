@@ -1,6 +1,8 @@
 import { LazyLog } from "@melloware/react-logviewer";
 import { useEffect, useRef, useState } from "react";
+
 import { stripLoggerPrefix } from "../../helpers/logs/loggerPrefix";
+
 import "./logs.css";
 
 // The status line above these panels is polled four times a second because it

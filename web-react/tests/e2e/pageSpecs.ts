@@ -292,15 +292,13 @@ export const PAGE_SPECS: PageSpec[] = [
       ".pf-rcp-run",
     ],
   },
-  ...SETTINGS_TABS.map(
-    (t): PageSpec => ({
-      name: `settings-${t.path}`,
-      path: `/settings/${t.path}`,
-      ready: ".pf-settings-content .pf-section",
-      root: ".pf-shell",
-      landmarks: [...SHELL, ...SETTINGS],
-    }),
-  ),
+  ...SETTINGS_TABS.map((t): PageSpec => ({
+    name: `settings-${t.path}`,
+    path: `/settings/${t.path}`,
+    ready: ".pf-settings-content .pf-section",
+    root: ".pf-shell",
+    landmarks: [...SHELL, ...SETTINGS],
+  })),
   // The twelfth settings tab, and the one that had no gate: it shipped after
   // the pre-Tailwind reference was captured, so it is absent from
   // SETTINGS_TABS above and from the 43 immutable baselines.
@@ -488,25 +486,23 @@ const WIZARD_STEPS: { name: string; heading: string }[] = [
 ];
 
 PAGE_SPECS.push(
-  ...WIZARD_STEPS.map(
-    (s, i): PageSpec => ({
-      name: `wizard-${s.name}`,
-      path: "/wizard",
-      // Reached by clicking Next i times from Welcome. Finish is NEVER clicked:
-      // it fires the real installer.
-      clicks: Array.from({ length: i }, () => NEXT),
-      ready: `h2:text-is("${s.heading}")`,
-      root: ".pf-wizard",
-      landmarks: [
-        ...WIZARD,
-        ".pf-module-card",
-        ".pf-module-details",
-        ".pf-module-image",
-        ".pf-probes-card",
-        ".pf-btn-primary",
-      ],
-    }),
-  ),
+  ...WIZARD_STEPS.map((s, i): PageSpec => ({
+    name: `wizard-${s.name}`,
+    path: "/wizard",
+    // Reached by clicking Next i times from Welcome. Finish is NEVER clicked:
+    // it fires the real installer.
+    clicks: Array.from({ length: i }, () => NEXT),
+    ready: `h2:text-is("${s.heading}")`,
+    root: ".pf-wizard",
+    landmarks: [
+      ...WIZARD,
+      ".pf-module-card",
+      ".pf-module-details",
+      ".pf-module-image",
+      ".pf-probes-card",
+      ".pf-btn-primary",
+    ],
+  })),
 );
 
 /** /pellets is the one surface stubApi cannot make deterministic: its data

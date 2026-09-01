@@ -41,11 +41,15 @@
     // JS denial above is ever lifted.
     "display/qml/**",
 
-    // Carries a byte-level contract that a formatter breaks -- not a style
-    // anyone chose. Digest-pinned by
-    // tests/characterization/test_process_command_golden.py.
-    "tests/characterization/fixtures/**"
+    // Captured data with byte-level contracts, not a style anyone chose.
+    // Reformatting these changes the digests computed over them and fails
+    // 11 tests across test_real_cook_cumulative_learning.py,
+    // test_pid_sp_delay_evidence.py, test_pid_sp_real_cook_learning.py and
+    // test_codegen.py -- with errors that point at learning logic rather
+    // than at a formatter, which is what makes this worth stating.
+    "tests/**",
+    "native/generated/**",
   ],
   // On by default. Reordering hand-maintained package.json files is churn.
-  "sortPackageJson": false
+  "sortPackageJson": false,
 }

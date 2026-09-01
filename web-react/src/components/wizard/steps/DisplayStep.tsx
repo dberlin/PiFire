@@ -1,4 +1,5 @@
 import type { ModuleValues, WizardState } from "@pifire/core/contracts/wizard";
+
 import { useModuleSwitch } from "../../../helpers/wizard/useModuleSwitch";
 import {
   displayConfigFor,

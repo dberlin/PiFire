@@ -1,6 +1,7 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+
 import { SegmentCard } from "../../../../src/components/tuner/SegmentCard";
 
 const READING = { probe: "Grill", trohms: 51234, tuning: true };

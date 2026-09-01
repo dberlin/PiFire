@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
+
 import { HydrateFallback } from "../../../../src/components/HydrateFallback";
 import { SettingsError } from "../../../../src/components/settings/SettingsError";
 

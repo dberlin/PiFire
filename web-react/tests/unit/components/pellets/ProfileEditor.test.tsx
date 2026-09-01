@@ -1,6 +1,7 @@
 import type { PelletProfile } from "@pifire/core/contracts/control";
 import { describe, expect, it, rs } from "@rstest/core";
 import { fireEvent, render, screen } from "@testing-library/react";
+
 import { ProfileEditor } from "../../../../src/components/pellets/ProfileEditor";
 
 const ARCHIVE: Record<string, PelletProfile> = {

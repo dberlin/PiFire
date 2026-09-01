@@ -1,5 +1,6 @@
 import type { ControllerCatalog } from "@pifire/core/settings/controllerTypes";
 import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
+
 import { normalizeApiBase, queryKeys } from "../query/keys";
 import { queryClient } from "../query/queryClient";
 import { getControllerMetadata, getMode, getSettings } from "./settingsApi";

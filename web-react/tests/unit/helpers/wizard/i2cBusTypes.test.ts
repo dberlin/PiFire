@@ -1,5 +1,6 @@
 import type { I2CBusValue } from "@pifire/core/contracts/wizard";
 import { describe, expect, it } from "@rstest/core";
+
 import { i2cBusError } from "../../../../src/helpers/wizard/i2cBusTypes";
 
 describe("i2cBusError", () => {

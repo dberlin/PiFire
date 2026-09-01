@@ -1,6 +1,7 @@
 import type { PelletDbSchema } from "@pifire/core/contracts/control";
 import { describe, expect, it, rs } from "@rstest/core";
 import { fireEvent, render, screen } from "@testing-library/react";
+
 import { CurrentLoadCard } from "../../../../src/components/pellets/CurrentLoadCard";
 
 const DB: PelletDbSchema = {

@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import userEvent from "@testing-library/user-event";
 import { useRef } from "react";
 import { MemoryRouter } from "react-router";
+
 import { testQueryClient } from "../../test-utils";
 
 // Counts chart INSTANCES (mounts), not renders -- see the stub below.

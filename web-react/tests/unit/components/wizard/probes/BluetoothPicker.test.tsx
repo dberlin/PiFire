@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+
 import { BluetoothPicker } from "../../../../../src/components/wizard/probes/BluetoothPicker";
 import { scanBluetooth } from "../../../../../src/helpers/wizard/wizardApi";
 

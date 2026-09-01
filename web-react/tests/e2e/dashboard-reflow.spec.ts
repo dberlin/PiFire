@@ -1,5 +1,7 @@
 import { mkdirSync } from "node:fs";
+
 import { expect, test } from "@playwright/test";
+
 import { freezeDate } from "./layoutBaseline";
 
 // The other half of the reflow gate. dashboard-fidelity.spec.ts proves the

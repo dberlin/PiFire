@@ -1,6 +1,7 @@
 import type { ControllerCatalog } from "@pifire/core/settings/controllerTypes";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+
 import { ControllerTab } from "../../../../../src/components/settings/tabs/ControllerTab";
 import { renderRoute } from "../../../test-utils";
 

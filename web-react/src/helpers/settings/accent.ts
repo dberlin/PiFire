@@ -1,5 +1,6 @@
 import type { SettingsSchema } from "@pifire/core/settings/settingsTypes";
 import type { QueryClient } from "@tanstack/react-query";
+
 import { queryKeys } from "../query/keys";
 import type { AccentName } from "../types";
 import { setPath } from "./delta";

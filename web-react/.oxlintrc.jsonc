@@ -12,7 +12,7 @@
   // eslint/no-shadow -- which are style refactors rather than defects. Turning
   // it on is a deliberate decision with a cleanup attached, not a default.
   "categories": {
-    "correctness": "error"
+    "correctness": "error",
   },
   "ignorePatterns": [
     "dist",
@@ -20,7 +20,7 @@
     "tests/e2e",
     "*.config.js",
     "*.config.ts",
-    "src/helpers/settings/settingsDefaults.gen.ts"
+    "src/helpers/settings/settingsDefaults.gen.ts",
   ],
   "rules": {
     // Both sit outside `correctness` (pedantic and restriction respectively),
@@ -53,6 +53,6 @@
     // fallbacks inside spreads). Cheap to clean up, but they are source edits
     // and belong in their own change.
     "unicorn/no-useless-spread": "off",
-    "unicorn/no-useless-fallback-in-spread": "off"
-  }
+    "unicorn/no-useless-fallback-in-spread": "off",
+  },
 }

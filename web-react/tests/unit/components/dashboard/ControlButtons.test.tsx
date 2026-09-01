@@ -4,6 +4,7 @@ import { FIXTURE_DASH } from "@pifire/core/fixture";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+
 import { ControlButtons } from "../../../../src/components/dashboard/ControlButtons";
 
 const OK: CommandResult = { ok: true, message: "" };

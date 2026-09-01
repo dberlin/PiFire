@@ -1,5 +1,7 @@
 import { mkdirSync } from "node:fs";
+
 import { expect, test } from "@playwright/test";
+
 import {
   CAPTURING,
   compareToBaseline,
