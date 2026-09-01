@@ -227,15 +227,22 @@ def test_git_vcs_detached_head_resolves_no_publication_bookmark():
     assert vcs.resolve_bookmark() == ""
 
 
-def test_detached_git_head_is_measured_from_head_even_with_a_jj_bookmark():
+def test_publication_bookmark_is_measured_from_its_origin_ref():
+    runner = FakeRunner()
+    assert tag_release.measured_against(runner, "massive-reworks-and-new-ui") == (
+        "origin/massive-reworks-and-new-ui"
+    )
+
+
+def test_detached_git_head_without_a_publication_bookmark_is_measured_from_head():
     runner = FakeRunner(ok={("git", "symbolic-ref", "--quiet", "--short", "HEAD"): False})
-    assert tag_release.measured_against(runner) == "HEAD"
+    assert tag_release.measured_against(runner, "") == "HEAD"
 
 
 def test_attached_git_head_is_measured_from_its_origin_branch():
     command = ("git", "symbolic-ref", "--quiet", "--short", "HEAD")
     runner = FakeRunner(replies={command: "main\n"}, ok={command: True})
-    assert tag_release.measured_against(runner) == "origin/main"
+    assert tag_release.measured_against(runner, "") == "origin/main"
 
 
 # --------------------------------------------------------------------------

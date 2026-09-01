@@ -314,13 +314,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return args
 
 
-def measured_against(runner: Runner) -> str:
-    """Match updater.get_remote_version(): the active Git branch, or HEAD.
+def measured_against(runner: Runner, bookmark: str) -> str:
+    """Match updater.get_remote_version() for the ref being published.
 
-    A jj publication bookmark is not evidence that colocated Git HEAD names
-    that branch. In the normal jj workspace HEAD is detached, so the updater
-    measures tags reachable from HEAD.
+    A release with a publication bookmark will run as that branch in deployed
+    Git checkouts, so measure its remote-tracking ref. Without one, retain the
+    updater's attached-branch-or-HEAD fallback.
     """
+    if bookmark:
+        return f"origin/{bookmark}"
     command = ("git", "symbolic-ref", "--quiet", "--short", "HEAD")
     if runner.ok(*command):
         return f"origin/{runner.out(*command).strip()}"
@@ -333,7 +335,7 @@ def latest_merged_tag(runner: Runner, ref: str) -> str:
 
 
 def report(runner: Runner, vcs, manifest: Path, bookmark: str) -> tuple[str, str]:
-    ref = measured_against(runner)
+    ref = measured_against(runner, bookmark)
     commit = vcs.release_commit()
     described = runner.out("git", "describe", "--tags", "--always", commit).strip()
     shown = latest_merged_tag(runner, ref)
@@ -361,7 +363,7 @@ def main(argv=None, runner=None, vcs=None, manifest=None) -> int:
         # could otherwise choose a name that already exists remotely, publish
         # the release commit, then fail only when the duplicate tag is pushed.
         runner.run("git", "fetch", "--tags", "--force")
-        ref = measured_against(runner)
+        ref = measured_against(runner, bookmark)
         current_tag = latest_merged_tag(runner, ref)
         if not current_tag:
             raise Refused(f"cannot auto-increment: no tag is merged into {ref}")
