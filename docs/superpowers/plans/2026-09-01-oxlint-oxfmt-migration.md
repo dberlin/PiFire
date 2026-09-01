@@ -28,9 +28,9 @@
 
 | File | Responsibility |
 |---|---|
-| `.oxfmtrc.json` (root, **create**) | Formats everything outside `web-react/`. Replaces `biome.jsonc`. |
-| `web-react/.oxfmtrc.json` (**create**) | Nested override for `web-react/` + the two `@pifire/core` generated trees. Replaces `web-react/biome.jsonc`'s formatter half. |
-| `web-react/.oxlintrc.json` (**create**) | The only lint config. Replaces `web-react/eslint.config.js` and `web-react/biome.jsonc`'s linter half. |
+| `.oxfmtrc.jsonc` (root, **create**) | Formats everything outside `web-react/`. Replaces `biome.jsonc`. |
+| `web-react/.oxfmtrc.jsonc` (**create**) | Nested override for `web-react/` + the two `@pifire/core` generated trees. Replaces `web-react/biome.jsonc`'s formatter half. |
+| `web-react/.oxlintrc.jsonc` (**create**) | The only lint config. Replaces `web-react/eslint.config.js` and `web-react/biome.jsonc`'s linter half. |
 | `biome.jsonc` (**delete**, Task 4) | — |
 | `web-react/biome.jsonc` (**delete**, Task 4) | — |
 | `web-react/eslint.config.js` (**delete**, Task 4) | — |
@@ -46,11 +46,11 @@ Biome stays installed and configured. The goal of this task is a working oxfmt w
 
 **Files:**
 - Modify: `web-react/package.json` (devDependencies only — not scripts yet)
-- Create: `.oxfmtrc.json`
-- Create: `web-react/.oxfmtrc.json`
+- Create: `.oxfmtrc.jsonc`
+- Create: `web-react/.oxfmtrc.jsonc`
 
 **Interfaces:**
-- Produces: two `.oxfmtrc.json` config files and the `oxfmt` / `oxlint` binaries at `web-react/node_modules/.bin/`. Task 2 consumes `oxlint`; Task 3 consumes the `web-react/.oxfmtrc.json` path; Task 5 consumes both configs.
+- Produces: two `.oxfmtrc.jsonc` config files and the `oxfmt` / `oxlint` binaries at `web-react/node_modules/.bin/`. Task 2 consumes `oxlint`; Task 3 consumes the `web-react/.oxfmtrc.jsonc` path; Task 5 consumes both configs.
 
 - [ ] **Step 1: Start a fresh commit BEFORE writing anything**
 
@@ -81,16 +81,27 @@ Expected: two version strings, `1.80.x` and `0.65.x`. If `oxlint` reports `Canno
 
 - [ ] **Step 4: Create the root formatter config**
 
-Create `/home/dannyb/sources/PiFire/.oxfmtrc.json`. The `ignorePatterns` are carried over verbatim from `biome.jsonc`, and the comments explaining *why* each byte-contract exclusion exists must survive — they are the reason, not decoration.
+Create `/home/dannyb/sources/PiFire/.oxfmtrc.jsonc`. The `ignorePatterns` are carried over verbatim from `biome.jsonc`, and the comments explaining *why* each byte-contract exclusion exists must survive — they are the reason, not decoration.
+
+**Two corrections found during execution — both are load-bearing:**
+
+1. The file must be named `.oxfmtrc.jsonc`, not `.oxfmtrc.jsonc`. It contains comments, and Biome (still installed until Task 4) parses a `.json` extension strictly, producing 17 errors that fail the old gate. oxfmt discovers `.oxfmtrc.jsonc` natively.
+2. Biome used an **allow-list** (`"includes": ["**/*.json", ...]`) — JSON and nothing else. oxfmt only has a deny-list, so the old scope must be reconstructed by denying every other extension. Without this, oxfmt reformats **362 files it never formatted before** (all of `mobile/`'s TS/TSX, every README, the GitHub workflows).
 
 ```jsonc
 {
   "$schema": "./web-react/node_modules/oxfmt/configuration_schema.json",
-  // Formats everything outside web-react/, which has its own nested config
-  // (web-react/.oxfmtrc.json) covering its JS, TS, CSS and JSON together.
-  // Unlike the Biome setup this replaces, oxfmt formats JS/TS and CSS here
-  // too, not only JSON -- there is simply nothing outside web-react/ that
-  // isn't already excluded below.
+  // Formats JSON everywhere outside web-react/, which has its own nested
+  // config (web-react/.oxfmtrc.jsonc) covering its JS, TS, CSS and JSON
+  // together.
+  //
+  // The Biome config this replaces used an ALLOW-list ("includes":
+  // ["**/*.json", ...]), so its scope was JSON and nothing else. oxfmt only
+  // has a deny-list, so that scope has to be reconstructed by denying every
+  // other extension -- without this, oxfmt reformats 362 files it was never
+  // formatting before (all of mobile/'s TS/TSX, every README, the GitHub
+  // workflows). Widening the scope may be worth doing on purpose one day;
+  // it should not happen as a side effect of changing formatters.
   //
   // oxfmt reads .gitignore by default, which is what biome.jsonc's
   // "vcs": { "useIgnoreFile": true } asked for explicitly.
@@ -101,6 +112,27 @@ Create `/home/dannyb/sources/PiFire/.oxfmtrc.json`. The `ignorePatterns` are car
     "htmlcov/**",
     "docs/**",
     ".superpowers/**",
+
+    // Everything that is not JSON, to reproduce the old allow-list.
+    "**/*.ts",
+    "**/*.tsx",
+    "**/*.js",
+    "**/*.jsx",
+    "**/*.mjs",
+    "**/*.cjs",
+    "**/*.md",
+    "**/*.html",
+    "**/*.css",
+    "**/*.yml",
+    "**/*.yaml",
+    "**/*.toml",
+
+    // Listed separately because it is a landmine, not a scope choice: this is
+    // QML JavaScript, and its leading `.pragma library` is not valid JS. oxfmt
+    // fails to parse it outright, which fails the whole run. Keep this
+    // exclusion even if the JS denial above is ever lifted.
+    "display/qml/**",
+
     // Excluded because it carries a byte-level contract that a formatter
     // breaks -- not because anyone chose its style. Digest-pinned by
     // tests/characterization/test_process_command_golden.py.
@@ -112,14 +144,16 @@ Create `/home/dannyb/sources/PiFire/.oxfmtrc.json`. The `ignorePatterns` are car
 
 `sortPackageJson` is `true` by default and would reorder hand-maintained `package.json` files; this migration did not ask for that churn.
 
+Note on nested configs: oxfmt resolves the **nearest** config per file and does not merge, so these root `ignorePatterns` do not apply to anything under `web-react/` — that tree is governed entirely by its own config.
+
 - [ ] **Step 5: Create the web-react formatter config**
 
-Create `/home/dannyb/sources/PiFire/web-react/.oxfmtrc.json`:
+Create `/home/dannyb/sources/PiFire/web-react/.oxfmtrc.jsonc`:
 
 ```jsonc
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
-  // Nested under the repo-root .oxfmtrc.json. This one owns everything in
+  // Nested under the repo-root .oxfmtrc.jsonc. This one owns everything in
   // web-react/ -- JS, TS, CSS and JSON -- plus the two @pifire/core trees the
   // Pydantic exporter writes into. The nearest config to a file wins, so this
   // one applies to web-react/** without the root config needing to know.
@@ -193,16 +227,16 @@ MSG
 This is the load-bearing task. A lint config that silently fails to load a plugin exits zero and is indistinguishable from a clean tree, so the deliverable is not "oxlint runs" but "oxlint demonstrably catches what ESLint caught."
 
 **Files:**
-- Create: `web-react/.oxlintrc.json`
+- Create: `web-react/.oxlintrc.jsonc`
 - Test: negative-control scratch file at `web-react/src/__oxlint_probe.tsx` (created and deleted within this task; never committed)
 
 **Interfaces:**
 - Consumes: the `oxlint` binary from Task 1.
-- Produces: `web-react/.oxlintrc.json`, the sole lint config. Task 3 consumes its enabled-rule set to decide which suppression comments to port vs delete. Task 4 consumes it as the target of the new `lint` script.
+- Produces: `web-react/.oxlintrc.jsonc`, the sole lint config. Task 3 consumes its enabled-rule set to decide which suppression comments to port vs delete. Task 4 consumes it as the target of the new `lint` script.
 
 - [ ] **Step 1: Write the lint config**
 
-Create `/home/dannyb/sources/PiFire/web-react/.oxlintrc.json`. Every `off` carries the rationale from `biome.jsonc` verbatim — the reasons are the point, not the switches.
+Create `/home/dannyb/sources/PiFire/web-react/.oxlintrc.jsonc`. Every `off` carries the rationale from `biome.jsonc` verbatim — the reasons are the point, not the switches.
 
 ```jsonc
 {
@@ -320,7 +354,7 @@ cd /home/dannyb/sources/PiFire/web-react
 ./node_modules/.bin/oxlint src/__oxlint_probe.tsx 2>&1 | grep -A3 "only-export-components"
 ```
 
-If `NOT_A_COMPONENT` is flagged, add the option to `.oxlintrc.json`:
+If `NOT_A_COMPONENT` is flagged, add the option to `.oxlintrc.jsonc`:
 
 ```jsonc
     "react/only-export-components": ["warn", { "allowConstantExport": true }]
@@ -372,7 +406,7 @@ Per the spec's audit, only 2 of the 25 suppression comments correspond to rules 
 - Leave untouched: `mobile/src/components/SetpointModal.tsx`
 
 **Interfaces:**
-- Consumes: the enabled-rule set from Task 2's `.oxlintrc.json`.
+- Consumes: the enabled-rule set from Task 2's `.oxlintrc.jsonc`.
 - Produces: `emitWebContracts.ts` with `OXFMT_EXECUTABLE` / `OXFMT_CONFIG` constants replacing `BIOME_EXECUTABLE` / `BIOME_CONFIG`, and `formatGeneratedTypeScript(generated: string, outputPath: string): Promise<string>` — same signature, so no caller changes.
 
 - [ ] **Step 1: Locate the two suppressions that must be ported**
@@ -426,7 +460,7 @@ with:
 
 ```ts
 const OXFMT_EXECUTABLE = join(WEB_REACT_ROOT, "node_modules/.bin/oxfmt");
-const OXFMT_CONFIG = join(WEB_REACT_ROOT, ".oxfmtrc.json");
+const OXFMT_CONFIG = join(WEB_REACT_ROOT, ".oxfmtrc.jsonc");
 ```
 
 `BIOME_HEADER` is deleted outright, not ported: `typescript/no-empty-interface` is a `style` rule and is not enabled, so the header would suppress nothing.
@@ -550,7 +584,7 @@ MSG
 - Modify: `web-react/package.json` (scripts + devDependencies)
 
 **Interfaces:**
-- Consumes: `.oxlintrc.json` and both `.oxfmtrc.json` files from Tasks 1–2.
+- Consumes: `.oxlintrc.jsonc` and both `.oxfmtrc.jsonc` files from Tasks 1–2.
 - Produces: `bun run lint` = `oxlint && oxfmt --check .`; `bun run format` = `oxfmt .`.
 
 - [ ] **Step 1: Switch the scripts**

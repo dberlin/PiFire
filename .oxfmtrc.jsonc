@@ -1,0 +1,53 @@
+{
+  "$schema": "./web-react/node_modules/oxfmt/configuration_schema.json",
+  // Formats JSON everywhere outside web-react/, which has its own nested
+  // config (web-react/.oxfmtrc.json) covering its JS, TS, CSS and JSON
+  // together.
+  //
+  // The Biome config this replaces used an ALLOW-list ("includes":
+  // ["**/*.json", ...]), so its scope was JSON and nothing else. oxfmt only
+  // has a deny-list, so that scope has to be reconstructed by denying every
+  // other extension -- without this, oxfmt reformats 362 files it was never
+  // formatting before (all of mobile/'s TS/TSX, every README, the GitHub
+  // workflows). Widening the scope may be worth doing on purpose one day;
+  // it should not happen as a side effect of changing formatters.
+  //
+  // oxfmt reads .gitignore by default, which is what biome.jsonc's
+  // "vcs": { "useIgnoreFile": true } asked for explicitly.
+  "ignorePatterns": [
+    "**/node_modules/**",
+    "web-react/**",
+    "static/**",
+    "htmlcov/**",
+    "docs/**",
+    ".superpowers/**",
+
+    // Everything that is not JSON, to reproduce the old allow-list.
+    "**/*.ts",
+    "**/*.tsx",
+    "**/*.js",
+    "**/*.jsx",
+    "**/*.mjs",
+    "**/*.cjs",
+    "**/*.md",
+    "**/*.html",
+    "**/*.css",
+    "**/*.yml",
+    "**/*.yaml",
+    "**/*.toml",
+
+    // Listed separately because it is a landmine, not a scope choice: this is
+    // QML JavaScript, and its leading `.pragma library` is not valid JS. oxfmt
+    // fails to parse it outright, which fails the whole run. Keep this
+    // exclusion even if the JS denial above is ever lifted.
+    "display/qml/**",
+
+    // Excluded because it carries a byte-level contract that a formatter
+    // breaks -- not because anyone chose its style. Digest-pinned by
+    // tests/characterization/test_process_command_golden.py.
+    "tests/characterization/fixtures/**"
+  ],
+  // On by default; would reorder hand-maintained package.json files, which is
+  // churn this migration did not ask for.
+  "sortPackageJson": false
+}
