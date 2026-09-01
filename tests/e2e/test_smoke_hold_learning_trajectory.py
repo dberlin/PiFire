@@ -1125,15 +1125,16 @@ def _assert_real_cook_hold_smoke(
             ]
             learning_core = getattr(runner, "_learning_core", None)
             grey_runtime = getattr(learning_core, "_grey_learning_runtime", None)
-            if stop_fit_request_id is None:
-                failure = getattr(grey_runtime, "_corpus_fit_failure", None)
-                assert failure is not None and failure[0] == "corpus-snapshot-failed"
-            else:
-                assert stop_fit_statuses[-1] in {"succeeded", "failed", "stale"}, (
-                    stop_fit_request_id,
-                    stop_fit_statuses,
-                )
-                assert sum(status in {"succeeded", "failed", "stale"} for status in stop_fit_statuses) == 1
+            assert stop_fit_request_id is not None, getattr(
+                grey_runtime,
+                "_corpus_fit_failure",
+                None,
+            )
+            assert stop_fit_statuses[-1] in {"succeeded", "failed", "stale"}, (
+                stop_fit_request_id,
+                stop_fit_statuses,
+            )
+            assert sum(status in {"succeeded", "failed", "stale"} for status in stop_fit_statuses) == 1
         worker = getattr(runner, "_thread", None)
         assert worker is None or not worker.is_alive()
         for attribute in (
@@ -1227,9 +1228,6 @@ def _assert_real_cook_hold_smoke(
         fit_statuses_by_request: dict[str, list[str]] = {}
         for payload in fit_lifecycle:
             fit_statuses_by_request.setdefault(payload.request_id, []).append(payload.status)
-        stop_fit_request_id = next(
-            payload.request_id for payload in reversed(fit_lifecycle) if payload.status == "queued"
-        )
         stop_fit_statuses = fit_statuses_by_request[stop_fit_request_id]
         assert stop_fit_statuses[0] == "queued"
         assert sum(status in {"succeeded", "failed", "stale"} for status in stop_fit_statuses) == 1

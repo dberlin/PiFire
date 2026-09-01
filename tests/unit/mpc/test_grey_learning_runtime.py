@@ -558,6 +558,40 @@ def test_passive_corpus_fit_terminalizes_not_ready_ticket_without_recording_a_ru
     harness.runtime.close()
     harness.activation.close()
 
+def test_passive_empty_corpus_terminalizes_ticket_without_disabling_learning(
+    tmp_path,
+) -> None:
+    repository, _partition = _reopened_corpus(tmp_path)
+    empty_partition = "f" * 64
+    probe = _CorpusRepositoryProbe(repository)
+    _CorpusWorker.instances.clear()
+    harness = _harness(
+        trajectory_repository=probe,
+        fit_partition_digest=lambda: empty_partition,
+        fit_worker_factory=_CorpusWorker,
+        learning_enabled=True,
+    )
+
+    ticket = harness.runtime._request_corpus_fit_ticket(
+        CandidateOrigin.PASSIVE_ONLINE,
+    )
+    assert ticket is not None
+    harness.runtime.poll_learning_off_path()
+
+    assert harness.runtime.learning_status()["failure"] is None
+    assert not _CorpusWorker.instances or _CorpusWorker.instances[-1].job is None
+    assert harness.runtime._consume_terminal_fit_ticket(
+        ticket,
+        CandidateOrigin.PASSIVE_ONLINE,
+    )
+    retry = harness.runtime._request_corpus_fit_ticket(
+        CandidateOrigin.PASSIVE_ONLINE,
+    )
+    assert retry is not None
+    assert retry != ticket
+    harness.runtime.close()
+    harness.activation.close()
+
 
 def test_unresolved_fit_partition_terminalizes_the_queued_request() -> None:
     repository = _CorpusRepositoryProbe(SimpleNamespace())

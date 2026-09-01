@@ -49,7 +49,7 @@ from common.model_evidence import (
     ForecastOriginEvidence,
     ModelEvidenceRecord,
 )
-from common.persistence.learning_trajectory import FitCorpusSnapshot
+from common.persistence.learning_trajectory import FitCorpusEmptyError, FitCorpusSnapshot
 from common.persistence.model_challenger import (
     ModelChallengerConflictError,
     ModelChallengerState,
@@ -897,6 +897,20 @@ class GreyLearningRuntime:
         """Fail queued corpus learning closed from an off-path lifecycle owner."""
         self._fail_corpus_learning(code, error)
 
+    def _terminalize_not_ready_corpus_fit(
+        self,
+        intent: _CorpusFitIntent,
+        origin: CandidateOrigin,
+        detail: str,
+    ) -> None:
+        self._logger.info(f"[mpc] cumulative corpus fit is not ready: {detail}")
+        with self._learning_lock:
+            if self._corpus_fit_intents and self._corpus_fit_intents[0] is intent:
+                self._corpus_fit_intents.popleft()
+            if self._learning_pending_origin is origin:
+                self._learning_pending_origin = None
+        self._record_terminal_fit_intent(intent)
+
     def _persist_prepared_cumulative_supersession(
         self,
         prepared: CandidatePreparation,
@@ -1016,6 +1030,12 @@ class GreyLearningRuntime:
                 )
                 return None
             snapshot = repository.snapshot_fit_corpus(partition)
+        except FitCorpusEmptyError as error:
+            if origin is not CandidateOrigin.PASSIVE_ONLINE:
+                self._fail_corpus_learning("corpus-snapshot-failed", error)
+                return None
+            self._terminalize_not_ready_corpus_fit(intent, origin, str(error))
+            return None
         except Exception as error:
             self._fail_corpus_learning("corpus-snapshot-failed", error)
             return None
@@ -1026,13 +1046,11 @@ class GreyLearningRuntime:
                 config=learning.trigger_config,
             )
             if not trigger.ready:
-                self._logger.info("[mpc] cumulative corpus fit is not ready: " + ", ".join(trigger.blockers))
-                with self._learning_lock:
-                    if self._corpus_fit_intents and self._corpus_fit_intents[0] is intent:
-                        self._corpus_fit_intents.popleft()
-                    if self._learning_pending_origin is origin:
-                        self._learning_pending_origin = None
-                self._record_terminal_fit_intent(intent)
+                self._terminalize_not_ready_corpus_fit(
+                    intent,
+                    origin,
+                    ", ".join(trigger.blockers),
+                )
                 return None
         identity = self.learning_identity() if identity is None else identity
         request = FitRequest(
