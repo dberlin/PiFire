@@ -7,10 +7,29 @@
   // diagnostics (22 rules), including set-state-in-effect, purity and
   // immutability -- the house render-phase-sync rules.
   "plugins": ["react", "jsx-a11y", "typescript", "unicorn", "oxc"],
-  // `correctness` only. `suspicious` adds 97 findings across this codebase --
-  // unicorn/consistent-function-scoping, unicorn/no-array-sort and
-  // eslint/no-shadow -- which are style refactors rather than defects. Turning
-  // it on is a deliberate decision with a cleanup attached, not a default.
+  // `correctness` only. `suspicious` was enabled and all 97 of its findings
+  // were read before this was settled:
+  //
+  //   - no-array-sort (39): every call site sorts a FRESH array --
+  //     Object.keys(...), [...x], .filter(...).sort(). Not one mutates props
+  //     or state, which is the bug class the rule is worth having for.
+  //   - consistent-function-scoping (44): checked specifically for components
+  //     declared inside components, which remount the subtree every render.
+  //     There are none; all 44 are lowercase helpers.
+  //   - no-shadow (12): short callback params (v, value, scan) shadowing in a
+  //     tight, immediately-visible scope.
+  //   - exhaustive-effect-dependencies (1): RecipeView's extra dependency is
+  //     deliberate and documented. Enabling this means re-adding a suppression
+  //     for it on day one.
+  //
+  // Zero defects. The category stays off because it finds nothing here -- not
+  // because the cleanup is unfinished. See
+  // docs/superpowers/plans/2026-09-01-oxlint-deferral-triage.md.
+  //
+  // typescript/no-explicit-any was reviewed the same way and is likewise not
+  // enabled. It has no entry below because it lives in `restriction` and is
+  // already off; a no-op "off" line would only rot. Its 6 findings are all in
+  // test files stubbing global.fetch and a browser API jsdom lacks.
   "categories": {
     "correctness": "error",
   },
