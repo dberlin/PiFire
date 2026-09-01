@@ -12,7 +12,7 @@ export function setPath<P extends SettingsPath>(
   let cur = root as Record<string, unknown>;
   for (let i = 0; i < keys.length - 1; i++) {
     const k = keys[i];
-    cur[k] = { ...((cur[k] as Record<string, unknown>) ?? {}) };
+    cur[k] = { ...(cur[k] as Record<string, unknown>) };
     cur = cur[k] as Record<string, unknown>;
   }
   cur[keys[keys.length - 1]] = value;

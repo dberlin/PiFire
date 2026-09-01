@@ -57,10 +57,11 @@
     // id/describedBy contract, which the rule cannot follow.
     "jsx-a11y/control-has-associated-label": "off",
 
-    // 3 findings, all genuine dead code (a redundant spread and two `?? []`
-    // fallbacks inside spreads). Cheap to clean up, but they are source edits
-    // and belong in their own change.
+    // Its one finding is the `...(cond ? { x } : {})` conditional spread in
+    // HistoryChart's uPlot options. That is idiomatic, appears twice in the
+    // same file (the rule flags only one of them), and is built once per chart
+    // rebuild rather than per frame. Satisfying the rule means restructuring
+    // readable code to no benefit.
     "unicorn/no-useless-spread": "off",
-    "unicorn/no-useless-fallback-in-spread": "off",
   },
 }

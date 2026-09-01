@@ -75,7 +75,7 @@ export function NotificationsTab() {
   const setField = (name: string, key: string, val: unknown) =>
     setV((s) => ({
       ...s,
-      ns: { ...s.ns, [name]: { ...(s.ns[name] ?? {}), [key]: val } },
+      ns: { ...s.ns, [name]: { ...s.ns[name], [key]: val } },
     }));
 
   const onSave = async () => {
