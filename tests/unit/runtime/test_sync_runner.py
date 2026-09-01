@@ -11,7 +11,7 @@ import controller.runtime.runner as runner_module
 from common.control_trace import ActuationMode, AllocationClampReason, ResultStaleState
 from common.model_evidence import SessionSummaryEvidence
 from controller.applied_output import AppliedOutput, OutputSource
-from controller.base import ControllerLearningDiagnostics
+from controller.base import ControllerLearningDiagnostics, PidTraceDiagnostics
 from controller.model_learning.contracts import CandidateOrigin, FrameObservation
 from controller.mpc_allocator import AllocationResult
 from controller.pid_sp import Controller as PidSpController
@@ -113,7 +113,27 @@ def test_sync_runner_float_output_has_no_fan():
     out = SyncControllerRunner(FloatCore()).latest_from(190.0)
     assert out.cycle_ratio == 0.25 and out.fan is None
 
-def test_sync_runner_uses_bounded_allocation_instead_of_raw_controller_demand():
+def test_sync_runner_uses_allocation_duty_and_preserves_raw_diagnostics():
+    diagnostics = PidTraceDiagnostics(
+        observed_dt_seconds=5.0,
+        error=1.0,
+        proportional_term=-0.15963,
+        integral_term=0.0,
+        derivative_term=0.0,
+        integral_accumulator=0.0,
+        integral_clamped=False,
+        derivative_input=0.0,
+        derivative_state=0.0,
+        proportional_band=100.0,
+        kp=1.0,
+        ki=0.0,
+        kd=0.0,
+        center=0.0,
+        previous_temperature=190.0,
+        previous_update_time=0.0,
+        raw_output=-0.15963,
+        final_output=0.0,
+    )
     allocation = AllocationResult(
         normalized_combustion_load=0.0,
         auger_duty=0.0,
@@ -128,7 +148,10 @@ def test_sync_runner_uses_bounded_allocation_instead_of_raw_controller_demand():
 
     class AllocatedCore(_Core):
         def update(self, temp):
-            return -0.25
+            return -0.15963
+
+        def trace_diagnostics(self):
+            return diagnostics
 
         def trace_allocation(self):
             return allocation
@@ -136,7 +159,46 @@ def test_sync_runner_uses_bounded_allocation_instead_of_raw_controller_demand():
     out = SyncControllerRunner(AllocatedCore()).latest_from(190.0)
 
     assert out.cycle_ratio == 0.0
+    assert out.diagnostics is diagnostics
+    assert out.diagnostics.raw_output == -0.15963
     assert out.allocation is allocation
+
+
+def test_sync_runner_preserves_normalized_fan_when_allocation_supplies_duty():
+    allocation = AllocationResult(
+        normalized_combustion_load=0.2,
+        auger_duty=0.2,
+        fan_duty=60.0,
+        u_max=1.0,
+        fan_min_pct=50.0,
+        fan_max_pct=100.0,
+        fan_enabled=True,
+        auger_clamp_reason=AllocationClampReason.NONE,
+        fan_clamp_reason=AllocationClampReason.NONE,
+    )
+
+    class FanCore(_Core):
+        def update(self, temp):
+            return {"cycle_ratio": 0.9, "fan": {"duty": 60.0}}
+
+        def trace_allocation(self):
+            return allocation
+
+    out = SyncControllerRunner(FanCore()).latest_from(190.0)
+
+    assert out.cycle_ratio == 0.2
+    assert out.fan == {"duty": 60.0}
+
+
+def test_sync_runner_uses_normalized_raw_demand_when_no_allocation():
+    class NoAllocationCore(_Core):
+        def update(self, temp):
+            return 0.4
+
+    out = SyncControllerRunner(NoAllocationCore()).latest_from(190.0)
+
+    assert out.cycle_ratio == 0.4
+    assert out.allocation is None
 
 
 def test_sync_runner_forwards_safety_cancellation_without_an_operator_command():
