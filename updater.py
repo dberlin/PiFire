@@ -120,6 +120,20 @@ def update_startup_transaction(repo_root=None):
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
+@contextmanager
+def git_fetch_transaction(repo_root=None):
+    """Serialize Git ref updates within one PiFire checkout."""
+    repository = Path(repo_root or REPO_ROOT).resolve()
+    lock_path = repository / "controller" / "_native" / "git-fetch.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
 """
 ==============================================================================
  Supporting Functions
@@ -159,15 +173,15 @@ def get_available_branches():
 
 
 def update_remote_branches():
-    # git remote set-branches origin '*'
-    command = ["git", "remote", "set-branches", "origin", "*"]
-    remote_branches = subprocess.run(command, capture_output=True, text=True, check=False)
-    error_msg = ""
-    if remote_branches.returncode != 0:
-        error_msg = remote_branches.stderr
-    # Fetch Branch Information Locally
-    command = ["git", "fetch"]
-    fetch = subprocess.run(command, capture_output=True, text=True, check=False)
+    with git_fetch_transaction():
+        # Changing the refspec and fetching it are one ref-update operation.
+        command = ["git", "remote", "set-branches", "origin", "*"]
+        remote_branches = subprocess.run(command, capture_output=True, text=True, check=False)
+        error_msg = ""
+        if remote_branches.returncode != 0:
+            error_msg = remote_branches.stderr
+        command = ["git", "fetch"]
+        fetch = subprocess.run(command, capture_output=True, text=True, check=False)
     if fetch.returncode != 0:
         error_msg += " | " + remote_branches.stderr
     return error_msg
@@ -253,7 +267,8 @@ def get_available_updates(branch=""):
 
     if "ERROR" not in remote and "ERROR" not in branch:
         command = ["git", "fetch"]
-        fetch = subprocess.run(command, capture_output=True, text=True, check=False)
+        with git_fetch_transaction():
+            fetch = subprocess.run(command, capture_output=True, text=True, check=False)
         command = ["git", "rev-list", "--left-only", "--count", f"origin/{branch}...@"]
         rev_list = subprocess.run(command, capture_output=True, text=True, check=False)
         # print(f'rev_list.returncode = {rev_list.returncode}')
@@ -287,7 +302,8 @@ def do_update():
     _remote, error_msg2 = get_remote_url()
     if error_msg1 == "" and error_msg2 == "":
         command = ["git", "fetch", "--all"]
-        fetch = subprocess.run(command, capture_output=True, text=True, check=False)
+        with git_fetch_transaction():
+            fetch = subprocess.run(command, capture_output=True, text=True, check=False)
         command = ["git", "reset", "--hard", f"origin/{branch}"]
         reset = subprocess.run(command, capture_output=True, text=True, check=False)
 
@@ -351,7 +367,8 @@ def get_remote_version():
         # this only ever displays the newest one, so taking the remote's answer
         # is the whole point.
         fetch_command = ["git", "fetch", "--tags", "--force"]
-        fetch = subprocess.run(fetch_command, capture_output=True, text=True, check=False)
+        with git_fetch_transaction():
+            fetch = subprocess.run(fetch_command, capture_output=True, text=True, check=False)
         # A failed fetch is not fatal. The tags already on disk still answer
         # "what version is this checkout", just possibly not the very newest --
         # and a network blip should not blank the version line.
@@ -537,7 +554,8 @@ def _install_update_checkout():
     branch, error_msg1 = get_branch()
     _remote, error_msg2 = get_remote_url()
     if error_msg1 == "" and error_msg2 == "":
-        fetch = subprocess.run(["git", "fetch"], capture_output=True, text=True, check=False)
+        with git_fetch_transaction():
+            fetch = subprocess.run(["git", "fetch"], capture_output=True, text=True, check=False)
         reset = subprocess.run(["git", "reset", "--hard", "HEAD"], capture_output=True, text=True, check=False)
         merge = subprocess.run(["git", "merge", f"origin/{branch}"], capture_output=True, text=True, check=False)
         if fetch.returncode == 0 and reset.returncode == 0 and merge.returncode == 0:
