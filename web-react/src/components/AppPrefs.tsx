@@ -40,7 +40,7 @@ export function AppPrefsProvider({ children }: { children: ReactNode }) {
   return <Ctx.Provider value={{ accent, setAccent, animate, setAnimate }}>{children}</Ctx.Provider>;
 }
 
-// eslint-disable-next-line react-refresh/only-export-components -- pairs the provider with its hook, same module by design.
+// oxlint-disable-next-line react/only-export-components -- pairs the provider with its hook, same module by design.
 export function useAppPrefs(): AppPrefs {
   const c = useContext(Ctx);
   if (!c) throw new Error("useAppPrefs must be used within AppPrefsProvider");

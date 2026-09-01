@@ -1,4 +1,4 @@
-/* eslint-disable */
+/* oxlint-disable */
 // GENERATED from Pydantic web contracts — do not edit. Regenerate: bun run gen:types
 
 type Enabled = boolean;
@@ -534,7 +534,7 @@ export interface PidSpConfig {
 interface Config1 {
   [k: string]:
     | {
-        [k: string]: number | boolean | string | undefined;
+        [k: string]: (number | boolean | string) | undefined;
       }
     | undefined;
 }

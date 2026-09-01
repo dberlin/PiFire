@@ -1,4 +1,4 @@
-// biome-ignore-all lint/suspicious/noEmptyInterface: Generated from closed empty JSON objects.
+/* oxlint-disable */
 // GENERATED from Pydantic web contracts — do not edit. Regenerate: bun run gen:types
 
 type DecisionId = string;
@@ -68,7 +68,7 @@ type ParentIncumbentGeneration = number;
 type RequestId = string;
 type ResultStatus = "succeeded";
 type ParameterDeltas = {
-  [k: string]: number | null | undefined;
+  [k: string]: (number | null) | undefined;
 } | null;
 type CC = number;
 type KQ = number;
@@ -622,7 +622,7 @@ export interface ModelEvidenceReport {
   status: ModelEvidenceStatus;
 }
 interface Checks {
-  [k: string]: CheckStatus | undefined;
+  [k: string]: CheckStatus;
 }
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema

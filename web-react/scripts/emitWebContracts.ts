@@ -13,15 +13,13 @@ const SCHEMA_DIRECTORY = "schema/contracts";
 const TYPESCRIPT_DIRECTORY = "../packages/pifire-core/src/contracts";
 const MANIFEST_PATH = join(SCHEMA_DIRECTORY, "manifest.json");
 const WEB_REACT_ROOT = fileURLToPath(new URL("..", import.meta.url));
-const BIOME_EXECUTABLE = join(WEB_REACT_ROOT, "node_modules/.bin/biome");
-const BIOME_CONFIG = join(WEB_REACT_ROOT, "biome.jsonc");
-const BIOME_HEADER =
-  "// biome-ignore-all lint/suspicious/noEmptyInterface: Generated from closed empty JSON objects.";
+const OXFMT_EXECUTABLE = join(WEB_REACT_ROOT, "node_modules/.bin/oxfmt");
+const OXFMT_CONFIG = join(WEB_REACT_ROOT, ".oxfmtrc.jsonc");
 
 const COMPILER_OPTIONS = {
   additionalProperties: false,
   bannerComment:
-    "/* eslint-disable */\n// GENERATED from Pydantic web contracts — do not edit. Regenerate: bun run gen:types",
+    "/* oxlint-disable */\n// GENERATED from Pydantic web contracts — do not edit. Regenerate: bun run gen:types",
   declareExternallyReferenced: true,
   strictIndexSignatures: true,
   unknownAny: true,
@@ -159,29 +157,19 @@ async function readManifest(): Promise<Record<string, string>> {
 }
 
 async function formatGeneratedTypeScript(generated: string, outputPath: string): Promise<string> {
-  const formatterInput = /\binterface\s+[\w$]+\s*\{\s*\}/.test(generated)
-    ? `${BIOME_HEADER}\n${generated.replace(/^\/\* eslint-disable \*\/\n/, "")}`
-    : generated;
-  // Biome only honors this config's `formatter.indentStyle` (space) for a
-  // --stdin-file-path it can place under the config's own root; an absolute
-  // path pointing outside web-react (as outputPath now does, since the
-  // contracts moved into the sibling @pifire/core package) falls back to
-  // Biome's built-in default (tabs). A WEB_REACT_ROOT-relative path — the
-  // same "../packages/..." shape TYPESCRIPT_DIRECTORY already uses — keeps
-  // it resolving the config correctly.
+  // The formatter only honors this config's indent settings for a
+  // --stdin-filepath it can place under the config's own root; an absolute
+  // path pointing outside web-react (as outputPath does, since the contracts
+  // moved into the sibling @pifire/core package) falls back to built-in
+  // defaults. A WEB_REACT_ROOT-relative path — the same "../packages/..."
+  // shape TYPESCRIPT_DIRECTORY already uses — keeps it resolving the config
+  // correctly.
   const formatterStdinPath = relative(WEB_REACT_ROOT, outputPath);
   const formatter = Bun.spawn(
-    [
-      BIOME_EXECUTABLE,
-      "format",
-      "--config-path",
-      BIOME_CONFIG,
-      "--stdin-file-path",
-      formatterStdinPath,
-    ],
+    [OXFMT_EXECUTABLE, "-c", OXFMT_CONFIG, "--stdin-filepath", formatterStdinPath],
     {
       cwd: WEB_REACT_ROOT,
-      stdin: new Blob([formatterInput]),
+      stdin: new Blob([generated]),
       stdout: "pipe",
       stderr: "pipe",
     },
@@ -190,7 +178,7 @@ async function formatGeneratedTypeScript(generated: string, outputPath: string):
   const formatterError = new Response(formatter.stderr).text();
   const exitCode = await formatter.exited;
   if (exitCode !== 0) {
-    throw new Error(`Biome failed to format ${outputPath}: ${await formatterError}`);
+    throw new Error(`oxfmt failed to format ${outputPath}: ${await formatterError}`);
   }
   return lfTerminated(await formattedOutput);
 }

@@ -1,4 +1,4 @@
-/* eslint-disable */
+/* oxlint-disable */
 // GENERATED from schema/settings.schema.json — do not edit. Regenerate: bun run gen:types
 
 export const SETTINGS_DEFAULTS = {

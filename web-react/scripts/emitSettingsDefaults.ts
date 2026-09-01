@@ -4,7 +4,7 @@
 // static value to publish.
 
 const BANNER =
-  "/* eslint-disable */\n" +
+  "/* oxlint-disable */\n" +
   "// GENERATED from schema/settings.schema.json — do not edit. Regenerate: bun run gen:types";
 
 interface SchemaLike {

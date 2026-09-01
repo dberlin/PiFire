@@ -64,7 +64,6 @@ const { routes } = await import("../../../src/components/appRoutes");
 
 afterEach(() => {
   cleanup();
-  // biome-ignore lint/suspicious/noExplicitAny: undo the stub above.
   (globalThis as any).fetch = undefined;
 });
 
@@ -106,7 +105,6 @@ beforeEach(() => {
     command,
   });
   fetchMock.mockClear();
-  // biome-ignore lint/suspicious/noExplicitAny: stubbing the global fetch.
   (globalThis as any).fetch = fetchMock;
 });
 

@@ -316,7 +316,6 @@
    on ProbesTab's health blocks, and a direct child has exactly one parent. The
    descending specificity is therefore unreachable, and the (0,2,0) scope above
    is pinned by this file's header. */
-/* biome-ignore lint/style/noDescendingSpecificity: disjoint elements, see above */
 .pf-probe-health-detail > h3 {
   @apply m-0;
   font: 700 17px "Barlow";

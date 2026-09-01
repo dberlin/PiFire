@@ -1,4 +1,4 @@
-// biome-ignore-all lint/suspicious/noEmptyInterface: Generated from closed empty JSON objects.
+/* oxlint-disable */
 // GENERATED from Pydantic web contracts — do not edit. Regenerate: bun run gen:types
 
 type Error = string | null;
@@ -194,7 +194,7 @@ type ProbeProfiles = ProbeProfile[];
 type ProbesUnits2 = string;
 
 export interface PiFireWizardWebContracts {
-  [k: string]: unknown;
+  [k: string]: unknown | undefined;
 }
 /**
  * This interface was referenced by `PiFireWizardWebContracts`'s JSON-Schema

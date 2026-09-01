@@ -58,14 +58,12 @@ async function settle() {
 beforeEach(() => {
   rs.useFakeTimers();
   fetchMock.mockReset();
-  // biome-ignore lint/suspicious/noExplicitAny: stubbing the global fetch.
   (globalThis as any).fetch = fetchMock;
 });
 
 afterEach(() => {
   cleanup();
   rs.useRealTimers();
-  // biome-ignore lint/suspicious/noExplicitAny: undo the stub above.
   (globalThis as any).fetch = undefined;
 });
 

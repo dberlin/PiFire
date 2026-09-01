@@ -1,4 +1,4 @@
-/* eslint-disable */
+/* oxlint-disable */
 // GENERATED from Pydantic web contracts — do not edit. Regenerate: bun run gen:types
 
 type Selected = string;
@@ -257,7 +257,7 @@ export interface ControllerSettings {
 interface Config {
   [k: string]:
     | {
-        [k: string]: number | boolean | string | undefined;
+        [k: string]: (number | boolean | string) | undefined;
       }
     | undefined;
 }

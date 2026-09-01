@@ -156,7 +156,6 @@ describe("InstallProgress", () => {
     rs.useFakeTimers();
     getStatusMock.mockResolvedValue({ percent: 20, status: "Working…", output: "" });
     const matchMediaMock = rs.fn().mockReturnValue({ matches: true });
-    // biome-ignore lint/suspicious/noExplicitAny: stubbing a browser API jsdom doesn't implement.
     (window as any).matchMedia = matchMediaMock;
 
     try {
@@ -170,7 +169,6 @@ describe("InstallProgress", () => {
       const bar = screen.getByRole("progressbar").firstElementChild;
       expect(bar).toHaveClass("pf-install-progress-bar-reduced-motion");
     } finally {
-      // biome-ignore lint/suspicious/noExplicitAny: undo the stub above.
       (window as any).matchMedia = undefined;
     }
   });

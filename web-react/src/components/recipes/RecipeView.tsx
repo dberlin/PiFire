@@ -119,7 +119,6 @@ export function RecipeView({ detail, activeStep }: Props) {
   // activeStep drives WHICH element registerRef populated activeRef with, not
   // anything read directly in this body -- it has to stay a dependency so the
   // scroll runs again each time the running step advances.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: see above
   useEffect(() => {
     activeRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [activeStep]);
