@@ -127,7 +127,7 @@ def _not_run(command: GateCommand) -> CommandEvidence:
 def _resolve_revision_safely(resolve_revision: _ResolveRevision) -> str | None:
     try:
         return resolve_revision()
-    except (KeyboardInterrupt, SystemExit, Exception):
+    except KeyboardInterrupt, SystemExit, Exception:
         return None
 
 
@@ -215,10 +215,7 @@ def _invalid_stage_evidence_index(
             stderr_sha256 = _sha256(revision_dir / stderr_name)
         except OSError:
             return position
-        if (
-            stdout_sha256 != evidence.stdout_sha256
-            or stderr_sha256 != evidence.stderr_sha256
-        ):
+        if stdout_sha256 != evidence.stdout_sha256 or stderr_sha256 != evidence.stderr_sha256:
             return position
 
     return None
@@ -273,7 +270,7 @@ def _run_one_command(
             if type(returncode) is not int:
                 raise TypeError("command runner returned an invalid exit code")
             exit_code = returncode
-    except (KeyboardInterrupt, SystemExit, Exception):
+    except KeyboardInterrupt, SystemExit, Exception:
         interrupted = True
 
     return CommandEvidence(
@@ -580,9 +577,7 @@ def resolve_current_operation_id(root: Path) -> str:
         raise RuntimeError(f"could not resolve current operation: {detail}")
     operation_id = completed.stdout.strip()
     if _FULL_OPERATION_ID.fullmatch(operation_id) is None:
-        raise RuntimeError(
-            "current operation did not resolve to one full 128-character lowercase hexadecimal ID"
-        )
+        raise RuntimeError("current operation did not resolve to one full 128-character lowercase hexadecimal ID")
     return operation_id
 
 
@@ -692,11 +687,13 @@ def _isolated_live_pifire(root: Path) -> Iterator[None]:
                     (
                         sys.executable,
                         "-c",
-                        "from common import datastore; "
-                        "from common.persistence.runtime import read_settings, write_settings; "
-                        "datastore.init(); settings = read_settings(); "
-                        "settings['platform']['real_hw'] = False; "
-                        "settings['globals']['first_time_setup'] = False; write_settings(settings)",
+                        (
+                            "from common import datastore; "
+                            "from common.persistence.runtime import read_settings, write_settings; "
+                            "datastore.init(); settings = read_settings(); "
+                            "settings['platform']['real_hw'] = False; "
+                            "settings['globals']['first_time_setup'] = False; write_settings(settings)"
+                        ),
                     ),
                     cwd=source_root,
                     check=False,
@@ -851,15 +848,9 @@ def push_verified_bookmark(
         if evidence.status != "passed":
             return evidence
 
-        operation_id = (
-            resolve_current_operation_id(root)
-            if resolve_operation is None
-            else resolve_operation()
-        )
+        operation_id = resolve_current_operation_id(root) if resolve_operation is None else resolve_operation()
         if _FULL_OPERATION_ID.fullmatch(operation_id) is None:
-            raise RuntimeError(
-                "current operation did not resolve to one full 128-character lowercase hexadecimal ID"
-            )
+            raise RuntimeError("current operation did not resolve to one full 128-character lowercase hexadecimal ID")
         post_gate_current = resolve_bookmark_revision(
             root,
             "@",
@@ -912,7 +903,7 @@ def push_verified_bookmark(
 
 @dataclass(frozen=True, slots=True)
 class _Arguments:
-    operation: Literal["verify", "verify-bookmark", "push", "verify-ci"]
+    operation: Literal["verify", "verify-bookmark", "push"]
     expected_revision: str | None
     bookmark: str | None
     artifact_root: Path
@@ -937,57 +928,31 @@ def _parse_args(argv: list[str] | None = None) -> _Arguments:
     _ = push.add_argument("--bookmark", required=True)
     _ = push.add_argument("--artifact-root", type=Path, default=_DEFAULT_ARTIFACT_ROOT)
 
-    verify_ci = subparsers.add_parser("verify-ci", help="run the gate for the exact GitHub Actions revision")
-    _ = verify_ci.add_argument("--expected-revision", required=True)
-    _ = verify_ci.add_argument("--artifact-root", type=Path, default=_DEFAULT_ARTIFACT_ROOT)
-
     values = cast(dict[str, object], vars(parser.parse_args(argv)))
     operation = values["operation"]
     expected_revision = values.get("expected_revision")
     bookmark = values.get("bookmark")
     artifact_root = values.get("artifact_root")
     if (
-        operation not in {"verify", "verify-bookmark", "push", "verify-ci"}
+        operation not in {"verify", "verify-bookmark", "push"}
         or (expected_revision is not None and not isinstance(expected_revision, str))
         or (bookmark is not None and not isinstance(bookmark, str))
         or not isinstance(artifact_root, Path)
     ):
         parser.error("invalid exact-revision gate arguments")
     return _Arguments(
-        operation=cast(Literal["verify", "verify-bookmark", "push", "verify-ci"], operation),
+        operation=cast(Literal["verify", "verify-bookmark", "push"], operation),
         expected_revision=expected_revision,
         bookmark=bookmark,
         artifact_root=artifact_root,
     )
 
 
-def _validate_ci_environment(expected_revision: str) -> None:
-    if os.environ.get("CI") != "true":
-        raise ValueError("verify-ci requires CI=true")
-    github_revision = os.environ.get("GITHUB_SHA")
-    if github_revision is None:
-        raise ValueError("verify-ci requires GITHUB_SHA")
-    if _FULL_REVISION.fullmatch(github_revision) is None:
-        raise ValueError("GITHUB_SHA must be a full 40-character lowercase hexadecimal revision")
-    if github_revision != expected_revision:
-        raise ValueError("GITHUB_SHA must exactly match --expected-revision")
-
-
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     root = Path.cwd()
     try:
-        if args.operation == "verify-ci":
-            assert args.expected_revision is not None
-            _validate_ci_environment(args.expected_revision)
-            with _isolated_live_pifire(root):
-                evidence = run_gate(
-                    root=root,
-                    expected_revision=args.expected_revision,
-                    artifact_root=args.artifact_root,
-                    resolve_revision=lambda: _resolve_current_revision(root),
-                )
-        elif args.operation == "verify":
+        if args.operation == "verify":
             assert args.expected_revision is not None
             evidence = run_gate(
                 root=root,

@@ -38,7 +38,7 @@ PID-SP's approved public contract is explicit: `Controller.update()` returns his
 
 The exact-revision gate in `scripts/exact_revision_gate.py` is the sole command and evidence authority. Keep its revision checks before and after preflight and every release command, plus the final publication check. A skipped, interrupted, timed-out, nonzero, missing, reordered, or different-revision command fails closed.
 
-Preserve `.artifacts/exact-revision/<full-revision>/evidence.json` and every referenced stdout/stderr log. CI uploads the directory as `exact-revision-<full-revision>`. Do not rename, delete, hand-edit, or reuse evidence from an earlier attempt.
+Preserve `.artifacts/exact-revision/<full-revision>/evidence.json` and every referenced stdout/stderr log. The guarded push revalidates that local directory after confirming the remote revision. Do not rename, delete, hand-edit, or reuse evidence from an earlier attempt.
 
 ## Jujutsu and prek
 
@@ -56,4 +56,4 @@ If the alias is unavailable, run the wrapper directly from the repository root:
 uv run python scripts/exact_revision_gate.py push --bookmark cumulative-mpc-learning --artifact-root .artifacts/exact-revision
 ```
 
-Direct `jj git push` intentionally bypasses the wrapper and is prohibited by project rules. Repository protection and the exact-revision CI status remain the shared, non-bypassable enforcement layer.
+Direct `jj git push` intentionally bypasses the wrapper and is prohibited by project rules. The guarded local wrapper is the authoritative enforcement boundary for `cumulative-mpc-learning`; no GitHub Actions status is part of this gate.

@@ -28,7 +28,7 @@ For every exclusion below, use the exact text `not applicable — no such consum
 - [ ] Focused contract preflight passed at the exact revision under review.
 - [ ] All five required release commands passed, in order, at that same exact revision.
 - [ ] Exact full revision (40 lowercase hexadecimal characters):
-- [ ] Preserved artifact name (`exact-revision-<full-revision>`):
+- [ ] Preserved local artifact directory (`.artifacts/exact-revision/<full-revision>/`):
 - [ ] The artifact contains `evidence.json` plus every referenced stdout/stderr log and SHA-256 digest.
 - [ ] No skipped, interrupted, timed-out, nonzero, missing, reordered, or revision-drifted command was accepted.
 - [ ] Push used repository `jj push` or the direct PiFire exact-revision `push` wrapper; direct `jj git push` was not used.

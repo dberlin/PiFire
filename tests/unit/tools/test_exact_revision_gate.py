@@ -178,14 +178,8 @@ def test_contract_preflight_is_separate_from_the_five_release_commands() -> None
 def test_agents_requires_schema_v2_preflight_evidence_to_authorize_push() -> None:
     rules = (_REPOSITORY_ROOT / "AGENTS.md").read_text(encoding="utf-8")
 
-    assert (
-        "Only schema v2 evidence with the separate contract preflight can authorize a push."
-        in rules
-    )
-    assert (
-        "Preserved schema v1 evidence is historical-only and cannot authorize a push."
-        in rules
-    )
+    assert "Only schema v2 evidence with the separate contract preflight can authorize a push." in rules
+    assert "Preserved schema v1 evidence is historical-only and cannot authorize a push." in rules
 
 
 @pytest.mark.parametrize(
@@ -211,12 +205,8 @@ def test_failed_or_interrupted_preflight_preserves_evidence_and_leaves_release_n
     preflight = evidence.preflight[0]
     assert preflight.stdout_log == "00-contract-preflight.stdout.log"
     assert preflight.stderr_log == "00-contract-preflight.stderr.log"
-    assert preflight.stdout_sha256 == hashlib.sha256(
-        (revision_dir / preflight.stdout_log).read_bytes()
-    ).hexdigest()
-    assert preflight.stderr_sha256 == hashlib.sha256(
-        (revision_dir / preflight.stderr_log).read_bytes()
-    ).hexdigest()
+    assert preflight.stdout_sha256 == hashlib.sha256((revision_dir / preflight.stdout_log).read_bytes()).hexdigest()
+    assert preflight.stderr_sha256 == hashlib.sha256((revision_dir / preflight.stderr_log).read_bytes()).hexdigest()
     assert _read_json(revision_dir / "evidence.json")["preflight"] == [
         {
             "name": preflight.name,
@@ -247,12 +237,7 @@ def test_revision_drift_during_preflight_fails_before_release_commands(tmp_path:
 def test_in_tree_artifact_root_is_ignored_and_supports_a_complete_attempt(tmp_path: Path) -> None:
     ignore_rules = (_REPOSITORY_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert "/.artifacts/" in ignore_rules
-    artifact_root = (
-        _REPOSITORY_ROOT
-        / ".artifacts"
-        / "exact-revision"
-        / f"unit-{os.getpid()}-{tmp_path.name}"
-    )
+    artifact_root = _REPOSITORY_ROOT / ".artifacts" / "exact-revision" / f"unit-{os.getpid()}-{tmp_path.name}"
     resolver = _RevisionResolver(*([_REVISION] * 13))
     runner = _CommandRunner(*_success_results())
 
@@ -382,8 +367,7 @@ def test_success_checks_revision_around_every_command_and_at_end(tmp_path: Path)
         "resolve",
     ]
     assert runner.calls == [
-        (command.argv, _REPOSITORY_ROOT / command.cwd)
-        for command in preflight_commands() + required_commands()
+        (command.argv, _REPOSITORY_ROOT / command.cwd) for command in preflight_commands() + required_commands()
     ]
     assert [command.status for command in evidence.preflight] == ["passed"]
     assert [command.status for command in evidence.commands] == ["passed"] * 5
@@ -678,6 +662,7 @@ def test_success_revalidates_both_logs_and_hashes_before_publication(
     ]
     assert _read_json(revision_dir / "evidence.json")["status"] == "failed"
 
+
 def test_evidence_json_replacement_is_atomic_when_replace_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -685,7 +670,7 @@ def test_evidence_json_replacement_is_atomic_when_replace_fails(
     artifact_root = tmp_path / "artifacts"
     evidence_path = artifact_root / _REVISION / "evidence.json"
     evidence_path.parent.mkdir(parents=True)
-    prior_evidence = b'{\"revision\": \"prior\", \"status\": \"passed\"}\n'
+    prior_evidence = b'{"revision": "prior", "status": "passed"}\n'
     _ = evidence_path.write_bytes(prior_evidence)
     resolver = _RevisionResolver(_REVISION)
     runner = _CommandRunner(*_success_results())
@@ -792,13 +777,9 @@ def test_release_stage_failure_after_successful_preflight_fails_closed_at_every_
 
     assert evidence.status == "failed"
     assert [command.status for command in evidence.preflight] == ["passed"]
-    assert [command.name for command in evidence.commands] == [
-        command.name for command in commands
-    ]
+    assert [command.name for command in evidence.commands] == [command.name for command in commands]
     assert [command.status for command in evidence.commands] == (
-        ["passed"] * failing_index
-        + [expected_status]
-        + ["not_run"] * (len(commands) - failing_index - 1)
+        ["passed"] * failing_index + [expected_status] + ["not_run"] * (len(commands) - failing_index - 1)
     )
     assert runner.calls == [
         (command.argv, _REPOSITORY_ROOT / command.cwd)
@@ -852,19 +833,15 @@ def test_release_stage_failure_after_successful_preflight_fails_closed_at_every_
     assert payload["schema_version"] == 2
     assert payload["status"] == "failed"
     assert [entry["status"] for entry in persisted_preflight] == ["passed"]
-    assert [entry["name"] for entry in persisted_commands] == [
-        command.name for command in commands
-    ]
-    assert [entry["status"] for entry in persisted_commands] == [
-        command.status for command in evidence.commands
-    ]
+    assert [entry["name"] for entry in persisted_commands] == [command.name for command in commands]
+    assert [entry["status"] for entry in persisted_commands] == [command.status for command in evidence.commands]
 
 
 def test_initial_revision_mismatch_preserves_expected_revision_evidence(tmp_path: Path) -> None:
     artifact_root = tmp_path / "artifacts"
     expected_evidence_path = artifact_root / _REVISION / "evidence.json"
     expected_evidence_path.parent.mkdir(parents=True)
-    prior_evidence = b'{\"revision\": \"prior\", \"status\": \"passed\"}\n'
+    prior_evidence = b'{"revision": "prior", "status": "passed"}\n'
     _ = expected_evidence_path.write_bytes(prior_evidence)
     resolver = _RevisionResolver(_OTHER_REVISION)
     runner = _CommandRunner(*_success_results())
@@ -904,11 +881,7 @@ def test_revision_drift_fails_at_every_exact_check(
     else:
         affected_command = min((failing_check - 3) // 2, 4)
         expected_preflight = ["passed"]
-        expected_commands = (
-            ["passed"] * affected_command
-            + ["revision_changed"]
-            + ["not_run"] * (4 - affected_command)
-        )
+        expected_commands = ["passed"] * affected_command + ["revision_changed"] + ["not_run"] * (4 - affected_command)
     assert resolver.calls == failing_check
     assert len(runner.calls) == failing_check // 2
     assert evidence.status == "failed"
@@ -1251,13 +1224,13 @@ def _bookmark_resolver(
         return revisions[bookmark].pop(0)
 
     monkeypatch.setattr(gate_module, "resolve_bookmark_revision", resolve)
+
     @contextmanager
     def no_live_runtime(_root: Path) -> Iterator[None]:
         yield
 
     monkeypatch.setattr(gate_module, "_isolated_live_pifire", no_live_runtime, raising=False)
     return calls
-
 
 
 def test_only_playwright_receives_the_live_runtime_datastore_environment(
@@ -1489,6 +1462,7 @@ def test_push_runs_a_fresh_gate_and_only_the_authorized_push(
     assert calls[:2] == ["cumulative-mpc-learning", "@"]
     assert calls[-3:] == ["@", "cumulative-mpc-learning", "cumulative-mpc-learning@origin"]
 
+
 def test_push_stays_pinned_when_live_bookmark_moves_before_command_execution(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1551,7 +1525,6 @@ def test_push_stays_pinned_when_live_bookmark_moves_before_command_execution(
             _REPOSITORY_ROOT,
         )
     ]
-
 
 
 def test_push_owns_artifact_lock_until_remote_and_durable_evidence_are_verified(
@@ -1898,74 +1871,8 @@ def test_push_fails_if_durable_evidence_changes_before_final_revalidation(
     assert len(runner.push_calls) == 1
 
 
-def test_verify_ci_runs_gate_inside_an_isolated_live_runtime(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    events: list[str] = []
-
-    @contextmanager
-    def live_runtime(root: Path) -> Iterator[None]:
-        assert root == _REPOSITORY_ROOT
-        events.append("runtime:start")
-        yield
-        events.append("runtime:stop")
-
-    def verified_gate(**kwargs: object) -> GateEvidence:
-        assert kwargs["root"] == _REPOSITORY_ROOT
-        assert kwargs["expected_revision"] == _REVISION
-        events.append("gate")
-        return GateEvidence(
-            schema_version=2,
-            revision=_REVISION,
-            status="passed",
-            preflight=(),
-            commands=(),
-        )
-
-    monkeypatch.setenv("CI", "true")
-    monkeypatch.setenv("GITHUB_SHA", _REVISION)
-    monkeypatch.setattr(gate_module, "_isolated_live_pifire", live_runtime)
-    monkeypatch.setattr(gate_module, "run_gate", verified_gate)
-    monkeypatch.chdir(_REPOSITORY_ROOT)
-
-    exit_code = gate_module.main(
-        [
-            "verify-ci",
-            "--expected-revision",
-            _REVISION,
-            "--artifact-root",
-            str(tmp_path / "artifacts"),
-        ]
-    )
-
-    assert exit_code == 0
-    assert events == ["runtime:start", "gate", "runtime:stop"]
-
-
-@pytest.mark.parametrize(
-    ("environment", "message"),
-    [
-        pytest.param({}, "CI=true", id="ci-absent"),
-        pytest.param({"CI": "false", "GITHUB_SHA": _REVISION}, "CI=true", id="ci-not-true"),
-        pytest.param({"CI": "true"}, "GITHUB_SHA", id="sha-absent"),
-        pytest.param({"CI": "true", "GITHUB_SHA": "short"}, "full 40-character", id="sha-not-full"),
-        pytest.param(
-            {"CI": "true", "GITHUB_SHA": _OTHER_REVISION},
-            "must exactly match",
-            id="sha-mismatch",
-        ),
-    ],
-)
-def test_verify_ci_rejects_invalid_environment_before_gate(
-    tmp_path: Path,
-    environment: dict[str, str],
-    message: str,
-) -> None:
-    clean_environment = os.environ.copy()
-    clean_environment.pop("CI", None)
-    clean_environment.pop("GITHUB_SHA", None)
-    clean_environment.update(environment)
+def test_ci_entrypoint_and_exact_revision_workflow_are_absent(tmp_path: Path) -> None:
+    workflow_path = _REPOSITORY_ROOT / ".github" / "workflows" / "integration-gate.yml"
     completed = subprocess.run(
         [
             sys.executable,
@@ -1978,12 +1885,11 @@ def test_verify_ci_rejects_invalid_environment_before_gate(
         check=False,
         capture_output=True,
         text=True,
-        env=clean_environment,
     )
 
+    assert not workflow_path.exists()
     assert completed.returncode == 2
-    assert message in completed.stderr
-    assert "Traceback" not in completed.stderr
+    assert "invalid choice: 'verify-ci'" in completed.stderr
     assert not (tmp_path / ".artifacts").exists()
 
 
@@ -1996,117 +1902,10 @@ def test_prek_pre_push_hook_verifies_the_cumulative_bookmark() -> None:
             "id": "exact-revision-gate",
             "name": "Exact revision integration gate",
             "entry": (
-                "uv run python scripts/exact_revision_gate.py verify-bookmark "
-                "--bookmark cumulative-mpc-learning"
+                "uv run python scripts/exact_revision_gate.py verify-bookmark --bookmark cumulative-mpc-learning"
             ),
             "language": "system",
             "pass_filenames": False,
             "stages": ["pre-push"],
         }
     ]
-
-
-def test_integration_workflow_has_exact_revision_gate_and_safe_live_runtime() -> None:
-    workflow_path = _REPOSITORY_ROOT / ".github" / "workflows" / "integration-gate.yml"
-    workflow = cast(
-        dict[str, object],
-        __import__("yaml").load(
-            workflow_path.read_text(encoding="utf-8"),
-            Loader=__import__("yaml").BaseLoader,
-        ),
-    )
-    triggers = cast(dict[str, object], workflow["on"])
-    jobs = cast(dict[str, object], workflow["jobs"])
-    job = cast(dict[str, object], jobs["integration-gate"])
-    steps = cast(list[dict[str, object]], job["steps"])
-
-    assert set(triggers) == {"pull_request", "push", "workflow_dispatch"}
-    assert cast(dict[str, object], triggers["push"])["branches"] == ["main"]
-    assert cast(dict[str, str], workflow["concurrency"])["cancel-in-progress"] == "false"
-    assert job["name"] == "Exact revision integration gate"
-
-    uses = {cast(str, step["uses"]): cast(dict[str, object], step.get("with", {})) for step in steps if "uses" in step}
-    assert uses["actions/checkout@v4"]["ref"] == "${{ github.sha }}"
-    assert uses["actions/checkout@v4"]["fetch-tags"] == "true"
-    assert uses["actions/setup-python@v5"]["python-version"] == "3.14"
-    assert "astral-sh/setup-uv@v10.0.1" in uses
-    assert "oven-sh/setup-bun@v2" in uses
-    assert "taiki-e/install-action@v2" in uses
-
-    scripts = "\n".join(cast(str, step["run"]) for step in steps if "run" in step)
-    assert "uv sync --locked --all-groups" in scripts
-    assert "sudo apt-get update" in scripts
-    reference_font_install = (
-        "sudo apt-get install --yes cabextract libegl1 libglib2.0-dev"
-    )
-    assert reference_font_install in scripts
-    assert (
-        "https://downloads.sourceforge.net/project/mscorefonts2/cabs/EUupdate.EXE"
-        in scripts
-    )
-    assert (
-        "464dd2cd5f09f489f9ac86ea7790b7b8548fc4e46d9f889b68d2cdce47e09ea8"
-        in scripts
-    )
-    assert (
-        "b69a5b33e997c3bc55f35dde8267cb93fe5fbdc3ecbc23b1d987602a9fd2b1f2"
-        in scripts
-    )
-    assert (
-        "7fea7f91f1140721bd7837a36ed2b1c856215f3ac08e6d2eb29c1afe235d0900"
-        in scripts
-    )
-    assert "https://downloads.sourceforge.net/project/corefonts/the%20fonts/final/impact32.exe" in scripts
-    assert (
-        "6061ef3b7401d9642f5dfdb5f2b376aa14663f6275e60a51207ad4facf2fccfb"
-        in scripts
-    )
-    assert (
-        "00f1fc230ac99f9b97ba1a7c214eb5b909a78660cb3826fca7d64c3af5a14848"
-        in scripts
-    )
-    assert 'cabextract -q -d "${font_tmp}/extracted" "${font_tmp}/EUupdate.EXE"' in scripts
-    assert "trebucbd.ttf" in scripts
-    assert "/usr/local/share/fonts/pifire-reference/impact.ttf" in scripts
-    assert '"${font_tmp}/extracted/"*.ttf' in scripts
-    assert '"/usr/local/share/fonts/pifire-reference/"' in scripts
-    assert "ttf-mscorefonts-installer" not in scripts
-    assert scripts.index(reference_font_install) < scripts.index("uv sync --locked --all-groups")
-    job_environment = cast(dict[str, object], job["env"])
-    assert job_environment["CI"] == "true"
-    assert job_environment["TZ"] == "America/New_York"
-    assert job_environment["PYTEST_XDIST_AUTO_NUM_WORKERS"] == "1"
-    for name in (
-        "PIFIRE_BACKEND_URL",
-        "PIFIRE_DB_PATH",
-        "PIFIRE_LOG_DIR",
-        "PIFIRE_GATE_LIVE_DB_PATH",
-        "PIFIRE_GATE_LIVE_LOG_DIR",
-    ):
-        assert name not in job_environment
-    gate_step = next(
-        step
-        for step in steps
-        if step.get("name") == "Run the exact revision gate against an isolated live PiFire"
-    )
-    assert "env" not in gate_step
-    assert "playwright install --with-deps chromium" in scripts
-    assert "bun run build" in scripts
-    assert "uv run python control.py" not in scripts
-    assert "uv run gunicorn" not in scripts
-    assert 'PIFIRE_DB_PATH="${runtime}/pifire.db"' not in scripts
-    assert 'PIFIRE_LOG_DIR="${runtime}/logs"' not in scripts
-    gate_command = (
-        'uv run python scripts/exact_revision_gate.py verify-ci --expected-revision "${{ github.sha }}"'
-    )
-    assert gate_command in scripts
-    assert scripts.index("bun run build") < scripts.index(gate_command)
-
-    upload = next(step for step in steps if step.get("uses") == "actions/upload-artifact@v4")
-    assert upload["if"] == "always()"
-    assert upload["with"] == {
-        "name": "exact-revision-${{ github.sha }}",
-        "path": ".artifacts/exact-revision/${{ github.sha }}/",
-        "include-hidden-files": "true",
-        "if-no-files-found": "error",
-    }
