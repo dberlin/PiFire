@@ -1,10 +1,10 @@
 {
   "metadata": {
     "versions": {
-      "server": "1.25.1",
+      "server": "1.26.0",
       "cookfile": "1.5.0",
       "recipe": "1.0.0",
-      "build": 124
+      "build": 125
     },
     "update_notes": "",
     "update_warnings": ""
@@ -26,13 +26,21 @@
       "reboot_required": false,
       "dependencies": {
         "app": {
-          "py_dependencies": ["flask_mobility", "flask_socketio", "flask_qrcode"],
+          "py_dependencies": [
+            "flask_mobility",
+            "flask_socketio",
+            "flask_qrcode"
+          ],
           "apt_dependencies": [],
           "command_list": []
         },
         "control": {
-          "py_dependencies": ["apprise"],
-          "apt_dependencies": ["libatlas-base-dev"],
+          "py_dependencies": [
+            "apprise"
+          ],
+          "apt_dependencies": [
+            "libatlas-base-dev"
+          ],
           "command_list": []
         }
       }
@@ -48,7 +56,9 @@
           "command_list": []
         },
         "control": {
-          "py_dependencies": ["ratelimitingfilter"],
+          "py_dependencies": [
+            "ratelimitingfilter"
+          ],
           "apt_dependencies": [],
           "command_list": []
         }
@@ -65,9 +75,17 @@
           "command_list": []
         },
         "control": {
-          "py_dependencies": ["paho-mqtt"],
+          "py_dependencies": [
+            "paho-mqtt"
+          ],
           "apt_dependencies": [],
-          "command_list": [["sudo", "bash", "updater/bl_udev_170.sh"]]
+          "command_list": [
+            [
+              "sudo",
+              "bash",
+              "updater/bl_udev_170.sh"
+            ]
+          ]
         }
       }
     },
@@ -80,11 +98,18 @@
           "py_dependencies": [],
           "apt_dependencies": [],
           "command_list": [
-            ["sudo", "cp", "./auto-install/supervisor/*.conf", "/etc/supervisor/conf.d"]
+            [
+              "sudo",
+              "cp",
+              "./auto-install/supervisor/*.conf",
+              "/etc/supervisor/conf.d"
+            ]
           ]
         },
         "control": {
-          "py_dependencies": ["rpi-hardware-pwm"],
+          "py_dependencies": [
+            "rpi-hardware-pwm"
+          ],
           "apt_dependencies": [],
           "command_list": []
         }
@@ -96,12 +121,24 @@
       "reboot_required": false,
       "dependencies": {
         "app": {
-          "py_dependencies": ["bluepy"],
-          "apt_dependencies": ["libglib2.0-dev"],
-          "command_list": [["sudo", "bash", "/usr/local/bin/pifire/wizard/bluepy.sh"]]
+          "py_dependencies": [
+            "bluepy"
+          ],
+          "apt_dependencies": [
+            "libglib2.0-dev"
+          ],
+          "command_list": [
+            [
+              "sudo",
+              "bash",
+              "/usr/local/bin/pifire/wizard/bluepy.sh"
+            ]
+          ]
         },
         "control": {
-          "py_dependencies": ["numpy>=1.24.2"],
+          "py_dependencies": [
+            "numpy>=1.24.2"
+          ],
           "apt_dependencies": [],
           "command_list": []
         }
@@ -113,7 +150,9 @@
       "reboot_required": true,
       "dependencies": {
         "app": {
-          "py_dependencies": ["netifaces>=0.11.0"],
+          "py_dependencies": [
+            "netifaces>=0.11.0"
+          ],
           "apt_dependencies": [],
           "command_list": []
         },
@@ -135,9 +174,21 @@
           "command_list": []
         },
         "control": {
-          "py_dependencies": ["bleak>=3.0.1"],
-          "apt_dependencies": ["bluetooth", "bluez"],
-          "command_list": [["sudo", "rfkill", "unblock", "bluetooth"]]
+          "py_dependencies": [
+            "bleak>=3.0.1"
+          ],
+          "apt_dependencies": [
+            "bluetooth",
+            "bluez"
+          ],
+          "command_list": [
+            [
+              "sudo",
+              "rfkill",
+              "unblock",
+              "bluetooth"
+            ]
+          ]
         }
       }
     },
@@ -151,7 +202,10 @@
           "py_dependencies": [],
           "apt_dependencies": [],
           "command_list": [
-            ["bash", "/usr/local/bin/pifire/updater/install-acados-prerequisites.sh"]
+            [
+              "bash",
+              "/usr/local/bin/pifire/updater/install-acados-prerequisites.sh"
+            ]
           ]
         },
         "control": {
