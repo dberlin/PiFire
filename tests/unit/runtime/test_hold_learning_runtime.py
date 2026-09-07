@@ -31,6 +31,7 @@ from common.model_evidence import (
     RecorderGapEvidence,
     RollbackEvidence,
 )
+from common.mpc_learning import MPC_FORECAST_HORIZON_SECONDS
 from controller.applied_output import AppliedOutput, FrameFeedbackDisposition, OutputSource
 from controller.model_learning.activation import ActivationPhase
 from controller.model_learning.calibration import (
@@ -526,9 +527,14 @@ def _evaluation() -> ModelEvaluationPayload:
         incumbent_digest="a" * 64,
         challenger_digest="b" * 64,
         completed_origins=(),
-        horizon_scores=(
-            HorizonScorePayload(3, None, None, 0),
-            HorizonScorePayload(15, None, None, 0),
+        horizon_scores=tuple(
+            HorizonScorePayload(
+                horizon_seconds=horizon_seconds,
+                incumbent_rmse_c=None,
+                challenger_rmse_c=None,
+                sample_count=0,
+            )
+            for horizon_seconds in MPC_FORECAST_HORIZON_SECONDS
         ),
         evaluation_duration_ms=0.0,
     )

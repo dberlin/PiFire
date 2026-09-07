@@ -22,6 +22,7 @@ from common.learning_trajectory import (
     TrajectoryBreakReason,
     canonical_generation_audit_ranges,
 )
+from common.mpc_learning import MPC_FORECAST_HORIZON_SECONDS, MPC_FORECAST_HORIZONS
 from common.persistence.learning_trajectory import (
     FitCorpusEmptyError,
     FitCorpusSnapshot,
@@ -41,8 +42,8 @@ from controller.model_learning.evaluation import (
 from controller.mpc import Controller
 from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.runtime.model_fitting import (
-    CausalForecastInput,
     FIT_CADENCE_S,
+    CausalForecastInput,
     GreyFitError,
     GreyFitSuccess,
     TriggerConfig,
@@ -60,7 +61,7 @@ PRE_ROLL_FRAMES = 8
 PRE_ROLL_DUTY = 0.15
 FRAME_SECONDS = int(FIT_CADENCE_S)
 TARGET_C = (225.0 - 32.0) * 5.0 / 9.0
-HORIZONS = EvaluationConfig().required_horizons
+HORIZONS = MPC_FORECAST_HORIZON_SECONDS
 MIN_EFFECTIVE_DURATION_S = TriggerConfig().min_effective_duration_s
 
 _FRAME_MS = FRAME_SECONDS * 1_000
@@ -278,9 +279,7 @@ def _collect_cook(plant_type: type[GrillSim], family: str, seed: int) -> _Collec
     entry_band_c = 5.0 * 5.0 / 9.0
     dwell_band_c = 15.0 * 5.0 / 9.0
     entry_frame = next(
-        index
-        for index, item in enumerate(scored)
-        if abs(item.chamber_temperature_c - TARGET_C) <= entry_band_c
+        index for index, item in enumerate(scored) if abs(item.chamber_temperature_c - TARGET_C) <= entry_band_c
     )
     after_entry = scored[entry_frame:]
     dwell = CookDwell(
@@ -443,9 +442,7 @@ def _first_600_second_boundary(
         boundary = _fit_boundary(snapshot, fit)
         if boundary.effective_duration_s >= MIN_EFFECTIVE_DURATION_S:
             return boundary
-    raise AssertionError(
-        f"no immutable corpus prefix reached {MIN_EFFECTIVE_DURATION_S:g} effective seconds"
-    )
+    raise AssertionError(f"no immutable corpus prefix reached {MIN_EFFECTIVE_DURATION_S:g} effective seconds")
 
 
 def _forecast_observation(
@@ -502,7 +499,7 @@ def _forecast_scores(
     int,
 ]:
     completed_windows: list[CompletedForecastOrigin] = []
-    horizon_wins = {horizon: 0 for horizon in HORIZONS}
+    horizon_wins = {horizon_seconds: 0 for horizon_seconds in MPC_FORECAST_HORIZON_SECONDS}
     whole_wins = 0
     evaluation_blockers: list[str] = []
     for seed in HELD_OUT_SEEDS:
@@ -537,7 +534,7 @@ def _forecast_scores(
             incumbent.update(post_primer_temperature)
 
             first_sequence = seed * 1_000
-            for offset in range(max(HORIZONS) + 1):
+            for offset in range(max(horizon.observation_frames for horizon in MPC_FORECAST_HORIZONS) + 1):
                 _apply_frame(plant, grill, on_seconds=_FORECAST_ON_SECONDS)
                 observation = _forecast_observation(
                     plant=plant,
@@ -569,32 +566,28 @@ def _forecast_scores(
                     adapter: GreyBoxPredictionAdapter,
                     origin: CausalForecastInput,
                 ) -> float:
-                    horizon = origin.horizon_steps
+                    prediction_steps = origin.prediction_steps
                     frame = origin.frame
                     forecast = adapter.forecast(
-                        np.full(horizon, frame.realized_q, dtype=np.float64),
-                        np.full(horizon, frame.ambient_c, dtype=np.float64),
+                        np.full(prediction_steps, frame.realized_q, dtype=np.float64),
+                        np.full(prediction_steps, frame.ambient_c, dtype=np.float64),
                     )
                     return float(forecast[-1])
 
-                for horizon in HORIZONS:
+                for horizon in MPC_FORECAST_HORIZONS:
                     origin = paired_forecast_origin(
                         observation,
-                        horizon_steps=horizon,
+                        horizon=horizon,
                         candidate_generation=1,
                         incumbent_digest=incumbent_digest,
                         challenger_digest=candidate_digest,
-                        incumbent_predict=lambda value, adapter=incumbent_adapter: predict(
-                            adapter, value
-                        ),
-                        challenger_predict=lambda value, adapter=candidate_adapter: predict(
-                            adapter, value
-                        ),
+                        incumbent_predict=lambda value, adapter=incumbent_adapter: predict(adapter, value),
+                        challenger_predict=lambda value, adapter=candidate_adapter: predict(adapter, value),
                     )
                     assert origin is not None
                     evaluator.register(origin)
 
-                if set(HORIZONS) <= {row.horizon_steps for row in completed}:
+                if set(MPC_FORECAST_HORIZON_SECONDS) <= {row.horizon_seconds for row in completed}:
                     decision = evaluate_forecasts(
                         tuple(completed),
                         role_generation=0,
@@ -613,41 +606,21 @@ def _forecast_scores(
             if blocker not in evaluation_blockers:
                 evaluation_blockers.append(blocker)
         for score in decision.scores:
-            horizon_wins[score.horizon_steps] += int(
-                score.challenger_rmse_c < score.incumbent_rmse_c
-            )
+            horizon_wins[score.horizon_seconds] += int(score.challenger_rmse_c < score.incumbent_rmse_c)
         candidate_whole_rmse = float(
-            np.sqrt(
-                np.mean(
-                    [row.challenger_error_c**2 for row in decision.completed_origins]
-                )
-            )
+            np.sqrt(np.mean([row.challenger_error_c**2 for row in decision.completed_origins]))
         )
-        incumbent_whole_rmse = float(
-            np.sqrt(
-                np.mean(
-                    [row.incumbent_error_c**2 for row in decision.completed_origins]
-                )
-            )
-        )
+        incumbent_whole_rmse = float(np.sqrt(np.mean([row.incumbent_error_c**2 for row in decision.completed_origins])))
         whole_wins += int(candidate_whole_rmse < incumbent_whole_rmse)
 
     horizon_ratios = []
-    for horizon in HORIZONS:
-        rows = [row for row in completed_windows if row.horizon_steps == horizon]
-        candidate_rmse = float(
-            np.sqrt(np.mean([row.challenger_error_c**2 for row in rows]))
-        )
-        incumbent_rmse = float(
-            np.sqrt(np.mean([row.incumbent_error_c**2 for row in rows]))
-        )
-        horizon_ratios.append((horizon, candidate_rmse / incumbent_rmse))
-    candidate_whole_rmse = float(
-        np.sqrt(np.mean([row.challenger_error_c**2 for row in completed_windows]))
-    )
-    incumbent_whole_rmse = float(
-        np.sqrt(np.mean([row.incumbent_error_c**2 for row in completed_windows]))
-    )
+    for horizon_seconds in MPC_FORECAST_HORIZON_SECONDS:
+        rows = [row for row in completed_windows if row.horizon_seconds == horizon_seconds]
+        candidate_rmse = float(np.sqrt(np.mean([row.challenger_error_c**2 for row in rows])))
+        incumbent_rmse = float(np.sqrt(np.mean([row.incumbent_error_c**2 for row in rows])))
+        horizon_ratios.append((horizon_seconds, candidate_rmse / incumbent_rmse))
+    candidate_whole_rmse = float(np.sqrt(np.mean([row.challenger_error_c**2 for row in completed_windows])))
+    incumbent_whole_rmse = float(np.sqrt(np.mean([row.incumbent_error_c**2 for row in completed_windows])))
     return (
         tuple(horizon_ratios),
         tuple(evaluation_blockers),
@@ -744,6 +717,18 @@ def _score_candidate(plant_type: type[GrillSim], boundary: _FitBoundary) -> Cand
         closed_loop_iae_wins=iae_wins,
         overshoot_wins=overshoot_wins,
     )
+
+
+def seed_short_cook_corpus(
+    repository: LearningTrajectoryRepository,
+    plant_type: type[GrillSim],
+    family: str,
+) -> str:
+    """Persist the deterministic qualifying campaign into an existing repository."""
+
+    cooks = tuple(_collect_cook(plant_type, family, seed) for seed in TRAINING_SEEDS)
+    partition_digest, _ = _persist_cooks(repository, cooks, family)
+    return partition_digest
 
 
 def run_short_cook_campaign(plant_type: type[GrillSim], family: str) -> ShortCookCampaignResult:

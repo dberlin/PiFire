@@ -9,6 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from common.control_trace import AllocationClampReason, AmbientSource
+from common.mpc_learning import forecast_horizon_spec
 from common.model_evidence import (
     MODEL_EVIDENCE_SCHEMA_VERSION,
     ActivationEvidence,
@@ -86,6 +87,7 @@ _RETIRED_LIFECYCLE_EVIDENCE = (
 
 
 def _forecast(evidence_id: str, timestamp_ms: int, *, sequence: int = 1) -> ModelEvidenceRecord:
+    horizon = forecast_horizon_spec(100)
     return ModelEvidenceRecord(
         evidence_id=evidence_id,
         kind=EvidenceKind.FORECAST_ORIGIN,
@@ -99,7 +101,9 @@ def _forecast(evidence_id: str, timestamp_ms: int, *, sequence: int = 1) -> Mode
             origin_sequence=sequence,
             origin_time_ms=timestamp_ms - 1,
             completion_time_ms=timestamp_ms,
-            horizon_steps=3,
+            horizon_seconds=horizon.seconds,
+            prediction_steps=horizon.prediction_steps,
+            observation_frames=horizon.observation_frames,
             incumbent_digest=_DIGEST,
             challenger_digest=_OTHER_DIGEST,
             incumbent_prediction_c=100.0,
@@ -209,6 +213,11 @@ def _rollback(evidence_id: str = "rollback-a") -> ModelEvidenceRecord:
         provenance_digest=_OTHER_DIGEST,
         payload=RollbackEvidence(decision_id="decision-a", reason="runtime-failure"),
     )
+
+
+def test_current_forecast_rejects_mismatched_horizon_clocks() -> None:
+    with pytest.raises(ValidationError, match="horizon"):
+        replace(_forecast("mismatched-clock", 100).payload, prediction_steps=5)
 
 
 def test_forecast_envelope_must_match_precommitted_payload_digests() -> None:
@@ -433,11 +442,59 @@ def test_v1_timing_row_reads_with_unavailable_new_measurements(ds) -> None:
 
     record = read_model_evidence(session_id="session-a")[0]
 
-    assert MODEL_EVIDENCE_SCHEMA_VERSION == 4
+    assert MODEL_EVIDENCE_SCHEMA_VERSION == 5
     assert record.schema_version == 1
     assert isinstance(record.payload, TimingDistributionEvidence)
     assert record.payload.p99_ms is None
     assert record.payload.hardware_provenance is None
+
+
+def test_schema_four_forecast_horizon_remains_historical_read_only(ds) -> None:
+    payload = {
+        "origin_sequence": 1,
+        "origin_time_ms": 100,
+        "completion_time_ms": 160,
+        "horizon_steps": 3,
+        "incumbent_digest": _DIGEST,
+        "challenger_digest": _OTHER_DIGEST,
+        "incumbent_prediction_c": 100.0,
+        "challenger_prediction_c": 101.0,
+        "observed_temperature_c": 102.0,
+        "incumbent_error_c": 2.0,
+        "challenger_error_c": 1.0,
+        "temperature_band": "near-target",
+        "phase": "coasting",
+        "ambient_source": "configured",
+        "calibration_fit": False,
+        "payload_type": "forecast_origin",
+    }
+    ds.connection().execute(
+        """
+        INSERT INTO model_evidence(
+            evidence_id, session_id, cook_id, timestamp_ms, kind, role_generation,
+            model_digest, provenance_digest, schema_version, payload
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "schema-four-forecast",
+            "session-a",
+            "cook-a",
+            160,
+            "forecast_origin",
+            2,
+            _OTHER_DIGEST,
+            _DIGEST,
+            4,
+            json.dumps(payload),
+        ),
+    )
+
+    record = read_model_evidence(session_id="session-a")[0]
+
+    assert record.schema_version == 4
+    assert isinstance(record.payload, ForecastOriginEvidence)
+    assert record.payload.horizon_steps == 3
+    assert record.payload.horizon_seconds is None
 
 
 def test_current_grey_fit_and_candidate_evidence_round_trip_without_state_space_fields(ds):

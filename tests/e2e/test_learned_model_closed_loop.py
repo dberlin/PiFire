@@ -21,11 +21,13 @@ from common.control_trace import (
     AmbientSource,
     AmbientUncertainty,
     ControllerType,
+    ModelEvaluationPayload,
     ModelObservationPayload,
     TraceEventKind,
 )
 from common.controller_model_state import ControllerModelStore
 from common.learning_trajectory import TrajectoryBreakReason
+from common.mpc_learning import MPC_FORECAST_HORIZON_SECONDS, forecast_horizon_spec
 from common.persistence.control_trace import read_control_trace_cook
 from common.persistence.learning_trajectory import LearningTrajectoryRepository
 from common.persistence.model_challenger import read_model_challenger
@@ -39,7 +41,6 @@ from controller.model_learning.evaluation import (
     CausalForecastEvaluator,
     EvaluationConfig,
     EvaluationDecision,
-    ForecastOrigin,
     evaluate_forecasts,
 )
 from controller.mpc import Controller
@@ -49,7 +50,13 @@ from controller.runtime.actuation_delivery import ActuationDeliveryJournal, Deli
 from controller.runtime.control_trace_recorder import ControlTraceRecorder
 from controller.runtime.control_trace_session import ControlTraceSession
 from controller.runtime.learning_trajectory import LearningTrajectoryRuntime, ModeEntered, ModeExited, ThermalSample
-from controller.runtime.model_fitting import GreyFitSuccess, fit_segmented_grey, segmented_corpus_fit_job
+from controller.runtime.model_fitting import (
+    CausalForecastInput,
+    GreyFitSuccess,
+    fit_segmented_grey,
+    paired_forecast_origin,
+    segmented_corpus_fit_job,
+)
 from controller.runtime.model_persistence import ModelPersistenceWorker
 from controller.runtime.modes.hold_learning import HoldLearningRuntime
 from controller.runtime.runner import SyncControllerRunner
@@ -62,11 +69,15 @@ from tests.e2e._mpc_online_learning_helpers import (
     _step_exact_frame,
     _trace_context,
 )
+from tests.e2e._short_cook_mpc_admission_helpers import seed_short_cook_corpus
 from tests.fakes.grill import FakeGrillPlatform
 
 _TRAINING_SEEDS = tuple(range(5))
 _HELD_OUT_SEEDS = tuple(range(5, 10))
-_REQUIRED_HORIZONS = (3, 15, 45, 90, 180)
+_TRANSPLANT_VALIDATION_SEEDS = tuple(range(10, 15))
+_FORECAST_HORIZON_SPECS = tuple(
+    forecast_horizon_spec(horizon_seconds) for horizon_seconds in MPC_FORECAST_HORIZON_SECONDS
+)
 _TRAINING_FRAMES = 120
 _FRAME_MS = _FRAME_SECONDS * 1_000
 _WALL_OFFSET_MS = 1_800_000_000_000
@@ -218,7 +229,12 @@ class _TrainingCorpus:
     next_sequence: int
 
 
-def _collect_training_corpus(plant_type: type[GrillSim], family: str) -> _TrainingCorpus:
+def _collect_training_corpus(
+    plant_type: type[GrillSim],
+    family: str,
+    *,
+    collect_training: bool = True,
+) -> _TrainingCorpus:
     repository = LearningTrajectoryRepository()
     model_store = ControllerModelStore()
     persistence = ModelPersistenceWorker(model_store, _TEST_LOGGER, trajectory_repository=repository)
@@ -289,6 +305,20 @@ def _collect_training_corpus(plant_type: type[GrillSim], family: str) -> _Traini
     grill.fan_on()
     grill.auger_off()
     sequence = 0
+    if not collect_training:
+        return _TrainingCorpus(
+            family=family,
+            repository=repository,
+            persistence=persistence,
+            trajectory=trajectory,
+            learning=learning,
+            runner=runner,
+            core=core,
+            partition=partition,
+            trace=trace,
+            final_time_ms=timeline.monotonic_ms,
+            next_sequence=sequence,
+        )
 
     for seed in _TRAINING_SEEDS:
         plant = plant_type(seed=seed)
@@ -384,7 +414,8 @@ def _close_training(corpus: _TrainingCorpus) -> None:
     corpus.learning.finish_teardown(generation=0)
     corpus.runner.stop()
     corpus.trace.close()
-    corpus.trajectory.close()
+    assert corpus.trajectory.close()
+    assert corpus.persistence.close(timeout=30.0)
 
 
 def _fit_training_corpus(corpus: _TrainingCorpus) -> GreyFitSuccess:
@@ -407,6 +438,8 @@ def _held_out_prediction_decision(
     plant_type: type[GrillSim],
     family: str,
     fit: GreyFitSuccess,
+    *,
+    held_out_seeds: tuple[int, ...] = _HELD_OUT_SEEDS,
 ) -> EvaluationDecision:
     candidate_config: dict[str, Any] = dict(DEFAULT_MPC_CONFIG)
     candidate_config.update(
@@ -419,25 +452,24 @@ def _held_out_prediction_decision(
     )
     incumbent_config: dict[str, Any] = dict(DEFAULT_MPC_CONFIG)
     incumbent_config["control_period"] = float(_FRAME_SECONDS)
-    candidate = Controller(candidate_config, "C", dict(_CYCLE))
-    incumbent = Controller(incumbent_config, "C", dict(_CYCLE))
-    candidate.set_target(_SETPOINT_C)
-    incumbent.set_target(_SETPOINT_C)
-    candidate_digest = candidate.active_control_pair.descriptor.model_digest
-    incumbent_digest = incumbent.active_control_pair.descriptor.model_digest
     completed = []
-    try:
-        for seed in _HELD_OUT_SEEDS:
-            plant = plant_type(seed=seed)
-            applied = AppliedOutput(
-                ratio=10 / _FRAME_SECONDS,
-                requested=10 / _FRAME_SECONDS,
-                source=OutputSource.CONTROLLER,
-                timestamp=0.0,
-            )
+    maximum_observation_frames = max(horizon.observation_frames for horizon in _FORECAST_HORIZON_SPECS)
+
+    for seed in held_out_seeds:
+        plant = plant_type(seed=seed)
+        candidate = Controller(candidate_config, "C", dict(_CYCLE))
+        incumbent = Controller(incumbent_config, "C", dict(_CYCLE))
+        candidate.set_target(_SETPOINT_C)
+        incumbent.set_target(_SETPOINT_C)
+        candidate_digest = candidate.active_control_pair.descriptor.model_digest
+        incumbent_digest = incumbent.active_control_pair.descriptor.model_digest
+        evaluator = CausalForecastEvaluator(role_generation=0, candidate_generation=1)
+        seed_completed = []
+        try:
             for index in range(30):
-                candidate.update(plant.measured())
-                incumbent.update(plant.measured())
+                shared_temperature = plant.measured()
+                candidate.update(shared_temperature)
+                incumbent.update(shared_temperature)
                 on_seconds = _PULSE_LEVELS[(index // _LEVEL_DWELL_FRAMES) % len(_PULSE_LEVELS)]
                 _step_exact_frame(plant, on_seconds=on_seconds, fan_frac=1.0)
                 applied = AppliedOutput(
@@ -448,60 +480,71 @@ def _held_out_prediction_decision(
                 )
                 candidate.set_output(applied)
                 incumbent.set_output(applied)
-            candidate.update(plant.measured())
-            incumbent.update(plant.measured())
-            candidate_adapter = GreyBoxPredictionAdapter.from_estimator(
-                candidate.active_control_pair.core.estimator,
-                config=candidate.active_control_pair.core.config,
-            )
-            incumbent_adapter = GreyBoxPredictionAdapter.from_estimator(
-                incumbent.active_control_pair.core.estimator,
-                config=incumbent.active_control_pair.core.config,
-            )
-            normalized_load = (10 / _FRAME_SECONDS) / _U_MAX
-            candidate_forecast = candidate_adapter.forecast(
-                [normalized_load] * max(_REQUIRED_HORIZONS),
-                [plant.T_amb] * max(_REQUIRED_HORIZONS),
-            )
-            incumbent_forecast = incumbent_adapter.forecast(
-                [normalized_load] * max(_REQUIRED_HORIZONS),
-                [plant.T_amb] * max(_REQUIRED_HORIZONS),
-            )
+            post_primer_temperature = plant.measured()
+            candidate.update(post_primer_temperature)
+            incumbent.update(post_primer_temperature)
+
             origin_sequence = seed * 1_000
-            evaluator = CausalForecastEvaluator(role_generation=0, candidate_generation=1)
-            for horizon in _REQUIRED_HORIZONS:
-                evaluator.register(
-                    ForecastOrigin(
-                        origin_sequence=origin_sequence,
-                        origin_time_s=float(origin_sequence * _FRAME_SECONDS),
-                        horizon_steps=horizon,
-                        role_generation=0,
-                        candidate_generation=1,
-                        incumbent_digest=incumbent_digest,
-                        challenger_digest=candidate_digest,
-                        incumbent_prediction_c=float(incumbent_forecast[horizon - 1]),
-                        challenger_prediction_c=float(candidate_forecast[horizon - 1]),
-                        temperature_band="held-out",
-                        phase=f"{family}-seed-{seed}",
-                        ambient_source=AmbientSource.CONFIGURED,
-                        calibration_fit=False,
-                    )
-                )
-            for offset in range(1, max(_REQUIRED_HORIZONS) + 1):
-                frame_start_ms = (origin_sequence + offset - 1) * _FRAME_MS
+            for offset in range(maximum_observation_frames + 1):
                 _step_exact_frame(plant, on_seconds=10, fan_frac=1.0)
                 observation = _frame_observation(
                     plant=plant,
                     family=family,
-                    frame_start_ms=frame_start_ms,
+                    frame_start_ms=(origin_sequence + offset) * _FRAME_MS,
                     on_seconds=10,
                     sequence=origin_sequence + offset,
                 )
-                completed.extend(evaluator.observe(observation))
-            assert not evaluator.pending_origins
-    finally:
-        candidate.close()
-        incumbent.close()
+                seed_completed.extend(evaluator.observe(observation))
+                applied = AppliedOutput(
+                    ratio=10 / _FRAME_SECONDS,
+                    requested=10 / _FRAME_SECONDS,
+                    source=OutputSource.CONTROLLER,
+                    timestamp=observation.frame_end_s,
+                )
+                candidate.set_output(applied)
+                incumbent.set_output(applied)
+                candidate.update(observation.temp_c)
+                incumbent.update(observation.temp_c)
+                candidate_adapter = GreyBoxPredictionAdapter.from_estimator(
+                    candidate.active_control_pair.core.estimator,
+                    config=candidate.active_control_pair.core.config,
+                )
+                incumbent_adapter = GreyBoxPredictionAdapter.from_estimator(
+                    incumbent.active_control_pair.core.estimator,
+                    config=incumbent.active_control_pair.core.config,
+                )
+
+                def predict(
+                    adapter: GreyBoxPredictionAdapter,
+                    forecast_input: CausalForecastInput,
+                ) -> float:
+                    forecast = adapter.forecast(
+                        [forecast_input.frame.realized_q] * forecast_input.prediction_steps,
+                        [forecast_input.frame.ambient_c] * forecast_input.prediction_steps,
+                    )
+                    return float(forecast[-1])
+
+                for horizon in _FORECAST_HORIZON_SPECS:
+                    origin = paired_forecast_origin(
+                        observation,
+                        horizon=horizon,
+                        candidate_generation=1,
+                        incumbent_digest=incumbent_digest,
+                        challenger_digest=candidate_digest,
+                        incumbent_predict=lambda value, adapter=incumbent_adapter: predict(adapter, value),
+                        challenger_predict=lambda value, adapter=candidate_adapter: predict(adapter, value),
+                    )
+                    assert origin is not None
+                    evaluator.register(origin)
+
+                if set(MPC_FORECAST_HORIZON_SECONDS) <= {row.horizon_seconds for row in seed_completed}:
+                    break
+        finally:
+            candidate.close()
+            incumbent.close()
+        assert set(MPC_FORECAST_HORIZON_SECONDS) <= {row.horizon_seconds for row in seed_completed}
+        completed.extend(seed_completed)
+
     return evaluate_forecasts(
         tuple(completed),
         role_generation=0,
@@ -531,7 +574,7 @@ def test_exact_frame_expands_fractional_duty_to_boolean_seconds() -> None:
 class _Qualification:
     active_snapshot: dict[str, Any] | None
     blocker: str | None
-    completed_horizons: tuple[int, ...]
+    completed_horizon_seconds: tuple[int, ...]
     held_out_seeds: tuple[int, ...]
 
 
@@ -539,6 +582,8 @@ def _attempt_production_qualification(
     corpus: _TrainingCorpus,
     plant_type: type[GrillSim],
     held_out_decision: EvaluationDecision,
+    *,
+    held_out_seeds: tuple[int, ...] = _HELD_OUT_SEEDS,
 ) -> _Qualification:
     fit_partition_digest = corpus.partition["digest"]
     assert fit_partition_digest is not None
@@ -556,7 +601,7 @@ def _attempt_production_qualification(
     )
     learning.bind_generation(0)
     corpus.learning = learning
-    plant = plant_type(seed=_HELD_OUT_SEEDS[0])
+    plant = plant_type(seed=held_out_seeds[0])
     history: list[float] = []
 
     def estimator_seed(theta: float, n_delay: int) -> EstimatorSeed:
@@ -576,7 +621,7 @@ def _attempt_production_qualification(
             delay_states=tuple(float(value) for value in delay_states),
             chamber_temperature_c=plant.measured(),
             disturbance=0.0,
-            segment_id=f"{corpus.family}-held-out-seed-5",
+            segment_id=f"{corpus.family}-held-out-seed-{held_out_seeds[0]}",
             pre_roll_digest=hashlib.sha256(
                 json.dumps(seed_projection, sort_keys=True, separators=(",", ":")).encode("utf-8")
             ).hexdigest(),
@@ -633,27 +678,38 @@ def _attempt_production_qualification(
             _PULSE_LEVELS[(index // _LEVEL_DWELL_FRAMES) % len(_PULSE_LEVELS)],
             poll_off_path=False,
         )
-    challenger = None
+
+    def wait_for_evaluating_challenger():
+        deadline = time.monotonic() + 30.0
+        while time.monotonic() < deadline:
+            corpus.core.poll_learning_off_path()
+            assert corpus.persistence.barrier(timeout=30.0)
+            learning.reconcile_activation()
+            learning.drain_activation_events()
+            current = read_model_challenger()
+            if current is not None and current.phase == "evaluating":
+                return current
+            diagnostics = corpus.core.get_learning_diagnostics().state
+            if diagnostics.get("failure") is not None:
+                return current
+            time.sleep(0.01)
+        return read_model_challenger()
+
     corpus.partition["digest"] = fit_partition_digest
     assert corpus.runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
-    candidate_ready = False
-    for _ in range(300):
-        drive(10)
-        corpus.core.poll_learning_off_path()
-        challenger = read_model_challenger()
-        if challenger is not None and challenger.phase == "evaluating":
-            candidate_ready = True
-            break
-        diagnostics = corpus.core.get_learning_diagnostics().state
-        if diagnostics.get("failure") is not None:
-            break
-        time.sleep(0.01)
+    challenger = wait_for_evaluating_challenger()
+    candidate_ready = challenger is not None and challenger.phase == "evaluating"
     if candidate_ready:
         for _ in range(400):
             drive(10)
             challenger = read_model_challenger()
             if challenger is not None and challenger.phase == "activating":
                 break
+            if challenger is not None and challenger.phase == "retired":
+                if not held_out_decision.accepted:
+                    break
+                assert corpus.runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+                challenger = wait_for_evaluating_challenger()
     if held_out_decision.accepted:
         for _ in range(5):
             learning.reconcile_activation()
@@ -671,6 +727,15 @@ def _attempt_production_qualification(
     blocker = None
     if active is None:
         activation = read_model_activation()
+        corpus.trace.flush_pending()
+        evaluation = next(
+            (
+                record.payload
+                for record in reversed(read_control_trace_cook(f"{corpus.family}-training"))
+                if isinstance(record.payload, ModelEvaluationPayload)
+            ),
+            None,
+        )
         blocker = json.dumps(
             {
                 "diagnostics": {
@@ -680,7 +745,7 @@ def _attempt_production_qualification(
                         "fit_status",
                         "activation_phase",
                         "failure",
-                        "completed_horizons",
+                        "completed_horizon_seconds",
                     )
                 },
                 "challenger": (
@@ -702,22 +767,38 @@ def _attempt_production_qualification(
                         "transaction_id": activation.transaction_id,
                     }
                 ),
+                "evaluation": (
+                    None
+                    if evaluation is None
+                    else {
+                        "rejection_reasons": evaluation.rejection_reasons,
+                        "scores": tuple(
+                            (
+                                score.horizon_seconds,
+                                score.incumbent_rmse_c,
+                                score.challenger_rmse_c,
+                                score.sample_count,
+                            )
+                            for score in evaluation.horizon_scores
+                        ),
+                    }
+                ),
             },
             sort_keys=True,
             default=str,
         )
-    raw_completed = diagnostics.get("completed_horizons", ())
-    assert isinstance(raw_completed, tuple | list)
-    completed_values: list[int] = []
-    for value in raw_completed:
+    raw_completed_horizon_seconds = diagnostics.get("completed_horizon_seconds", ())
+    assert isinstance(raw_completed_horizon_seconds, tuple | list)
+    completed_horizon_seconds_values: list[int] = []
+    for value in raw_completed_horizon_seconds:
         assert isinstance(value, int)
-        completed_values.append(value)
-    completed = tuple(completed_values)
+        completed_horizon_seconds_values.append(value)
+    completed_horizon_seconds = tuple(completed_horizon_seconds_values)
     return _Qualification(
         active_snapshot=active if isinstance(active, dict) else None,
         blocker=blocker,
-        completed_horizons=completed,
-        held_out_seeds=_HELD_OUT_SEEDS,
+        completed_horizon_seconds=completed_horizon_seconds,
+        held_out_seeds=held_out_seeds,
     )
 
 
@@ -1088,12 +1169,15 @@ def _transplant_failure(
             learning.drain_activation_events()
         state = runner.controller_state()
         learning_state = state.get("learning", {})
-        required = tuple(learning_state.get("required_horizons", ()))
-        completed = tuple(learning_state.get("completed_horizons", ()))
-        if set(required) != set(_REQUIRED_HORIZONS) or (completed and set(completed) != set(_REQUIRED_HORIZONS)):
+        required_horizon_seconds = tuple(learning_state.get("required_horizon_seconds", ()))
+        completed_horizon_seconds = tuple(learning_state.get("completed_horizon_seconds", ()))
+        if set(required_horizon_seconds) != set(MPC_FORECAST_HORIZON_SECONDS) or (
+            completed_horizon_seconds and set(completed_horizon_seconds) != set(MPC_FORECAST_HORIZON_SECONDS)
+        ):
             return (
                 "transplant revalidation did not use the production horizon contract: "
-                f"completed={completed!r}, required={required!r}"
+                f"completed_horizon_seconds={completed_horizon_seconds!r}, "
+                f"required_horizon_seconds={required_horizon_seconds!r}"
             )
         final = runner.get_model_snapshot()
         assert isinstance(final, dict)
@@ -1148,34 +1232,43 @@ def test_production_gates_qualify_only_on_strict_held_out_prediction(
         fit = _fit_training_corpus(corpus)
         prediction = _held_out_prediction_decision(plant_type, family, fit)
         qualification = _attempt_production_qualification(corpus, plant_type, prediction)
-        assert {score.horizon_steps for score in prediction.scores} == set(_REQUIRED_HORIZONS)
-        assert all(score.sample_count == len(_HELD_OUT_SEEDS) for score in prediction.scores)
-        if not prediction.accepted:
-            assert prediction.blockers == (
-                "challenger-horizon-15",
-                "challenger-horizon-45",
-                "challenger-horizon-90",
-                "challenger-horizon-180",
+        assert {score.horizon_seconds for score in prediction.scores} == set(MPC_FORECAST_HORIZON_SECONDS)
+        maximum_observation_frames = max(horizon.observation_frames for horizon in _FORECAST_HORIZON_SPECS)
+        expected_sample_counts = {
+            horizon.seconds: len(_HELD_OUT_SEEDS) * (maximum_observation_frames - horizon.observation_frames + 1)
+            for horizon in _FORECAST_HORIZON_SPECS
+        }
+        assert {score.horizon_seconds: score.sample_count for score in prediction.scores} == expected_sample_counts
+        expected_blockers = tuple(
+            blocker
+            for score in prediction.scores
+            for blocker in (
+                *(
+                    (f"challenger-horizon-{score.horizon_seconds}",)
+                    if score.challenger_rmse_c >= score.incumbent_rmse_c
+                    else ()
+                ),
+                *(
+                    (f"absolute-rmse-{score.horizon_seconds}",)
+                    if score.challenger_rmse_c > forecast_horizon_spec(score.horizon_seconds).maximum_rmse_c
+                    else ()
+                ),
             )
-            assert all(
-                score.challenger_rmse_c >= score.incumbent_rmse_c
-                for score in prediction.scores
-                if score.horizon_steps in {15, 45, 90, 180}
-            )
-            assert qualification.active_snapshot is None, (
-                f"{family} production authorizer accepted a held-out-rejected candidate: "
-                f"{qualification.active_snapshot}"
-            )
+        )
+        assert prediction.blockers == expected_blockers
+        if qualification.active_snapshot is None:
+            assert not prediction.accepted, qualification.blocker
             assert qualification.blocker is not None
-            assert set(qualification.completed_horizons) == set(_REQUIRED_HORIZONS)
+            blocker = json.loads(qualification.blocker)
+            assert blocker["challenger"]["retirement_reason"] == "evaluation-lost"
+            assert expected_blockers
             assert corpus.core.active_control_pair.descriptor.role_generation == 0
             assert ControllerModelStore().load("mpc") is None
             return
-        assert qualification.active_snapshot is not None, (
-            f"{family} produced no trusted checkpoint; blocker={qualification.blocker}; "
-            f"completed_horizons={qualification.completed_horizons}"
+        assert prediction.accepted, (
+            f"{family} production authorizer accepted a held-out-rejected candidate: {qualification.active_snapshot}"
         )
-        assert set(qualification.completed_horizons) == set(_REQUIRED_HORIZONS)
+        assert set(qualification.completed_horizon_seconds) == set(MPC_FORECAST_HORIZON_SECONDS)
         assert qualification.blocker is None
         learned_snapshot = qualification.active_snapshot
         assert corpus.core.activation_output_authorized
@@ -1193,12 +1286,41 @@ def test_production_gates_qualify_only_on_strict_held_out_prediction(
 
 @pytest.mark.slow
 def test_transplanted_checkpoint_requires_passive_restore_revalidation(ds) -> None:
-    corpus = _collect_training_corpus(MAKGrillSim, "mak")
+    corpus = _collect_training_corpus(
+        MAKGrillSim,
+        "mak",
+        collect_training=False,
+    )
     try:
+        corpus.partition["digest"] = seed_short_cook_corpus(
+            corpus.repository,
+            MAKGrillSim,
+            "mak-transplant-source",
+        )
         fit = _fit_training_corpus(corpus)
-        prediction = _held_out_prediction_decision(MAKGrillSim, "mak", fit)
-        assert prediction.accepted
-        qualification = _attempt_production_qualification(corpus, MAKGrillSim, prediction)
+        prediction = _held_out_prediction_decision(
+            MAKGrillSim,
+            "mak",
+            fit,
+            held_out_seeds=_TRANSPLANT_VALIDATION_SEEDS,
+        )
+        assert prediction.accepted, (
+            prediction.blockers,
+            tuple(
+                (
+                    score.horizon_seconds,
+                    score.incumbent_rmse_c,
+                    score.challenger_rmse_c,
+                )
+                for score in prediction.scores
+            ),
+        )
+        qualification = _attempt_production_qualification(
+            corpus,
+            MAKGrillSim,
+            prediction,
+            held_out_seeds=_TRANSPLANT_VALIDATION_SEEDS,
+        )
         assert qualification.active_snapshot is not None, qualification.blocker
         learned_snapshot = qualification.active_snapshot
         assert corpus.learning.submit_online_checkpoint(learned_snapshot)

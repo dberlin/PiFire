@@ -396,7 +396,7 @@ def _freeze_evidence(
     records = tuple(
         ModelEvidenceRecord(
             evidence_id=(
-                f"{session_id}:forecast:{value.origin_sequence}:{value.horizon_steps}:{value.completion_time_ms}"
+                f"{session_id}:forecast:{value.origin_sequence}:{value.horizon_seconds}:{value.completion_time_ms}"
             ),
             kind=EvidenceKind.FORECAST_ORIGIN,
             session_id=session_id,

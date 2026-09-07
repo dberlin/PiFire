@@ -10,6 +10,7 @@ from common.learning_trajectory import (
     ModelFitLineage,
     canonical_fit_corpus_digest,
 )
+from common.mpc_learning import MPC_FORECAST_HORIZON_SECONDS
 from common.persistence.model_challenger import ModelChallengerState
 from controller.model_learning.activation import (
     GreyControlPairDescriptor,
@@ -17,7 +18,6 @@ from controller.model_learning.activation import (
 )
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
 
-_REQUIRED_HORIZONS = (3, 15, 45, 90, 180)
 
 
 def _digest(label: str) -> str:
@@ -124,6 +124,7 @@ def _state(
         "request_id": lineage.request_id,
         "accepted": True,
         "candidate_digest": challenger.model_digest,
+        "required_horizon_seconds": list(MPC_FORECAST_HORIZON_SECONDS),
         "native_build": "passed",
         "dry_solve": "passed",
         "target_timing": {"target": "pi", "p99_ms": 4.0, "limit_ms": 5.0},

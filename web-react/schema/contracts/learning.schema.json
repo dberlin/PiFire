@@ -538,18 +538,11 @@
     "CausalEvaluationProgress": {
       "additionalProperties": false,
       "properties": {
-        "completed_horizons": {
+        "completed_horizon_seconds": {
           "items": {
-            "enum": [
-              3,
-              15,
-              45,
-              90,
-              180
-            ],
-            "type": "integer"
+            "$ref": "#/$defs/ForecastHorizonSeconds"
           },
-          "title": "Completed Horizons",
+          "title": "Completed Horizon Seconds",
           "type": "array"
         },
         "epoch": {
@@ -564,18 +557,11 @@
           "title": "Pending Origins",
           "type": "array"
         },
-        "required_horizons": {
+        "required_horizon_seconds": {
           "items": {
-            "enum": [
-              3,
-              15,
-              45,
-              90,
-              180
-            ],
-            "type": "integer"
+            "$ref": "#/$defs/ForecastHorizonSeconds"
           },
-          "title": "Required Horizons",
+          "title": "Required Horizon Seconds",
           "type": "array"
         },
         "required_wins": {
@@ -601,8 +587,8 @@
       "required": [
         "epoch",
         "round",
-        "completed_horizons",
-        "required_horizons",
+        "completed_horizon_seconds",
+        "required_horizon_seconds",
         "wins",
         "required_wins",
         "resumed_from_previous_cook",
@@ -940,6 +926,36 @@
       "title": "FopdtPidSpPredictor",
       "type": "object"
     },
+    "ForecastHorizonSeconds": {
+      "enum": [
+        100,
+        200,
+        300,
+        400,
+        600
+      ],
+      "type": "integer"
+    },
+    "ForecastObservationFrames": {
+      "enum": [
+        5,
+        10,
+        15,
+        20,
+        30
+      ],
+      "type": "integer"
+    },
+    "ForecastPredictionSteps": {
+      "enum": [
+        4,
+        8,
+        12,
+        16,
+        24
+      ],
+      "type": "integer"
+    },
     "GreyParameters": {
       "additionalProperties": false,
       "properties": {
@@ -1197,7 +1213,7 @@
           "type": "string"
         },
         "schema_version": {
-          "const": 3,
+          "const": 4,
           "title": "Schema Version",
           "type": "integer"
         },
@@ -1609,26 +1625,24 @@
           "title": "Candidate Generation",
           "type": "integer"
         },
-        "horizon_steps": {
-          "enum": [
-            3,
-            15,
-            45,
-            90,
-            180
-          ],
-          "title": "Horizon Steps",
-          "type": "integer"
+        "horizon_seconds": {
+          "$ref": "#/$defs/ForecastHorizonSeconds"
         },
         "incumbent_digest": {
           "pattern": "^[0-9a-f]{64}$",
           "title": "Incumbent Digest",
           "type": "string"
         },
+        "observation_frames": {
+          "$ref": "#/$defs/ForecastObservationFrames"
+        },
         "origin_sequence": {
           "minimum": 0,
           "title": "Origin Sequence",
           "type": "integer"
+        },
+        "prediction_steps": {
+          "$ref": "#/$defs/ForecastPredictionSteps"
         },
         "role_generation": {
           "minimum": 0,
@@ -1638,7 +1652,9 @@
       },
       "required": [
         "origin_sequence",
-        "horizon_steps",
+        "horizon_seconds",
+        "prediction_steps",
+        "observation_frames",
         "role_generation",
         "candidate_generation",
         "incumbent_digest",
@@ -2830,6 +2846,9 @@
     "FitStatus",
     "FopdtPidSpParameters",
     "FopdtPidSpPredictor",
+    "ForecastHorizonSeconds",
+    "ForecastObservationFrames",
+    "ForecastPredictionSteps",
     "GreyParameters",
     "IpdtPidSpParameters",
     "IpdtPidSpPredictor",

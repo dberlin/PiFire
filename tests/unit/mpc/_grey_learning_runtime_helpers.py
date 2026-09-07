@@ -10,6 +10,7 @@ from typing import ClassVar
 from common.control_trace import AmbientSource
 from common.controller_model_state import CheckpointSaveOutcome
 from common.learning_trajectory import FitCorpusIdentity, ModelFitLineage
+from common.mpc_learning import MPC_FORECAST_HORIZONS, MPC_FORECAST_HORIZON_SECONDS
 from common.model_evidence import (
     ChallengerRoundEvidence,
     EvidenceKind,
@@ -80,7 +81,7 @@ _DEFAULT_EFFECTIVE_FRAME_COUNT = ceil(
     TriggerConfig().min_effective_duration_s / FIT_CADENCE_S
 )
 
-_REQUIRED_HORIZONS = (3, 15, 45, 90, 180)
+_REQUIRED_HORIZONS = MPC_FORECAST_HORIZON_SECONDS
 _COMPLETE_SCORES = tuple(HorizonScore(horizon, 1.0, 0.5, 1) for horizon in _REQUIRED_HORIZONS)
 
 
@@ -96,7 +97,9 @@ def _complete_origins(
             forecast=ForecastOrigin(
                 origin_sequence=index,
                 origin_time_s=100.0,
-                horizon_steps=horizon,
+                horizon_seconds=horizon.seconds,
+                prediction_steps=horizon.prediction_steps,
+                observation_frames=horizon.observation_frames,
                 role_generation=role_generation,
                 candidate_generation=candidate_generation,
                 incumbent_digest=incumbent_digest,
@@ -108,10 +111,10 @@ def _complete_origins(
                 ambient_source=AmbientSource.CONFIGURED,
                 calibration_fit=False,
             ),
-            completion_time_s=100.0 + horizon,
+            completion_time_s=100.0 + horizon.seconds,
             observed_temperature_c=100.0,
         )
-        for index, horizon in enumerate(_REQUIRED_HORIZONS, start=1)
+        for index, horizon in enumerate(MPC_FORECAST_HORIZONS, start=1)
     )
 
 
@@ -570,7 +573,7 @@ def _seed_durable_challenger(
             "request_id": request_id,
             "accepted": True,
             "candidate_digest": candidate.model_digest,
-            "required_horizons": list(_REQUIRED_HORIZONS),
+            "required_horizon_seconds": list(_REQUIRED_HORIZONS),
             "native_build": "passed",
             "dry_solve": "passed",
             "target_timing": {
@@ -630,8 +633,8 @@ def _seed_durable_challenger(
                         evaluation_round=retained_wins,
                         decision_id=retained_decision_id,
                         accepted=True,
-                        required_horizons=_REQUIRED_HORIZONS,
-                        completed_horizons=_REQUIRED_HORIZONS,
+                        required_horizon_seconds=_REQUIRED_HORIZONS,
+                        completed_horizon_seconds=_REQUIRED_HORIZONS,
                         incumbent_digest=incumbent.model_digest,
                         candidate_digest=candidate.model_digest,
                     ),
@@ -742,7 +745,7 @@ def _automatic_candidate(
             role_generation=active_descriptor.role_generation,
             candidate_generation=request.candidate_generation,
         ),
-        completed_horizons=_REQUIRED_HORIZONS,
+        completed_horizon_seconds=_REQUIRED_HORIZONS,
     )
     return preparation, evaluation, components
 

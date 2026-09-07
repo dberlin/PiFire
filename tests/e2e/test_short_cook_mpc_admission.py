@@ -30,17 +30,12 @@ def test_three_59_frame_cooks_build_a_shadow_candidate_at_600_seconds(
     for score in (result.first_600s, result.full_177):
         assert score.effective_duration_s >= 600.0
         assert tuple(horizon for horizon, _ in score.horizon_ratios) == HORIZONS
-        assert all(reason.startswith("challenger-horizon-") for reason in score.evaluation_blockers)
-        assert all(ratio < 1.0 for horizon, ratio in score.horizon_ratios if horizon < 180)
-        assert all(wins == 5 for horizon, wins in score.horizon_wins if horizon < 180)
+        assert score.evaluation_blockers == ()
+        assert all(ratio < 1.0 for _, ratio in score.horizon_ratios)
+        assert all(wins == 5 for _, wins in score.horizon_wins)
         assert score.whole_cook_ratio < 1.0
         assert score.closed_loop_iae_ratio < 1.0
         assert score.candidate_overshoot_c < score.incumbent_overshoot_c
         assert score.whole_cook_wins == 5
         assert score.closed_loop_iae_wins == 5
         assert score.overshoot_wins == 5
-
-    if family == "grill":
-        assert "challenger-horizon-180" in result.first_600s.evaluation_blockers
-    else:
-        assert result.first_600s.evaluation_blockers == ()

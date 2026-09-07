@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from common.learning_trajectory import ModelFitLineage
 from common.model_evidence import ChallengerRoundEvidence, EvidenceKind, ModelEvidenceRecord
+from common.mpc_learning import MPC_FORECAST_HORIZON_SECONDS
 from common.persistence.model_challenger import ModelChallengerState, create_model_challenger
 from common.persistence.model_evidence import append_model_evidence
 from controller.model_learning.activation import GreyControlPairDescriptor
@@ -44,7 +45,7 @@ def _seed_qualified_challenger(
             "request_id": request_id,
             "accepted": True,
             "candidate_digest": candidate.model_digest,
-            "required_horizons": [3, 15, 45, 90, 180],
+            "required_horizon_seconds": list(MPC_FORECAST_HORIZON_SECONDS),
             "native_build": "passed",
             "dry_solve": "passed",
             "target_timing": {
@@ -99,8 +100,8 @@ def _seed_qualified_challenger(
                     evaluation_round=2,
                     decision_id=decision_id,
                     accepted=True,
-                    required_horizons=(3, 15, 45, 90, 180),
-                    completed_horizons=(3, 15, 45, 90, 180),
+                    required_horizon_seconds=MPC_FORECAST_HORIZON_SECONDS,
+                    completed_horizon_seconds=MPC_FORECAST_HORIZON_SECONDS,
                     incumbent_digest=incumbent.model_digest,
                     candidate_digest=candidate.model_digest,
                 ),

@@ -7,6 +7,7 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from common.control_trace import AmbientSource
+from common.mpc_learning import MPC_FORECAST_HORIZONS, forecast_horizon_spec
 from controller.model_learning.contracts import (
     ActivationPolicy,
     CandidateOrigin,
@@ -30,7 +31,7 @@ _CHALLENGER = "2" * 64
 
 def _origin(
     sequence: int,
-    horizon: int,
+    horizon_seconds: int,
     *,
     incumbent_error: float = 2.0,
     challenger_error: float = 1.0,
@@ -39,10 +40,13 @@ def _origin(
     phase: str = "heating",
 ) -> CompletedForecastOrigin:
     observed = 100.0
+    horizon = forecast_horizon_spec(horizon_seconds)
     forecast = ForecastOrigin(
         origin_sequence=sequence,
-        origin_time_s=sequence * 25.0,
-        horizon_steps=horizon,
+        origin_time_s=sequence * 20.0,
+        horizon_seconds=horizon.seconds,
+        prediction_steps=horizon.prediction_steps,
+        observation_frames=horizon.observation_frames,
         role_generation=role_generation,
         candidate_generation=candidate_generation,
         incumbent_digest=_INCUMBENT,
@@ -56,15 +60,15 @@ def _origin(
     )
     return CompletedForecastOrigin(
         forecast=forecast,
-        completion_time_s=(sequence + horizon) * 25.0,
+        completion_time_s=sequence * 20.0 + horizon.seconds,
         observed_temperature_c=observed,
     )
 
 
 def _winning_window(*, generation: int = 9) -> tuple[CompletedForecastOrigin, ...]:
     return tuple(
-        _origin(sequence, horizon, candidate_generation=generation)
-        for horizon in (3, 15, 45, 90, 180)
+        _origin(sequence, horizon.seconds, candidate_generation=generation)
+        for horizon in MPC_FORECAST_HORIZONS
         for sequence in range(4)
     )
 
@@ -119,7 +123,7 @@ def test_fit_request_and_result_preserve_exact_corpus_origin_and_generations() -
 
 def test_challenger_must_win_each_required_horizon_not_only_the_pooled_score() -> None:
     records = list(_winning_window())
-    records[-1] = _origin(3, 180, incumbent_error=0.2, challenger_error=3.1)
+    records[-1] = _origin(3, 600, incumbent_error=0.2, challenger_error=3.1)
     assert sum(record.challenger_error_c**2 for record in records) < sum(
         record.incumbent_error_c**2 for record in records
     )
@@ -131,13 +135,38 @@ def test_challenger_must_win_each_required_horizon_not_only_the_pooled_score() -
         prior_consecutive_wins=1,
         config=EvaluationConfig(required_consecutive_wins=2),
     )
-    horizon_180 = next(score for score in decision.scores if score.horizon_steps == 180)
+    horizon_600 = next(score for score in decision.scores if score.horizon_seconds == 600)
 
     assert not decision.accepted
     assert decision.consecutive_wins == 0
-    assert decision.blockers == ("challenger-horizon-180",)
-    assert horizon_180.challenger_rmse_c > horizon_180.incumbent_rmse_c
-    assert {score.horizon_steps for score in decision.scores} == {3, 15, 45, 90, 180}
+    assert decision.blockers == ("challenger-horizon-600",)
+    assert horizon_600.challenger_rmse_c > horizon_600.incumbent_rmse_c
+    assert {score.horizon_seconds for score in decision.scores} == {100, 200, 300, 400, 600}
+
+
+def test_challenger_must_meet_absolute_rmse_limit_at_every_horizon() -> None:
+    records = tuple(
+        _origin(
+            sequence,
+            horizon.seconds,
+            incumbent_error=4.0,
+            challenger_error=3.0,
+        )
+        for horizon in MPC_FORECAST_HORIZONS
+        for sequence in range(4)
+    )
+
+    decision = evaluate_forecasts(
+        records,
+        role_generation=4,
+        candidate_generation=9,
+        prior_consecutive_wins=1,
+        config=EvaluationConfig(required_consecutive_wins=2),
+    )
+
+    assert not decision.accepted
+    assert decision.consecutive_wins == 0
+    assert decision.blockers == tuple(f"absolute-rmse-{horizon.seconds}" for horizon in MPC_FORECAST_HORIZONS)
 
 
 def test_two_complete_causal_windows_create_a_decision_without_transferring_ownership() -> None:
@@ -168,8 +197,8 @@ def test_two_complete_causal_windows_create_a_decision_without_transferring_owne
 
 def test_forecasts_from_another_role_or_candidate_generation_cannot_join() -> None:
     mixed = _winning_window() + (
-        _origin(99, 3, role_generation=3),
-        _origin(100, 3, candidate_generation=10),
+        _origin(99, 100, role_generation=3),
+        _origin(100, 100, candidate_generation=10),
     )
 
     with pytest.raises(ValueError, match="generation"):
@@ -183,7 +212,7 @@ def test_forecasts_from_another_role_or_candidate_generation_cannot_join() -> No
 
 
 def test_origin_band_phase_and_ambient_are_frozen_at_forecast_time() -> None:
-    completed = _origin(3, 15, phase="coasting")
+    completed = _origin(3, 200, phase="coasting")
 
     assert completed.phase == "coasting"
     assert completed.temperature_band == "middle"

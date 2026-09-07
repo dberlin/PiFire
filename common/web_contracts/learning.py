@@ -4,6 +4,8 @@ from typing import Annotated, Literal
 
 from pydantic import Field, RootModel, field_validator, model_validator
 
+from common.mpc_learning import MPC_FORECAST_HORIZON_SECONDS, forecast_horizon_spec
+
 from .base import FiniteFloat, WireModel
 from .core import ApiEnvelope, CommandResponseData
 
@@ -11,6 +13,10 @@ NonNegativeInt = Annotated[int, Field(ge=0, strict=True)]
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$", strict=True)]
 NonBlankString = Annotated[str, Field(min_length=1, strict=True)]
 type FiniteNumber = int | FiniteFloat
+type ForecastHorizonSeconds = Literal[100, 200, 300, 400, 600]
+type ForecastPredictionSteps = Literal[4, 8, 12, 16, 24]
+type ForecastObservationFrames = Literal[5, 10, 15, 20, 30]
+
 
 type CandidateOrigin = Literal["passive-online", "operator-calibration"]
 type ActivationPolicy = Literal["causal-auto"]
@@ -100,22 +106,41 @@ class CorpusStatusReport(WireModel):
 
 class PendingForecastOriginReport(WireModel):
     origin_sequence: NonNegativeInt
-    horizon_steps: Literal[3, 15, 45, 90, 180]
+    horizon_seconds: ForecastHorizonSeconds
+    prediction_steps: ForecastPredictionSteps
+    observation_frames: ForecastObservationFrames
     role_generation: NonNegativeInt
     candidate_generation: NonNegativeInt
     incumbent_digest: Digest
     candidate_digest: Digest
 
+    @model_validator(mode="after")
+    def _validate_horizon_clocks(self) -> PendingForecastOriginReport:
+        horizon = forecast_horizon_spec(self.horizon_seconds)
+        if self.prediction_steps != horizon.prediction_steps or self.observation_frames != horizon.observation_frames:
+            raise ValueError("pending forecast origin horizon clocks do not align")
+        return self
+
 
 class CausalEvaluationProgress(WireModel):
     epoch: NonNegativeInt
     round: NonNegativeInt
-    completed_horizons: list[Literal[3, 15, 45, 90, 180]]
-    required_horizons: list[Literal[3, 15, 45, 90, 180]]
+    completed_horizon_seconds: list[ForecastHorizonSeconds]
+    required_horizon_seconds: list[ForecastHorizonSeconds]
     wins: NonNegativeInt
     required_wins: NonNegativeInt
     resumed_from_previous_cook: bool
     pending_origins: list[PendingForecastOriginReport]
+
+    @model_validator(mode="after")
+    def _validate_horizons(self) -> CausalEvaluationProgress:
+        required = tuple(self.required_horizon_seconds)
+        completed = tuple(self.completed_horizon_seconds)
+        if required != MPC_FORECAST_HORIZON_SECONDS:
+            raise ValueError("required forecast horizons do not match the current MPC contract")
+        if completed != tuple(horizon for horizon in required if horizon in completed):
+            raise ValueError("completed forecast horizons must be an ordered subset")
+        return self
 
 
 class CandidateReport(WireModel):
@@ -198,7 +223,7 @@ class EvidenceGate(WireModel):
 
 
 class ModelEvidenceReport(WireModel):
-    schema_version: Literal[3]
+    schema_version: Literal[4]
     status: ModelEvidenceStatus
     mode: CandidateOrigin | None
     decision_id: str | None

@@ -112,7 +112,7 @@ def test_empty_report_route_surfaces_missing_authority_terminally(client):
         "rollback_generation",
     }
     assert set(payload["calibration"]) == {"revision", "command_high_water"}
-    assert payload["schema_version"] == 3
+    assert payload["schema_version"] == 4
     assert payload["status"] == "error"
     assert payload["errors"] == ["checkpoint-missing"]
     assert payload["decision_id"] is None
@@ -182,7 +182,7 @@ def test_artifact_route_contains_the_identical_report_projection_and_revision(cl
     assert response.status_code == 200
     assert response.mimetype == "application/json"
     assert response.data == json.dumps(decoded, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    assert decoded["artifact_schema"] == "pifire-grey-learning-report/v3"
+    assert decoded["artifact_schema"] == "pifire-grey-learning-report/v4"
     assert decoded["report"] == report_response.get_json()
     assert decoded["revision"] == decoded["report"]["revision"]
     assert [record["evidence_id"] for record in decoded["records"]] == ["assessment-api"]

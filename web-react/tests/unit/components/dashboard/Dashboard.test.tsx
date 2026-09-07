@@ -46,7 +46,7 @@ function dashboardLearningReport(
   const activeDigest = `${roleGeneration}`.padEnd(64, "a");
   const candidateDigest = `${roleGeneration + 1}`.padEnd(64, "b");
   return {
-    schema_version: 3,
+    schema_version: 4,
     status,
     mode: "passive-online",
     decision_id: `decision-${roleGeneration}`,

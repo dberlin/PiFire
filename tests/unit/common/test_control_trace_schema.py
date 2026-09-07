@@ -151,8 +151,8 @@ def _challenger_progress_trace_payload() -> ChallengerProgressTracePayload:
         evaluation_round=1,
         consecutive_wins=1,
         required_wins=2,
-        completed_horizons=(3, 15),
-        required_horizons=(3, 15, 45, 90, 180),
+        completed_horizon_seconds=(100, 200),
+        required_horizon_seconds=(100, 200, 300, 400, 600),
         resumed_from_previous_cook=True,
         reset_reason=None,
     )
@@ -415,14 +415,16 @@ def _payload_cases():
                 sample_count=2,
                 prospective_digest=None,
                 window_start_ms=20_000,
-                window_end_ms=340_000,
+                window_end_ms=240_000,
                 incumbent_digest="b" * 64,
                 challenger_digest="c" * 64,
                 completed_origins=(
                     {
                         "origin_time_ms": 20_000,
-                        "completion_time_ms": 80_000,
-                        "horizon_steps": 3,
+                        "completion_time_ms": 120_000,
+                        "horizon_seconds": 100,
+                        "prediction_steps": 4,
+                        "observation_frames": 5,
                         "generation": 0,
                         "observed_temperature_c": 110.0,
                         "incumbent_error_c": 2.0,
@@ -438,8 +440,10 @@ def _payload_cases():
                     },
                     {
                         "origin_time_ms": 40_000,
-                        "completion_time_ms": 340_000,
-                        "horizon_steps": 15,
+                        "completion_time_ms": 240_000,
+                        "horizon_seconds": 200,
+                        "prediction_steps": 8,
+                        "observation_frames": 10,
                         "generation": 0,
                         "observed_temperature_c": 115.0,
                         "incumbent_error_c": -3.0,
@@ -456,13 +460,13 @@ def _payload_cases():
                 ),
                 horizon_scores=(
                     {
-                        "horizon_steps": 3,
+                        "horizon_seconds": 100,
                         "incumbent_rmse_c": 2.0,
                         "challenger_rmse_c": 1.0,
                         "sample_count": 1,
                     },
                     {
-                        "horizon_steps": 15,
+                        "horizon_seconds": 200,
                         "incumbent_rmse_c": 3.0,
                         "challenger_rmse_c": 4.0,
                         "sample_count": 1,
@@ -620,7 +624,7 @@ def _mpc_only_learning_trace_payload_cases():
 
 
 @pytest.mark.parametrize(("event_kind", "payload"), _segmented_learning_trace_payload_cases())
-def test_schema_v8_segmented_learning_payloads_round_trip_through_db(event_kind, payload) -> None:
+def test_schema_v9_segmented_learning_payloads_round_trip_through_db(event_kind, payload) -> None:
     record = ControlTraceRecord(
         ts_ms=25_000,
         session_id="trace-session-2",
@@ -633,10 +637,98 @@ def test_schema_v8_segmented_learning_payloads_round_trip_through_db(event_kind,
     row = record.to_db_row()
     restored = ControlTraceRecord.from_db_row(row)
 
-    assert row.schema_version == 8
+    assert row.schema_version == 9
     assert json.loads(row.payload)["payload_type"] == event_kind.value
     assert restored == record
     assert type(restored.payload) is type(payload)
+
+
+def test_schema_v8_model_evaluation_horizons_remain_historical_read_only() -> None:
+    payload = next(item[2] for item in _payload_cases() if isinstance(item[2], ModelEvaluationPayload))
+    current = ControlTraceRecord(
+        ts_ms=360_000,
+        session_id="historical-session",
+        cook_id="historical-cook",
+        controller=ControllerType.MPC,
+        event_kind=TraceEventKind.MODEL_EVALUATION,
+        payload=payload,
+    )
+    raw_payload = json.loads(current.to_db_row().payload)
+    for origin, legacy_steps in zip(raw_payload["completed_origins"], (3, 15), strict=True):
+        origin["horizon_steps"] = legacy_steps
+        for field in ("horizon_seconds", "prediction_steps", "observation_frames"):
+            origin.pop(field)
+    for score, legacy_steps in zip(raw_payload["horizon_scores"], (3, 15), strict=True):
+        score["horizon_steps"] = legacy_steps
+        score.pop("horizon_seconds")
+    historical_row = replace(
+        current.to_db_row(),
+        schema_version=8,
+        payload=json.dumps(raw_payload),
+    )
+
+    restored = ControlTraceRecord.from_db_row(historical_row)
+
+    assert restored.schema_version == 8
+    assert isinstance(restored.payload, ModelEvaluationPayload)
+    assert tuple(origin.horizon_steps for origin in restored.payload.completed_origins) == (3, 15)
+    assert all(origin.horizon_seconds is None for origin in restored.payload.completed_origins)
+
+
+def test_schema_v8_rejects_mixed_legacy_and_current_model_evaluation_horizons() -> None:
+    payload = next(item[2] for item in _payload_cases() if isinstance(item[2], ModelEvaluationPayload))
+    current = ControlTraceRecord(
+        ts_ms=360_000,
+        session_id="historical-session",
+        cook_id="historical-cook",
+        controller=ControllerType.MPC,
+        event_kind=TraceEventKind.MODEL_EVALUATION,
+        payload=payload,
+    )
+    raw_payload = json.loads(current.to_db_row().payload)
+    origin = raw_payload["completed_origins"][0]
+    origin["horizon_steps"] = 3
+    for field in ("horizon_seconds", "prediction_steps", "observation_frames"):
+        origin.pop(field)
+    score = raw_payload["horizon_scores"][0]
+    score["horizon_steps"] = 3
+    score.pop("horizon_seconds")
+    historical_row = replace(
+        current.to_db_row(),
+        schema_version=8,
+        payload=json.dumps(raw_payload),
+    )
+
+    with pytest.raises(ValidationError, match="horizon contract"):
+        ControlTraceRecord.from_db_row(historical_row)
+
+
+def test_schema_v8_rejects_unknown_legacy_model_evaluation_horizon() -> None:
+    payload = next(item[2] for item in _payload_cases() if isinstance(item[2], ModelEvaluationPayload))
+    current = ControlTraceRecord(
+        ts_ms=360_000,
+        session_id="historical-session",
+        cook_id="historical-cook",
+        controller=ControllerType.MPC,
+        event_kind=TraceEventKind.MODEL_EVALUATION,
+        payload=payload,
+    )
+    raw_payload = json.loads(current.to_db_row().payload)
+    for origin, legacy_steps in zip(raw_payload["completed_origins"], (3, 7), strict=True):
+        origin["horizon_steps"] = legacy_steps
+        for field in ("horizon_seconds", "prediction_steps", "observation_frames"):
+            origin.pop(field)
+    for score, legacy_steps in zip(raw_payload["horizon_scores"], (3, 7), strict=True):
+        score["horizon_steps"] = legacy_steps
+        score.pop("horizon_seconds")
+    historical_row = replace(
+        current.to_db_row(),
+        schema_version=8,
+        payload=json.dumps(raw_payload),
+    )
+
+    with pytest.raises(ValidationError):
+        ControlTraceRecord.from_db_row(historical_row)
 
 
 @pytest.mark.parametrize(
@@ -760,11 +852,11 @@ def test_trajectory_segment_trace_accepts_an_open_segment_without_a_terminal_rea
         {"evaluation_round": -1},
         {"consecutive_wins": 3},
         {"required_wins": 0},
-        {"completed_horizons": (15, 3)},
-        {"completed_horizons": (3, 3)},
-        {"completed_horizons": (3, 360)},
-        {"required_horizons": (15, 3, 45, 90, 180)},
-        {"required_horizons": (3, 15, 15, 45, 90, 180)},
+        {"completed_horizon_seconds": (200, 100)},
+        {"completed_horizon_seconds": (100, 100)},
+        {"completed_horizon_seconds": (100, 700)},
+        {"required_horizon_seconds": (200, 100, 300, 400, 600)},
+        {"required_horizon_seconds": (100, 200, 200, 300, 400, 600)},
         {"phase": "unsupported"},
         {"reset_reason": ""},
     ),
@@ -785,7 +877,7 @@ def test_challenger_progress_trace_rejects_inconsistent_authority_and_progress(
                 "evaluation_epoch": 0,
                 "evaluation_round": 0,
                 "consecutive_wins": 0,
-                "completed_horizons": (),
+                "completed_horizon_seconds": (),
                 "resumed_from_previous_cook": False,
             },
         ),
@@ -794,14 +886,14 @@ def test_challenger_progress_trace_rejects_inconsistent_authority_and_progress(
             "qualified",
             {
                 "consecutive_wins": 2,
-                "completed_horizons": (3, 15, 45, 90, 180),
+                "completed_horizon_seconds": (100, 200, 300, 400, 600),
             },
         ),
         (
             "activating",
             {
                 "consecutive_wins": 2,
-                "completed_horizons": (3, 15, 45, 90, 180),
+                "completed_horizon_seconds": (100, 200, 300, 400, 600),
             },
         ),
         ("retired", {"reset_reason": "incumbent-changed"}),
@@ -1060,14 +1152,13 @@ def test_model_evaluation_json_round_trip_preserves_auditable_completed_origins(
         "sample_count": 2,
         "prospective_digest": None,
         "window_start_ms": 20_000,
-        "window_end_ms": 340_000,
+        "window_end_ms": 240_000,
         "incumbent_digest": "b" * 64,
         "challenger_digest": "c" * 64,
         "completed_origins": [
             {
                 "origin_time_ms": 20_000,
-                "completion_time_ms": 80_000,
-                "horizon_steps": 3,
+                "completion_time_ms": 120_000,
                 "generation": 0,
                 "observed_temperature_c": 110.0,
                 "incumbent_error_c": 2.0,
@@ -1080,11 +1171,14 @@ def test_model_evaluation_json_round_trip_preserves_auditable_completed_origins(
                 "challenger_prediction_c": 109.0,
                 "temperature_band": "near-target",
                 "ambient_source": "configured",
+                "horizon_steps": None,
+                "horizon_seconds": 100,
+                "prediction_steps": 4,
+                "observation_frames": 5,
             },
             {
                 "origin_time_ms": 40_000,
-                "completion_time_ms": 340_000,
-                "horizon_steps": 15,
+                "completion_time_ms": 240_000,
                 "generation": 0,
                 "observed_temperature_c": 115.0,
                 "incumbent_error_c": -3.0,
@@ -1097,20 +1191,26 @@ def test_model_evaluation_json_round_trip_preserves_auditable_completed_origins(
                 "challenger_prediction_c": 119.0,
                 "temperature_band": "below-target",
                 "ambient_source": "measured",
+                "horizon_steps": None,
+                "horizon_seconds": 200,
+                "prediction_steps": 8,
+                "observation_frames": 10,
             },
         ],
         "horizon_scores": [
             {
-                "horizon_steps": 3,
                 "incumbent_rmse_c": 2.0,
                 "challenger_rmse_c": 1.0,
                 "sample_count": 1,
+                "horizon_steps": None,
+                "horizon_seconds": 100,
             },
             {
-                "horizon_steps": 15,
                 "incumbent_rmse_c": 3.0,
                 "challenger_rmse_c": 4.0,
                 "sample_count": 1,
+                "horizon_steps": None,
+                "horizon_seconds": 200,
             },
         ],
         "evaluation_duration_ms": 7.5,
@@ -1137,7 +1237,7 @@ def test_model_evaluation_preserves_a_prior_win_until_both_horizons_are_complete
     short_origin = (payload.completed_origins[0],)
     short_scores = tuple(
         score
-        if score.horizon_steps == 3
+        if score.horizon_seconds == 100
         else replace(score, incumbent_rmse_c=None, challenger_rmse_c=None, sample_count=0)
         for score in payload.horizon_scores
     )
@@ -1167,7 +1267,7 @@ def test_model_evaluation_rejects_unbounded_or_inconsistent_audit_evidence() -> 
     with pytest.raises(ValidationError):
         replace(payload, window_start_ms=20_001)
     with pytest.raises(ValidationError):
-        replace(payload, evaluated_at_ms=339_999)
+        replace(payload, evaluated_at_ms=239_999)
     with pytest.raises(ValidationError):
         replace(payload, incumbent_digest="B" * 64)
     with pytest.raises(ValidationError):
@@ -1563,8 +1663,8 @@ def test_strict_db_json_path_still_decodes_valid_enum_values():
     assert ControlTraceRecord.from_db_row(row) == record
 
 
-def test_schema_eight_has_one_canonical_model_evidence_contract():
-    assert TRACE_SCHEMA_VERSION == 8
+def test_schema_nine_has_one_canonical_model_evidence_contract():
+    assert TRACE_SCHEMA_VERSION == 9
     assert {"u_min", "u_max", "hold_cycle_seconds"}.isdisjoint(SessionPayload.__annotations__)
     assert {"pulse_slot_seconds", "pulse_frame_seconds"} <= SessionPayload.__annotations__.keys()
     assert "FAN_ASSIST" not in OutputSource.__members__
@@ -2113,8 +2213,10 @@ def test_completed_origins_require_precommitted_prediction_provenance() -> None:
     with pytest.raises(ValidationError):
         CompletedOriginPayload(
             origin_time_ms=20_000,
-            completion_time_ms=80_000,
-            horizon_steps=3,
+            completion_time_ms=120_000,
+            horizon_seconds=100,
+            prediction_steps=4,
+            observation_frames=5,
             generation=0,
             observed_temperature_c=110.0,
             incumbent_error_c=2.0,

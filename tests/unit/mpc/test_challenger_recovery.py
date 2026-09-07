@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from common.learning_trajectory import trajectory_json_value
 from common.persistence.model_challenger import (
     ModelChallengerState,
     create_model_challenger,
@@ -104,6 +105,33 @@ def test_exact_restart_retains_only_completed_wins_and_starts_a_new_epoch(
     assert recovered.candidate == durable.candidate
     assert recovered.calibration_manifest == durable.calibration_manifest
     assert read_model_challenger(database_path=database_path) == recovered
+
+
+def test_restart_retires_challenger_from_previous_evaluation_contract(
+    database_path: Path,
+) -> None:
+    current = _state(phase="evaluating")
+    legacy_preparation = trajectory_json_value(current.fit_preparation)
+    assert isinstance(legacy_preparation, dict)
+    legacy_preparation.pop("required_horizon_seconds")
+    legacy_preparation["required_horizons"] = [3, 15, 45, 90, 180]
+    durable = _state(
+        phase="evaluating",
+        fit_preparation=legacy_preparation,
+        evaluation_round=1,
+        consecutive_wins=1,
+        last_decision_id="legacy-decision",
+        last_evidence_id="legacy-evidence",
+    )
+    create_model_challenger(durable, database_path=database_path)
+
+    assert _recover_exact(durable, database_path, recovered_ms=5_050) is None
+
+    retired = read_model_challenger(database_path=database_path)
+    assert retired is not None
+    assert retired.phase == "retired"
+    assert retired.retirement_reason == "evaluation-contract-changed"
+    assert retired.consecutive_wins == 1
 
 
 @pytest.mark.parametrize("wins", [0, 1])

@@ -11,6 +11,7 @@ from __future__ import annotations
 from hashlib import sha256
 
 from common.control_trace import AmbientSource
+from common.mpc_learning import MPC_FORECAST_HORIZONS
 from common.model_evidence import (
     CalibrationSummaryEvidence,
     CandidateAssessmentEvidence,
@@ -118,17 +119,19 @@ def _qualifying(*, include_calibration: bool = False) -> tuple[ModelEvidenceReco
     )
     timestamp = 7
     for cook in ("cook-a", "cook-b"):
-        for horizon in (3, 15, 45, 90, 180):
-            for sequence in range(horizon):
+        for horizon in MPC_FORECAST_HORIZONS:
+            for sequence in range(horizon.observation_frames):
                 error = (-0.5, 0.5, 0.0)[sequence % 3]
                 records.append(
                     _record(
                         EvidenceKind.FORECAST_ORIGIN,
                         ForecastOriginEvidence(
                             origin_sequence=sequence,
-                            origin_time_ms=sequence * 25,
-                            completion_time_ms=(sequence + horizon) * 25,
-                            horizon_steps=horizon,
+                            origin_time_ms=sequence * 20_000,
+                            completion_time_ms=sequence * 20_000 + horizon.seconds * 1_000,
+                            horizon_seconds=horizon.seconds,
+                            prediction_steps=horizon.prediction_steps,
+                            observation_frames=horizon.observation_frames,
                             incumbent_digest=_INCUMBENT,
                             challenger_digest=_CANDIDATE,
                             incumbent_prediction_c=100.0,

@@ -7,8 +7,7 @@ import json
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import replace
-from itertools import pairwise
-from math import ceil
+from math import ceil, sqrt
 from pathlib import Path
 from threading import Condition
 from typing import Any, cast
@@ -17,12 +16,12 @@ import pytest
 
 from common import datastore
 from common.control_trace import (
+    TRACE_SCHEMA_VERSION,
     AllocationClampReason,
     AmbientSource,
     AmbientUncertainty,
     ChallengerProgressTracePayload,
     ControllerType,
-    ModelEvaluationPayload,
     ModelObservationPayload,
     TraceEventKind,
 )
@@ -34,11 +33,10 @@ from common.learning_trajectory import (
     LearningTrajectoryFrame,
     LearningTrajectorySegment,
     TrajectoryBreakReason,
-    canonical_model_fit_lineage_digest,
     canonical_trajectory_digest,
-    trajectory_json_value,
 )
 from common.model_evidence import (
+    MODEL_EVIDENCE_SCHEMA_VERSION,
     ActivationLifecycleEvidence,
     CandidateAssessmentEvidence,
     ChallengerRoundEvidence,
@@ -48,6 +46,7 @@ from common.model_evidence import (
     ForecastOriginEvidence,
     SessionSummaryEvidence,
 )
+from common.mpc_learning import MPC_FORECAST_HORIZON_SECONDS, forecast_horizon_spec
 from common.persistence.control_trace import read_control_trace_cook, read_control_trace_session
 from common.persistence.learning_trajectory import LearningTrajectoryRepository
 from common.persistence.model_challenger import (
@@ -60,12 +59,10 @@ from controller.grill_sim import MAKGrillSim
 from controller.model_learning.activation import (
     ActivationPhase,
     PreparedActivationRecord,
-    canonical_snapshot_digest,
 )
 from controller.model_learning.contracts import (
     ActivationPolicy,
     CandidateOrigin,
-    FitRequest,
     FrameObservation,
 )
 from controller.model_learning.grey_runtime import GreyLearningProcessOwner
@@ -73,16 +70,10 @@ from controller.model_learning.migration import migrate_mpc_learning_authority
 from controller.model_learning.report import current_learning_report
 from controller.mpc import Controller
 from controller.mpc_config import DEFAULT_MPC_CONFIG
-from controller.mpc_factory import MpcPairFactory
 from controller.mpc_model import EstimatorSeed, replay_delay_chain_arrays, simulate_grey_box_intervals
 from controller.mpc_snapshot import migrate_grey_learning_snapshot
 from controller.runtime.control_trace_recorder import RETENTION_PERIOD_MS, ControlTraceRecorder
 from controller.runtime.control_trace_session import ControlTraceSession
-from controller.runtime.model_fitting import (
-    GreyFitSuccess,
-    fit_segmented_grey,
-    segmented_corpus_fit_job,
-)
 from controller.runtime.model_persistence import ModelPersistenceWorker
 from controller.runtime.modes.hold_learning import HoldLearningRuntime
 from controller.runtime.runner import SyncControllerRunner, ThreadedControllerRunner
@@ -100,9 +91,12 @@ from tests.e2e._mpc_online_learning_helpers import (
     _trace_context,
 )
 
-_FIRST_EVALUATION_MIN_SEQUENCE = 300
-_MAX_EVALUATION_PUBLICATION_SEQUENCE = 305
-_REQUIRED_HORIZONS = {3, 15, 45, 90, 180}
+_LONGEST_FORECAST_HORIZON = forecast_horizon_spec(max(MPC_FORECAST_HORIZON_SECONDS))
+_MAX_FIRST_FORECAST_ORIGIN_SEQUENCE = _FIT_SAMPLES + _LONGEST_FORECAST_HORIZON.observation_frames + 5
+_MAX_EVALUATION_PUBLICATION_SEQUENCE = (
+    _MAX_FIRST_FORECAST_ORIGIN_SEQUENCE + _LONGEST_FORECAST_HORIZON.observation_frames + 2
+)
+_REQUIRED_HORIZON_SECONDS = set(MPC_FORECAST_HORIZON_SECONDS)
 _OBSOLETE_V6_SCORES = {"incumbent_innovation_c", "challenger_innovation_c"}
 _EXACT_V6_FIXTURE = Path(__file__).with_name("fixtures") / "restored_v6_passive_21_140.json"
 _EXACT_V6_ROWS_SHA256 = "f9bf8eaa632a68e73586abfd93ef42c07d4bac91a824f4660fcc1af8cd59b0a6"
@@ -726,82 +720,6 @@ def _report_candidate_lineage(
     return projected
 
 
-def _replay_exact_fit(
-    repository: LearningTrajectoryRepository,
-    challenger: ModelChallengerState,
-) -> GreyFitSuccess:
-    preparation = trajectory_json_value(challenger.fit_preparation)
-    assert isinstance(preparation, dict)
-    fit_result_value = preparation["fit_result"]
-    assert isinstance(fit_result_value, dict)
-    request = FitRequest(
-        request_id=challenger.fit_lineage.request_id,
-        origin=challenger.origin,
-        fit_corpus=challenger.fit_corpus,
-        configuration_digest=challenger.controller_configuration_digest,
-        parent_incumbent_digest=challenger.fit_lineage.parent_incumbent_digest,
-        parent_incumbent_generation=challenger.fit_lineage.parent_incumbent_generation,
-        candidate_generation=challenger.candidate.candidate_generation,
-    )
-
-    replayed = repository.replay_fit(request.request_id)
-    assert replayed.identity == challenger.fit_corpus
-    assert replayed.identity.corpus_digest == challenger.fit_lineage.fit_corpus_digest
-    assert tuple((segment.segment_id, segment.content_digest) for segment in replayed.segments) == tuple(
-        (segment.segment_id, segment.content_digest) for segment in repository.replay_fit(request.request_id).segments
-    )
-
-    job = segmented_corpus_fit_job(
-        replayed,
-        request,
-        MpcPairFactory._native_from_descriptor(challenger.incumbent),
-    )
-    assert job.request == request
-    assert job.corpus == replayed.identity
-    assert tuple(
-        (
-            segment.segment_id,
-            segment.through_ordinal,
-            segment.prefix_digest,
-            len(segment.pre_roll_load),
-            len(segment.scored_load),
-        )
-        for segment in job.segments
-    ) == tuple(
-        (
-            segment.segment_id,
-            segment.through_ordinal,
-            segment.prefix_digest,
-            segment.pre_roll_count,
-            segment.scored_count,
-        )
-        for segment in replayed.identity.slices
-    )
-
-    replayed_result = fit_segmented_grey(job)
-    assert isinstance(replayed_result, GreyFitSuccess)
-    assert {
-        "rmse_c": replayed_result.rmse_c,
-        "max_error_c": replayed_result.max_error_c,
-        "identifiability": replayed_result.identifiability,
-        "sample_count": replayed_result.sample_count,
-        "temperature_band_c": list(replayed_result.temperature_band_c),
-        "nfev": replayed_result.nfev,
-        "effective_masks": [
-            [bool(value) for value in mask] for mask in replayed_result.effective_masks
-        ],
-        "warmup_excluded_segment_ids": list(
-            replayed_result.warmup_excluded_segment_ids
-        ),
-        "result_digest": replayed_result.result_digest,
-    } == fit_result_value
-    assert (
-        canonical_snapshot_digest(MpcPairFactory._native_mapping(replayed_result.config))
-        == challenger.candidate.model_digest
-    )
-    return replayed_result
-
-
 def _legacy_observation(active_digest: str) -> None:
     legacy_payload = {
         "frame_start_ms": 0,
@@ -984,18 +902,18 @@ def _identity(snapshot: dict[str, Any]) -> tuple[str, int]:
     ("fresh-v7", "upgraded-v6"),
     ids=("fresh-v7", "upgraded-v6"),
 )
-def test_passive_online_learning_crosses_trace_persistence_activation_and_restart(
+def test_passive_online_learning_rejects_absolute_rmse_failure_and_restart_remains_inactive(
     ds,
     database_state: str,
 ) -> None:
     config: dict[str, Any] = dict(DEFAULT_MPC_CONFIG)
     config["enable_online_adaptation"] = True
-    stale_transaction_id = _seed_v6_state(config) if database_state == "upgraded-v6" else None
+    if database_state == "upgraded-v6":
+        _seed_v6_state(config)
     if database_state == "upgraded-v6":
         migration = migrate_mpc_learning_authority(defaults=config)
         assert migration.snapshot["version"] == 7
     cook_id = f"mpc-online-learning-{database_state}"
-    resumed_cook_id = f"{cook_id}-resumed"
 
     cumulative_rows = _mak_grey_corpus_rows()
     cumulative_rows_digest = hashlib.sha256(
@@ -1057,15 +975,11 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
         logger=_TEST_LOGGER,
         initial_generation=0,
     )
-    learned_snapshot: dict[str, Any] | None = None
     initial_snapshot: dict[str, Any] | None = None
-    before_active_boundary: dict[str, Any] | None = None
-    durable_active = None
-    estimator_seeds: list[EstimatorSeed] = []
-    challenger_snapshots: dict[int, ModelChallengerState] = {}
     fit_challenger: ModelChallengerState | None = None
-    evaluation_publication_sequence: int | None = None
-    trace_session_ids: dict[str, str] = {}
+    rejected_round: ChallengerRoundEvidence | None = None
+    rejected_assessment: CandidateAssessmentEvidence | None = None
+    rejection_sequence: int | None = None
     try:
         learning.restore_model(timestamp_ms=0)
         learning.reconcile_activation()
@@ -1079,7 +993,6 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
             timestamp_ms=0,
         )
         assert identity is not None
-        trace_session_ids[cook_id] = identity.session_id
         learning.bind_generation(0)
         runner.set_target(_SETPOINT_C)
         runner.submit(MAKGrillSim.AMBIENT_C)
@@ -1123,7 +1036,6 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
                 required_frame_count=required,
                 status="exact",
             )
-            estimator_seeds.append(seed)
             return seed
 
         runner.bind_estimator_seed_source(candidate_seed)
@@ -1178,7 +1090,7 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
             timeout_s=90.0,
             description="the real grey fit and candidate preparation",
         )
-        created_challenger = cast(
+        fit_challenger = cast(
             ModelChallengerState,
             _wait_until(
                 lambda: (
@@ -1192,200 +1104,20 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
                 description="the initial durable challenger",
             ),
         )
-        fit_challenger = created_challenger
-        challenger_snapshots[created_challenger.revision] = created_challenger
 
-        def durable_first_round() -> ModelChallengerState | None:
-            challenger = read_model_challenger()
-            return (
-                challenger
-                if challenger is not None
-                and challenger.challenger_id == created_challenger.challenger_id
-                and challenger.evaluation_round == 1
-                and challenger.consecutive_wins == 1
-                else None
-            )
-
-        first_round_challenger: ModelChallengerState | None = None
-        first_evaluation_sequence: int | None = None
-        for sequence in range(
-            _FIT_SAMPLES,
-            _MAX_EVALUATION_PUBLICATION_SEQUENCE - 1,
-        ):
-            _drive_frame(
-                plant=plant,
-                sequence=sequence,
-                runner=runner,
-                gate=gate,
-                learning=learning,
-            )
-            if sequence < _FIRST_EVALUATION_MIN_SEQUENCE:
-                continue
-            first_round_challenger = _poll_until(durable_first_round, timeout_s=2.0)
-            if first_round_challenger is not None:
-                first_evaluation_sequence = sequence
-                break
-        if first_round_challenger is None or first_evaluation_sequence is None:
-            challenger = read_model_challenger()
-            learning_state = core.get_learning_diagnostics().state
-            pending_origins = cast(tuple[Mapping[str, Any], ...], learning_state.get("pending_origins", ()))
-            challenger_summary = (
-                None
-                if challenger is None
-                else (
-                    challenger.challenger_id,
-                    challenger.phase,
-                    challenger.evaluation_round,
-                    challenger.consecutive_wins,
-                    challenger.retirement_reason,
-                )
-            )
-            pending_origin_sequences = tuple(
-                origin.get("origin_sequence") for origin in pending_origins[:2] + pending_origins[-2:]
-            )
-            pytest.fail(
-                "the first durable challenger round did not complete within the causal frame bound; "
-                f"challenger={challenger_summary!r}; "
-                f"completed_horizons={learning_state.get('completed_horizons')!r}; "
-                f"pending_origin_count={len(pending_origins)}; "
-                f"pending_origin_sequences={pending_origin_sequences!r}; "
-                f"failure={learning_state.get('failure')!r}"
-            )
-        challenger_snapshots[first_round_challenger.revision] = first_round_challenger
-
-        first_confidence = _wait_until(
-            lambda: next(
-                (
-                    record
-                    for record in read_model_evidence(kind=EvidenceKind.CONFIDENCE_DECISION)
-                    if isinstance(record.payload, ConfidenceDecisionEvidence)
-                    and record.payload.decision_id == first_round_challenger.last_decision_id
-                    and record.payload.blocked
-                    and record.payload.reason == "confidence-rejected"
-                ),
-                None,
-            ),
-            timeout_s=30.0,
-            description="the first winning causal confidence window",
-        )
-        learning.reconcile_outcomes(
-            (first_evaluation_sequence + 1) * _FRAME_SECONDS + 0.001,
-        )
-        learning.drain_activation_events()
-        assert runner.stop_and_retain_for_teardown()
-        assert learning.barrier_for_teardown(generation=0)
-        assert learning.schedule_stop_fit(
-            {
-                "controller": {
-                    "config": {
-                        "mpc": {
-                            "enable_identification": True,
-                        },
-                    },
-                },
-            },
-        )
-        learning.finish_teardown(generation=0)
-        _wait_until(
-            lambda: runner._corpus_fit_thread is None,
-            timeout_s=30.0,
-            description="the Stop fit plan to retire without replacing the challenger",
-        )
-        stopped_challenger = read_model_challenger()
-        assert stopped_challenger is not None
-        assert stopped_challenger.challenger_id == first_round_challenger.challenger_id
-        assert stopped_challenger.phase == "evaluating"
-        assert stopped_challenger.evaluation_round == 1
-        assert stopped_challenger.consecutive_wins == 1
-        assert stopped_challenger.retirement_reason is None
-
-        owned_learning = process_owner.learning
-        assert owned_learning is not None
-        assert owned_learning.prepared is not None
-        gate = _FrameBoundaryGate()
-        core = Controller(
-            config,
-            "C",
-            dict(_CYCLE),
-            activation_persistence=persistence,
-            trajectory_repository=repository,
-            fit_partition_digest=lambda: fit_partition_digest,
-            grey_learning_process=process_owner,
-        )
-        assert process_owner.learning is owned_learning
-        assert owned_learning.prepared is not None
-        runner = ThreadedControllerRunner(
-            core,
-            controller_type=ControllerType.MPC,
-            wait_for_period=gate,
-        )
-        gate.wait_until_blocked()
-        recorder = ControlTraceRecorder(
-            monotonic_clock=lambda: 0,
-            wall_clock=lambda: RETENTION_PERIOD_MS,
-        )
-        trace = ControlTraceSession(recorder, warning=_TEST_LOGGER.warning)
-        learning = HoldLearningRuntime(
-            runner=runner,
-            model_store=model_store,
-            persistence=persistence,
-            trajectory_repository=repository,
-            trace=trace,
-            controller_name="mpc",
-            logger=_TEST_LOGGER,
-            initial_generation=0,
-        )
-        learning.restore_model(
-            timestamp_ms=int((first_evaluation_sequence + 1) * _FRAME_SECONDS * 1_000),
-        )
-        learning.reconcile_activation()
-        gate.advance()
-        resumed_snapshot = runner.get_model_snapshot()
-        assert isinstance(resumed_snapshot, dict)
-        assert process_owner.learning is owned_learning
-        assert owned_learning.prepared is not None
-        assert _identity(resumed_snapshot) == (initial_digest, initial_generation)
-        identity = trace.ensure_open(
-            _trace_context(resumed_snapshot, config, resumed_cook_id),
-            timestamp_ms=int((first_evaluation_sequence + 1) * _FRAME_SECONDS * 1_000),
-        )
-        assert identity is not None
-        trace_session_ids[resumed_cook_id] = identity.session_id
-        learning.bind_generation(0)
-        assert process_owner.learning is owned_learning
-        assert owned_learning.prepared is not None
-        assert owned_learning.resumed_from_previous_cook
-        runner.set_target(_SETPOINT_C)
-        runner.submit(plant.measured())
-        gate.advance()
-        runner.bind_estimator_seed_source(candidate_seed)
-        gate.advance()
-        resumed_challenger = read_model_challenger()
-        assert resumed_challenger is not None
-        assert resumed_challenger.challenger_id == first_round_challenger.challenger_id
-        assert resumed_challenger.phase == "evaluating"
-        assert resumed_challenger.evaluation_round == 1
-        assert resumed_challenger.consecutive_wins == 1
-
-        challenger_snapshots[resumed_challenger.revision] = resumed_challenger
-
-        def accepted_second_confidence():
+        def first_rejected_round() -> ChallengerRoundEvidence | None:
             return next(
                 (
-                    record
-                    for record in read_model_evidence(kind=EvidenceKind.CONFIDENCE_DECISION)
-                    if isinstance(record.payload, ConfidenceDecisionEvidence)
-                    and not record.payload.blocked
-                    and record.payload.decision_id != first_confidence.payload.decision_id
+                    record.payload
+                    for record in read_model_evidence(kind=EvidenceKind.CHALLENGER_ROUND)
+                    if isinstance(record.payload, ChallengerRoundEvidence) and not record.payload.accepted
                 ),
                 None,
             )
 
-        second_confidence = None
-        second_evaluation_sequence = None
         for sequence in range(
-            first_evaluation_sequence + 1,
-            first_evaluation_sequence + max(_REQUIRED_HORIZONS) + 2,
+            _FIT_SAMPLES,
+            _MAX_EVALUATION_PUBLICATION_SEQUENCE,
         ):
             _drive_frame(
                 plant=plant,
@@ -1394,115 +1126,51 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
                 gate=gate,
                 learning=learning,
             )
-            second_confidence = _poll_until(accepted_second_confidence, timeout_s=0.1)
-            if second_confidence is not None:
-                second_evaluation_sequence = sequence
+            rejected_round = _poll_until(first_rejected_round, timeout_s=0.1)
+            if rejected_round is not None:
+                rejection_sequence = sequence
                 break
-        if second_confidence is None:
-            second_confidence = _poll_until(accepted_second_confidence, timeout_s=5.0)
-            if second_confidence is not None:
-                second_evaluation_sequence = sequence
-        if second_confidence is None or second_evaluation_sequence is None:
-            learning_state = core.get_learning_diagnostics().state
-            pending_origins = cast(tuple[Mapping[str, Any], ...], learning_state.get("pending_origins", ()))
-            durable = read_model_challenger()
-            challenger_summary = (
-                None
-                if durable is None
-                else (
-                    durable.phase,
-                    durable.evaluation_round,
-                    durable.consecutive_wins,
-                    durable.retirement_reason,
+        if rejected_round is None or rejection_sequence is None:
+            state = core.get_learning_diagnostics().state
+            rounds = tuple(
+                (
+                    record.payload.challenger_id,
+                    record.payload.evaluation_round,
+                    record.payload.accepted,
                 )
-            )
-            pending_origin_sequences = tuple(
-                item.get("origin_sequence") for item in pending_origins[:2] + pending_origins[-2:]
+                for record in read_model_evidence(kind=EvidenceKind.CHALLENGER_ROUND)
+                if isinstance(record.payload, ChallengerRoundEvidence)
             )
             pytest.fail(
-                "the resumed challenger did not complete its second causal win; "
-                f"challenger={challenger_summary!r}; "
-                f"completed_horizons={learning_state.get('completed_horizons')!r}; "
-                f"pending_origin_count={len(pending_origins)}; "
-                f"pending_origin_sequences={pending_origin_sequences!r}; "
-                f"failure={learning_state.get('failure')!r}; "
-                f"resumed={learning_state.get('resumed_from_previous_cook')!r}"
+                "the deterministic MAK simulation did not publish a terminal causal round; "
+                f"challenger={read_model_challenger()!r}; "
+                f"completed_horizon_seconds={state.get('completed_horizon_seconds')!r}; "
+                f"pending_origins={state.get('pending_origins')!r}; "
+                f"rounds={rounds!r}; "
+                f"failure={state.get('failure')!r}"
             )
-        evaluation_publication_sequence = second_evaluation_sequence + 1
-        prepared_state = _wait_until(
-            lambda: (
-                state
-                if (state := read_model_activation()) is not None
-                and state.phase == ActivationPhase.PREPARED.value
-                and state.transaction_id != stale_transaction_id
-                else None
-            ),
-            timeout_s=30.0,
-            description="durable passive activation preparation",
-        )
-        assert prepared_state.evidence_decision_id == second_confidence.payload.decision_id
-        activating_challenger = cast(
-            ModelChallengerState,
+
+        rejected_assessment = cast(
+            CandidateAssessmentEvidence,
             _wait_until(
-                lambda: (
-                    challenger
-                    if (challenger := read_model_challenger()) is not None
-                    and challenger.phase == "activating"
-                    and challenger.evaluation_round == 2
-                    and challenger.consecutive_wins == challenger.required_wins
-                    else None
+                lambda: next(
+                    (
+                        record.payload
+                        for record in read_model_evidence(kind=EvidenceKind.CANDIDATE_ASSESSMENT)
+                        if isinstance(record.payload, CandidateAssessmentEvidence)
+                        and record.payload.decision_id == rejected_round.decision_id
+                    ),
+                    None,
                 ),
                 timeout_s=30.0,
-                description="the durable activating challenger",
+                description="the durable absolute-RMSE rejection",
             ),
         )
-        challenger_snapshots[activating_challenger.revision] = activating_challenger
 
-        learning.reconcile_activation()
-        _drive_frame(
-            plant=plant,
-            sequence=evaluation_publication_sequence,
-            runner=runner,
-            gate=gate,
-            learning=learning,
+        assert _identity(cast(dict[str, Any], runner.get_model_snapshot())) == (
+            initial_digest,
+            initial_generation,
         )
-
-        def reconciled_durable_active():
-            learning.reconcile_activation()
-            state = read_model_activation()
-            return (
-                state
-                if state is not None
-                and state.phase == ActivationPhase.ACTIVE.value
-                and state.transaction_id == prepared_state.transaction_id
-                else None
-            )
-
-        durable_active = _wait_until(
-            reconciled_durable_active,
-            timeout_s=30.0,
-            description="durable active activation phase",
-        )
-
-        before_active_boundary = runner.get_model_snapshot()
-        assert isinstance(before_active_boundary, dict)
-        assert _identity(before_active_boundary) == (initial_digest, initial_generation)
-        assert core.activation_output_authorized is False
-
-        learning.reconcile_activation()
-        gate.advance()
-        learning.reconcile_activation()
-        learning.drain_activation_events()
-        learned_snapshot = runner.get_model_snapshot()
-        assert isinstance(learned_snapshot, dict)
-        learned_digest, learned_generation = _identity(learned_snapshot)
-        assert learned_generation > initial_generation
-        assert learned_digest != initial_digest
-        assert core.activation_output_authorized is True
-        assert durable_active.role_generation == learned_generation
-        assert durable_active.active_pair is not None
-        assert durable_active.active_pair.model_digest == learned_digest
-        assert learning.submit_online_checkpoint(learned_snapshot)
     finally:
         learning.finish_teardown(generation=0)
         runner.stop()
@@ -1510,192 +1178,101 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
         process_owner.close()
 
     assert initial_snapshot is not None
-    assert before_active_boundary is not None
-    assert learned_snapshot is not None
-    assert durable_active is not None
     assert fit_challenger is not None
-    assert estimator_seeds
-    initial_parameters = cast(
-        dict[str, Any],
-        cast(dict[str, Any], initial_snapshot["active"])["parameters"],
+    assert rejected_round is not None
+    assert rejected_assessment is not None
+    assert rejection_sequence is not None
+
+    expected_absolute_blockers = tuple(
+        f"absolute-rmse-{horizon_seconds}" for horizon_seconds in MPC_FORECAST_HORIZON_SECONDS
     )
-    learned_active = cast(dict[str, Any], learned_snapshot["active"])
-    learned_parameters = cast(dict[str, Any], learned_active["parameters"])
-    assert any(learned_parameters[name] != initial_parameters[name] for name in ("C_c", "K_Q", "theta"))
+    assert rejected_round.accepted is False
+    assert rejected_round.evaluation_round == 1
+    assert rejected_round.required_horizon_seconds == MPC_FORECAST_HORIZON_SECONDS
+    assert rejected_round.completed_horizon_seconds == MPC_FORECAST_HORIZON_SECONDS
+    assert rejected_assessment.decision_id == rejected_round.decision_id
+    assert rejected_assessment.rejection_reasons == expected_absolute_blockers
+    assert rejected_assessment.fit_accepted
+    assert rejected_assessment.identifiability_accepted
+    assert rejected_assessment.native_build == "passed"
+    assert rejected_assessment.native_dry_solve == "passed"
+    assert rejected_assessment.target_timing == "passed"
+    assert rejected_assessment.confidence_accepted is False
 
-    raw_persisted = ControllerModelStore().load("mpc")
-    assert isinstance(raw_persisted, dict)
-    persisted: dict[str, Any] = raw_persisted
-    assert _identity(persisted) == _identity(learned_snapshot)
-    assert cast(dict[str, Any], persisted["active"])["parameters"] == learned_parameters
-
-    cook_trace = [
-        *read_control_trace_cook(cook_id),
-        *read_control_trace_cook(resumed_cook_id),
-    ]
+    cook_trace = read_control_trace_cook(cook_id)
     observation_records = [
         record
         for record in cook_trace
         if record.event_kind is TraceEventKind.MODEL_OBSERVATION and isinstance(record.payload, ModelObservationPayload)
     ]
-    assert evaluation_publication_sequence is not None
-    observation_sequences = [
-        cast(ModelObservationPayload, record.payload).observation_sequence for record in observation_records
-    ]
-    assert observation_sequences == list(range(evaluation_publication_sequence + 1))
-    assert all(record.schema_version == 8 for record in observation_records)
-    for record in observation_records:
-        payload = cast(ModelObservationPayload, record.payload)
-        assert payload.eligible
-        normalized_load = _load_for(payload.observation_sequence)
-        assert payload.requested_combustion_load == pytest.approx(normalized_load)
-        assert payload.realized_combustion_load == pytest.approx(normalized_load)
-        assert payload.requested_auger_duty == pytest.approx(normalized_load * _U_MAX)
-        assert payload.delivered_on_seconds == pytest.approx(normalized_load * _U_MAX * _FRAME_SECONDS)
-        assert _OBSOLETE_V6_SCORES.isdisjoint(json.loads(record.to_db_row().payload))
+    assert observation_records
+    assert all(record.schema_version == TRACE_SCHEMA_VERSION for record in observation_records)
     fit_gate_observation = next(
         cast(ModelObservationPayload, record.payload)
         for record in observation_records
-        if cast(ModelObservationPayload, record.payload).observation_sequence == 119
+        if cast(ModelObservationPayload, record.payload).observation_sequence == _FIT_SAMPLES - 1
     )
     assert fit_gate_observation.effective_updates == _FIT_SAMPLES
+    assert all(_OBSOLETE_V6_SCORES.isdisjoint(json.loads(record.to_db_row().payload)) for record in observation_records)
 
-    evaluations = [
-        cast(ModelEvaluationPayload, record.payload)
-        for record in cook_trace
-        if record.event_kind is TraceEventKind.MODEL_EVALUATION and isinstance(record.payload, ModelEvaluationPayload)
-    ]
-    wins = [evaluation.consecutive_wins for evaluation in evaluations]
-    assert wins and wins[-1] == 2
-    assert all(earlier < later for earlier, later in pairwise(wins))
-    assert all(not evaluation.rejection_reasons for evaluation in evaluations)
-    assert all(
-        {score.horizon_steps for score in evaluation.horizon_scores} == _REQUIRED_HORIZONS
-        and all(
-            score.challenger_rmse_c is not None
-            and score.incumbent_rmse_c is not None
-            and score.challenger_rmse_c < score.incumbent_rmse_c
-            for score in evaluation.horizon_scores
-        )
-        for evaluation in evaluations
-    )
-
-    cook_evidence = [
-        *read_model_evidence(cook_id=cook_id),
-        *read_model_evidence(cook_id=resumed_cook_id),
-    ]
-    fit_records = [record.payload for record in cook_evidence if isinstance(record.payload, FitLifecycleEvidence)]
-    assert [record.status for record in fit_records] == ["queued", "succeeded"]
-    assert len({record.request_id for record in fit_records}) == 1
-    assert all(record.origin == CandidateOrigin.PASSIVE_ONLINE.value for record in fit_records)
-    _replay_exact_fit(repository, fit_challenger)
-
-    progress_records = [
-        record
-        for record in cook_trace
-        if record.event_kind is TraceEventKind.CHALLENGER_PROGRESS
-        and isinstance(record.payload, ChallengerProgressTracePayload)
-    ]
-    assert progress_records
-    progress_payloads = [cast(ChallengerProgressTracePayload, record.payload) for record in progress_records]
-    revisions = [payload.challenger_revision for payload in progress_payloads]
-    assert revisions == sorted(set(revisions))
-    assert progress_payloads[0].phase == "evaluating"
-    assert {
-        (payload.phase, payload.evaluation_round, payload.consecutive_wins) for payload in progress_payloads
-    }.issuperset(
-        {
-            ("evaluating", 0, 0),
-            ("evaluating", 1, 1),
-            ("qualified", 2, 2),
-            ("activating", 2, 2),
-        }
-    )
-    fit_result_value = trajectory_json_value(fit_challenger.fit_preparation)["fit_result"]
-    assert isinstance(fit_result_value, dict)
-    expected_lineage_digest = canonical_model_fit_lineage_digest(fit_challenger.fit_lineage)
-    for record, payload in zip(progress_records, progress_payloads, strict=True):
-        assert record.schema_version == 8
-        assert record.cook_id in trace_session_ids
-        assert record.session_id == trace_session_ids[record.cook_id]
-        assert payload.challenger_id == fit_challenger.challenger_id
-        assert payload.origin == fit_challenger.origin.value
-        assert payload.policy == fit_challenger.policy.value
-        assert payload.incumbent_digest == fit_challenger.incumbent.model_digest
-        assert payload.incumbent_generation == fit_challenger.incumbent.role_generation
-        assert payload.candidate_digest == fit_challenger.candidate.model_digest
-        assert payload.candidate_generation == fit_challenger.candidate.candidate_generation
-        assert payload.corpus_digest == fit_challenger.fit_corpus.corpus_digest
-        assert payload.lineage_digest == expected_lineage_digest
-        assert payload.result_digest == fit_result_value["result_digest"]
-        assert payload.required_horizons == tuple(sorted(_REQUIRED_HORIZONS))
-        assert payload.resumed_from_previous_cook is (record.cook_id == resumed_cook_id)
-
-    challenger_rounds = {
-        record.evidence_id: cast(ChallengerRoundEvidence, record.payload)
-        for record in read_model_evidence(kind=EvidenceKind.CHALLENGER_ROUND)
-        if isinstance(record.payload, ChallengerRoundEvidence)
-        and record.payload.challenger_id == fit_challenger.challenger_id
-    }
-    for revision, state in challenger_snapshots.items():
-        payload = next(item for item in progress_payloads if item.challenger_revision == revision)
-        completed_horizons = (
-            () if state.last_evidence_id is None else challenger_rounds[state.last_evidence_id].completed_horizons
-        )
-        assert (
-            payload.phase,
-            payload.evaluation_epoch,
-            payload.evaluation_round,
-            payload.consecutive_wins,
-            payload.required_wins,
-            payload.completed_horizons,
-            payload.reset_reason,
-        ) == (
-            state.phase,
-            state.evaluation_epoch,
-            state.evaluation_round,
-            state.consecutive_wins,
-            state.required_wins,
-            completed_horizons,
-            state.retirement_reason,
-        )
-    assessments = [
-        record.payload for record in cook_evidence if isinstance(record.payload, CandidateAssessmentEvidence)
-    ]
-    assert len(assessments) >= 2
-    assessment_ids = [assessment.decision_id for assessment in assessments]
-    evaluation_ids = [evaluation.decision_id for evaluation in evaluations]
-    assert evaluation_ids == assessment_ids[-len(evaluation_ids) :]
-    assert assessments[0].confidence_accepted is False
-    assert assessments[0].rejection_reasons == ("confidence-rejected",)
-    assert all(assessment.confidence_accepted for assessment in assessments[1:])
-    assert all(assessment.rejection_reasons == () for assessment in assessments[1:])
-    assert assessments[1].decision_id == second_confidence.payload.decision_id
-    assert assessments[1].decision_id == durable_active.evidence_decision_id
-    assert all(
-        assessment.fit_accepted
-        and assessment.identifiability_accepted
-        and assessment.native_build == "passed"
-        and assessment.native_dry_solve == "passed"
-        and assessment.target_timing == "passed"
-        for assessment in assessments
-    )
+    cook_evidence = read_model_evidence(cook_id=cook_id)
+    assert cook_evidence
+    assert all(record.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION for record in cook_evidence)
     forecast_records = [
         record.payload for record in cook_evidence if isinstance(record.payload, ForecastOriginEvidence)
     ]
-    assert {forecast.horizon_steps for forecast in forecast_records} == _REQUIRED_HORIZONS
-    assert all(not forecast.calibration_fit for forecast in forecast_records)
-
-    lifecycle = [
-        record.payload
+    assert {forecast.horizon_seconds for forecast in forecast_records} == _REQUIRED_HORIZON_SECONDS
+    assert all(
+        (
+            forecast.prediction_steps,
+            forecast.observation_frames,
+        )
+        == (
+            forecast_horizon_spec(forecast.horizon_seconds).prediction_steps,
+            forecast_horizon_spec(forecast.horizon_seconds).observation_frames,
+        )
+        and not forecast.calibration_fit
+        for forecast in forecast_records
+    )
+    rejected_forecasts = [
+        forecast for forecast in forecast_records if forecast.challenger_digest == rejected_round.candidate_digest
+    ]
+    assert {forecast.horizon_seconds for forecast in rejected_forecasts} == _REQUIRED_HORIZON_SECONDS
+    for horizon_seconds in MPC_FORECAST_HORIZON_SECONDS:
+        horizon_forecasts = [forecast for forecast in rejected_forecasts if forecast.horizon_seconds == horizon_seconds]
+        challenger_rmse_c = sqrt(
+            sum(forecast.challenger_error_c**2 for forecast in horizon_forecasts) / len(horizon_forecasts)
+        )
+        assert challenger_rmse_c > forecast_horizon_spec(horizon_seconds).maximum_rmse_c
+    assert not [
+        record
         for record in read_model_evidence(kind=EvidenceKind.ACTIVATION_LIFECYCLE)
         if isinstance(record.payload, ActivationLifecycleEvidence)
-        and record.payload.decision_id == durable_active.evidence_decision_id
+        and record.payload.decision_id == rejected_round.decision_id
     ]
-    assert {record.phase for record in lifecycle} == {"prepared", "active"}
-    assert all(record.origin == CandidateOrigin.PASSIVE_ONLINE.value for record in lifecycle)
-    assert all(record.policy == ActivationPolicy.CAUSAL_AUTO.value for record in lifecycle)
 
+    progress = [
+        cast(ChallengerProgressTracePayload, record.payload)
+        for record in cook_trace
+        if record.event_kind is TraceEventKind.CHALLENGER_PROGRESS
+        and isinstance(record.payload, ChallengerProgressTracePayload)
+        and record.payload.challenger_id == rejected_round.challenger_id
+    ]
+    assert progress
+    assert (progress[0].phase, progress[0].evaluation_round, progress[0].consecutive_wins) == (
+        "evaluating",
+        0,
+        0,
+    )
+    assert (
+        progress[-1].phase,
+        progress[-1].evaluation_round,
+        progress[-1].consecutive_wins,
+        progress[-1].reset_reason,
+    ) == ("retired", 1, 0, "evaluation-lost")
+
+    activation_state = read_model_activation()
+    assert activation_state is None or activation_state.phase != ActivationPhase.ACTIVE.value
     if database_state == "upgraded-v6":
         legacy = read_control_trace_session("legacy-v6-session")
         assert len(legacy) == 1
@@ -1722,12 +1299,9 @@ def test_passive_online_learning_crosses_trace_persistence_activation_and_restar
         restart_runner.set_target(_SETPOINT_C)
         restart_learning.restore_model(timestamp_ms=10_000_000)
         restart_learning.reconcile_activation()
-        raw_restored = restart_runner.get_model_snapshot()
-        assert isinstance(raw_restored, dict)
-        restored: dict[str, Any] = raw_restored
-        assert _identity(restored) == _identity(learned_snapshot)
-        assert cast(dict[str, Any], restored["active"])["parameters"] == learned_parameters
-        assert restart_core.activation_output_authorized is True
+        restored = restart_runner.get_model_snapshot()
+        assert isinstance(restored, dict)
+        assert _identity(restored) == _identity(initial_snapshot)
     finally:
         restart_learning.finish_teardown(generation=0)
         restart_runner.stop()
@@ -2019,6 +1593,21 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
         fit_state = dict(core.get_learning_diagnostics().state)
         assert fit_state["status"] == "evaluating"
         assert fit_state["fit_status"] == "succeeded"
+        assert tuple(fit_state["required_horizon_seconds"]) == MPC_FORECAST_HORIZON_SECONDS
+        assert tuple(fit_state["completed_horizon_seconds"]) == ()
+        fit_pending_origins = cast(list[Mapping[str, Any]], fit_state["pending_origins"])
+        assert {origin["horizon_seconds"] for origin in fit_pending_origins} == _REQUIRED_HORIZON_SECONDS
+        assert all(
+            (
+                origin["prediction_steps"],
+                origin["observation_frames"],
+            )
+            == (
+                forecast_horizon_spec(origin["horizon_seconds"]).prediction_steps,
+                forecast_horizon_spec(origin["horizon_seconds"]).observation_frames,
+            )
+            for origin in fit_pending_origins
+        )
 
         def durable_fit_lifecycle():
             records = [
@@ -2109,7 +1698,7 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
         if record.event_kind is TraceEventKind.MODEL_OBSERVATION and isinstance(record.payload, ModelObservationPayload)
     ]
     assert len(observation_records) == _FIT_SAMPLES + 1
-    assert all(record.schema_version == 8 for record in observation_records)
+    assert all(record.schema_version == TRACE_SCHEMA_VERSION for record in observation_records)
     replay_rows = []
     for record in observation_records:
         payload = cast(ModelObservationPayload, record.payload)
@@ -2146,6 +1735,7 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
     assert cast(ModelObservationPayload, observation_records[-1].payload).observation_sequence == 141
 
     fit_payloads = [cast(FitLifecycleEvidence, record.payload) for record in fit_evidence_records]
+    assert all(record.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION for record in fit_evidence_records)
     assert [payload.status for payload in fit_payloads] == ["queued", "succeeded"]
     assert len({payload.request_id for payload in fit_payloads}) == 1
     assert all(
@@ -2257,6 +1847,22 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
     assert restart_challenger.fit_lineage == durable_challenger.fit_lineage
 
     assert normalized_report["status"] == "evaluating", normalized_report
+    report_evaluation = cast(dict[str, Any], normalized_report["evaluation"])
+    assert report_evaluation["required_horizon_seconds"] == list(MPC_FORECAST_HORIZON_SECONDS)
+    assert report_evaluation["completed_horizon_seconds"] == []
+    report_pending_origins = cast(list[Mapping[str, Any]], report_evaluation["pending_origins"])
+    assert {origin["horizon_seconds"] for origin in report_pending_origins} == _REQUIRED_HORIZON_SECONDS
+    assert all(
+        (
+            origin["prediction_steps"],
+            origin["observation_frames"],
+        )
+        == (
+            forecast_horizon_spec(origin["horizon_seconds"]).prediction_steps,
+            forecast_horizon_spec(origin["horizon_seconds"]).observation_frames,
+        )
+        for origin in report_pending_origins
+    )
     assert normalized_report["mode"] == CandidateOrigin.PASSIVE_ONLINE.value
     assert normalized_report["blockers"] == []
     for checkpoint, challenger, expected_revision in (

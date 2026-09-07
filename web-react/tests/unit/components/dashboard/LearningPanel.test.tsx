@@ -12,7 +12,7 @@ import { testQueryClient } from "../../test-utils";
 
 function mpcReport(status: ModelEvidenceStatus, revision: string): ModelEvidenceReport {
   return {
-    schema_version: 3,
+    schema_version: 4,
     status,
     mode: "passive-online",
     decision_id: `decision-${revision}`,

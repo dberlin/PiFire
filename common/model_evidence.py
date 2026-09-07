@@ -20,8 +20,9 @@ from pydantic import (
 from pydantic.dataclasses import dataclass
 
 from common.control_trace import AllocationClampReason, AmbientSource
+from common.mpc_learning import MPC_FORECAST_HORIZON_SECONDS, forecast_horizon_spec
 
-MODEL_EVIDENCE_SCHEMA_VERSION = 4
+MODEL_EVIDENCE_SCHEMA_VERSION = 5
 
 type FiniteFloat = Annotated[float, Field(allow_inf_nan=False, strict=True)]
 type NonNegativeFloat = Annotated[FiniteFloat, Field(ge=0)]
@@ -189,7 +190,6 @@ class ForecastOriginEvidence:
     origin_sequence: NonNegativeInt
     origin_time_ms: NonNegativeInt
     completion_time_ms: NonNegativeInt
-    horizon_steps: PositiveInt
     incumbent_digest: Digest
     challenger_digest: Digest
     incumbent_prediction_c: FiniteFloat
@@ -201,6 +201,10 @@ class ForecastOriginEvidence:
     phase: Literal["heating", "coasting"]
     ambient_source: AmbientSource
     calibration_fit: bool
+    horizon_steps: PositiveInt | None = None
+    horizon_seconds: PositiveInt | None = None
+    prediction_steps: PositiveInt | None = None
+    observation_frames: PositiveInt | None = None
     payload_type: Literal["forecast_origin"] = "forecast_origin"
 
     @model_validator(mode="after")
@@ -209,6 +213,26 @@ class ForecastOriginEvidence:
             raise ValueError("forecast origin must precede completion")
         if self.calibration_fit:
             raise ValueError("calibration-fit forecasts are not validation evidence")
+        legacy = self.horizon_steps is not None
+        current = (
+            self.horizon_seconds is not None
+            and self.prediction_steps is not None
+            and self.observation_frames is not None
+        )
+        if legacy == current:
+            raise ValueError("forecast evidence requires exactly one horizon contract")
+        if current:
+            horizon = forecast_horizon_spec(self.horizon_seconds)
+            if (
+                self.prediction_steps != horizon.prediction_steps
+                or self.observation_frames != horizon.observation_frames
+            ):
+                raise ValueError("forecast evidence horizon clocks do not match")
+        elif any(
+            value is not None
+            for value in (self.horizon_seconds, self.prediction_steps, self.observation_frames)
+        ):
+            raise ValueError("forecast evidence horizon contract is incomplete")
         return self
 
 
@@ -407,22 +431,42 @@ class ChallengerRoundEvidence:
     evaluation_round: PositiveInt
     decision_id: NonBlankString
     accepted: bool
-    required_horizons: tuple[PositiveInt, ...]
-    completed_horizons: tuple[PositiveInt, ...]
     incumbent_digest: Digest
     candidate_digest: Digest
+    required_horizons: tuple[PositiveInt, ...] | None = None
+    completed_horizons: tuple[PositiveInt, ...] | None = None
+    required_horizon_seconds: tuple[PositiveInt, ...] | None = None
+    completed_horizon_seconds: tuple[PositiveInt, ...] | None = None
     payload_type: Literal["challenger_round"] = "challenger_round"
 
     @model_validator(mode="after")
     def validate_complete_round(self) -> ChallengerRoundEvidence:
-        if not self.required_horizons:
+        legacy = self.required_horizons is not None and self.completed_horizons is not None
+        current = (
+            self.required_horizon_seconds is not None
+            and self.completed_horizon_seconds is not None
+        )
+        if legacy == current:
+            raise ValueError("challenger round requires exactly one horizon contract")
+        required = self.required_horizons if legacy else self.required_horizon_seconds
+        completed = self.completed_horizons if legacy else self.completed_horizon_seconds
+        if required is None or completed is None or not required:
             raise ValueError("challenger round requires at least one horizon")
-        if len(set(self.required_horizons)) != len(self.required_horizons):
+        if len(set(required)) != len(required):
             raise ValueError("challenger round horizons must be unique")
-        if tuple(sorted(self.required_horizons)) != self.required_horizons:
+        if tuple(sorted(required)) != required:
             raise ValueError("challenger round horizons must be ordered")
-        if self.completed_horizons != self.required_horizons:
+        if completed != required:
             raise ValueError("challenger round must complete every required horizon")
+        if current and required != MPC_FORECAST_HORIZON_SECONDS:
+            raise ValueError("current challenger round horizons do not match the MPC contract")
+        if legacy and any(
+            value is not None
+            for value in (self.required_horizon_seconds, self.completed_horizon_seconds)
+        ):
+            raise ValueError("challenger round horizon contract is incomplete")
+        if current and any(value is not None for value in (self.required_horizons, self.completed_horizons)):
+            raise ValueError("challenger round horizon contract is incomplete")
         return self
 
 
@@ -532,7 +576,7 @@ class ModelEvidenceRecord(BaseModel):
     role_generation: NonNegativeInt
     model_digest: Digest | None
     provenance_digest: Digest | None
-    schema_version: Literal[1, 2, 3, 4] = MODEL_EVIDENCE_SCHEMA_VERSION
+    schema_version: Literal[1, 2, 3, 4, 5] = MODEL_EVIDENCE_SCHEMA_VERSION
     payload: ModelEvidencePayload
 
     @model_validator(mode="after")
@@ -571,17 +615,23 @@ class ModelEvidenceRecord(BaseModel):
                 or self.provenance_digest != self.payload.incumbent_digest
             ):
                 raise ValueError("forecast envelope digests must match precommitted payload digests")
+            current_horizon = self.payload.horizon_seconds is not None
+            if (self.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION) != current_horizon:
+                raise ValueError("forecast horizon contract does not match evidence schema")
         if isinstance(self.payload, ChallengerRoundEvidence):
-            if self.schema_version != MODEL_EVIDENCE_SCHEMA_VERSION:
-                raise ValueError("challenger round evidence requires the current schema")
+            if self.schema_version not in {4, MODEL_EVIDENCE_SCHEMA_VERSION}:
+                raise ValueError("challenger round evidence requires schema four or current")
+            current_horizon = self.payload.required_horizon_seconds is not None
+            if (self.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION) != current_horizon:
+                raise ValueError("challenger round horizon contract does not match evidence schema")
             if (
                 self.model_digest != self.payload.candidate_digest
                 or self.provenance_digest != self.payload.incumbent_digest
             ):
                 raise ValueError("challenger round envelope digests must match its causal payload")
         if isinstance(self.payload, PidSpFitDecisionEvidence):
-            if self.schema_version != MODEL_EVIDENCE_SCHEMA_VERSION:
-                raise ValueError("PID-SP fit decision requires the current schema")
+            if self.schema_version not in {4, MODEL_EVIDENCE_SCHEMA_VERSION}:
+                raise ValueError("PID-SP fit decision requires schema four or current")
             expected_model_digest = (
                 self.payload.candidate_digest
                 if self.payload.candidate_digest is not None

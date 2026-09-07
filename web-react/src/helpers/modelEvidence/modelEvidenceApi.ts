@@ -37,6 +37,14 @@ const FIT_STATUSES = ["idle", "queued", "running", "succeeded", "failed", "stale
 const CHECK_STATUSES = ["not-run", "pending", "passed", "failed"] as const;
 const ACTIVATION_PHASES = ["prepared", "active", "aborted"] as const;
 const CANDIDATE_PHASES = ["built", "evaluating", "qualified", "activating"] as const;
+const FORECAST_HORIZON_SECONDS = [100, 200, 300, 400, 600] as const;
+const FORECAST_HORIZON_CLOCKS = {
+  100: { predictionSteps: 4, observationFrames: 5 },
+  200: { predictionSteps: 8, observationFrames: 10 },
+  300: { predictionSteps: 12, observationFrames: 15 },
+  400: { predictionSteps: 16, observationFrames: 20 },
+  600: { predictionSteps: 24, observationFrames: 30 },
+} as const;
 
 function invalidReport(detail: string): never {
   throw new Error(`Invalid model evidence report: ${detail}`);
@@ -126,11 +134,16 @@ function stringArray(value: unknown, path: string) {
   });
 }
 
-function nonNegativeIntegerArray(value: unknown, path: string) {
+function forecastHorizon(value: unknown, path: string) {
+  const seconds = nonNegativeInteger(value, path);
+  const clock = FORECAST_HORIZON_CLOCKS[seconds as keyof typeof FORECAST_HORIZON_CLOCKS];
+  if (clock === undefined) return invalidReport(`${path} has an invalid value`);
+  return { seconds, ...clock };
+}
+
+function forecastHorizonArray(value: unknown, path: string): number[] {
   if (!Array.isArray(value)) return invalidReport(`${path} must be an array`);
-  value.forEach((item, index) => {
-    nonNegativeInteger(item, `${path}[${index}]`);
-  });
+  return value.map((item, index) => forecastHorizon(item, `${path}[${index}]`).seconds);
 }
 
 function validateEvidence(value: unknown) {
@@ -286,8 +299,8 @@ function validateEvaluation(value: unknown) {
     [
       "epoch",
       "round",
-      "completed_horizons",
-      "required_horizons",
+      "completed_horizon_seconds",
+      "required_horizon_seconds",
       "wins",
       "required_wins",
       "resumed_from_previous_cook",
@@ -297,8 +310,27 @@ function validateEvaluation(value: unknown) {
   );
   nonNegativeInteger(source.epoch, "evaluation.epoch");
   nonNegativeInteger(source.round, "evaluation.round");
-  nonNegativeIntegerArray(source.completed_horizons, "evaluation.completed_horizons");
-  nonNegativeIntegerArray(source.required_horizons, "evaluation.required_horizons");
+  const completed = forecastHorizonArray(
+    source.completed_horizon_seconds,
+    "evaluation.completed_horizon_seconds",
+  );
+  const required = forecastHorizonArray(
+    source.required_horizon_seconds,
+    "evaluation.required_horizon_seconds",
+  );
+  if (
+    required.length !== FORECAST_HORIZON_SECONDS.length ||
+    required.some((seconds, index) => seconds !== FORECAST_HORIZON_SECONDS[index])
+  ) {
+    invalidReport("evaluation.required_horizon_seconds does not match the current contract");
+  }
+  const orderedCompleted = required.filter((seconds) => completed.includes(seconds));
+  if (
+    completed.length !== orderedCompleted.length ||
+    completed.some((seconds, index) => seconds !== orderedCompleted[index])
+  ) {
+    invalidReport("evaluation.completed_horizon_seconds must be an ordered subset");
+  }
   nonNegativeInteger(source.wins, "evaluation.wins");
   nonNegativeInteger(source.required_wins, "evaluation.required_wins");
   booleanValue(source.resumed_from_previous_cook, "evaluation.resumed_from_previous_cook");
@@ -312,7 +344,9 @@ function validateEvaluation(value: unknown) {
       pending,
       [
         "origin_sequence",
-        "horizon_steps",
+        "horizon_seconds",
+        "prediction_steps",
+        "observation_frames",
         "role_generation",
         "candidate_generation",
         "incumbent_digest",
@@ -321,7 +355,13 @@ function validateEvaluation(value: unknown) {
       path,
     );
     nonNegativeInteger(pending.origin_sequence, `${path}.origin_sequence`);
-    nonNegativeInteger(pending.horizon_steps, `${path}.horizon_steps`);
+    const horizon = forecastHorizon(pending.horizon_seconds, `${path}.horizon_seconds`);
+    if (
+      pending.prediction_steps !== horizon.predictionSteps ||
+      pending.observation_frames !== horizon.observationFrames
+    ) {
+      invalidReport(`${path} horizon clocks do not align`);
+    }
     nonNegativeInteger(pending.role_generation, `${path}.role_generation`);
     nonNegativeInteger(pending.candidate_generation, `${path}.candidate_generation`);
     digest(pending.incumbent_digest, `${path}.incumbent_digest`);
@@ -513,7 +553,7 @@ function parseModelEvidenceReport(value: unknown): ModelEvidenceReport {
     ],
     "report",
   );
-  if (source.schema_version !== 3) invalidReport("schema_version must equal 3");
+  if (source.schema_version !== 4) invalidReport("schema_version must equal 4");
   oneOf(source.status, REPORT_STATUSES, "status");
   nullable(source.mode, (item) => oneOf(item, ORIGINS, "mode"));
   nullable(source.decision_id, (item) => stringValue(item, "decision_id"));

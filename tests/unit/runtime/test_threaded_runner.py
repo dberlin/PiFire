@@ -30,6 +30,7 @@ from common.model_evidence import (
     RefreshDiagnosticsEvidence,
     SessionSummaryEvidence,
 )
+from common.mpc_learning import MPC_FORECAST_HORIZONS
 from common.persistence.model_evidence import ModelActivationState, append_model_evidence
 from controller.applied_output import AppliedOutput, OutputSource
 from controller.base import ControllerLearningDiagnostics
@@ -3384,11 +3385,14 @@ def test_learning_process_starts_during_safe_construction_not_on_controller_work
 
 
 def test_real_completed_forecast_survives_controller_to_runner_evidence_drain(monkeypatch):
+    horizon = MPC_FORECAST_HORIZONS[0]
     completed = CompletedForecastOrigin(
         forecast=ForecastOrigin(
             origin_sequence=0,
             origin_time_s=20.0,
-            horizon_steps=3,
+            horizon_seconds=horizon.seconds,
+            prediction_steps=horizon.prediction_steps,
+            observation_frames=horizon.observation_frames,
             role_generation=0,
             candidate_generation=1,
             incumbent_digest="a" * 64,
@@ -3400,14 +3404,16 @@ def test_real_completed_forecast_survives_controller_to_runner_evidence_drain(mo
             ambient_source=_frame(0).ambient_source,
             calibration_fit=False,
         ),
-        completion_time_s=80.0,
+        completion_time_s=120.0,
         observed_temperature_c=102.0,
     )
     forecast_evidence = ForecastOriginEvidence(
         origin_sequence=completed.origin_sequence,
         origin_time_ms=int(completed.forecast.origin_time_s * 1_000),
         completion_time_ms=int(completed.completion_time_s * 1_000),
-        horizon_steps=completed.horizon_steps,
+        horizon_seconds=completed.horizon_seconds,
+        prediction_steps=completed.prediction_steps,
+        observation_frames=completed.observation_frames,
         incumbent_digest=completed.incumbent_digest,
         challenger_digest=completed.challenger_digest,
         incumbent_prediction_c=completed.forecast.incumbent_prediction_c,
@@ -3439,7 +3445,7 @@ def test_real_completed_forecast_survives_controller_to_runner_evidence_drain(mo
     drained = []
     try:
         runner.bind_evidence_context(0, "session", "cook")
-        runner.observe_frame(_frame(3))
+        runner.observe_frame(_frame(5))
 
         def collect():
             drained.extend(runner.drain_observation_outcomes().envelopes)
@@ -3475,9 +3481,14 @@ def test_hold_publishes_controller_evaluation_even_when_grey_observation_is_not_
         incumbent_digest="a" * 64,
         challenger_digest="b" * 64,
         completed_origins=(),
-        horizon_scores=(
-            HorizonScorePayload(3, None, None, 0),
-            HorizonScorePayload(15, None, None, 0),
+        horizon_scores=tuple(
+            HorizonScorePayload(
+                horizon_seconds=horizon.seconds,
+                incumbent_rmse_c=None,
+                challenger_rmse_c=None,
+                sample_count=0,
+            )
+            for horizon in MPC_FORECAST_HORIZONS
         ),
         evaluation_duration_ms=1.0,
         challenger_model_kind="grey-box",

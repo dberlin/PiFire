@@ -28,6 +28,7 @@ from common.model_evidence import (
     ModelEvidenceRecord,
     RefreshDiagnosticsEvidence,
 )
+from common.mpc_learning import MPC_FORECAST_HORIZONS
 from common.persistence.learning_trajectory import (
     LearningTrajectoryRepository,
     SegmentCursor,
@@ -82,20 +83,23 @@ class _Logger:
 
 
 def _evidence(evidence_id: str) -> ModelEvidenceRecord:
+    horizon = MPC_FORECAST_HORIZONS[0]
     return ModelEvidenceRecord(
         evidence_id=evidence_id,
         kind=EvidenceKind.FORECAST_ORIGIN,
         session_id="session-a",
         cook_id="cook-a",
-        timestamp_ms=200,
+        timestamp_ms=200_000,
         role_generation=1,
         model_digest=_OTHER_DIGEST,
         provenance_digest=_DIGEST,
         payload=ForecastOriginEvidence(
             origin_sequence=1,
-            origin_time_ms=100,
-            completion_time_ms=200,
-            horizon_steps=3,
+            origin_time_ms=100_000,
+            completion_time_ms=200_000,
+            horizon_seconds=horizon.seconds,
+            prediction_steps=horizon.prediction_steps,
+            observation_frames=horizon.observation_frames,
             incumbent_digest=_DIGEST,
             challenger_digest=_OTHER_DIGEST,
             incumbent_prediction_c=100.0,

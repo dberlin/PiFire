@@ -18,7 +18,7 @@ const CORPUS_DIGEST = "c".repeat(64);
 const SEGMENT_CONTENT_DIGEST = "d".repeat(64);
 
 const VALID_REPORT = {
-  schema_version: 3,
+  schema_version: 4,
   status: "evaluating",
   mode: "passive-online",
   decision_id: "causal-round-2-1",
@@ -65,15 +65,17 @@ const VALID_REPORT = {
   evaluation: {
     epoch: 2,
     round: 1,
-    completed_horizons: [3, 15],
-    required_horizons: [3, 15, 45, 90, 180],
+    completed_horizon_seconds: [100, 200],
+    required_horizon_seconds: [100, 200, 300, 400, 600],
     wins: 1,
     required_wins: 2,
     resumed_from_previous_cook: true,
     pending_origins: [
       {
         origin_sequence: 201,
-        horizon_steps: 45,
+        horizon_seconds: 300,
+        prediction_steps: 12,
+        observation_frames: 15,
         role_generation: 4,
         candidate_generation: 5,
         incumbent_digest: ACTIVE_DIGEST,
@@ -218,6 +220,31 @@ describe("fetchModelEvidenceReport", () => {
               segment_content_digest: "not-a-digest",
             },
           ],
+        },
+      },
+    ],
+    [
+      "misaligned forecast horizon clocks",
+      {
+        ...VALID_REPORT,
+        evaluation: {
+          ...VALID_REPORT.evaluation,
+          pending_origins: [
+            {
+              ...VALID_REPORT.evaluation.pending_origins[0],
+              prediction_steps: 16,
+            },
+          ],
+        },
+      },
+    ],
+    [
+      "noncanonical required horizon sequence",
+      {
+        ...VALID_REPORT,
+        evaluation: {
+          ...VALID_REPORT.evaluation,
+          required_horizon_seconds: [100, 200, 300, 600],
         },
       },
     ],

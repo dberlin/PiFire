@@ -29,6 +29,7 @@ from common.control_trace import (
 )
 from common.controller_model_state import CheckpointSaveOutcome
 from common.model_evidence import ForecastOriginEvidence, ModelEvidenceRecord, RecorderGapEvidence
+from common.mpc_learning import MPC_FORECAST_HORIZONS
 from common.persistence.control_trace import read_control_trace_session
 from controller.applied_output import AppliedOutput, FrameFeedbackDisposition, OutputSource
 from controller.base import (
@@ -1465,7 +1466,9 @@ def _promotion_outcome(*, frame_end_ms):
         {
             "origin_time_s": evaluated_at_s - 12.0 + index,
             "completion_time_s": evaluated_at_s - 11.5 + index,
-            "horizon_steps": 3 if index < 6 else 15,
+            "horizon_seconds": horizon.seconds,
+            "prediction_steps": horizon.prediction_steps,
+            "observation_frames": horizon.observation_frames,
             "generation": 0,
             "observed_temperature_c": 225.0,
             "incumbent_error_c": 2.0,
@@ -1479,7 +1482,12 @@ def _promotion_outcome(*, frame_end_ms):
             "ambient_source": AmbientSource.CONFIGURED.value,
             "challenger_prediction_c": 224.0,
         }
-        for index in range(12)
+        for horizon, start_index in zip(
+            MPC_FORECAST_HORIZONS[:2],
+            (0, 6),
+            strict=True,
+        )
+        for index in range(start_index, start_index + 6)
     )
     outcome = {
         **_model_observation_outcome(frame_end_ms=frame_end_ms),
@@ -1504,13 +1512,13 @@ def _promotion_outcome(*, frame_end_ms):
             "completed_origins": completed_origins,
             "horizon_scores": (
                 {
-                    "horizon_steps": 3,
+                    "horizon_seconds": MPC_FORECAST_HORIZONS[0].seconds,
                     "incumbent_rmse_c": 2.0,
                     "challenger_rmse_c": 1.0,
                     "sample_count": 6,
                 },
                 {
-                    "horizon_steps": 15,
+                    "horizon_seconds": MPC_FORECAST_HORIZONS[1].seconds,
                     "incumbent_rmse_c": 2.0,
                     "challenger_rmse_c": 1.0,
                     "sample_count": 6,
@@ -1560,8 +1568,13 @@ def _promotion_outcome(*, frame_end_ms):
         horizon_scores=(
             *evaluation["horizon_scores"],
             *(
-                {"horizon_steps": horizon, "incumbent_rmse_c": None, "challenger_rmse_c": None, "sample_count": 0}
-                for horizon in (45, 90, 180)
+                {
+                    "horizon_seconds": horizon.seconds,
+                    "incumbent_rmse_c": None,
+                    "challenger_rmse_c": None,
+                    "sample_count": 0,
+                }
+                for horizon in MPC_FORECAST_HORIZONS[2:]
             ),
         ),
         evaluation_duration_ms=evaluation["evaluation_duration_ms"],

@@ -22,6 +22,7 @@ from common.model_evidence import (
     ModelEvidenceRecord,
     SchemaInvalidationEvidence,
 )
+from common.mpc_learning import MPC_FORECAST_HORIZON_SECONDS
 from common.persistence.protocols import JsonValue
 from common.web_contracts.learning import ModelEvidenceReport
 
@@ -33,8 +34,8 @@ from .contracts import (
     LearningStatus,
 )
 
-REPORT_SCHEMA_VERSION = 3
-ARTIFACT_SCHEMA = "pifire-grey-learning-report/v3"
+REPORT_SCHEMA_VERSION = 4
+ARTIFACT_SCHEMA = "pifire-grey-learning-report/v4"
 _REPORT_CACHE_MAX_ENTRIES = 8
 _REPORT_CACHE: OrderedDict[str, LearningReport] = OrderedDict()
 _REPORT_CACHE_LOCK = threading.Lock()
@@ -578,14 +579,17 @@ def build_learning_report(
     evaluation_projection = None
     candidate_projection = None
     if challenger:
-        required_horizons = live.get("required_horizons", (3, 15, 45, 90, 180))
-        completed_horizons = live.get("completed_horizons", ())
+        required_horizon_seconds = live.get(
+            "required_horizon_seconds",
+            MPC_FORECAST_HORIZON_SECONDS,
+        )
+        completed_horizon_seconds = live.get("completed_horizon_seconds", ())
         pending_origins = live.get("pending_origins", ())
         evaluation_projection = {
             "epoch": challenger["evaluation_epoch"],
             "round": challenger["evaluation_round"],
-            "completed_horizons": completed_horizons,
-            "required_horizons": required_horizons,
+            "completed_horizon_seconds": completed_horizon_seconds,
+            "required_horizon_seconds": required_horizon_seconds,
             "wins": challenger["consecutive_wins"],
             "required_wins": challenger["required_wins"],
             "resumed_from_previous_cook": bool(live.get("resumed_from_previous_cook", False)),

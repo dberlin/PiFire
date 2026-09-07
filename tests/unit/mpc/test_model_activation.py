@@ -690,7 +690,7 @@ def test_automatic_preparation_makes_confidence_durable_before_prepared_authorit
     assert authority.phase == "activating"
     assert authority.activation_transaction_id == transaction_id
     confidence = next(record for kind, record, *_ in calls if kind == "confidence")
-    assert confidence.schema_version == 4
+    assert confidence.schema_version == 5
     assert isinstance(confidence.payload, ConfidenceDecisionEvidence)
     assert confidence.payload.decision_id == evaluation.decision_id
     assert confidence.payload.blocked is False
@@ -776,7 +776,7 @@ def test_hold_and_learning_share_one_injected_activation_persistence_fifo(ds) ->
             reason=None,
         ),
     )
-    assert hold_confidence.schema_version == 4
+    assert hold_confidence.schema_version == 5
 
     core.submit_activation_confidence(hold_confidence)
     transaction_id = core._grey_learning_runtime.prepare_automatic_activation(

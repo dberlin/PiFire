@@ -19,6 +19,7 @@ from common.model_evidence import (
     EvidenceKind,
     ModelEvidenceRecord,
 )
+from common.mpc_learning import MPC_FORECAST_HORIZON_SECONDS
 from common.persistence.model_challenger import (
     ModelChallengerConflictError,
     ModelChallengerState,
@@ -37,7 +38,6 @@ from controller.model_learning.activation import (
 )
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
 from tests.unit.common._model_challenger_helpers import (
-    _REQUIRED_HORIZONS,
     _corpus,
     _descriptor,
     _digest,
@@ -63,8 +63,8 @@ def _round_evidence(state: ModelChallengerState, *, round_number: int) -> ModelE
             evaluation_round=round_number,
             decision_id=f"decision-{state.evaluation_epoch}-{round_number}",
             accepted=True,
-            required_horizons=_REQUIRED_HORIZONS,
-            completed_horizons=_REQUIRED_HORIZONS,
+            required_horizon_seconds=MPC_FORECAST_HORIZON_SECONDS,
+            completed_horizon_seconds=MPC_FORECAST_HORIZON_SECONDS,
             incumbent_digest=state.incumbent.model_digest,
             candidate_digest=state.candidate.model_digest,
         ),
@@ -252,10 +252,10 @@ def test_legacy_v1_challenger_round_trips_and_appends_evidence_after_restart(
     assert read_model_evidence(database_path=database_path) == [evidence]
 
 
-def test_complete_round_appends_schema_v4_evidence_and_progress_atomically(
+def test_complete_round_appends_schema_v5_evidence_and_progress_atomically(
     database_path: Path,
 ) -> None:
-    assert MODEL_EVIDENCE_SCHEMA_VERSION == 4
+    assert MODEL_EVIDENCE_SCHEMA_VERSION == 5
     evaluating = _state(phase="evaluating")
     create_model_challenger(evaluating, database_path=database_path)
     evidence = _round_evidence(evaluating, round_number=1)

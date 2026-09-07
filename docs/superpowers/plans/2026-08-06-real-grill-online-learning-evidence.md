@@ -20,9 +20,9 @@
 - The canonical sample is one completed 20-second framed-pulse interval with a 2-second pulse quantum. All internal temperatures are Celsius.
 - Model fitting, forecasting, scoring, persistence, report generation, confidence bootstrapping, and raw pruning stay off the Hold safety/actuation path.
 - Raw trace retention remains 30 days. Compact evidence persists until explicit reset, incompatible schema change, failed provenance validation, or intentional lineage retirement.
-- Required forecast horizons are 60, 300, 900, 1800, and 3600 seconds: 3, 15, 45, 90, and 180 canonical frames.
-- Absolute RMSE limits are 2.8 °C at 60/300/900 seconds and 5.0 °C at 1800/3600 seconds. State alignment error is at most 2.0 °C, maximum pole magnitude defaults to 0.999, and maximum delay defaults to 15 frames.
-- Relative confidence uses a deterministic hierarchical block bootstrap with cook/session as the top-level unit, within-cook contiguous blocks at least as long as the scored horizon, a stored seed, 10,000 replicates, and a one-sided 95% upper bound below 1.0.
+- Required forecast horizons are 100, 200, 300, 400, and 600 seconds. Forecasts use 4, 8, 12, 16, and 24 MPC prediction steps at 25 seconds; causal completion and bootstrap blocks use 5, 10, 15, 20, and 30 observation frames at 20 seconds.
+- The absolute RMSE limit is 2.8 °C at every required horizon. State alignment error is at most 2.0 °C, maximum pole magnitude defaults to 0.999, and maximum delay defaults to 15 frames.
+- Relative confidence uses a deterministic hierarchical block bootstrap with cook/session as the top-level unit, within-cook contiguous blocks at least as long as the horizon's observation-frame count, a stored seed, 10,000 replicates, and a one-sided 95% upper bound below 1.0.
 - State-space refresh p99 must be no greater than 250 ms on target hardware. Workstation timing is diagnostic and cannot satisfy activation readiness.
 - Passing gates yields `ready-for-review`; it never changes control. First activation is explicit and exact-digest. Later parameter-generation promotion is automatic only through the same applicable fail-closed gates.
 - Real-grill readiness cannot be claimed by simulator tests. Until qualifying hardware evidence exists, report the exact missing gates and keep grey-box active.
@@ -143,7 +143,7 @@ Use a signed-load validator bounded to `[-1, 1]`. Validate event/reason consiste
 
 Add exact identity and provenance fields: `observation_sequence`, `probe_valid`, `probe_source`, `ambient_source`, `ambient_uncertainty`, `baseline_q`, `probe_q`, `allocated_q`, `scheduled_on_s`, `realized_auger_duty`, `allocator_revision`, `allocation_clamp_reasons`, `calibration_stage`, and `calibration_fit`. Keep `requested_q` as the combined request and `realized_q` as the model input. Make tuples and arrays owned/immutable in `__post_init__`.
 
-Change horizon literals in raw evaluation payloads from `Literal[3, 15]` to `Literal[3, 15, 45, 90, 180]`. Record exact incumbent/challenger digest and precommitted prediction on each origin before a target is available.
+Change raw evaluation payloads to the explicit aligned clock: horizon seconds `Literal[100, 200, 300, 400, 600]`, prediction steps `Literal[4, 8, 12, 16, 24]`, and observation frames `Literal[5, 10, 15, 20, 30]`. Record the exact incumbent/challenger digest and precommitted prediction on each origin before a target is available.
 
 - [ ] **Step 6: Populate the contract from completed framed output**
 
@@ -243,7 +243,9 @@ class ForecastOriginEvidence:
     origin_sequence: NonNegativeInt
     origin_time_ms: NonNegativeInt
     completion_time_ms: NonNegativeInt
-    horizon_steps: Literal[3, 15, 45, 90, 180]
+    horizon_seconds: Literal[100, 200, 300, 400, 600]
+    prediction_steps: Literal[4, 8, 12, 16, 24]
+    observation_frames: Literal[5, 10, 15, 20, 30]
     incumbent_digest: Digest
     challenger_digest: Digest
     incumbent_prediction_c: FiniteFloat
@@ -350,7 +352,7 @@ Expected: existing 3/15-only origins lack long horizons and durable evidence out
 
 - [ ] **Step 4: Generalize `OnlineAdaptation` horizons without recomputation**
 
-Set `_HORIZONS = (3, 15, 45, 90, 180)`. Capture both affine forecasts and exact model snapshots/digests at the origin. Complete an origin only when the matching future sequence arrives with uninterrupted eligible continuity. Expire origins on destructive gap, role-generation change, incompatible refresh, queue eviction, or session end.
+Set the central horizon contract to `(seconds, prediction_steps, observation_frames)` values `(100, 4, 5)`, `(200, 8, 10)`, `(300, 12, 15)`, `(400, 16, 20)`, and `(600, 24, 30)`. Capture both affine forecasts and exact model snapshots/digests at the origin. Complete an origin only after its observation-frame count arrives with uninterrupted eligible continuity. Expire origins on destructive gap, role-generation change, incompatible refresh, queue eviction, or session end.
 
 Keep fit and validation roles distinct: calibration-fit observations may update/refresh a challenger but never complete a validation origin and never enter relative confidence samples.
 
@@ -611,7 +613,7 @@ Expected: import failure for `controller.linear_mpc.confidence`.
 Group by cook/session, horizon, temperature band, heating/coasting phase, ambient provenance, and model generation. For each of 10,000 replicates:
 
 1. resample cook IDs with replacement;
-2. within each selected cook, resample contiguous origin blocks of at least `horizon_steps` frames until the original group size is reached;
+2. within each selected cook, resample contiguous origin blocks of at least the scored horizon's observation-frame count until the original group size is reached;
 3. compute challenger RMSE divided by incumbent RMSE;
 4. store the finite ratio.
 

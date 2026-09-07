@@ -8,10 +8,9 @@ from dataclasses import dataclass
 from math import isfinite, sqrt
 
 from common.control_trace import AmbientSource
+from common.mpc_learning import MPC_FORECAST_HORIZON_SECONDS, forecast_horizon_spec
 
 from .contracts import FrameObservation
-
-_REQUIRED_HORIZONS = (3, 15, 45, 90, 180)
 
 
 def _generation(value: object, name: str) -> int:
@@ -42,7 +41,9 @@ class ForecastOrigin:
 
     origin_sequence: int
     origin_time_s: float
-    horizon_steps: int
+    horizon_seconds: int
+    prediction_steps: int
+    observation_frames: int
     role_generation: int
     candidate_generation: int
     incumbent_digest: str
@@ -57,9 +58,9 @@ class ForecastOrigin:
     def __post_init__(self) -> None:
         object.__setattr__(self, "origin_sequence", _generation(self.origin_sequence, "origin_sequence"))
         object.__setattr__(self, "origin_time_s", _finite(self.origin_time_s, "origin_time_s"))
-        if isinstance(self.horizon_steps, bool) or self.horizon_steps not in _REQUIRED_HORIZONS:
-            raise ValueError(f"horizon_steps must be one of {_REQUIRED_HORIZONS}")
-        object.__setattr__(self, "role_generation", _generation(self.role_generation, "role_generation"))
+        horizon = forecast_horizon_spec(self.horizon_seconds)
+        if self.prediction_steps != horizon.prediction_steps or self.observation_frames != horizon.observation_frames:
+            raise ValueError("forecast horizon clock dimensions do not match the current contract")
         object.__setattr__(
             self,
             "candidate_generation",
@@ -112,8 +113,16 @@ class CompletedForecastOrigin:
         return self.forecast.origin_sequence
 
     @property
-    def horizon_steps(self) -> int:
-        return self.forecast.horizon_steps
+    def horizon_seconds(self) -> int:
+        return self.forecast.horizon_seconds
+
+    @property
+    def prediction_steps(self) -> int:
+        return self.forecast.prediction_steps
+
+    @property
+    def observation_frames(self) -> int:
+        return self.forecast.observation_frames
 
     @property
     def role_generation(self) -> int:
@@ -158,25 +167,25 @@ class CompletedForecastOrigin:
 
 @dataclass(frozen=True, slots=True)
 class EvaluationConfig:
-    required_horizons: tuple[int, ...] = _REQUIRED_HORIZONS
+    required_horizon_seconds: tuple[int, ...] = MPC_FORECAST_HORIZON_SECONDS
     required_consecutive_wins: int = 2
 
     def __post_init__(self) -> None:
-        horizons = tuple(self.required_horizons)
-        if horizons != _REQUIRED_HORIZONS:
-            raise ValueError(f"required_horizons must be {_REQUIRED_HORIZONS}")
+        horizons = tuple(self.required_horizon_seconds)
+        if horizons != MPC_FORECAST_HORIZON_SECONDS:
+            raise ValueError(f"required_horizon_seconds must be {MPC_FORECAST_HORIZON_SECONDS}")
         if (
             isinstance(self.required_consecutive_wins, bool)
             or not isinstance(self.required_consecutive_wins, int)
             or self.required_consecutive_wins < 1
         ):
             raise ValueError("required_consecutive_wins must be a positive integer")
-        object.__setattr__(self, "required_horizons", horizons)
+        object.__setattr__(self, "required_horizon_seconds", horizons)
 
 
 @dataclass(frozen=True, slots=True)
 class HorizonScore:
-    horizon_steps: int
+    horizon_seconds: int
     incumbent_rmse_c: float
     challenger_rmse_c: float
     sample_count: int
@@ -196,10 +205,10 @@ class EvaluationDecision:
     completed_origins: tuple[CompletedForecastOrigin, ...] = ()
 
     @property
-    def completed_horizons(self) -> tuple[int, ...]:
-        """Horizons backed by observations in this complete causal round."""
+    def completed_horizon_seconds(self) -> tuple[int, ...]:
+        """Elapsed-time horizons backed by observations in this causal round."""
 
-        return tuple(score.horizon_steps for score in self.scores if score.sample_count > 0)
+        return tuple(score.horizon_seconds for score in self.scores if score.sample_count > 0)
 
 
 class CausalForecastEvaluator:
@@ -240,8 +249,8 @@ class CausalForecastEvaluator:
             raise ValueError("forecast generation does not match evaluator generation")
         if origin.calibration_fit:
             raise ValueError("probe frames are forbidden as causal forecast origins")
-        key = (origin.origin_sequence, origin.horizon_steps)
-        if any((item.origin_sequence, item.horizon_steps) == key for item in self._pending):
+        key = (origin.origin_sequence, origin.horizon_seconds)
+        if any((item.origin_sequence, item.horizon_seconds) == key for item in self._pending):
             raise ValueError("duplicate causal forecast origin")
         self._pending.append(origin)
         self._next_sequence[origin] = origin.origin_sequence + 1
@@ -253,7 +262,7 @@ class CausalForecastEvaluator:
         survivors: list[ForecastOrigin] = []
         for origin in self._pending:
             sequence = observation.observation_sequence
-            target = origin.origin_sequence + origin.horizon_steps
+            target = origin.origin_sequence + origin.observation_frames
             if sequence <= origin.origin_sequence:
                 survivors.append(origin)
                 continue
@@ -318,17 +327,20 @@ def evaluate_forecasts(
 
     scores: list[HorizonScore] = []
     blockers: list[str] = []
-    for horizon in config.required_horizons:
-        horizon_rows = tuple(row for row in rows if row.horizon_steps == horizon)
+    for horizon_seconds in config.required_horizon_seconds:
+        horizon_rows = tuple(row for row in rows if row.horizon_seconds == horizon_seconds)
         if not horizon_rows:
-            scores.append(HorizonScore(horizon, 0.0, 0.0, 0))
-            blockers.append(f"missing-horizon-{horizon}")
+            scores.append(HorizonScore(horizon_seconds, 0.0, 0.0, 0))
+            blockers.append(f"missing-horizon-{horizon_seconds}")
             continue
         incumbent_rmse = sqrt(sum(row.incumbent_error_c**2 for row in horizon_rows) / len(horizon_rows))
         challenger_rmse = sqrt(sum(row.challenger_error_c**2 for row in horizon_rows) / len(horizon_rows))
-        scores.append(HorizonScore(horizon, incumbent_rmse, challenger_rmse, len(horizon_rows)))
+        scores.append(HorizonScore(horizon_seconds, incumbent_rmse, challenger_rmse, len(horizon_rows)))
         if challenger_rmse >= incumbent_rmse:
-            blockers.append(f"challenger-horizon-{horizon}")
+            blockers.append(f"challenger-horizon-{horizon_seconds}")
+        maximum_rmse_c = forecast_horizon_spec(horizon_seconds).maximum_rmse_c
+        if challenger_rmse > maximum_rmse_c:
+            blockers.append(f"absolute-rmse-{horizon_seconds}")
 
     wins = prior + 1 if not blockers else 0
     accepted = not blockers and wins >= config.required_consecutive_wins
@@ -342,7 +354,7 @@ def evaluate_forecasts(
         "scores": [
             score.__dict__
             if hasattr(score, "__dict__")
-            else [score.horizon_steps, score.incumbent_rmse_c, score.challenger_rmse_c, score.sample_count]
+            else [score.horizon_seconds, score.incumbent_rmse_c, score.challenger_rmse_c, score.sample_count]
             for score in scores
         ],
         "consecutive_wins": wins,

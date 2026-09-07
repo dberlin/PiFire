@@ -77,8 +77,7 @@ const LEARNING_ISSUES: Readonly<Record<string, LearningIssueCopy>> = {
   "minimum-effective-duration": {
     summary:
       "Some collected cooking time is still warming the thermal model and cannot be scored yet.",
-    action:
-      "Continue normal cooking; masked warm-up evidence is never treated as a measurement.",
+    action: "Continue normal cooking; masked warm-up evidence is never treated as a measurement.",
   },
   "pooled-regression": {
     summary: "The new model fits the collected cooks worse than the active model.",
@@ -501,10 +500,12 @@ function ActiveMpcLearningView({
                   <p>Evaluation epoch: {report.evaluation.epoch}</p>
                   <p>Evaluation round: {report.evaluation.round}</p>
                   <p>
-                    Completed horizons: {report.evaluation.completed_horizons.join(", ") || "none"}
+                    Completed horizons (s):{" "}
+                    {report.evaluation.completed_horizon_seconds.join(", ") || "none"}
                   </p>
                   <p>
-                    Required horizons: {report.evaluation.required_horizons.join(", ") || "none"}
+                    Required horizons (s):{" "}
+                    {report.evaluation.required_horizon_seconds.join(", ") || "none"}
                   </p>
                   <p>
                     Wins: {report.evaluation.wins} / {report.evaluation.required_wins}
@@ -523,10 +524,13 @@ function ActiveMpcLearningView({
                       {report.evaluation.pending_origins.map((origin) => (
                         <li
                           className="grid gap-1 border-t border-card-border pt-2 md:grid-cols-2"
-                          key={`${origin.origin_sequence}-${origin.horizon_steps}-${origin.candidate_generation}`}
+                          key={`${origin.origin_sequence}-${origin.horizon_seconds}-${origin.candidate_generation}`}
                         >
                           <span>Origin sequence: {origin.origin_sequence}</span>
-                          <span>Horizon: {origin.horizon_steps}</span>
+                          <span>
+                            Horizon: {origin.horizon_seconds} s ({origin.prediction_steps}{" "}
+                            prediction steps / {origin.observation_frames} observation frames)
+                          </span>
                           <span>Origin role generation: {origin.role_generation}</span>
                           <span>Origin candidate generation: {origin.candidate_generation}</span>
                           <span className="break-all font-mono text-xs">

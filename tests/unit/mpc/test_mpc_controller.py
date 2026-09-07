@@ -395,7 +395,9 @@ def test_completed_task7_forecasts_are_translated_to_compact_runner_evidence(mon
         forecast=ForecastOrigin(
             origin_sequence=1,
             origin_time_s=20.0,
-            horizon_steps=3,
+            horizon_seconds=100,
+            prediction_steps=4,
+            observation_frames=5,
             role_generation=0,
             candidate_generation=1,
             incumbent_digest="a" * 64,
@@ -407,7 +409,7 @@ def test_completed_task7_forecasts_are_translated_to_compact_runner_evidence(mon
             ambient_source=AmbientSource.CONFIGURED,
             calibration_fit=False,
         ),
-        completion_time_s=80.0,
+        completion_time_s=120.0,
         observed_temperature_c=82.0,
     )
     controller._grey_learning_runtime._learning = SimpleNamespace(
@@ -428,8 +430,10 @@ def test_completed_task7_forecasts_are_translated_to_compact_runner_evidence(mon
         ForecastOriginEvidence(
             origin_sequence=1,
             origin_time_ms=20_000,
-            completion_time_ms=80_000,
-            horizon_steps=3,
+            completion_time_ms=120_000,
+            horizon_seconds=100,
+            prediction_steps=4,
+            observation_frames=5,
             incumbent_digest="a" * 64,
             challenger_digest="b" * 64,
             incumbent_prediction_c=79.0,
@@ -451,7 +455,9 @@ def test_task7_evaluation_is_published_through_the_established_runner_payload(mo
         forecast=ForecastOrigin(
             origin_sequence=1,
             origin_time_s=20.0,
-            horizon_steps=3,
+            horizon_seconds=100,
+            prediction_steps=4,
+            observation_frames=5,
             role_generation=0,
             candidate_generation=1,
             incumbent_digest="a" * 64,
@@ -463,7 +469,7 @@ def test_task7_evaluation_is_published_through_the_established_runner_payload(mo
             ambient_source=AmbientSource.CONFIGURED,
             calibration_fit=False,
         ),
-        completion_time_s=80.0,
+        completion_time_s=120.0,
         observed_temperature_c=82.0,
     )
     decision = EvaluationDecision(
@@ -475,7 +481,7 @@ def test_task7_evaluation_is_published_through_the_established_runner_payload(mo
         challenger_digest="b" * 64,
         consecutive_wins=1,
         blockers=(),
-        scores=(HorizonScore(3, 3.0, 1.0, 1), HorizonScore(15, 0.0, 0.0, 0)),
+        scores=(HorizonScore(100, 3.0, 1.0, 1), HorizonScore(200, 0.0, 0.0, 0)),
         completed_origins=(completed,),
     )
     controller._grey_learning_runtime._learning = SimpleNamespace(
@@ -712,9 +718,7 @@ def test_rejected_real_fit_candidate_is_released_and_a_later_fit_can_prepare(mon
                     sample_count=len(temperatures),
                     temperature_band_c=(min(temperatures), max(temperatures)),
                     nfev=4,
-                    effective_masks=tuple(
-                        (True,) * len(segment.scored_load) for segment in self.job.segments
-                    ),
+                    effective_masks=tuple((True,) * len(segment.scored_load) for segment in self.job.segments),
                     warmup_excluded_segment_ids=(),
                 ),
                 worker_start_method="spawn",
@@ -856,7 +860,14 @@ def test_rejected_real_fit_candidate_is_released_and_a_later_fit_can_prepare(mon
     _delivery, evaluation = controller.poll_learning_off_path()
 
     assert isinstance(evaluation, ModelEvaluationPayload)
-    assert evaluation.rejection_reasons == tuple(f"challenger-horizon-{horizon}" for horizon in (3, 15, 45, 90, 180))
+    assert evaluation.rejection_reasons == tuple(
+        reason
+        for horizon in (100, 200, 300, 400, 600)
+        for reason in (
+            f"challenger-horizon-{horizon}",
+            f"absolute-rmse-{horizon}",
+        )
+    )
     assert learning.prepared is None
     assert first_candidate.closed is True
 
@@ -908,13 +919,15 @@ def test_get_status_uses_one_learning_capability_snapshot(monkeypatch):
         "activation_phase": "aborted",
         "pending_persistence": False,
         "pending_swap": False,
-        "completed_horizons": [3, 15, 45],
-        "required_horizons": [3, 15, 45, 90, 180],
+        "completed_horizon_seconds": [100, 200, 300],
+        "required_horizon_seconds": [100, 200, 300, 400, 600],
         "resumed_from_previous_cook": True,
         "pending_origins": [
             {
                 "origin_sequence": 12,
-                "horizon_steps": 90,
+                "horizon_seconds": 400,
+                "prediction_steps": 16,
+                "observation_frames": 20,
                 "role_generation": 4,
                 "candidate_generation": 5,
                 "incumbent_digest": "a" * 64,

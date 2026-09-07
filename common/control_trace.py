@@ -28,10 +28,11 @@ from pydantic import (
 )
 from pydantic.dataclasses import dataclass
 
+from common.mpc_learning import MPC_FORECAST_HORIZON_SECONDS, forecast_horizon_spec
 from controller.applied_output import OutputSource
 
-COMPATIBLE_TRACE_SCHEMA_VERSIONS = (2, 3, 4, 5, 6, 7, 8)
-TRACE_SCHEMA_VERSION = 8
+COMPATIBLE_TRACE_SCHEMA_VERSIONS = (2, 3, 4, 5, 6, 7, 8, 9)
+TRACE_SCHEMA_VERSION = 9
 
 type FiniteFloat = Annotated[float, Field(allow_inf_nan=False, strict=True)]
 type NonNegativeFloat = Annotated[FiniteFloat, Field(ge=0)]
@@ -40,6 +41,7 @@ type BoundedLoad = Annotated[FiniteFloat, Field(ge=0, le=1)]
 type BoundedSignedLoad = Annotated[FiniteFloat, Field(ge=-1, le=1)]
 type NonNegativeInt = Annotated[int, Field(ge=0, strict=True)]
 type PositiveInt = Annotated[int, Field(gt=0, strict=True)]
+type LegacyForecastHorizonSteps = Literal[3, 15, 45, 90, 180]
 type NonBlankString = Annotated[
     str,
     StringConstraints(strict=True, strip_whitespace=True, min_length=1),
@@ -665,7 +667,6 @@ class CompletedOriginPayload:
 
     origin_time_ms: NonNegativeInt
     completion_time_ms: NonNegativeInt
-    horizon_steps: Literal[3, 15, 45, 90, 180]
     generation: NonNegativeInt
     observed_temperature_c: FiniteFloat
     incumbent_error_c: FiniteFloat
@@ -678,29 +679,69 @@ class CompletedOriginPayload:
     challenger_prediction_c: FiniteFloat
     temperature_band: NonBlankString
     ambient_source: AmbientSource
+    horizon_steps: LegacyForecastHorizonSteps | None = None
+    horizon_seconds: PositiveInt | None = None
+    prediction_steps: PositiveInt | None = None
+    observation_frames: PositiveInt | None = None
 
     @model_validator(mode="after")
     def validate_origin_interval(self) -> CompletedOriginPayload:
         if self.origin_time_ms >= self.completion_time_ms:
             raise ValueError("completed origin interval must be positive")
+        legacy = self.horizon_steps is not None
+        current = (
+            self.horizon_seconds is not None
+            and self.prediction_steps is not None
+            and self.observation_frames is not None
+        )
+        if legacy == current:
+            raise ValueError("completed origin requires exactly one horizon contract")
+        if current:
+            horizon = forecast_horizon_spec(self.horizon_seconds)
+            if (
+                self.prediction_steps != horizon.prediction_steps
+                or self.observation_frames != horizon.observation_frames
+            ):
+                raise ValueError("completed origin horizon clocks do not match")
+        elif any(value is not None for value in (self.horizon_seconds, self.prediction_steps, self.observation_frames)):
+            raise ValueError("completed origin horizon contract is incomplete")
         return self
+
+    @property
+    def horizon_identity(self) -> tuple[str, int]:
+        if self.horizon_seconds is not None:
+            return ("seconds", self.horizon_seconds)
+        assert self.horizon_steps is not None
+        return ("legacy-steps", self.horizon_steps)
 
 
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
 class HorizonScorePayload:
     """Immutable per-horizon incumbent/challenger RMSE evidence."""
 
-    horizon_steps: Literal[3, 15, 45, 90, 180]
     incumbent_rmse_c: NonNegativeFloat | None
     challenger_rmse_c: NonNegativeFloat | None
     sample_count: NonNegativeInt
+    horizon_steps: LegacyForecastHorizonSteps | None = None
+    horizon_seconds: PositiveInt | None = None
 
     @model_validator(mode="after")
     def validate_horizon_score(self) -> HorizonScorePayload:
         available = self.sample_count > 0
         if available != (self.incumbent_rmse_c is not None and self.challenger_rmse_c is not None):
             raise ValueError("horizon RMSE availability must match sample count")
+        if (self.horizon_steps is None) == (self.horizon_seconds is None):
+            raise ValueError("horizon score requires exactly one horizon contract")
+        if self.horizon_seconds is not None:
+            forecast_horizon_spec(self.horizon_seconds)
         return self
+
+    @property
+    def horizon_identity(self) -> tuple[str, int]:
+        if self.horizon_seconds is not None:
+            return ("seconds", self.horizon_seconds)
+        assert self.horizon_steps is not None
+        return ("legacy-steps", self.horizon_steps)
 
 
 def _completed_origin_payload(value: object) -> CompletedOriginPayload:
@@ -781,7 +822,7 @@ class ModelEvaluationPayload:
             raise ValueError("promoted model evaluation must not have rejection reasons")
         if (self.prospective_digest is not None) != self.promoted:
             raise ValueError("model evaluation prospective digest must match promotion")
-        if len({score.horizon_steps for score in self.horizon_scores}) != len(self.horizon_scores):
+        if len({score.horizon_identity for score in self.horizon_scores}) != len(self.horizon_scores):
             raise ValueError("evaluation horizon scores must not duplicate horizons")
         if self.sample_count != len(self.completed_origins):
             raise ValueError("evaluation sample count must match completed origins")
@@ -794,8 +835,8 @@ class ModelEvaluationPayload:
             raise ValueError("empty evaluation window must coincide with evaluation time")
         if self.evaluated_at_ms < self.window_end_ms:
             raise ValueError("evaluation cannot precede its evidence window")
-        errors_by_horizon: dict[int, tuple[list[float], list[float]]] = {
-            score.horizon_steps: ([], []) for score in self.horizon_scores
+        errors_by_horizon: dict[tuple[str, int], tuple[list[float], list[float]]] = {
+            score.horizon_identity: ([], []) for score in self.horizon_scores
         }
         for origin in self.completed_origins:
             if origin.generation != self.role_generation:
@@ -804,13 +845,13 @@ class ModelEvaluationPayload:
                 raise ValueError("completed origin begins before evaluation window")
             if not origin.completion_time_ms <= self.window_end_ms:
                 raise ValueError("completed origin completes after evaluation window")
-            if origin.horizon_steps not in errors_by_horizon:
+            if origin.horizon_identity not in errors_by_horizon:
                 raise ValueError("completed origin horizon has no score")
-            incumbent_errors, challenger_errors = errors_by_horizon[origin.horizon_steps]
+            incumbent_errors, challenger_errors = errors_by_horizon[origin.horizon_identity]
             incumbent_errors.append(origin.incumbent_error_c)
             challenger_errors.append(origin.challenger_error_c)
         for score in self.horizon_scores:
-            incumbent_errors, challenger_errors = errors_by_horizon[score.horizon_steps]
+            incumbent_errors, challenger_errors = errors_by_horizon[score.horizon_identity]
             if score.sample_count != len(incumbent_errors):
                 raise ValueError("horizon score count must match completed origins")
             if not _matches_completed_rmse(incumbent_errors, score.incumbent_rmse_c):
@@ -965,10 +1006,12 @@ class ChallengerProgressTracePayload:
     evaluation_round: NonNegativeInt
     consecutive_wins: NonNegativeInt
     required_wins: PositiveInt
-    completed_horizons: tuple[PositiveInt, ...]
-    required_horizons: tuple[PositiveInt, ...]
     resumed_from_previous_cook: bool
     reset_reason: NonBlankString | None
+    completed_horizons: tuple[PositiveInt, ...] | None = None
+    required_horizons: tuple[PositiveInt, ...] | None = None
+    completed_horizon_seconds: tuple[PositiveInt, ...] | None = None
+    required_horizon_seconds: tuple[PositiveInt, ...] | None = None
     payload_type: Literal["challenger_progress"] = "challenger_progress"
 
     @model_validator(mode="after")
@@ -977,18 +1020,28 @@ class ChallengerProgressTracePayload:
             raise ValueError("challenger policy must remain causal-auto")
         if self.consecutive_wins > self.required_wins:
             raise ValueError("challenger wins cannot exceed required wins")
-        if not self.required_horizons:
+        legacy = self.required_horizons is not None and self.completed_horizons is not None
+        current = self.required_horizon_seconds is not None and self.completed_horizon_seconds is not None
+        if legacy == current:
+            raise ValueError("challenger progress requires exactly one horizon contract")
+        required = self.required_horizons if legacy else self.required_horizon_seconds
+        completed = self.completed_horizons if legacy else self.completed_horizon_seconds
+        if required is None or completed is None or not required:
             raise ValueError("challenger progress requires at least one horizon")
-        if tuple(sorted(self.required_horizons)) != self.required_horizons:
-            raise ValueError("required challenger horizons must be ordered")
-        if len(set(self.required_horizons)) != len(self.required_horizons):
-            raise ValueError("required challenger horizons must be unique")
-        if tuple(sorted(self.completed_horizons)) != self.completed_horizons:
-            raise ValueError("completed challenger horizons must be ordered")
-        if len(set(self.completed_horizons)) != len(self.completed_horizons):
-            raise ValueError("completed challenger horizons must be unique")
-        if not set(self.completed_horizons).issubset(self.required_horizons):
+        if tuple(sorted(required)) != required or len(set(required)) != len(required):
+            raise ValueError("required challenger horizons must be ordered and unique")
+        if tuple(sorted(completed)) != completed or len(set(completed)) != len(completed):
+            raise ValueError("completed challenger horizons must be ordered and unique")
+        if not set(completed).issubset(required):
             raise ValueError("completed challenger horizons must be required horizons")
+        if current and required != MPC_FORECAST_HORIZON_SECONDS:
+            raise ValueError("current challenger horizons do not match the MPC contract")
+        if legacy and any(
+            value is not None for value in (self.required_horizon_seconds, self.completed_horizon_seconds)
+        ):
+            raise ValueError("challenger progress horizon contract is incomplete")
+        if current and any(value is not None for value in (self.required_horizons, self.completed_horizons)):
+            raise ValueError("challenger progress horizon contract is incomplete")
         return self
 
 
@@ -1067,7 +1120,7 @@ class ControlTraceRecord(BaseModel):
     cook_id: NonBlankString | None = None
     controller: ControllerType
     event_kind: TraceEventKind
-    schema_version: Literal[2, 3, 4, 5, 6, 7, 8] = TRACE_SCHEMA_VERSION
+    schema_version: Literal[2, 3, 4, 5, 6, 7, 8, 9] = TRACE_SCHEMA_VERSION
     payload: ControlTracePayload
 
     @model_validator(mode="after")
@@ -1098,6 +1151,23 @@ class ControlTraceRecord(BaseModel):
             ),
         ):
             raise ValueError(f"trace schema version {self.schema_version} cannot contain segmented learning evidence")
+        if isinstance(self.payload, ModelEvaluationPayload):
+            current_horizons = all(
+                origin.horizon_seconds is not None for origin in self.payload.completed_origins
+            ) and all(score.horizon_seconds is not None for score in self.payload.horizon_scores)
+            legacy_horizons = all(
+                origin.horizon_steps is not None for origin in self.payload.completed_origins
+            ) and all(score.horizon_steps is not None for score in self.payload.horizon_scores)
+            if self.schema_version == TRACE_SCHEMA_VERSION:
+                valid_horizons = current_horizons
+            else:
+                valid_horizons = legacy_horizons
+            if not valid_horizons:
+                raise ValueError("model evaluation horizon contract does not match trace schema")
+        if isinstance(self.payload, ChallengerProgressTracePayload):
+            current_horizons = self.payload.required_horizon_seconds is not None
+            if (self.schema_version == TRACE_SCHEMA_VERSION) != current_horizons:
+                raise ValueError("challenger progress horizon contract does not match trace schema")
         if self.schema_version == TRACE_SCHEMA_VERSION and isinstance(
             self.payload,
             (GreyFitLifecyclePayload, GreyCandidateAssessmentPayload, GreyActivationLifecyclePayload),

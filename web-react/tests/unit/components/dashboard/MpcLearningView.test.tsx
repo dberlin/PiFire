@@ -16,7 +16,7 @@ const PREFIX_DIGEST = "1".repeat(64);
 const DECISION_ID = "causal-round-3-1";
 
 const REPORT: ModelEvidenceReport = {
-  schema_version: 3,
+  schema_version: 4,
   status: "evaluating",
   mode: "operator-calibration",
   decision_id: DECISION_ID,
@@ -85,15 +85,17 @@ const REPORT: ModelEvidenceReport = {
   evaluation: {
     epoch: 3,
     round: 1,
-    completed_horizons: [3, 15, 45],
-    required_horizons: [3, 15, 45, 90, 180],
+    completed_horizon_seconds: [100, 200, 300],
+    required_horizon_seconds: [100, 200, 300, 400, 600],
     wins: 1,
     required_wins: 2,
     resumed_from_previous_cook: true,
     pending_origins: [
       {
         origin_sequence: 221,
-        horizon_steps: 90,
+        horizon_seconds: 400,
+        prediction_steps: 16,
+        observation_frames: 20,
         role_generation: 12,
         candidate_generation: 7,
         incumbent_digest: ACTIVE_DIGEST,
@@ -333,12 +335,14 @@ describe("MpcLearningView", () => {
     expect(dialog).toHaveTextContent("Mode: operator-calibration");
     expect(dialog).toHaveTextContent("Evaluation epoch: 3");
     expect(dialog).toHaveTextContent("Evaluation round: 1");
-    expect(dialog).toHaveTextContent("Completed horizons: 3, 15, 45");
-    expect(dialog).toHaveTextContent("Required horizons: 3, 15, 45, 90, 180");
+    expect(dialog).toHaveTextContent("Completed horizons (s): 100, 200, 300");
+    expect(dialog).toHaveTextContent("Required horizons (s): 100, 200, 300, 400, 600");
     expect(dialog).toHaveTextContent("Wins: 1 / 2");
     expect(dialog).toHaveTextContent("Resumed from previous cook: yes");
     expect(dialog).toHaveTextContent("Origin sequence: 221");
-    expect(dialog).toHaveTextContent("Horizon: 90");
+    expect(dialog).toHaveTextContent(
+      "Horizon: 400 s (16 prediction steps / 20 observation frames)",
+    );
 
     expect(dialog).toHaveTextContent("Challenger: challenger-7");
     expect(dialog).toHaveTextContent("Role generation: 12");
@@ -442,7 +446,7 @@ describe("MpcLearningView", () => {
           ...REPORT.evaluation!,
           epoch: 4,
           round: 0,
-          completed_horizons: [],
+          completed_horizon_seconds: [],
           wins: 1,
           pending_origins: [],
           resumed_from_previous_cook: true,
@@ -455,7 +459,7 @@ describe("MpcLearningView", () => {
     expect(dialog).toHaveTextContent("Interrupted");
     expect(dialog).toHaveTextContent("Evaluation epoch: 4");
     expect(dialog).toHaveTextContent("Evaluation round: 0");
-    expect(dialog).toHaveTextContent("Completed horizons: none");
+    expect(dialog).toHaveTextContent("Completed horizons (s): none");
     expect(dialog).toHaveTextContent("Wins: 1 / 2");
     expect(dialog).toHaveTextContent("Resumed from previous cook: yes");
     expect(dialog).toHaveTextContent("Pending origins: none");
@@ -473,7 +477,7 @@ describe("MpcLearningView", () => {
         evaluation: {
           ...REPORT.evaluation!,
           round: 2,
-          completed_horizons: [...REPORT.evaluation!.required_horizons],
+          completed_horizon_seconds: [...REPORT.evaluation!.required_horizon_seconds],
           wins: 2,
           pending_origins: [],
         },
@@ -581,9 +585,7 @@ describe("MpcLearningView", () => {
     const readiness = screen
       .getByRole("heading", { name: "Readiness and rejection" })
       .closest("section");
-    expect(readiness).toHaveTextContent(
-      "Learning is still collecting enough usable cooking time.",
-    );
+    expect(readiness).toHaveTextContent("Learning is still collecting enough usable cooking time.");
     expect(readiness).toHaveTextContent(
       "Continue normal cooks; the existing evidence remains saved.",
     );

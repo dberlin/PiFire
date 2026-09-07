@@ -24,42 +24,47 @@ def _session_origin(
         payload=replace(
             record.payload,
             origin_sequence=origin_sequence,
-            origin_time_ms=origin_sequence * 20,
-            completion_time_ms=(origin_sequence + record.payload.horizon_steps) * 20,
+            origin_time_ms=origin_sequence * 20_000,
+            completion_time_ms=origin_sequence * 20_000 + record.payload.horizon_seconds * 1_000,
         ),
     )
 
 
-def _two_session_same_cook_horizon_three(*, first_session_has_block: bool):
+def _two_session_same_cook_horizon_100(*, first_session_has_block: bool):
     records = _qualifying()
     cook_a = tuple(
         record
         for record in records
         if isinstance(record.payload, ForecastOriginEvidence)
         and record.cook_id == "cook-a"
-        and record.payload.horizon_steps == 3
+        and record.payload.horizon_seconds == 100
     )
     cook_b = tuple(
         record
         for record in records
         if isinstance(record.payload, ForecastOriginEvidence)
         and record.cook_id == "cook-b"
-        and record.payload.horizon_steps == 3
+        and record.payload.horizon_seconds == 100
     )
     if first_session_has_block:
-        sessions = (
-            _session_origin(cook_a[0], session_id="session-a", origin_sequence=0, evidence_id="a-0"),
-            _session_origin(cook_a[1], session_id="session-a", origin_sequence=1, evidence_id="a-1"),
-            _session_origin(cook_a[2], session_id="session-a", origin_sequence=2, evidence_id="a-2"),
-            _session_origin(cook_a[0], session_id="session-restarted", origin_sequence=3, evidence_id="b-3"),
-            _session_origin(cook_a[1], session_id="session-restarted", origin_sequence=4, evidence_id="b-4"),
+        sessions = tuple(
+            _session_origin(
+                cook_a[index % len(cook_a)],
+                session_id="session-a" if index < 5 else "session-restarted",
+                origin_sequence=index,
+                evidence_id=f"origin-{index}",
+            )
+            for index in range(7)
         )
     else:
-        sessions = (
-            _session_origin(cook_a[0], session_id="session-a", origin_sequence=0, evidence_id="a-0"),
-            _session_origin(cook_a[1], session_id="session-a", origin_sequence=1, evidence_id="a-1"),
-            _session_origin(cook_a[2], session_id="session-restarted", origin_sequence=2, evidence_id="b-2"),
-            _session_origin(cook_a[0], session_id="session-restarted", origin_sequence=3, evidence_id="b-3"),
+        sessions = tuple(
+            _session_origin(
+                cook_a[index % len(cook_a)],
+                session_id="session-a" if index < 3 else "session-restarted",
+                origin_sequence=index,
+                evidence_id=f"origin-{index}",
+            )
+            for index in range(5)
         )
     non_forecasts = tuple(record for record in records if not isinstance(record.payload, ForecastOriginEvidence))
     return non_forecasts + cook_b + sessions
@@ -69,7 +74,7 @@ def _interval(records):
     report = evaluate_confidence(
         records, activation_state=_state(), target_timing=None, config=ConfidenceConfig(bootstrap_seed=17)
     )
-    return next(interval for interval in report.bootstrap_intervals if interval.horizon_steps == 3)
+    return next(interval for interval in report.bootstrap_intervals if interval.horizon_seconds == 100)
 
 
 def test_ten_thousand_grouped_replicates_are_byte_identical() -> None:
@@ -98,7 +103,7 @@ def test_grouped_blocks_are_scientifically_distinct_from_independent_rows() -> N
         )
         if record.kind is EvidenceKind.FORECAST_ORIGIN
         and isinstance(record.payload, ForecastOriginEvidence)
-        and record.payload.horizon_steps == 3
+        and record.payload.horizon_seconds == 100
         else record
         for record in _qualifying()
     )
@@ -109,7 +114,7 @@ def test_grouped_blocks_are_scientifically_distinct_from_independent_rows() -> N
             for record in records
             if record.kind is EvidenceKind.FORECAST_ORIGIN
             and isinstance(record.payload, ForecastOriginEvidence)
-            and record.payload.horizon_steps == 3
+            and record.payload.horizon_seconds == 100
         ]
     )
     rng = np.random.default_rng(17)
@@ -129,14 +134,14 @@ def test_one_cook_has_no_grouped_interval() -> None:
 
 
 def test_same_cook_short_sessions_cannot_join_a_bootstrap_block() -> None:
-    interval = _interval(_two_session_same_cook_horizon_three(first_session_has_block=False))
+    interval = _interval(_two_session_same_cook_horizon_100(first_session_has_block=False))
 
     assert interval.available is False
     assert interval.replicate_count == 0
 
 
 def test_same_cook_session_with_a_full_block_remains_bootstrap_eligible() -> None:
-    interval = _interval(_two_session_same_cook_horizon_three(first_session_has_block=True))
+    interval = _interval(_two_session_same_cook_horizon_100(first_session_has_block=True))
 
     assert interval.available is True
     assert interval.replicate_count == 10_000

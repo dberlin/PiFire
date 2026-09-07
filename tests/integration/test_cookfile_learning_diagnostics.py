@@ -626,7 +626,7 @@ def _assert_mixed_controller_envelope(payload: Mapping[str, Any]) -> None:
     assert [report["controller"] for report in reports] == ["pid_sp", "mpc"]
     assert reports[0]["report"]["controller"] == "pid_sp"
     assert reports[0]["report"]["schema_version"] == 1
-    assert reports[1]["report"]["schema_version"] == 3
+    assert reports[1]["report"]["schema_version"] == 4
 
     trace = payload["control_trace"]
     assert isinstance(trace, dict)

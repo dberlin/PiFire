@@ -62,10 +62,10 @@ function evidenceReport(
         : "evaluating";
   const activeDigest = "c".repeat(64);
   const corpusDigest = "e".repeat(64);
-  const requiredHorizons: (3 | 15 | 45 | 90 | 180)[] = [3, 15, 45, 90, 180];
+  const requiredHorizonSeconds: (100 | 200 | 300 | 400 | 600)[] = [100, 200, 300, 400, 600];
   const qualified = ["qualified", "activating", "active"].includes(status);
   return {
-    schema_version: 3,
+    schema_version: 4,
     status,
     mode: origin,
     decision_id: decisionId,
@@ -144,8 +144,8 @@ function evidenceReport(
       ? {
           epoch: status === "interrupted" ? 2 : 1,
           round: qualified ? 2 : 1,
-          completed_horizons: qualified ? requiredHorizons : [3, 15],
-          required_horizons: requiredHorizons,
+          completed_horizon_seconds: qualified ? requiredHorizonSeconds : [100, 200],
+          required_horizon_seconds: requiredHorizonSeconds,
           wins: qualified ? 2 : 1,
           required_wins: 2,
           resumed_from_previous_cook: status === "interrupted",
@@ -154,7 +154,9 @@ function evidenceReport(
               ? [
                   {
                     origin_sequence: 121,
-                    horizon_steps: 45,
+                    horizon_seconds: 300,
+                    prediction_steps: 12,
+                    observation_frames: 15,
                     role_generation: roleGeneration,
                     candidate_generation: 5,
                     incumbent_digest: activeDigest,
@@ -982,7 +984,7 @@ test("automatic calibration exposes causal progress and rolls back only to expli
   let dialog = page.getByRole("dialog", { name: "MPC model learning" });
   await expect(dialog).toContainText("Evaluation epoch: 2");
   await expect(dialog).toContainText("Evaluation round: 1");
-  await expect(dialog).toContainText("Completed horizons: 3, 15");
+  await expect(dialog).toContainText("Completed horizons (s): 100, 200");
   await expect(dialog).toContainText("Wins: 1 / 2");
   await expect(dialog).toContainText("Resumed from previous cook: yes");
   await expect(dialog).toContainText("Pending origins: none");

@@ -12,7 +12,6 @@ from typing import cast
 import pytest
 
 from common import datastore
-
 from common.control_trace import AllocationClampReason, TraceEventKind
 from common.learning_trajectory import LearningTrajectorySegment
 from common.model_evidence import (
@@ -45,8 +44,8 @@ from controller.runtime.model_fitting import (
     TargetTimingEvidence,
     TriggerConfig,
     TriggerDecision,
-    persistent_corpus_trigger,
     handoff_candidate,
+    persistent_corpus_trigger,
     segmented_corpus_fit_job,
 )
 from tests.unit.common._learning_trajectory_helpers import _finalize_segment, _segment
@@ -57,19 +56,19 @@ from tests.unit.mpc._grey_learning_runtime_helpers import (
     _CheckpointStore,
     _close_prepared_candidate,
     _ControlledDeliveryCorpusWorker,
-    _EffectiveDurationDeficitWorker,
     _CorpusRepositoryProbe,
     _CorpusWorker,
     _DeliveringCorpusWorker,
     _descriptor,
+    _EffectiveDurationDeficitWorker,
     _fit_success,
     _frame,
     _harness,
     _operator_candidate,
     _ProbeSolver,
     _reopened_corpus,
-    _reopened_replayable_passive_corpus,
     _reopened_ready_passive_corpus,
+    _reopened_replayable_passive_corpus,
     _seed_durable_challenger,
     _seed_replayable_unchanged_challenger,
     _SubmissionFailureWorker,
@@ -233,9 +232,7 @@ def test_restore_model_retires_durably_corrupted_inner_mask_without_changing_act
         "revision": durable.revision,
     }
     with datastore.connection() as connection:
-        row = connection.execute(
-            "SELECT state_json FROM model_challenger_state WHERE singleton=1"
-        ).fetchone()
+        row = connection.execute("SELECT state_json FROM model_challenger_state WHERE singleton=1").fetchone()
         assert row is not None
         state_json = json.loads(row[0])
         serialized_mask = state_json["fit_preparation"]["fit_result"]["effective_masks"][0]
@@ -290,21 +287,13 @@ def test_restore_model_retires_same_shape_mask_bit_corruption_without_changing_a
         "revision": durable.revision,
     }
     with datastore.connection() as connection:
-        row = connection.execute(
-            "SELECT state_json FROM model_challenger_state WHERE singleton=1"
-        ).fetchone()
+        row = connection.execute("SELECT state_json FROM model_challenger_state WHERE singleton=1").fetchone()
         assert row is not None
         state_json = json.loads(row[0])
-        assert state_json["fit_preparation"]["fit_result"] == (
-            source.runtime._durable_fit_result(replayed)
-        )
+        assert state_json["fit_preparation"]["fit_result"] == (source.runtime._durable_fit_result(replayed))
         serialized_mask = state_json["fit_preparation"]["fit_result"]["effective_masks"][0]
-        true_indices = [
-            index for index, included in enumerate(serialized_mask) if included
-        ]
-        false_indices = [
-            index for index, included in enumerate(serialized_mask) if not included
-        ]
+        true_indices = [index for index, included in enumerate(serialized_mask) if included]
+        false_indices = [index for index, included in enumerate(serialized_mask) if not included]
         assert true_indices
         assert false_indices
         serialized_mask[true_indices[0]] = False
@@ -715,7 +704,6 @@ def test_retry_watermark_is_discarded_when_incumbent_or_partition_changes(
     harness.runtime.poll_learning_off_path()
     assert len(worker.jobs) == 1
 
-
     if identity_change == "partition":
         current_partition[0] = alternate.fit_partition_digest
     else:
@@ -757,10 +745,7 @@ def test_restart_may_repeat_one_safe_fit_but_persists_no_retry_authority(
     assert restarted.runtime.request_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
     restarted.runtime.poll_learning_off_path()
 
-    assert sum(
-        len(worker.jobs)
-        for worker in _EffectiveDurationDeficitWorker.instances
-    ) == 2
+    assert sum(len(worker.jobs) for worker in _EffectiveDurationDeficitWorker.instances) == 2
     restarted.runtime.close()
     restarted.activation.close()
 
@@ -1864,7 +1849,7 @@ def test_rejected_evaluation_persists_causal_blocker_and_projects_once(
     assert outcome["confidence_accepted"] is False
     assert outcome["input_variance"] == 0.125
     assert outcome["input_levels"] == 3
-    assert harness.persistence.confidence_preceding[-1][0].schema_version == 4
+    assert harness.persistence.confidence_preceding[-1][0].schema_version == 5
     assessment = harness.persistence.confidence_preceding[-1][0].payload
     assert assessment.rejection_reasons == ("candidate-confidence-low",)
     assert components.estimator.closed
@@ -1958,7 +1943,7 @@ def test_candidate_assessment_uses_activation_fifo_when_unrelated_evidence_is_re
     assert harness.persistence.evidence == []
     assert len(harness.persistence.confidence) == 1
     assert len(harness.persistence.confidence_preceding) == 1
-    assert harness.persistence.confidence_preceding[0][0].schema_version == 4
+    assert harness.persistence.confidence_preceding[0][0].schema_version == 5
     assert harness.persistence.confidence_preceding[0][0].payload.decision_id == evaluation.decision_id
     assert components.estimator.closed
     assert components.controller.closed
@@ -2079,7 +2064,7 @@ def test_trace_projection_failure_terminates_activation_without_losing_evidence(
     )
 
     def fail_trace(records):
-        assert {record.schema_version for record in records} == {8}
+        assert {record.schema_version for record in records} == {9}
         raise RuntimeError("trace unavailable")
 
     harness = _harness(learning_enabled=True, append_trace=fail_trace)
@@ -2530,8 +2515,8 @@ def test_real_orchestrator_detaches_raw_owner_after_queued_lifecycle_abort(
     assert delivery.preparation is not None
     estimator = delivery.preparation.candidate_pair.estimator
     solver = delivery.preparation.candidate_pair.controller
-    incumbent_predict = lambda _origin: -1_000.0
-    challenger_predict = lambda _origin: 0.0
+    challenger_predict = lambda origin: origin.frame.temp_c + origin.observation_frames
+    incumbent_predict = lambda origin: challenger_predict(origin) + 10.0
     orchestrator.register_causal_forecasts(
         _frame(9),
         incumbent_predict=incumbent_predict,

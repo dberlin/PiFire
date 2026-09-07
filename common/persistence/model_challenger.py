@@ -17,6 +17,7 @@ from common.learning_trajectory import (
     ModelFitLineage,
     trajectory_json_value,
 )
+from common.mpc_learning import MPC_FORECAST_HORIZON_SECONDS
 from common.model_evidence import (
     MODEL_EVIDENCE_SCHEMA_VERSION,
     ChallengerRoundEvidence,
@@ -875,6 +876,26 @@ def recover_model_challenger(
             return None
         if current.phase == "retired":
             return None
+        preparation = trajectory_json_value(current.fit_preparation)
+        stored_horizon_seconds = (
+            preparation.get("required_horizon_seconds")
+            if isinstance(preparation, dict)
+            else None
+        )
+        if stored_horizon_seconds != list(MPC_FORECAST_HORIZON_SECONDS):
+            retired = _retired_state(
+                current,
+                reason="evaluation-contract-changed",
+                retired_ms=recovered_ms,
+            )
+            _write_state(
+                transaction,
+                retired,
+                insert=False,
+                expected_revision=current.revision,
+            )
+            return None
+
 
         activation_row = _activation_state_row(transaction)
         activation = None if activation_row is None else ModelActivationState(*activation_row)

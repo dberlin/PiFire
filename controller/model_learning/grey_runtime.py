@@ -171,6 +171,15 @@ class _FitRetryWatermark:
 
 def _corpus_observed_duration_s(identity: FitCorpusIdentity) -> float:
     return sum(item.scored_count for item in identity.slices) * FIT_CADENCE_S
+def _uses_current_evaluation_contract(state: ModelChallengerState) -> bool:
+    preparation = trajectory_json_value(state.fit_preparation)
+    return (
+        isinstance(preparation, dict)
+        and preparation.get("required_horizon_seconds")
+        == list(EvaluationConfig().required_horizon_seconds)
+    )
+
+
 
 
 class GreyLearningProcessOwner:
@@ -562,7 +571,9 @@ class GreyLearningRuntime:
             origin_sequence=value.origin_sequence,
             origin_time_ms=int(forecast.origin_time_s * 1_000),
             completion_time_ms=int(value.completion_time_s * 1_000),
-            horizon_steps=value.horizon_steps,
+            horizon_seconds=value.horizon_seconds,
+            prediction_steps=value.prediction_steps,
+            observation_frames=value.observation_frames,
             incumbent_digest=value.incumbent_digest,
             challenger_digest=value.challenger_digest,
             incumbent_prediction_c=forecast.incumbent_prediction_c,
@@ -582,7 +593,9 @@ class GreyLearningRuntime:
             CompletedOriginPayload(
                 origin_time_ms=int(origin.forecast.origin_time_s * 1_000),
                 completion_time_ms=int(origin.completion_time_s * 1_000),
-                horizon_steps=origin.horizon_steps,
+                horizon_seconds=origin.horizon_seconds,
+                prediction_steps=origin.prediction_steps,
+                observation_frames=origin.observation_frames,
                 generation=origin.role_generation,
                 observed_temperature_c=origin.observed_temperature_c,
                 incumbent_error_c=origin.incumbent_error_c,
@@ -630,7 +643,7 @@ class GreyLearningRuntime:
             completed_origins=raw_origins,
             horizon_scores=tuple(
                 HorizonScorePayload(
-                    horizon_steps=score.horizon_steps,
+                    horizon_seconds=score.horizon_seconds,
                     incumbent_rmse_c=score.incumbent_rmse_c if score.sample_count else None,
                     challenger_rmse_c=score.challenger_rmse_c if score.sample_count else None,
                     sample_count=score.sample_count,
@@ -643,11 +656,11 @@ class GreyLearningRuntime:
 
     @staticmethod
     def _forecast_from_adapter(adapter, origin):
-        horizon = origin.horizon_steps
+        prediction_steps = origin.prediction_steps
         frame = origin.frame
         predicted = adapter.forecast(
-            np.full(horizon, frame.realized_q, dtype=np.float64),
-            np.full(horizon, frame.ambient_c, dtype=np.float64),
+            np.full(prediction_steps, frame.realized_q, dtype=np.float64),
+            np.full(prediction_steps, frame.ambient_c, dtype=np.float64),
         )
         return float(predicted[-1])
 
@@ -1380,6 +1393,7 @@ class GreyLearningRuntime:
             and current.origin is request.origin
             and current.controller_configuration_digest == request.configuration_digest
             and trajectory_json_value(current.calibration_manifest) == calibration_manifest
+            and _uses_current_evaluation_contract(current)
             and not manifest_blocked
         ):
             with self._learning_lock:
@@ -1401,7 +1415,7 @@ class GreyLearningRuntime:
                 "request_id": request.request_id,
                 "accepted": True,
                 "candidate_digest": candidate.model_digest,
-                "required_horizons": list(learning.evaluation_config.required_horizons),
+                "required_horizon_seconds": list(learning.evaluation_config.required_horizon_seconds),
                 "native_build": "passed",
                 "dry_solve": "passed" if preparation.dry_solve_finite else "failed",
                 "target_timing": (None if timing is None else trajectory_json_value(asdict(timing))),
@@ -1427,7 +1441,11 @@ class GreyLearningRuntime:
         if current is not None and current.phase != "retired":
             retired_current = retire_model_challenger(
                 expected_revision=current.revision,
-                reason="superseded-by-new-cumulative-fit",
+                reason=(
+                    "superseded-by-new-cumulative-fit"
+                    if _uses_current_evaluation_contract(current)
+                    else "evaluation-contract-changed"
+                ),
                 retired_ms=now_ms,
             )
             self._trace_durable_challenger(retired_current)
@@ -1478,7 +1496,7 @@ class GreyLearningRuntime:
                 "accepted": True,
                 "restore_revalidation": True,
                 "candidate_digest": candidate.model_digest,
-                "required_horizons": list(learning.evaluation_config.required_horizons),
+                "required_horizon_seconds": list(learning.evaluation_config.required_horizon_seconds),
                 "native_build": "passed",
                 "dry_solve": ("passed" if preparation.dry_solve_finite else "failed"),
                 "target_timing": (None if timing is None else trajectory_json_value(asdict(timing))),
@@ -1602,20 +1620,27 @@ class GreyLearningRuntime:
         self,
         state: ModelChallengerState,
     ) -> tuple[tuple[int, ...], tuple[int, ...]]:
+        current_required = EvaluationConfig().required_horizon_seconds
         fit_preparation = trajectory_json_value(state.fit_preparation)
         stored_required_horizons = (
-            fit_preparation.get("required_horizons") if isinstance(fit_preparation, dict) else None
+            fit_preparation.get("required_horizon_seconds")
+            if isinstance(fit_preparation, dict)
+            else None
         )
-        if stored_required_horizons is None:
-            required_horizons = EvaluationConfig().required_horizons
-        elif (
+        if (
+            stored_required_horizons is None
+            and state.phase == "retired"
+            and state.retirement_reason == "evaluation-contract-changed"
+        ):
+            return (), current_required
+        if (
             not isinstance(stored_required_horizons, list)
-            or not stored_required_horizons
             or any(type(horizon) is not int or horizon <= 0 for horizon in stored_required_horizons)
         ):
-            raise RuntimeError("durable challenger required horizons are invalid")
-        else:
-            required_horizons = tuple(stored_required_horizons)
+            raise RuntimeError("durable challenger required horizon seconds are invalid")
+        required_horizons = tuple(stored_required_horizons)
+        if required_horizons != current_required:
+            raise RuntimeError("durable challenger evaluation contract changed")
         if state.last_evidence_id is None:
             return (), required_horizons
 
@@ -1636,7 +1661,7 @@ class GreyLearningRuntime:
             or payload.incumbent_digest != state.incumbent.model_digest
             or payload.candidate_digest != state.candidate.model_digest
             or evidence.role_generation != state.incumbent.role_generation
-            or payload.required_horizons != required_horizons
+            or payload.required_horizon_seconds != required_horizons
         ):
             raise RuntimeError("durable challenger round lineage changed")
         current_round = (
@@ -1645,7 +1670,9 @@ class GreyLearningRuntime:
         resumed_round = state.evaluation_round == 0 and state.evaluation_epoch == payload.evaluation_epoch + 1
         if not current_round and not resumed_round:
             raise RuntimeError("durable challenger round progress changed")
-        return payload.completed_horizons, payload.required_horizons
+        assert payload.completed_horizon_seconds is not None
+        assert payload.required_horizon_seconds is not None
+        return payload.completed_horizon_seconds, payload.required_horizon_seconds
 
     def _trace_durable_challenger(self, state: ModelChallengerState) -> None:
         try:
@@ -1672,8 +1699,8 @@ class GreyLearningRuntime:
                 evaluation_round=state.evaluation_round,
                 consecutive_wins=state.consecutive_wins,
                 required_wins=state.required_wins,
-                completed_horizons=completed_horizons,
-                required_horizons=required_horizons,
+                completed_horizon_seconds=completed_horizons,
+                required_horizon_seconds=required_horizons,
                 resumed_from_previous_cook=(
                     state.evaluation_epoch > 0 or bool(getattr(self._learning, "resumed_from_previous_cook", False))
                 ),
@@ -1838,11 +1865,11 @@ class GreyLearningRuntime:
         required_horizons = tuple(
             getattr(
                 evaluation_config,
-                "required_horizons",
-                evaluation.completed_horizons,
+                "required_horizon_seconds",
+                evaluation.completed_horizon_seconds,
             )
         )
-        completed_horizons = evaluation.completed_horizons
+        completed_horizons = evaluation.completed_horizon_seconds
         if completed_horizons != required_horizons:
             raise RuntimeError("partial causal evaluation round cannot persist")
         gates = qualification_gates(state)
@@ -1895,8 +1922,8 @@ class GreyLearningRuntime:
                 evaluation_round=round_number,
                 decision_id=evaluation.decision_id,
                 accepted=not bool(evaluation.blockers),
-                required_horizons=required_horizons,
-                completed_horizons=completed_horizons,
+                required_horizon_seconds=required_horizons,
+                completed_horizon_seconds=completed_horizons,
                 incumbent_digest=evaluation.incumbent_digest,
                 candidate_digest=evaluation.challenger_digest,
             ),
@@ -2603,11 +2630,11 @@ class GreyLearningRuntime:
         required_horizons = tuple(
             getattr(
                 getattr(learning, "evaluation_config", None),
-                "required_horizons",
-                (3, 15, 45, 90, 180),
+                "required_horizon_seconds",
+                EvaluationConfig().required_horizon_seconds,
             )
         )
-        completed_horizons = tuple(getattr(learning, "completed_horizons", ()))
+        completed_horizons = tuple(getattr(learning, "completed_horizon_seconds", ()))
         resumed_from_previous_cook = bool(getattr(learning, "resumed_from_previous_cook", False))
         pending_origins = tuple(getattr(learning, "pending_origins", ()))
         inert_record = self._activation_runtime.inert_record
@@ -2705,13 +2732,15 @@ class GreyLearningRuntime:
             ),
             "pending_persistence": self._activation_runtime.activation_pending,
             "pending_swap": inert_record is not None,
-            "completed_horizons": completed_horizons,
-            "required_horizons": required_horizons,
+            "completed_horizon_seconds": completed_horizons,
+            "required_horizon_seconds": required_horizons,
             "resumed_from_previous_cook": resumed_from_previous_cook,
             "pending_origins": [
                 {
                     "origin_sequence": item.origin_sequence,
-                    "horizon_steps": item.horizon_steps,
+                    "horizon_seconds": item.horizon_seconds,
+                    "prediction_steps": item.prediction_steps,
+                    "observation_frames": item.observation_frames,
                     "role_generation": item.role_generation,
                     "candidate_generation": item.candidate_generation,
                     "incumbent_digest": item.incumbent_digest,

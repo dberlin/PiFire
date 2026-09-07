@@ -19,12 +19,12 @@ from common.model_evidence import (
     RecorderGapEvidence,
     TimingDistributionEvidence,
 )
+from common.mpc_learning import MPC_FORECAST_HORIZON_SECONDS, forecast_horizon_spec
 from common.persistence.model_challenger import ModelChallengerState
 
 from .contracts import CandidateOrigin, LearningStatus
 
-_REQUIRED_HORIZONS = (3, 15, 45, 90, 180)
-_RMSE_LIMITS = {3: 2.8, 15: 2.8, 45: 2.8, 90: 5.0, 180: 5.0}
+_REQUIRED_HORIZONS = MPC_FORECAST_HORIZON_SECONDS
 _REQUIRED_STAGE_ORDER = ("low", "middle", "high", "coast")
 _REQUIRED_STAGES = frozenset(_REQUIRED_STAGE_ORDER)
 
@@ -108,7 +108,7 @@ class GateResult:
 
 @dataclass(frozen=True, slots=True)
 class BootstrapInterval:
-    horizon_steps: int
+    horizon_seconds: int
     temperature_band: str
     phase: str
     ambient_source: str
@@ -146,8 +146,10 @@ class _Origin:
 
     @property
     def stratum(self) -> tuple[int, str, str, str, int]:
+        if self.payload.horizon_seconds is None:
+            raise ValueError("current forecast evidence requires horizon seconds")
         return (
-            self.payload.horizon_steps,
+            self.payload.horizon_seconds,
             self.payload.temperature_band,
             self.payload.phase,
             self.payload.ambient_source.value,
@@ -259,17 +261,19 @@ def evaluate_confidence(
     _gate(gates, "untouched-future-rows", bool(origins), "untouched-future-rows")
 
     intervals = _bootstrap_intervals(origins, config)
-    present = {interval.horizon_steps for interval in intervals}
+    present = {interval.horizon_seconds for interval in intervals}
     for horizon in _REQUIRED_HORIZONS:
         if horizon not in present:
             _gate(gates, f"missing-horizon-{horizon}", False, f"missing-horizon-{horizon}")
     for interval in intervals:
-        if interval.horizon_steps not in _RMSE_LIMITS:
+        try:
+            horizon = forecast_horizon_spec(interval.horizon_seconds)
+        except ValueError:
             _gate(
                 gates,
-                f"unsupported-horizon-{interval.horizon_steps}",
+                f"unsupported-horizon-{interval.horizon_seconds}",
                 False,
-                f"unsupported-horizon-{interval.horizon_steps}",
+                f"unsupported-horizon-{interval.horizon_seconds}",
             )
             continue
         label = _label(interval)
@@ -277,7 +281,7 @@ def evaluate_confidence(
             gates,
             f"absolute-rmse:{label}",
             interval.challenger_rmse_c is not None
-            and interval.challenger_rmse_c <= _RMSE_LIMITS[interval.horizon_steps],
+            and interval.challenger_rmse_c <= horizon.maximum_rmse_c,
             f"absolute-rmse:{label}",
         )
         _gate(
@@ -328,16 +332,23 @@ def _origins(records: Sequence[ModelEvidenceRecord]) -> tuple[tuple[_Origin, ...
     unique: dict[tuple[str, int, int, int, int], _Origin] = {}
     conflict = False
     for record in records:
-        if not isinstance(record.payload, ForecastOriginEvidence) or record.cook_id is None:
+        if (
+            record.schema_version != MODEL_EVIDENCE_SCHEMA_VERSION
+            or not isinstance(record.payload, ForecastOriginEvidence)
+            or record.cook_id is None
+        ):
             continue
         payload = record.payload
+        if payload.horizon_seconds is None:
+            conflict = True
+            continue
         if record.model_digest != payload.challenger_digest or record.provenance_digest != payload.incumbent_digest:
             conflict = True
             continue
         identity = (
             record.cook_id,
             record.role_generation,
-            payload.horizon_steps,
+            payload.horizon_seconds,
             payload.origin_sequence,
             payload.completion_time_ms,
         )
@@ -402,7 +413,8 @@ def _bootstrap_intervals(origins: Sequence[_Origin], config: ConfidenceConfig) -
         grouped[origin.stratum].append(origin)
     intervals: list[BootstrapInterval] = []
     for stratum in sorted(grouped):
-        horizon, band, phase, ambient, generation = stratum
+        horizon_seconds, band, phase, ambient, generation = stratum
+        observation_frames = forecast_horizon_spec(horizon_seconds).observation_frames
         group = grouped[stratum]
         by_cook: dict[str, list[_Origin]] = defaultdict(list)
         for origin in group:
@@ -416,13 +428,13 @@ def _bootstrap_intervals(origins: Sequence[_Origin], config: ConfidenceConfig) -
                     origin.record.evidence_id,
                 )
             )
-        ratios = _hierarchical_ratios(by_cook, horizon, config.bootstrap_seed)
+        ratios = _hierarchical_ratios(by_cook, observation_frames, config.bootstrap_seed)
         challenger = _rmse(origin.payload.challenger_error_c for origin in group)
         incumbent = _rmse(origin.payload.incumbent_error_c for origin in group)
         upper = None if len(ratios) != 10_000 else float(np.quantile(np.asarray(ratios), 0.95, method="higher"))
         intervals.append(
             BootstrapInterval(
-                horizon,
+                horizon_seconds,
                 band,
                 phase,
                 ambient,
@@ -437,9 +449,13 @@ def _bootstrap_intervals(origins: Sequence[_Origin], config: ConfidenceConfig) -
     return tuple(intervals)
 
 
-def _hierarchical_ratios(by_cook: Mapping[str, Sequence[_Origin]], horizon: int, seed: int) -> tuple[float, ...]:
+def _hierarchical_ratios(
+    by_cook: Mapping[str, Sequence[_Origin]],
+    observation_frames: int,
+    seed: int,
+) -> tuple[float, ...]:
     cooks = tuple(sorted(by_cook))
-    starts = {cook: _block_starts(by_cook[cook], horizon) for cook in cooks}
+    starts = {cook: _block_starts(by_cook[cook], observation_frames) for cook in cooks}
     if len(cooks) < 2 or any(not starts[cook] for cook in cooks):
         return ()
     rng = np.random.default_rng(seed)
@@ -448,7 +464,7 @@ def _hierarchical_ratios(by_cook: Mapping[str, Sequence[_Origin]], horizon: int,
         sample: list[_Origin] = []
         for index in selected:
             cook = cooks[int(index)]
-            sample.extend(_sample_blocks(by_cook[cook], horizon, starts[cook], rng))
+            sample.extend(_sample_blocks(by_cook[cook], observation_frames, starts[cook], rng))
         challenger = _rmse(origin.payload.challenger_error_c for origin in sample)
         incumbent = _rmse(origin.payload.incumbent_error_c for origin in sample)
         if challenger is None or incumbent is None or incumbent == 0.0:
@@ -460,25 +476,28 @@ def _hierarchical_ratios(by_cook: Mapping[str, Sequence[_Origin]], horizon: int,
     return tuple(ratios)
 
 
-def _block_starts(rows: Sequence[_Origin], horizon: int) -> tuple[int, ...]:
+def _block_starts(rows: Sequence[_Origin], observation_frames: int) -> tuple[int, ...]:
     return tuple(
         start
-        for start in range(len(rows) - horizon + 1)
+        for start in range(len(rows) - observation_frames + 1)
         if all(
             rows[index].record.session_id == rows[index + 1].record.session_id
             and rows[index].payload.origin_sequence + 1 == rows[index + 1].payload.origin_sequence
-            for index in range(start, start + horizon - 1)
+            for index in range(start, start + observation_frames - 1)
         )
     )
 
 
 def _sample_blocks(
-    rows: Sequence[_Origin], horizon: int, starts: Sequence[int], rng: np.random.Generator
+    rows: Sequence[_Origin],
+    observation_frames: int,
+    starts: Sequence[int],
+    rng: np.random.Generator,
 ) -> tuple[_Origin, ...]:
     sampled: list[_Origin] = []
     while len(sampled) < len(rows):
         start = starts[int(rng.integers(0, len(starts)))]
-        sampled.extend(rows[start : start + horizon])
+        sampled.extend(rows[start : start + observation_frames])
     return tuple(sampled[: len(rows)])
 
 
@@ -493,7 +512,7 @@ def _rmse(values: Sequence[float] | object) -> float | None:
 
 def _stratum_rows(origins: Sequence[_Origin], interval: BootstrapInterval) -> tuple[_Origin, ...]:
     key = (
-        interval.horizon_steps,
+        interval.horizon_seconds,
         interval.temperature_band,
         interval.phase,
         interval.ambient_source,
@@ -581,4 +600,4 @@ def _nonnegative_int(value: object) -> int | None:
 
 
 def _label(interval: BootstrapInterval) -> str:
-    return f"{interval.horizon_steps}/{interval.temperature_band}/{interval.phase}/{interval.ambient_source}/{interval.generation}"
+    return f"{interval.horizon_seconds}/{interval.temperature_band}/{interval.phase}/{interval.ambient_source}/{interval.generation}"

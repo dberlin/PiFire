@@ -717,8 +717,7 @@ def _accepted_durable_fit_request_ids(
         return set()
     durable_identity = (lineage.request_id, lineage.fit_corpus_digest)
     if not any(
-        payload.status == "succeeded"
-        and (payload.request_id, payload.fit_corpus_digest) == durable_identity
+        payload.status == "succeeded" and (payload.request_id, payload.fit_corpus_digest) == durable_identity
         for payload in current_cook_fit_lifecycle
     ):
         return set()
@@ -1290,8 +1289,8 @@ def _assert_real_cook_hold_smoke(
         grey_fit_worker_drained = all(
             not worker.alive and not worker.busy and worker.process_count == 0 for worker in captured_grey_fit_workers
         )
-        persistence_drained = persistence.barrier(timeout=5.0)
         trajectory_closed = trajectory.close()
+        persistence_drained = persistence.close(timeout=5.0)
 
     assert trajectory_closed
     assert grey_owner_drained
@@ -1477,14 +1476,10 @@ def _assert_real_cook_hold_smoke(
         if record.event_kind is TraceEventKind.FIT_LIFECYCLE
     )
     fit_terminal_statuses = tuple(
-        payload.status
-        for payload in current_cook_fit_lifecycle
-        if payload.status in {"succeeded", "failed", "stale"}
+        payload.status for payload in current_cook_fit_lifecycle if payload.status in {"succeeded", "failed", "stale"}
     )
     fit_terminal_errors = tuple(
-        payload.error
-        for payload in current_cook_fit_lifecycle
-        if payload.status in {"succeeded", "failed", "stale"}
+        payload.error for payload in current_cook_fit_lifecycle if payload.status in {"succeeded", "failed", "stale"}
     )
     candidate_assessments = [
         cast(GreyCandidateAssessmentPayload, record.payload)

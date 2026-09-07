@@ -20,6 +20,7 @@ from common.model_evidence import (
     RecorderGapEvidence,
     SchemaInvalidationEvidence,
 )
+from common.mpc_learning import MPC_FORECAST_HORIZON_SECONDS
 from common.persistence.control_trace import read_control_trace_session
 from common.persistence.model_challenger import (
     ModelChallengerState,
@@ -64,7 +65,7 @@ _CANDIDATE = "b" * 64
 _INCUMBENT = "a" * 64
 
 
-_REQUIRED_HORIZONS = (3, 15, 45, 90, 180)
+_REQUIRED_HORIZON_SECONDS = MPC_FORECAST_HORIZON_SECONDS
 
 
 def _persist_evaluating_challenger(
@@ -97,7 +98,7 @@ def _persist_evaluating_challenger(
             "request_id": request.request_id,
             "accepted": True,
             "candidate_digest": candidate.model_digest,
-            "required_horizons": list(_REQUIRED_HORIZONS),
+            "required_horizon_seconds": list(_REQUIRED_HORIZON_SECONDS),
             "native_build": "passed",
             "dry_solve": "passed",
             "target_timing": None,
@@ -174,7 +175,7 @@ def _evidence(evidence_id: str = "gap-1") -> ModelEvidenceRecord:
         role_generation=4,
         model_digest=_CANDIDATE,
         provenance_digest=_INCUMBENT,
-        schema_version=4,
+        schema_version=5,
         payload=RecorderGapEvidence(lost_record_count=1, reason="recorder-gap"),
     )
 
@@ -503,7 +504,7 @@ def test_current_lifecycle_matches_production_activation_decision_key() -> None:
         role_generation=4,
         model_digest=_CANDIDATE,
         provenance_digest=_INCUMBENT,
-        schema_version=4,
+        schema_version=5,
         payload=ActivationLifecycleEvidence(
             decision_id="decision-9",
             phase="active",
@@ -696,26 +697,26 @@ def test_live_terminal_failure_overrides_stale_active_lifecycle() -> None:
         "expected_status",
         "round_number",
         "wins",
-        "completed_horizons",
+        "completed_horizon_seconds",
         "resumed",
         "pending_count",
     ),
     (
         ("warming", 0, 1, (), True, 0),
         ("collecting", 0, 0, (), False, 0),
-        ("evaluating", 1, 1, (3, 15), False, 1),
+        ("evaluating", 1, 1, (100, 200), False, 1),
         ("interrupted", 1, 1, (), True, 0),
-        ("qualified", 2, 2, _REQUIRED_HORIZONS, False, 0),
-        ("activating", 2, 2, _REQUIRED_HORIZONS, False, 0),
-        ("active", 2, 2, _REQUIRED_HORIZONS, False, 0),
+        ("qualified", 2, 2, _REQUIRED_HORIZON_SECONDS, False, 0),
+        ("activating", 2, 2, _REQUIRED_HORIZON_SECONDS, False, 0),
+        ("active", 2, 2, _REQUIRED_HORIZON_SECONDS, False, 0),
     ),
 )
-def test_report_v3_projects_exact_causal_progress_and_lineage_for_every_phase(
+def test_report_v4_projects_exact_causal_progress_and_lineage_for_every_phase(
     monkeypatch,
     expected_status,
     round_number,
     wins,
-    completed_horizons,
+    completed_horizon_seconds,
     resumed,
     pending_count,
 ) -> None:
@@ -737,7 +738,9 @@ def test_report_v3_projects_exact_causal_progress_and_lineage_for_every_phase(
     )
     pending_origin = {
         "origin_sequence": 81,
-        "horizon_steps": 45,
+        "horizon_seconds": 300,
+        "prediction_steps": 12,
+        "observation_frames": 15,
         "role_generation": challenger.incumbent.role_generation,
         "candidate_generation": challenger.candidate.candidate_generation,
         "incumbent_digest": challenger.incumbent.model_digest,
@@ -757,8 +760,8 @@ def test_report_v3_projects_exact_causal_progress_and_lineage_for_every_phase(
         ),
         "pending_persistence": False,
         "pending_swap": expected_status == "activating",
-        "completed_horizons": completed_horizons,
-        "required_horizons": _REQUIRED_HORIZONS,
+        "completed_horizon_seconds": completed_horizon_seconds,
+        "required_horizon_seconds": _REQUIRED_HORIZON_SECONDS,
         "resumed_from_previous_cook": resumed,
         "pending_origins": ([pending_origin] if pending_count else []),
     }
@@ -794,7 +797,7 @@ def test_report_v3_projects_exact_causal_progress_and_lineage_for_every_phase(
         calibration_command_high_water=11,
     ).as_dict()
 
-    assert payload["schema_version"] == 3
+    assert payload["schema_version"] == 4
     assert payload["status"] == expected_status
     lineage = {
         "request_id": challenger.fit_lineage.request_id,
@@ -832,8 +835,8 @@ def test_report_v3_projects_exact_causal_progress_and_lineage_for_every_phase(
     assert payload["evaluation"] == {
         "epoch": 3,
         "round": round_number,
-        "completed_horizons": list(completed_horizons),
-        "required_horizons": list(_REQUIRED_HORIZONS),
+        "completed_horizon_seconds": list(completed_horizon_seconds),
+        "required_horizon_seconds": list(_REQUIRED_HORIZON_SECONDS),
         "wins": wins,
         "required_wins": 2,
         "resumed_from_previous_cook": resumed,
@@ -1187,13 +1190,13 @@ def test_real_evaluation_blocker_persists_rejection_context_before_retirement(
         incumbent_digest=incumbent.model_digest,
         challenger_digest=candidate_digest,
         completed_origins=(),
-        completed_horizons=_REQUIRED_HORIZONS,
+        completed_horizon_seconds=_REQUIRED_HORIZON_SECONDS,
     )
 
     class _Learning:
         handoff = None
         pending_request = None
-        evaluation_config = SimpleNamespace(required_horizons=_REQUIRED_HORIZONS)
+        evaluation_config = SimpleNamespace(required_horizon_seconds=_REQUIRED_HORIZON_SECONDS)
 
         def __init__(self):
             self.prepared = preparation

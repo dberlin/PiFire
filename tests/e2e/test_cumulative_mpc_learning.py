@@ -41,6 +41,7 @@ from common.learning_trajectory import (
     canonical_trajectory_digest,
     trajectory_json_value,
 )
+from common.mpc_learning import MPC_FORECAST_HORIZON_SECONDS, forecast_horizon_spec
 from common.model_evidence import (
     MODEL_EVIDENCE_SCHEMA_VERSION,
     ActivationLifecycleEvidence,
@@ -112,7 +113,6 @@ from tests.e2e._mpc_online_learning_helpers import _CYCLE
 _FRAME_SECONDS = FIT_CADENCE_S
 _FRAME_MS = int(_FRAME_SECONDS * 1_000)
 _WALL_EPOCH_MS = 1_800_000_000_000
-_REQUIRED_HORIZONS = (3, 15, 45, 90, 180)
 _LOAD_LEVELS = (0.20, 0.55, 0.90)
 _TRUTH = GreyBoxMPCConfig(
     C_c=1767.5013593870272,
@@ -961,6 +961,7 @@ def test_supplied_candidate_resumes_then_uses_the_same_two_win_durable_activatio
             "accepted": True,
             "candidate_digest": candidate.model_digest,
             "result_digest": _digest(f"fit-result:{origin.value}"),
+            "required_horizon_seconds": list(MPC_FORECAST_HORIZON_SECONDS),
         },
         controller_configuration_digest=_digest("shared-controller-configuration"),
         incumbent=incumbent,
@@ -1022,8 +1023,8 @@ def test_supplied_candidate_resumes_then_uses_the_same_two_win_durable_activatio
                 evaluation_round=round_number,
                 decision_id=decision_id,
                 accepted=True,
-                required_horizons=_REQUIRED_HORIZONS,
-                completed_horizons=_REQUIRED_HORIZONS,
+                required_horizon_seconds=MPC_FORECAST_HORIZON_SECONDS,
+                completed_horizon_seconds=MPC_FORECAST_HORIZON_SECONDS,
                 incumbent_digest=incumbent.model_digest,
                 candidate_digest=candidate.model_digest,
             ),
@@ -1167,17 +1168,42 @@ def _complete_winning_evaluation_round(
     )
     assert origin_result is not None
     origins = learning.pending_origins
-    assert tuple(origin.horizon_steps for origin in origins) == _REQUIRED_HORIZONS
+    horizon_specs = tuple(forecast_horizon_spec(horizon_seconds) for horizon_seconds in MPC_FORECAST_HORIZON_SECONDS)
+    expected_clocks = tuple(
+        (horizon.seconds, horizon.prediction_steps, horizon.observation_frames) for horizon in horizon_specs
+    )
+    assert (
+        tuple((origin.horizon_seconds, origin.prediction_steps, origin.observation_frames) for origin in origins)
+        == expected_clocks
+    )
     assert all(origin.origin_sequence == origin_sequence for origin in origins)
     assert all(origin.incumbent_digest == runtime.active_control_pair.descriptor.model_digest for origin in origins)
-    expected = {
-        origin.origin_sequence + origin.horizon_steps: origin
-        for origin in origins
-    }
+    expected = {origin.origin_sequence + origin.observation_frames: origin for origin in origins}
+    pending_status = runtime.get_learning_diagnostics().state
+    assert pending_status["required_horizon_seconds"] == MPC_FORECAST_HORIZON_SECONDS
+    assert pending_status["completed_horizon_seconds"] == ()
+    pending_origins = cast(
+        tuple[Mapping[str, JsonValue], ...],
+        pending_status["pending_origins"],
+    )
+    assert (
+        tuple(
+            (
+                item["horizon_seconds"],
+                item["prediction_steps"],
+                item["observation_frames"],
+            )
+            for item in pending_origins
+        )
+        == expected_clocks
+    )
     # Probe-bearing completion frames remain valid causal outcomes but cannot
     # themselves become forecast origins, leaving exactly one five-horizon round.
     completed: list[ForecastOriginEvidence] = []
-    for sequence in range(origin_sequence + 1, origin_sequence + max(_REQUIRED_HORIZONS) + 1):
+    for sequence in range(
+        origin_sequence + 1,
+        origin_sequence + max(horizon.observation_frames for horizon in horizon_specs) + 1,
+    ):
         forecast = expected.get(sequence)
         temperature_c = 100.0 if forecast is None else forecast.challenger_prediction_c
         observation = runtime.observe_frame(
@@ -1194,10 +1220,17 @@ def _complete_winning_evaluation_round(
                 observation["forecast_origin_evidence"],
             ),
         )
-    assert tuple(item.horizon_steps for item in completed) == _REQUIRED_HORIZONS
+    assert (
+        tuple((item.horizon_seconds, item.prediction_steps, item.observation_frames) for item in completed)
+        == expected_clocks
+    )
     assert all(item.challenger_prediction_c == item.observed_temperature_c for item in completed)
     assert all(item.incumbent_digest == origins[0].incumbent_digest for item in completed)
     assert all(item.challenger_digest == origins[0].challenger_digest for item in completed)
+    completed_status = runtime.get_learning_diagnostics().state
+    assert completed_status["required_horizon_seconds"] == MPC_FORECAST_HORIZON_SECONDS
+    assert completed_status["completed_horizon_seconds"] == MPC_FORECAST_HORIZON_SECONDS
+    assert completed_status["pending_origins"] == ()
     delivery, evaluation = cast(
         tuple[GreyLearningDelivery | None, ModelEvaluationPayload | None],
         runtime.poll_learning_off_path(),
@@ -1306,10 +1339,7 @@ def test_three_short_cooks_prepare_shadow_then_two_complete_rounds_durably_activ
         assert fit.sample_count * FIT_CADENCE_S >= 600.0
         assert fit.request.fit_corpus == snapshot.identity
         fit_job = segmented_corpus_fit_job(snapshot, fit.request, incumbent_config)
-        actual_masks = tuple(
-            tuple(bool(value) for value in mask)
-            for mask in fit.effective_masks
-        )
+        actual_masks = tuple(tuple(bool(value) for value in mask) for mask in fit.effective_masks)
         expected_masks = _expected_common_masks(
             fit_job,
             candidate_theta=fit.config.theta,
@@ -1374,6 +1404,7 @@ def test_three_short_cooks_prepare_shadow_then_two_complete_rounds_durably_activ
 
         serialized_preparation = trajectory_json_value(challenger.fit_preparation)
         assert isinstance(serialized_preparation, dict)
+        assert serialized_preparation["required_horizon_seconds"] == list(MPC_FORECAST_HORIZON_SECONDS)
         assert serialized_preparation["fit_result"] == {
             "rmse_c": fit.rmse_c,
             "max_error_c": fit.max_error_c,
@@ -1381,18 +1412,14 @@ def test_three_short_cooks_prepare_shadow_then_two_complete_rounds_durably_activ
             "sample_count": fit.sample_count,
             "temperature_band_c": list(fit.temperature_band_c),
             "nfev": fit.nfev,
-            "effective_masks": [
-                [bool(value) for value in mask]
-                for mask in fit.effective_masks
-            ],
+            "effective_masks": [[bool(value) for value in mask] for mask in fit.effective_masks],
             "warmup_excluded_segment_ids": list(fit_exclusions),
             "result_digest": fit.result_digest,
         }
         fit_lifecycle = tuple(
             record.payload
             for record in read_model_evidence(kind=EvidenceKind.FIT_LIFECYCLE)
-            if isinstance(record.payload, FitLifecycleEvidence)
-            and record.payload.request_id == fit.request.request_id
+            if isinstance(record.payload, FitLifecycleEvidence) and record.payload.request_id == fit.request.request_id
         )
         assert tuple(item.status for item in fit_lifecycle) == ("queued", "succeeded")
 
@@ -1401,17 +1428,16 @@ def test_three_short_cooks_prepare_shadow_then_two_complete_rounds_durably_activ
             owner,
             origin_sequence=1_000,
         )
-        assert tuple(
-            score.horizon_steps
-            for score in first_evaluation.horizon_scores
-            if score.sample_count > 0
-        ) == _REQUIRED_HORIZONS
+        assert (
+            tuple(score.horizon_seconds for score in first_evaluation.horizon_scores if score.sample_count > 0)
+            == MPC_FORECAST_HORIZON_SECONDS
+        )
         assert first_evaluation.rejection_reasons == ()
         assert first_evaluation.consecutive_wins == 1
         assert not first_evaluation.promoted
         assert not first_evaluation.committed
         assert len(first_origins) == 5
-        assert tuple(score.horizon_steps for score in first_evaluation.horizon_scores) == _REQUIRED_HORIZONS
+        assert tuple(score.horizon_seconds for score in first_evaluation.horizon_scores) == MPC_FORECAST_HORIZON_SECONDS
         assert all(
             score.challenger_rmse_c is not None
             and score.incumbent_rmse_c is not None
@@ -1436,17 +1462,18 @@ def test_three_short_cooks_prepare_shadow_then_two_complete_rounds_durably_activ
             owner,
             origin_sequence=2_000,
         )
-        assert tuple(
-            score.horizon_steps
-            for score in second_evaluation.horizon_scores
-            if score.sample_count > 0
-        ) == _REQUIRED_HORIZONS
+        assert (
+            tuple(score.horizon_seconds for score in second_evaluation.horizon_scores if score.sample_count > 0)
+            == MPC_FORECAST_HORIZON_SECONDS
+        )
         assert second_evaluation.rejection_reasons == ()
         assert second_evaluation.consecutive_wins == 2
         assert not second_evaluation.promoted
         assert not second_evaluation.committed
         assert len(second_origins) == 5
-        assert tuple(score.horizon_steps for score in second_evaluation.horizon_scores) == _REQUIRED_HORIZONS
+        assert (
+            tuple(score.horizon_seconds for score in second_evaluation.horizon_scores) == MPC_FORECAST_HORIZON_SECONDS
+        )
         assert all(
             score.challenger_rmse_c is not None
             and score.incumbent_rmse_c is not None
@@ -1485,11 +1512,11 @@ def test_three_short_cooks_prepare_shadow_then_two_complete_rounds_durably_activ
         )
         round_payloads = tuple(cast(ChallengerRoundEvidence, record.payload) for record in rounds)
         assert len(round_payloads) == 2
-        assert tuple(payload.completed_horizons for payload in round_payloads) == (
-            _REQUIRED_HORIZONS,
-            _REQUIRED_HORIZONS,
+        assert tuple(payload.completed_horizon_seconds for payload in round_payloads) == (
+            MPC_FORECAST_HORIZON_SECONDS,
+            MPC_FORECAST_HORIZON_SECONDS,
         )
-        assert all(payload.required_horizons == _REQUIRED_HORIZONS for payload in round_payloads)
+        assert all(payload.required_horizon_seconds == MPC_FORECAST_HORIZON_SECONDS for payload in round_payloads)
         assert all(record.model_digest == learned_digest for record in rounds)
         assert all(record.provenance_digest == incumbent_digest for record in rounds)
         assert canonical_model_fit_lineage_digest(challenger.fit_lineage) == lineage_digest
@@ -1501,10 +1528,7 @@ def test_three_short_cooks_prepare_shadow_then_two_complete_rounds_durably_activ
             if record.event_kind is TraceEventKind.CHALLENGER_PROGRESS
             and isinstance(record.payload, ChallengerProgressTracePayload)
         )
-        assert {
-            (item.phase, item.evaluation_round, item.consecutive_wins)
-            for item in progress
-        }.issuperset(
+        assert {(item.phase, item.evaluation_round, item.consecutive_wins) for item in progress}.issuperset(
             {
                 ("evaluating", 0, 0),
                 ("evaluating", 1, 1),
@@ -1514,6 +1538,11 @@ def test_three_short_cooks_prepare_shadow_then_two_complete_rounds_durably_activ
         )
         assert all(item.lineage_digest == lineage_digest for item in progress)
         assert all(item.result_digest == fit.result_digest for item in progress)
+        assert all(item.required_horizon_seconds == MPC_FORECAST_HORIZON_SECONDS for item in progress)
+        assert {item.completed_horizon_seconds for item in progress} == {
+            (),
+            MPC_FORECAST_HORIZON_SECONDS,
+        }
         confidence = tuple(
             record.payload
             for record in read_model_evidence(kind=EvidenceKind.CONFIDENCE_DECISION)

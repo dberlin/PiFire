@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from common.mpc_learning import forecast_horizon_spec
 from controller.acados.contracts import GreyBoxMPCConfig
 from controller.model_learning.contracts import (
     ActivationPolicy,
@@ -459,8 +460,8 @@ def test_orchestrator_carries_both_origins_through_causal_evaluation_and_handoff
     )
     assert delivery.preparation.accepted
 
-    incumbent_predict = lambda _origin: -1000.0
-    challenger_predict = lambda _origin: 0.0
+    challenger_predict = lambda forecast: forecast.frame.temp_c + forecast.observation_frames
+    incumbent_predict = lambda forecast: challenger_predict(forecast) + 10.0
     assert (
         len(
             orchestrator.register_causal_forecasts(
@@ -579,7 +580,7 @@ def test_incumbent_and_challenger_share_one_exact_causal_origin_and_probe_frames
 
     normal = paired_forecast_origin(
         _frame(12),
-        horizon_steps=15,
+        horizon=forecast_horizon_spec(300),
         candidate_generation=9,
         incumbent_digest=_INCUMBENT,
         challenger_digest=_CHALLENGER,
@@ -594,7 +595,7 @@ def test_incumbent_and_challenger_share_one_exact_causal_origin_and_probe_frames
     assert (
         paired_forecast_origin(
             probe,
-            horizon_steps=15,
+            horizon=forecast_horizon_spec(300),
             candidate_generation=9,
             incumbent_digest=_INCUMBENT,
             challenger_digest=_CHALLENGER,

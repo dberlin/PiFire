@@ -79,16 +79,30 @@ type Sigma = number;
 type Theta = number;
 type Phase = "built" | "evaluating" | "qualified" | "activating";
 type RoleGeneration2 = number;
-type CompletedHorizons = (3 | 15 | 45 | 90 | 180)[];
+/**
+ * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
+ * via the `definition` "ForecastHorizonSeconds".
+ */
+export type ForecastHorizonSeconds = 100 | 200 | 300 | 400 | 600;
+type CompletedHorizonSeconds = ForecastHorizonSeconds[];
 type Epoch = number;
 type CandidateDigest2 = string;
 type CandidateGeneration3 = number;
-type HorizonSteps = 3 | 15 | 45 | 90 | 180;
 type IncumbentDigest1 = string;
+/**
+ * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
+ * via the `definition` "ForecastObservationFrames".
+ */
+export type ForecastObservationFrames = 5 | 10 | 15 | 20 | 30;
 type OriginSequence = number;
+/**
+ * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
+ * via the `definition` "ForecastPredictionSteps".
+ */
+export type ForecastPredictionSteps = 4 | 8 | 12 | 16 | 24;
 type RoleGeneration3 = number;
 type PendingOrigins = PendingForecastOriginReport[];
-type RequiredHorizons = (3 | 15 | 45 | 90 | 180)[];
+type RequiredHorizonSeconds = ForecastHorizonSeconds[];
 type RequiredWins = number;
 type ResumedFromPreviousCook = boolean;
 type Round = number;
@@ -152,7 +166,7 @@ type CandidateGeneration4 = number | null;
 type RollbackDigest = string | null;
 type RollbackGeneration = number | null;
 type Revision2 = string;
-type SchemaVersion = 3;
+type SchemaVersion = 4;
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
  * via the `definition` "ModelEvidenceStatus".
@@ -470,10 +484,10 @@ export interface GreyParameters {
  * via the `definition` "CausalEvaluationProgress".
  */
 export interface CausalEvaluationProgress {
-  completed_horizons: CompletedHorizons;
+  completed_horizon_seconds: CompletedHorizonSeconds;
   epoch: Epoch;
   pending_origins: PendingOrigins;
-  required_horizons: RequiredHorizons;
+  required_horizon_seconds: RequiredHorizonSeconds;
   required_wins: RequiredWins;
   resumed_from_previous_cook: ResumedFromPreviousCook;
   round: Round;
@@ -486,9 +500,11 @@ export interface CausalEvaluationProgress {
 export interface PendingForecastOriginReport {
   candidate_digest: CandidateDigest2;
   candidate_generation: CandidateGeneration3;
-  horizon_steps: HorizonSteps;
+  horizon_seconds: ForecastHorizonSeconds;
   incumbent_digest: IncumbentDigest1;
+  observation_frames: ForecastObservationFrames;
   origin_sequence: OriginSequence;
+  prediction_steps: ForecastPredictionSteps;
   role_generation: RoleGeneration3;
 }
 /**

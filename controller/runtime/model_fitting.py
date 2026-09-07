@@ -24,6 +24,7 @@ from types import TracebackType
 from typing import TYPE_CHECKING, Any, Self
 
 if TYPE_CHECKING:
+    from common.mpc_learning import ForecastHorizonSpec
     from controller.model_learning.contracts import FitRequest
 
 
@@ -1735,7 +1736,9 @@ def prepare_candidate_off_path(
 @dataclass(frozen=True, slots=True)
 class CausalForecastInput:
     frame: Any
-    horizon_steps: int
+    horizon_seconds: int
+    prediction_steps: int
+    observation_frames: int
     candidate_generation: int
     incumbent_digest: str
     challenger_digest: str
@@ -1744,7 +1747,7 @@ class CausalForecastInput:
 def paired_forecast_origin(
     frame: Any,
     *,
-    horizon_steps: int,
+    horizon: ForecastHorizonSpec,
     candidate_generation: int,
     incumbent_digest: str,
     challenger_digest: str,
@@ -1752,16 +1755,21 @@ def paired_forecast_origin(
     challenger_predict: Callable[[CausalForecastInput], float],
 ) -> Any | None:
     """Call both predictors with one shared immutable, pre-observation origin."""
+    from common.mpc_learning import ForecastHorizonSpec
     from controller.model_learning.contracts import FrameObservation
     from controller.model_learning.evaluation import ForecastOrigin
 
     if not isinstance(frame, FrameObservation):
         raise TypeError("frame must be a FrameObservation")
+    if not isinstance(horizon, ForecastHorizonSpec):
+        raise TypeError("horizon must be a ForecastHorizonSpec")
     if frame.calibration_fit or frame.calibration_stage is not None or frame.probe_q != 0.0:
         return None
     shared = CausalForecastInput(
         frame=frame,
-        horizon_steps=horizon_steps,
+        horizon_seconds=horizon.seconds,
+        prediction_steps=horizon.prediction_steps,
+        observation_frames=horizon.observation_frames,
         candidate_generation=candidate_generation,
         incumbent_digest=incumbent_digest,
         challenger_digest=challenger_digest,
@@ -1771,7 +1779,9 @@ def paired_forecast_origin(
     return ForecastOrigin(
         origin_sequence=frame.observation_sequence,
         origin_time_s=frame.frame_end_s,
-        horizon_steps=horizon_steps,
+        horizon_seconds=horizon.seconds,
+        prediction_steps=horizon.prediction_steps,
+        observation_frames=horizon.observation_frames,
         role_generation=frame.role_generation,
         candidate_generation=candidate_generation,
         incumbent_digest=incumbent_digest,
@@ -2046,12 +2056,16 @@ class GreyLearningOrchestrator:
         return self._resumed_from_previous_cook
 
     @property
-    def completed_horizons(self) -> tuple[int, ...]:
+    def completed_horizon_seconds(self) -> tuple[int, ...]:
         if self._evaluator is None:
             return ()
         completed = self._evaluator.completed_origins[self._evaluation_cursor :]
-        present = {origin.horizon_steps for origin in completed}
-        return tuple(horizon for horizon in self.evaluation_config.required_horizons if horizon in present)
+        present = {origin.horizon_seconds for origin in completed}
+        return tuple(
+            horizon
+            for horizon in self.evaluation_config.required_horizon_seconds
+            if horizon in present
+        )
 
     @property
     def pending_origins(self) -> tuple[Any, ...]:
@@ -2397,14 +2411,16 @@ class GreyLearningOrchestrator:
         incumbent_predict: Callable[[CausalForecastInput], float],
         challenger_predict: Callable[[CausalForecastInput], float],
     ) -> tuple[Any, ...]:
+        from common.mpc_learning import MPC_FORECAST_HORIZONS
+
         if self._prepared is None or not self._prepared.accepted or self._evaluator is None:
             return ()
         request = self._prepared.candidate.request
         origins = []
-        for horizon in self.evaluation_config.required_horizons:
+        for horizon in MPC_FORECAST_HORIZONS:
             origin = paired_forecast_origin(
                 frame,
-                horizon_steps=horizon,
+                horizon=horizon,
                 candidate_generation=request.candidate_generation,
                 incumbent_digest=request.parent_incumbent_digest,
                 challenger_digest=self._prepared.candidate_digest,
@@ -2422,8 +2438,8 @@ class GreyLearningOrchestrator:
         if self._evaluator is None or self._prepared is None:
             return None
         rows = self._evaluator.completed_origins[self._evaluation_cursor :]
-        horizons = {row.horizon_steps for row in rows}
-        if not set(self.evaluation_config.required_horizons) <= horizons:
+        horizons = {row.horizon_seconds for row in rows}
+        if not set(self.evaluation_config.required_horizon_seconds) <= horizons:
             return None
         request = self._prepared.candidate.request
         decision = evaluate_forecasts(
