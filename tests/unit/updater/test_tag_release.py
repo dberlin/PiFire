@@ -229,9 +229,7 @@ def test_git_vcs_detached_head_resolves_no_publication_bookmark():
 
 def test_publication_bookmark_is_measured_from_its_origin_ref():
     runner = FakeRunner()
-    assert tag_release.measured_against(runner, "massive-reworks-and-new-ui") == (
-        "origin/massive-reworks-and-new-ui"
-    )
+    assert tag_release.measured_against(runner, "massive-reworks-and-new-ui") == ("origin/massive-reworks-and-new-ui")
 
 
 def test_detached_git_head_without_a_publication_bookmark_is_measured_from_head():
@@ -351,9 +349,7 @@ def test_check_refreshes_remote_refs_before_reporting(manifest):
 
     fetch = runner.calls.index(["git", "fetch", "--tags", "--force"])
     report = next(
-        index
-        for index, call in enumerate(runner.calls)
-        if call[:4] == ["git", "tag", "--sort=v:refname", "--merged"]
+        index for index, call in enumerate(runner.calls) if call[:4] == ["git", "tag", "--sort=v:refname", "--merged"]
     )
     assert fetch < report
 

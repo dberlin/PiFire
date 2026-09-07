@@ -168,11 +168,7 @@ class Controller:
             control["updated"] = False  # Clear Updated Flag if Set
             ctx.store.write_control_snapshot(control, origin="control")
             # 4b. Start the recipe step work cycle
-            next_effective_mode = (
-                recipe["steps"][step_num + 1]["mode"]
-                if step_num + 1 < num_steps
-                else Mode.STOP
-            )
+            next_effective_mode = recipe["steps"][step_num + 1]["mode"] if step_num + 1 < num_steps else Mode.STOP
             self.ctx.trajectory_next_effective_mode = next_effective_mode
             try:
                 self.work_cycle(recipe["steps"][step_num]["mode"])
@@ -240,9 +236,7 @@ class Controller:
                 error_log = getattr(self.eventLogger, "error", None)
                 if callable(error_log):
                     try:
-                        error_log(
-                            f"Grey learning process shutdown failed: {error}"
-                        )
+                        error_log(f"Grey learning process shutdown failed: {error}")
                     except Exception:  # noqa: S110 -- cleanup must continue after logging failure
                         pass
         trajectory = getattr(self.ctx, "learning_trajectory", None)
@@ -250,11 +244,7 @@ class Controller:
         owner = trajectory if trajectory is not None else persistence
         if owner is not None:
             try:
-                closed = (
-                    owner.close()
-                    if trajectory is not None
-                    else owner.close(timeout=2.0)
-                )
+                closed = owner.close() if trajectory is not None else owner.close(timeout=2.0)
                 if closed is False:
                     error_log = getattr(self.eventLogger, "error", None)
                     if callable(error_log):
@@ -263,9 +253,7 @@ class Controller:
                 error_log = getattr(self.eventLogger, "error", None)
                 if callable(error_log):
                     try:
-                        error_log(
-                            f"Learning persistence process shutdown failed: {error}"
-                        )
+                        error_log(f"Learning persistence process shutdown failed: {error}")
                     except Exception:  # noqa: S110 -- cleanup must continue after logging failure
                         pass
         try:

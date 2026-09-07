@@ -56,8 +56,6 @@ def _synthetic_cook(seed=0, noise=0.5, rows=1200):
     return list(zip(t.tolist(), temp.tolist(), Q.tolist()))
 
 
-
-
 def _heatup_only(rows, seed=0, noise=0.5):
     """A ramp from cold at full fire and nothing else -- no step, no coast.
 
@@ -271,5 +269,3 @@ def test_an_undetermined_first_fit_cannot_slip_through_on_having_no_incumbent():
     )
     assert verdict.accepted is False
     assert "does not determine the model" in verdict.reason
-
-

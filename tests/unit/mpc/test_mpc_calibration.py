@@ -227,10 +227,7 @@ def test_grey_model_is_invariant_under_common_thermal_scaling() -> None:
     )
 
     for scale in (0.25, 0.5, 2.0, 4.0):
-        scaled = {
-            key: value if key == "theta" else value * scale
-            for key, value in TRUTH.items()
-        }
+        scaled = {key: value if key == "theta" else value * scale for key, value in TRUTH.items()}
         other = simulate_grey_box(
             time_s,
             load,

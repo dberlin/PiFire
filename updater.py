@@ -957,7 +957,7 @@ def _uv_is_compatible(executable):
     try:
         name, raw_version, *_ = result.stdout.strip().split()
         parsed = tuple(int(part) for part in raw_version.split("."))
-    except (AttributeError, TypeError, ValueError):
+    except AttributeError, TypeError, ValueError:
         return False
     return name == "uv" and parsed >= MINIMUM_UV_VERSION
 

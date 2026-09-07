@@ -50,9 +50,7 @@ BY_UNIT_NAME = re.compile(rf"service{SEP}supervisor\w*{SEP}restart|systemctl{SEP
 #: Token types after which a STRING is a statement in its own right -- a
 #: docstring, or one of the bare `"""..."""` section banners updater.py and
 #: common/process_mon.py use as headers.
-_STATEMENT_START = frozenset(
-    {tokenize.NEWLINE, tokenize.NL, tokenize.INDENT, tokenize.DEDENT, tokenize.ENCODING}
-)
+_STATEMENT_START = frozenset({tokenize.NEWLINE, tokenize.NL, tokenize.INDENT, tokenize.DEDENT, tokenize.ENCODING})
 
 
 def code_only(path):
@@ -170,9 +168,7 @@ def test_every_installer_grants_supervisorctl():
 #: Non-capturing throughout: findall returns GROUPS when a pattern has any, so a
 #: capturing alternative reports empty strings for every branch that did not use
 #: it -- which reads as a hit with nothing in it.
-RUNS_LIFECYCLE = re.compile(
-    rf"supervisorctl|sudo{SEP}reboot|systemctl{SEP}(?:reboot|poweroff)|shutdown{SEP}-h{SEP}now"
-)
+RUNS_LIFECYCLE = re.compile(rf"supervisorctl|sudo{SEP}reboot|systemctl{SEP}(?:reboot|poweroff)|shutdown{SEP}-h{SEP}now")
 
 #: The one module allowed to name these commands.
 LIFECYCLE_OWNER = "common/system.py"

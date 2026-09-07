@@ -158,12 +158,15 @@ def test_replay_rejects_nonphysical_model_and_initial_load_values(
 
 
 def test_zero_delay_chain_returns_empty_without_requiring_positive_theta() -> None:
-    assert replay_delay_chain(
-        (_frame(0, 0.5),),
-        theta=0.0,
-        n_delay=0,
-        initial_load=0.5,
-    ) == ()
+    assert (
+        replay_delay_chain(
+            (_frame(0, 0.5),),
+            theta=0.0,
+            n_delay=0,
+            initial_load=0.5,
+        )
+        == ()
+    )
 
 
 @pytest.mark.parametrize(
@@ -231,14 +234,8 @@ def test_replay_rejects_delivery_that_is_not_exact() -> None:
 
 def test_replay_does_not_read_frame_temperatures() -> None:
     loads = (0.1, 0.8, 0.3)
-    cool = tuple(
-        _frame(index, load, temperature_c=40.0 + index)
-        for index, load in enumerate(loads)
-    )
-    hot = tuple(
-        _frame(index, load, temperature_c=400.0 - index)
-        for index, load in enumerate(loads)
-    )
+    cool = tuple(_frame(index, load, temperature_c=40.0 + index) for index, load in enumerate(loads))
+    hot = tuple(_frame(index, load, temperature_c=400.0 - index) for index, load in enumerate(loads))
 
     assert replay_delay_chain(
         cool,

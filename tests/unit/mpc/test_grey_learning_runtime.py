@@ -558,6 +558,7 @@ def test_passive_corpus_fit_terminalizes_not_ready_ticket_without_recording_a_ru
     harness.runtime.close()
     harness.activation.close()
 
+
 def test_passive_empty_corpus_terminalizes_ticket_without_disabling_learning(
     tmp_path,
 ) -> None:

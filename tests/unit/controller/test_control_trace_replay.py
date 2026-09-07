@@ -162,8 +162,6 @@ def _pid_update(revision=1):
     )
 
 
-
-
 def _mpc_update(revision=1, *, mode=ActuationMode.FRAMED_PULSE):
     return MpcUpdatePayload(
         **_common(revision, mode=mode, output=0.5, requested_fan_duty=70.0, applied_fan_duty=70.0),
@@ -207,8 +205,6 @@ def _allocation(revision=1):
         fan_clamp_reason=result.fan_clamp_reason,
         allocator_revision=ALLOCATOR_REVISION,
     )
-
-
 
 
 def _applied(revision=1):

@@ -185,11 +185,11 @@ class ActivationRuntime:
             None,
         )
         return self._last_seed_refresh_status is not None
+
     @property
     def last_seed_refresh_status(self) -> str | None:
         with self._lock:
             return self._last_seed_refresh_status
-
 
     @staticmethod
     def _receipt_is_durable(receipt: DurableActivationReceipt) -> bool:
@@ -572,9 +572,7 @@ class ActivationRuntime:
                     return False
             incumbent = self._active_pair
             try:
-                pair.core.adopt_model_independent_state(
-                    incumbent.core.capture_model_independent_state()
-                )
+                pair.core.adopt_model_independent_state(incumbent.core.capture_model_independent_state())
             except Exception:
                 return False
             pair.revoke_output()
@@ -628,9 +626,7 @@ class ActivationRuntime:
             ):
                 return False
             try:
-                rollback.core.adopt_model_independent_state(
-                    pair.core.capture_model_independent_state()
-                )
+                rollback.core.adopt_model_independent_state(pair.core.capture_model_independent_state())
             except Exception:
                 return False
             if not self._refresh_pair_seed(rollback):
@@ -717,9 +713,7 @@ class ActivationRuntime:
             failed = self._active_pair
             active_record = self._active_record
             try:
-                rollback.core.adopt_model_independent_state(
-                    failed.core.capture_model_independent_state()
-                )
+                rollback.core.adopt_model_independent_state(failed.core.capture_model_independent_state())
             except Exception:
                 return False
             if not self._refresh_pair_seed(rollback):
@@ -872,9 +866,7 @@ class ActivationRuntime:
                         pair.close()
                 return False
             try:
-                restored.core.adopt_model_independent_state(
-                    self._active_pair.core.capture_model_independent_state()
-                )
+                restored.core.adopt_model_independent_state(self._active_pair.core.capture_model_independent_state())
             except Exception:
                 restored.close()
                 if rollback is not None:
@@ -919,9 +911,7 @@ class ActivationRuntime:
             current = self._active_pair
             if pair is current:
                 raise ValueError("replacement pair must be a distinct owner")
-            pair.core.adopt_model_independent_state(
-                current.core.capture_model_independent_state()
-            )
+            pair.core.adopt_model_independent_state(current.core.capture_model_independent_state())
             pair.revoke_output()
             displaced_rollback = self._rollback_pair
             pending = self._pending
@@ -999,15 +989,12 @@ class ActivationRuntime:
         self._persistence_close_pending = False
         return None
 
-
     def close(self) -> None:
         with self._lock:
             if self._closed:
                 persistence_error = self._close_owned_persistence_locked()
                 if persistence_error is not None:
-                    raise RuntimeError(
-                        "could not close complete activation runtime ownership"
-                    ) from persistence_error
+                    raise RuntimeError("could not close complete activation runtime ownership") from persistence_error
                 return
             aborts_durable = self._retry_pending_aborts_locked(wait_for_completion=True)
             self._closed = True

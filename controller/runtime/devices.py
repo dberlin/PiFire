@@ -28,7 +28,6 @@ from controller.runtime.context import Devices
 _AUTHORITATIVE_ACTUATION_READBACK_MODULES = frozenset({"grillplat.prototype"})
 
 
-
 def build_display(settings, *, errors, event_log, control_log):
     """
     Construct the display device with prototype-fallback logic: import the
@@ -201,7 +200,6 @@ def build_devices(settings, *, errors, event_log, control_log):
         raw_grill_platform,
         readback_authoritative=type(raw_grill_platform).__module__ in _AUTHORITATIVE_ACTUATION_READBACK_MODULES,
     )
-
 
     """
 	Set up Probes Input Module

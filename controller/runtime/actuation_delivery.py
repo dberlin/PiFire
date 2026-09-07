@@ -273,7 +273,6 @@ class ActuationDeliveryJournal:
             boundary = self._last_monotonic_ms if self._last_monotonic_ms is not None else 0
             self._mark_uncertain_locked(reason, boundary, channels)
 
-
     def _accept_monotonic_locked(self, monotonic_ms: int) -> None:
         if self._last_monotonic_ms is not None and monotonic_ms < self._last_monotonic_ms:
             raise ValueError("monotonic clock regressed")
@@ -367,7 +366,6 @@ class DeliveredGrillPlatform:
     _platform: object
     _pwm_capable: bool | None
     _readback_authoritative: bool
-
 
     def __init__(
         self,

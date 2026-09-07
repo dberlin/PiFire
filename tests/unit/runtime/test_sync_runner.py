@@ -113,6 +113,7 @@ def test_sync_runner_float_output_has_no_fan():
     out = SyncControllerRunner(FloatCore()).latest_from(190.0)
     assert out.cycle_ratio == 0.25 and out.fan is None
 
+
 @pytest.mark.parametrize(
     ("raw_output", "allocated_duty", "clamp_reason"),
     [

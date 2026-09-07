@@ -124,8 +124,6 @@ def test_published_release_uses_canonical_current_manifest(
     )
 
 
-
-
 def test_fixture_uses_validated_library_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

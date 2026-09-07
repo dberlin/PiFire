@@ -196,11 +196,7 @@ def test_manual_takeover_resets_the_active_frame_before_manual_feedback(hold_cyc
 
     hold.on_tick(3.0, 200.0, hold.grill.get_output_status())
 
-    scored = [
-        record.payload
-        for record in recorder.records
-        if isinstance(record.payload, ModelObservationPayload)
-    ]
+    scored = [record.payload for record in recorder.records if isinstance(record.payload, ModelObservationPayload)]
     assert len(scored) == 1
     assert (
         scored[0].frame_start_ms,

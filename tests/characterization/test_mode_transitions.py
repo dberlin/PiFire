@@ -410,26 +410,14 @@ def test_shared_smoke_skeleton_emits_one_canonical_sample_per_post_entry_probe_r
     assert recorder.events[0][0] == "entered"
     assert recorder.events[0][1].effective_mode == "Smoke"
     assert recorder.events[0][1].persisted_mode == "Smoke"
-    exits = [
-        (index, event)
-        for index, (kind, event) in enumerate(recorder.events)
-        if kind == "exited"
-    ]
+    exits = [(index, event) for index, (kind, event) in enumerate(recorder.events) if kind == "exited"]
     assert len(exits) == 1
     exit_index, exit_event = exits[0]
     assert exit_event.effective_mode == "Smoke"
-    assert all(
-        index < exit_index
-        for index, (kind, _event) in enumerate(recorder.events)
-        if kind == "sample"
-    )
+    assert all(index < exit_index for index, (kind, _event) in enumerate(recorder.events) if kind == "sample")
     assert len(recorder.samples) == len(probes.read_calls)
     assert all(sample.chamber_temperature == 200 for sample in recorder.samples)
-    assert all(
-        left.monotonic_ms <= right.monotonic_ms
-        for left, right in zip(recorder.samples, recorder.samples[1:])
-    )
-
+    assert all(left.monotonic_ms <= right.monotonic_ms for left, right in zip(recorder.samples, recorder.samples[1:]))
 
 
 def test_recipe_exit_emits_actual_next_effective_handler() -> None:
@@ -488,15 +476,14 @@ def test_preflight_probe_sample_and_fault_exit_are_emitted_without_hardware_reor
         ("power_off", ()),
     ]
 
+
 class _ForbiddenMpcFinder(importlib.abc.MetaPathFinder):
     def __init__(self) -> None:
         self.attempts: list[str] = []
 
     def find_spec(self, fullname, path=None, target=None):
         del path, target
-        if fullname == "controller.mpc" or fullname.startswith(
-            ("controller.mpc.", "controller.mpc_")
-        ):
+        if fullname == "controller.mpc" or fullname.startswith(("controller.mpc.", "controller.mpc_")):
             self.attempts.append(fullname)
             raise AssertionError(f"Smoke imported forbidden MPC dependency {fullname}")
 
@@ -505,15 +492,10 @@ def test_smoke_has_no_mpc_import_build_or_call_and_mode_hardware_order_is_unchan
     finder = _ForbiddenMpcFinder()
     with monkeypatch.context() as scoped:
         for loaded_name in tuple(sys.modules):
-            if (
-                loaded_name in {
-                    "controller.runtime.modes.smoke",
-                    "controller.mpc",
-                }
-                or loaded_name.startswith(
-                    ("controller.mpc.", "controller.mpc_")
-                )
-            ):
+            if loaded_name in {
+                "controller.runtime.modes.smoke",
+                "controller.mpc",
+            } or loaded_name.startswith(("controller.mpc.", "controller.mpc_")):
                 scoped.delitem(sys.modules, loaded_name, raising=False)
         scoped.setattr(sys, "meta_path", [finder, *sys.meta_path])
         loaded = importlib.import_module("controller.runtime.modes.smoke")

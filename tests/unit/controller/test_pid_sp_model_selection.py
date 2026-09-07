@@ -52,9 +52,6 @@ from tests.unit.controller._pid_sp_model_selection_helpers import (
 _INSTALLATION_DIGEST = "a" * 64
 
 
-
-
-
 def _unavailable_profile(form: ModelForm) -> DelayProfile:
     return DelayProfile(
         model_form=form.value,
@@ -66,8 +63,6 @@ def _unavailable_profile(form: ModelForm) -> DelayProfile:
         blockers=(DelayBlocker.NO_PHYSICALLY_VALID_CANDIDATE,),
         authorized=False,
     )
-
-
 
 
 def test_nonphysical_fopdt_cannot_preempt_physical_ipdt():

@@ -58,10 +58,7 @@ def _resolved_from_module(path: Path, root: Path, node: ast.ImportFrom) -> str:
 
 
 def _targets_test(target: str, test_modules: set[str]) -> bool:
-    return any(
-        target == module or target.startswith(f"{module}.")
-        for module in test_modules
-    )
+    return any(target == module or target.startswith(f"{module}.") for module in test_modules)
 
 
 def _importlib_aliases(tree: ast.AST) -> tuple[set[str], set[str]]:
@@ -74,11 +71,7 @@ def _importlib_aliases(tree: ast.AST) -> tuple[set[str], set[str]]:
                     module_aliases.add(alias.asname or "importlib")
                 elif alias.name.startswith("importlib.") and alias.asname is None:
                     module_aliases.add("importlib")
-        elif (
-            isinstance(node, ast.ImportFrom)
-            and node.level == 0
-            and node.module == "importlib"
-        ):
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module == "importlib":
             for alias in node.names:
                 if alias.name == "*":
                     function_aliases.add("import_module")
@@ -124,10 +117,7 @@ def _dynamic_target(
         return name
 
     package_node = _call_argument(node, 1, "package")
-    if (
-        not isinstance(package_node, ast.Constant)
-        or not isinstance(package_node.value, str)
-    ):
+    if not isinstance(package_node, ast.Constant) or not isinstance(package_node.value, str):
         return None
     try:
         return importlib.util.resolve_name(name, package_node.value)
@@ -143,10 +133,7 @@ def _static_targets(path: Path, root: Path, node: ast.AST) -> set[str]:
 
     module = _resolved_from_module(path, root, node)
     targets = {module} if module else set()
-    targets.update(
-        ".".join(part for part in (module, alias.name) if part)
-        for alias in node.names
-    )
+    targets.update(".".join(part for part in (module, alias.name) if part) for alias in node.names)
     return targets
 
 
@@ -170,11 +157,7 @@ def _file_offenders(
 
 
 def _cross_test_imports(root: Path = TESTS_ROOT) -> list[str]:
-    paths = [
-        path
-        for path in sorted(root.rglob("*.py"))
-        if "__pycache__" not in path.parts
-    ]
+    paths = [path for path in sorted(root.rglob("*.py")) if "__pycache__" not in path.parts]
     test_modules = _test_modules(paths, root)
     offenders: list[tuple[str, int, int, str]] = []
 
@@ -191,10 +174,7 @@ def _cross_test_imports(root: Path = TESTS_ROOT) -> list[str]:
             )
         )
 
-    return [
-        f"{rel}:{lineno}: {source}"
-        for rel, lineno, _column, source in sorted(offenders)
-    ]
+    return [f"{rel}:{lineno}: {source}" for rel, lineno, _column, source in sorted(offenders)]
 
 
 @pytest.mark.parametrize(
@@ -210,9 +190,7 @@ def _cross_test_imports(root: Path = TESTS_ROOT) -> list[str]:
         "from .test_module import shared_value as value\n",
     ],
 )
-def test_cross_test_imports_detects_static_import_forms(
-    tmp_path: Path, source: str
-) -> None:
+def test_cross_test_imports_detects_static_import_forms(tmp_path: Path, source: str) -> None:
     package = tmp_path / "package"
     package.mkdir()
     (package / "__init__.py").write_text("")
@@ -232,19 +210,11 @@ def test_cross_test_imports_detects_static_import_forms(
         'import importlib as loader\nloader.import_module("package.test_module")\n',
         'import importlib\nimportlib.import_module(name="package.test_module")\n',
         'import importlib.util\nimportlib.import_module("package.test_module")\n',
-        (
-            "from importlib import import_module as load\n"
-            'load("package.test_module")\n'
-        ),
-        (
-            "from importlib import import_module as load\n"
-            'load(name="package.test_module")\n'
-        ),
+        ('from importlib import import_module as load\nload("package.test_module")\n'),
+        ('from importlib import import_module as load\nload(name="package.test_module")\n'),
     ],
 )
-def test_cross_test_imports_detects_literal_dynamic_imports(
-    tmp_path: Path, source: str
-) -> None:
+def test_cross_test_imports_detects_literal_dynamic_imports(tmp_path: Path, source: str) -> None:
     package = tmp_path / "package"
     package.mkdir()
     (package / "__init__.py").write_text("")
@@ -261,23 +231,12 @@ def test_cross_test_imports_detects_literal_dynamic_imports(
     "source",
     [
         'import importlib\nimportlib.import_module(".test_module", "package")\n',
-        (
-            "import importlib\n"
-            'importlib.import_module(name=".test_module", package="package")\n'
-        ),
-        (
-            "import importlib\n"
-            'importlib.import_module("..test_module", package="package.subpackage")\n'
-        ),
-        (
-            "from importlib import import_module as load\n"
-            'load(name="..test_module", package="package.subpackage")\n'
-        ),
+        ('import importlib\nimportlib.import_module(name=".test_module", package="package")\n'),
+        ('import importlib\nimportlib.import_module("..test_module", package="package.subpackage")\n'),
+        ('from importlib import import_module as load\nload(name="..test_module", package="package.subpackage")\n'),
     ],
 )
-def test_cross_test_imports_resolves_relative_dynamic_imports(
-    tmp_path: Path, source: str
-) -> None:
+def test_cross_test_imports_resolves_relative_dynamic_imports(tmp_path: Path, source: str) -> None:
     package = tmp_path / "package"
     package.mkdir()
     (package / "__init__.py").write_text("")
@@ -295,31 +254,13 @@ def test_cross_test_imports_resolves_relative_dynamic_imports(
 @pytest.mark.parametrize(
     "source",
     [
-        (
-            "import importlib as loader\n"
-            "def helper(loader):\n"
-            '    loader.import_module("package.test_module")\n'
-        ),
-        (
-            "from importlib import import_module as load\n"
-            "load = object()\n"
-            'load("package.test_module")\n'
-        ),
-        (
-            'loader.import_module("package.test_module")\n'
-            "if False:\n"
-            "    import importlib as loader\n"
-        ),
-        (
-            'load("package.test_module")\n'
-            "if False:\n"
-            "    from importlib import import_module as load\n"
-        ),
+        ('import importlib as loader\ndef helper(loader):\n    loader.import_module("package.test_module")\n'),
+        ('from importlib import import_module as load\nload = object()\nload("package.test_module")\n'),
+        ('loader.import_module("package.test_module")\nif False:\n    import importlib as loader\n'),
+        ('load("package.test_module")\nif False:\n    from importlib import import_module as load\n'),
     ],
 )
-def test_cross_test_imports_reserves_importlib_aliases_for_whole_file(
-    tmp_path: Path, source: str
-) -> None:
+def test_cross_test_imports_reserves_importlib_aliases_for_whole_file(tmp_path: Path, source: str) -> None:
     package = tmp_path / "package"
     package.mkdir()
     (package / "__init__.py").write_text("")
@@ -331,6 +272,7 @@ def test_cross_test_imports_reserves_importlib_aliases_for_whole_file(
     assert len(offenders) == 1
     assert "package.test_module" in offenders[0]
 
+
 def test_cross_test_imports_reserves_wildcard_import_module_for_whole_file(
     tmp_path: Path,
 ) -> None:
@@ -339,14 +281,10 @@ def test_cross_test_imports_reserves_wildcard_import_module_for_whole_file(
     (package / "__init__.py").write_text("")
     (package / "test_module.py").write_text("")
     (package / "test_importer.py").write_text(
-        'import_module("package.test_module")\n'
-        "if False:\n"
-        "    from importlib import *\n"
+        'import_module("package.test_module")\nif False:\n    from importlib import *\n'
     )
 
-    assert _cross_test_imports(tmp_path) == [
-        "package/test_importer.py:1: import_module('package.test_module')"
-    ]
+    assert _cross_test_imports(tmp_path) == ["package/test_importer.py:1: import_module('package.test_module')"]
 
 
 def test_cross_test_imports_ignores_names_never_imported_from_importlib(
@@ -371,19 +309,11 @@ def test_cross_test_imports_ignores_names_never_imported_from_importlib(
     [
         "import package.test_package.child\n",
         "from package.test_package.child import shared_value\n",
-        (
-            "import importlib\n"
-            'importlib.import_module("package.test_package.child")\n'
-        ),
-        (
-            "from importlib import import_module\n"
-            'import_module(".child", package="package.test_package")\n'
-        ),
+        ('import importlib\nimportlib.import_module("package.test_package.child")\n'),
+        ('from importlib import import_module\nimport_module(".child", package="package.test_package")\n'),
     ],
 )
-def test_cross_test_imports_detects_descendants_of_test_packages(
-    tmp_path: Path, source: str
-) -> None:
+def test_cross_test_imports_detects_descendants_of_test_packages(tmp_path: Path, source: str) -> None:
     package = tmp_path / "package"
     package.mkdir()
     (package / "__init__.py").write_text("")
@@ -408,13 +338,10 @@ def test_cross_test_imports_detects_descendants_of_namespace_test_directories(
     test_package = package / "test_namespace"
     test_package.mkdir()
     (test_package / "child.py").write_text("shared_value = 1\n")
-    (package / "test_importer.py").write_text(
-        "from package.test_namespace.child import shared_value\n"
-    )
+    (package / "test_importer.py").write_text("from package.test_namespace.child import shared_value\n")
 
     assert _cross_test_imports(tmp_path) == [
-        "package/test_importer.py:1: "
-        "from package.test_namespace.child import shared_value",
+        "package/test_importer.py:1: from package.test_namespace.child import shared_value",
     ]
 
 
@@ -424,12 +351,7 @@ def test_cross_test_imports_allows_non_module_test_names_and_string_mentions(
     package = tmp_path / "package"
     package.mkdir()
     (package / "__init__.py").write_text("")
-    (package / "regular_module.py").write_text(
-        "def test_function():\n"
-        "    pass\n\n"
-        "class TestClass:\n"
-        "    pass\n"
-    )
+    (package / "regular_module.py").write_text("def test_function():\n    pass\n\nclass TestClass:\n    pass\n")
     (package / "_test_helper.py").write_text("")
     (package / "_helper_test.py").write_text("")
     (package / "test_importer.py").write_text(

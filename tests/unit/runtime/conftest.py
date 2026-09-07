@@ -18,8 +18,6 @@ def _off():
     return {"auger": False, "fan": False, "igniter": False, "power": False, "pwm": 100}
 
 
-
-
 @pytest.fixture
 def hold_cycle(monkeypatch):
     """A HoldMode wired to a FakeControllerRunner, driven tick by tick.

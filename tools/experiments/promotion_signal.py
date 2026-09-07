@@ -345,11 +345,7 @@ def shipped_fit(t, y, Q):
     if not isinstance(outcome, GreyFitSuccess):
         return dict(SHIPPED, converged=False, nfev=0, effective_rows=0)
     fitted = {
-        key: (
-            outcome.config.delay_states
-            if key == "n_delay"
-            else float(getattr(outcome.config, key))
-        )
+        key: (outcome.config.delay_states if key == "n_delay" else float(getattr(outcome.config, key)))
         for key in MODEL_KEYS
     }
     fitted.update(
@@ -382,7 +378,7 @@ def log_svals(t, Q, fitted, T0):
                 y_up = _sim(dict(fitted, **{key: base * math.exp(h)}), t, Q, T0)
                 y_dn = _sim(dict(fitted, **{key: base * math.exp(-h)}), t, Q, T0)
                 column = (y_up - y_dn) / (2.0 * h)
-        except (OverflowError, ValueError):
+        except OverflowError, ValueError:
             return None
         if not np.all(np.isfinite(column)):
             return None
@@ -681,10 +677,7 @@ def gate_verdict(row, incumbent, cand_rmse, inc_rmse):
     any rule measured below.
     """
     if not in_scope(row):
-        return False, (
-            f"only {row.get('effective_rows', 0)} effective rows; "
-            f"need {_EFFECTIVE_ROW_GATE}"
-        )
+        return False, (f"only {row.get('effective_rows', 0)} effective rows; need {_EFFECTIVE_ROW_GATE}")
     if not row["converged"]:
         return False, "solve did not converge"
     if not (math.isfinite(cand_rmse) and math.isfinite(inc_rmse)):
@@ -856,10 +849,7 @@ def main():
     say("profiles; d_err/c_err = model minus plant dead time and coast on cq_probe, so a NEGATIVE")
     say("c_err is a model that believes the grill stops sooner than it does. s_min = C RMS per e-fold")
     say("of the worst-determined direction of (log K_Q, log C_c, log theta).")
-    say(
-        f"'sc' marks scope: 'y' = at least {_EFFECTIVE_ROW_GATE} scored "
-        "20-second effective rows and used in every"
-    )
+    say(f"'sc' marks scope: 'y' = at least {_EFFECTIVE_ROW_GATE} scored 20-second effective rows and used in every")
     say("population below; '-' = the persistent trigger cannot reach candidate evaluation, so it is shown")
     say("for what it says about the FITTER and enters no bound, matrix or correlation.")
     hdr = (
@@ -974,9 +964,7 @@ def main():
         say(f"  === {plant} ===  (each cell insample/truth, C)")
         say(
             f"  {'profile':15s} "
-            + " ".join(
-                f"{str(L) + ('s*' if L < _NOMINAL_GATE_DURATION_S else 's'):>15s}" for L in sorted(LENGTHS_S)
-            )
+            + " ".join(f"{str(L) + ('s*' if L < _NOMINAL_GATE_DURATION_S else 's'):>15s}" for L in sorted(LENGTHS_S))
         )
         for profile in profiles():
             cells = []
@@ -996,10 +984,7 @@ def main():
     say("better than the incumbent does, truth_rmse(candidate) < truth_rmse(incumbent). No threshold")
     say("and no constant enters that label. Everything below is model_promotion.evaluate itself,")
     say("with only the pair of RMSEs handed to it varied.")
-    say(
-        f"Population: in-scope records only (effective_rows >= {_EFFECTIVE_ROW_GATE}), "
-        "duplicates collapsed."
-    )
+    say(f"Population: in-scope records only (effective_rows >= {_EFFECTIVE_ROW_GATE}), duplicates collapsed.")
     say()
     say(
         f"{'incumbent':11s} {'signal':20s} {'n':>4s} {'TP':>4s} {'FP':>4s} {'TN':>4s} {'FN':>4s} {'wrong':>7s} {'worst FP c_err':>15s} {'worst FP truth':>15s}"
@@ -1048,10 +1033,7 @@ def main():
     say("transient-free operating point by construction. INFORM (behavioural, constant-free): the")
     say("fit beats the shipped incumbent's truth error and does not worsen its coast reading, i.e.")
     say("a record the gate ought to let through. 'other' records are shown but do not draw the line.")
-    say(
-        f"Population: in-scope records only (effective_rows >= {_EFFECTIVE_ROW_GATE}), "
-        "duplicates collapsed."
-    )
+    say(f"Population: in-scope records only (effective_rows >= {_EFFECTIVE_ROW_GATE}), duplicates collapsed.")
     say("Read the s_min row carefully: the two classes OVERLAP, so no threshold on it separates them")
     say("outright. That is the direct answer to 'give a statistic that puts the flat cook on one side")
     say("and every promotable cook on the other' -- none does. What SECTION 9's floor buys is measured")
@@ -1188,9 +1170,7 @@ def main():
             say("  the two overlap -- no threshold on this statistic separates them")
         say(
             "  real MAK cook    : "
-            + ", ".join(
-                f"{stat_of(r, st):.5g}@{r['length_s']}s" for r in sorted(real_all, key=lambda r: r["length_s"])
-            )
+            + ", ".join(f"{stat_of(r, st):.5g}@{r['length_s']}s" for r in sorted(real_all, key=lambda r: r["length_s"]))
         )
     say()
     say("Held-out margin: the ratio candidate/incumbent on the given signal, over records where")
@@ -1479,13 +1459,7 @@ def main():
     b_safe = {}
     for inc_name in incumbents:
         for sig_label, sig_key in SIGNALS:
-            vals = sorted(
-                {
-                    r["s_min"]
-                    for r in population(inc_name)
-                    if math.isfinite(r["s_min"])
-                }
-            )
+            vals = sorted({r["s_min"] for r in population(inc_name) if math.isfinite(r["s_min"])})
             hit = None
             for thr in vals + [math.inf]:
 
