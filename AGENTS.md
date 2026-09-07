@@ -47,13 +47,13 @@ Preserve `.artifacts/exact-revision/<full-revision>/evidence.json` and every ref
 Repository `jj push` must invoke PiFire's authoritative exact-revision `push` wrapper. Configure the repository-scoped alias with:
 
 ```bash
-jj config set --repo aliases.push '["util", "exec", "--", "sh", "-c", "cd \"$JJ_WORKSPACE_ROOT\" && exec uv run python scripts/exact_revision_gate.py push --bookmark cumulative-mpc-learning --artifact-root .artifacts/exact-revision \"$@\"", "pifire-jj-push"]'
+jj config set --repo aliases.push '["util", "exec", "--", "sh", "-c", "cd \"$JJ_WORKSPACE_ROOT\" && exec uv run python scripts/exact_revision_gate.py push --bookmark massive-reworks-and-new-ui --artifact-root .artifacts/exact-revision \"$@\"", "pifire-jj-push"]'
 ```
 
 If the alias is unavailable, run the wrapper directly from the repository root:
 
 ```bash
-uv run python scripts/exact_revision_gate.py push --bookmark cumulative-mpc-learning --artifact-root .artifacts/exact-revision
+uv run python scripts/exact_revision_gate.py push --bookmark massive-reworks-and-new-ui --artifact-root .artifacts/exact-revision
 ```
 
-Direct `jj git push` intentionally bypasses the wrapper and is prohibited by project rules. The guarded local wrapper is the authoritative enforcement boundary for `cumulative-mpc-learning`; no GitHub Actions status is part of this gate.
+Direct `jj git push` intentionally bypasses the wrapper and is prohibited by project rules. The guarded local wrapper is the authoritative enforcement boundary for `massive-reworks-and-new-ui`; no GitHub Actions status is part of this gate.

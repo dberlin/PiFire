@@ -1053,7 +1053,7 @@ def test_resolve_bookmark_revision_uses_one_exact_jj_query(monkeypatch: pytest.M
 
     monkeypatch.setattr(gate_module.subprocess, "run", completed_run)
 
-    assert resolve_bookmark_revision(_REPOSITORY_ROOT, "cumulative-mpc-learning") == _REVISION
+    assert resolve_bookmark_revision(_REPOSITORY_ROOT, "massive-reworks-and-new-ui") == _REVISION
     assert calls == [
         (
             (
@@ -1062,7 +1062,7 @@ def test_resolve_bookmark_revision_uses_one_exact_jj_query(monkeypatch: pytest.M
                 "log",
                 "--no-graph",
                 "-r",
-                "cumulative-mpc-learning",
+                "massive-reworks-and-new-ui",
                 "-T",
                 'commit_id ++ "\\n"',
             ),
@@ -1395,7 +1395,7 @@ def test_verify_bookmark_runs_gate_inside_an_isolated_live_runtime(
     _bookmark_resolver(
         monkeypatch,
         {
-            "cumulative-mpc-learning": [_REVISION],
+            "massive-reworks-and-new-ui": [_REVISION],
             "@": [_REVISION] * 14,
         },
     )
@@ -1411,7 +1411,7 @@ def test_verify_bookmark_runs_gate_inside_an_isolated_live_runtime(
 
     evidence = gate_module._verify_bookmark(
         root=_REPOSITORY_ROOT,
-        bookmark="cumulative-mpc-learning",
+        bookmark="massive-reworks-and-new-ui",
         artifact_root=tmp_path / "artifacts",
         run_command=runner,
     )
@@ -1436,16 +1436,16 @@ def test_push_runs_a_fresh_gate_and_only_the_authorized_push(
     calls = _bookmark_resolver(
         monkeypatch,
         {
-            "cumulative-mpc-learning": [_REVISION, _REVISION],
+            "massive-reworks-and-new-ui": [_REVISION, _REVISION],
             "@": [_REVISION] * 15,
-            "cumulative-mpc-learning@origin": [_REVISION],
+            "massive-reworks-and-new-ui@origin": [_REVISION],
         },
     )
     runner = _PushRunner(*_success_results())
 
     evidence = push_verified_bookmark(
         root=_REPOSITORY_ROOT,
-        bookmark="cumulative-mpc-learning",
+        bookmark="massive-reworks-and-new-ui",
         artifact_root=tmp_path / "artifacts",
         run_command=runner,
         resolve_operation=lambda: _OPERATION_ID,
@@ -1455,12 +1455,12 @@ def test_push_runs_a_fresh_gate_and_only_the_authorized_push(
     assert len(runner.calls) == 6
     assert runner.push_calls == [
         (
-            ("jj", "--at-operation", _OPERATION_ID, "git", "push", "-b", "cumulative-mpc-learning"),
+            ("jj", "--at-operation", _OPERATION_ID, "git", "push", "-b", "massive-reworks-and-new-ui"),
             _REPOSITORY_ROOT,
         )
     ]
-    assert calls[:2] == ["cumulative-mpc-learning", "@"]
-    assert calls[-3:] == ["@", "cumulative-mpc-learning", "cumulative-mpc-learning@origin"]
+    assert calls[:2] == ["massive-reworks-and-new-ui", "@"]
+    assert calls[-3:] == ["@", "massive-reworks-and-new-ui", "massive-reworks-and-new-ui@origin"]
 
 
 def test_push_stays_pinned_when_live_bookmark_moves_before_command_execution(
@@ -1472,7 +1472,7 @@ def test_push_stays_pinned_when_live_bookmark_moves_before_command_execution(
 
     def resolve(root: Path, bookmark: str, *, operation_id: str | None = None) -> str:
         assert root == _REPOSITORY_ROOT
-        if bookmark == "cumulative-mpc-learning@origin":
+        if bookmark == "massive-reworks-and-new-ui@origin":
             return _REVISION
         if operation_id is not None:
             assert operation_id == _OPERATION_ID
@@ -1501,7 +1501,7 @@ def test_push_stays_pinned_when_live_bookmark_moves_before_command_execution(
             **kwargs: object,
         ) -> subprocess.CompletedProcess:
             if len(argv) >= 6 and argv[:2] == ("jj", "--at-operation") and argv[3:5] == ("git", "push"):
-                assert race_events == ["pinned:@", "pinned:cumulative-mpc-learning"]
+                assert race_events == ["pinned:@", "pinned:massive-reworks-and-new-ui"]
                 live_bookmark["revision"] = _OTHER_REVISION
                 race_events.append("live-bookmark:moved")
             return super().__call__(argv, cwd=cwd, check=check, **kwargs)
@@ -1510,7 +1510,7 @@ def test_push_stays_pinned_when_live_bookmark_moves_before_command_execution(
 
     evidence = push_verified_bookmark(
         root=_REPOSITORY_ROOT,
-        bookmark="cumulative-mpc-learning",
+        bookmark="massive-reworks-and-new-ui",
         artifact_root=tmp_path / "artifacts",
         run_command=runner,
         resolve_operation=lambda: _OPERATION_ID,
@@ -1518,10 +1518,10 @@ def test_push_stays_pinned_when_live_bookmark_moves_before_command_execution(
 
     assert evidence.status == "passed"
     assert live_bookmark["revision"] == _OTHER_REVISION
-    assert race_events == ["pinned:@", "pinned:cumulative-mpc-learning", "live-bookmark:moved"]
+    assert race_events == ["pinned:@", "pinned:massive-reworks-and-new-ui", "live-bookmark:moved"]
     assert runner.push_calls == [
         (
-            ("jj", "--at-operation", _OPERATION_ID, "git", "push", "-b", "cumulative-mpc-learning"),
+            ("jj", "--at-operation", _OPERATION_ID, "git", "push", "-b", "massive-reworks-and-new-ui"),
             _REPOSITORY_ROOT,
         )
     ]
@@ -1535,9 +1535,9 @@ def test_push_owns_artifact_lock_until_remote_and_durable_evidence_are_verified(
     _bookmark_resolver(
         monkeypatch,
         {
-            "cumulative-mpc-learning": [_REVISION, _REVISION],
+            "massive-reworks-and-new-ui": [_REVISION, _REVISION],
             "@": [_REVISION] * 15,
-            "cumulative-mpc-learning@origin": [_REVISION],
+            "massive-reworks-and-new-ui@origin": [_REVISION],
         },
     )
     competing_command_started = threading.Event()
@@ -1615,7 +1615,7 @@ def test_push_owns_artifact_lock_until_remote_and_durable_evidence_are_verified(
         try:
             _ = push_verified_bookmark(
                 root=_REPOSITORY_ROOT,
-                bookmark="cumulative-mpc-learning",
+                bookmark="massive-reworks-and-new-ui",
                 artifact_root=artifact_root,
                 run_command=runner,
                 resolve_operation=lambda: _OPERATION_ID,
@@ -1650,7 +1650,7 @@ def test_push_rejects_every_other_bookmark_before_resolving_or_running(
     monkeypatch.setattr(gate_module, "resolve_bookmark_revision", unexpected_resolve)
     runner = _PushRunner(*_success_results())
 
-    with pytest.raises(ValueError, match="restricted to bookmark 'cumulative-mpc-learning'"):
+    with pytest.raises(ValueError, match="restricted to bookmark 'massive-reworks-and-new-ui'"):
         push_verified_bookmark(
             root=_REPOSITORY_ROOT,
             bookmark="some-other-bookmark",
@@ -1669,7 +1669,7 @@ def test_push_is_not_invoked_when_local_bookmark_differs_from_current_revision(
     _bookmark_resolver(
         monkeypatch,
         {
-            "cumulative-mpc-learning": [_REVISION],
+            "massive-reworks-and-new-ui": [_REVISION],
             "@": [_OTHER_REVISION],
         },
     )
@@ -1678,7 +1678,7 @@ def test_push_is_not_invoked_when_local_bookmark_differs_from_current_revision(
     with pytest.raises(RuntimeError, match="does not equal the current revision"):
         push_verified_bookmark(
             root=_REPOSITORY_ROOT,
-            bookmark="cumulative-mpc-learning",
+            bookmark="massive-reworks-and-new-ui",
             artifact_root=tmp_path / "artifacts",
             run_command=runner,
         )
@@ -1695,7 +1695,7 @@ def test_push_is_not_invoked_when_fresh_gate_fails(
     _bookmark_resolver(
         monkeypatch,
         {
-            "cumulative-mpc-learning": [_REVISION],
+            "massive-reworks-and-new-ui": [_REVISION],
             "@": [_REVISION] * 3,
         },
     )
@@ -1703,7 +1703,7 @@ def test_push_is_not_invoked_when_fresh_gate_fails(
 
     evidence = push_verified_bookmark(
         root=_REPOSITORY_ROOT,
-        bookmark="cumulative-mpc-learning",
+        bookmark="massive-reworks-and-new-ui",
         artifact_root=tmp_path / "artifacts",
         run_command=runner,
     )
@@ -1743,7 +1743,7 @@ def test_push_is_not_invoked_when_operation_resolution_is_invalid_or_fails(
     _bookmark_resolver(
         monkeypatch,
         {
-            "cumulative-mpc-learning": [_REVISION],
+            "massive-reworks-and-new-ui": [_REVISION],
             "@": [_REVISION] * 14,
         },
     )
@@ -1760,7 +1760,7 @@ def test_push_is_not_invoked_when_operation_resolution_is_invalid_or_fails(
     with pytest.raises(RuntimeError, match=message):
         push_verified_bookmark(
             root=_REPOSITORY_ROOT,
-            bookmark="cumulative-mpc-learning",
+            bookmark="massive-reworks-and-new-ui",
             artifact_root=tmp_path / "artifacts",
             run_command=runner,
         )
@@ -1784,7 +1784,7 @@ def test_push_is_not_invoked_when_revision_drifts_after_the_gate(
     _bookmark_resolver(
         monkeypatch,
         {
-            "cumulative-mpc-learning": bookmark_revisions,
+            "massive-reworks-and-new-ui": bookmark_revisions,
             "@": current_revisions,
         },
     )
@@ -1793,7 +1793,7 @@ def test_push_is_not_invoked_when_revision_drifts_after_the_gate(
     with pytest.raises(RuntimeError, match="changed after the gate"):
         push_verified_bookmark(
             root=_REPOSITORY_ROOT,
-            bookmark="cumulative-mpc-learning",
+            bookmark="massive-reworks-and-new-ui",
             artifact_root=tmp_path / "artifacts",
             run_command=runner,
             resolve_operation=lambda: _OPERATION_ID,
@@ -1810,9 +1810,9 @@ def test_post_push_remote_mismatch_fails_after_exactly_one_push(
     _bookmark_resolver(
         monkeypatch,
         {
-            "cumulative-mpc-learning": [_REVISION, _REVISION],
+            "massive-reworks-and-new-ui": [_REVISION, _REVISION],
             "@": [_REVISION] * 15,
-            "cumulative-mpc-learning@origin": [_OTHER_REVISION],
+            "massive-reworks-and-new-ui@origin": [_OTHER_REVISION],
         },
     )
     runner = _PushRunner(*_success_results())
@@ -1820,7 +1820,7 @@ def test_post_push_remote_mismatch_fails_after_exactly_one_push(
     with pytest.raises(RuntimeError, match="remote-tracking bookmark"):
         push_verified_bookmark(
             root=_REPOSITORY_ROOT,
-            bookmark="cumulative-mpc-learning",
+            bookmark="massive-reworks-and-new-ui",
             artifact_root=tmp_path / "artifacts",
             run_command=runner,
             resolve_operation=lambda: _OPERATION_ID,
@@ -1828,7 +1828,7 @@ def test_post_push_remote_mismatch_fails_after_exactly_one_push(
 
     assert runner.push_calls == [
         (
-            ("jj", "--at-operation", _OPERATION_ID, "git", "push", "-b", "cumulative-mpc-learning"),
+            ("jj", "--at-operation", _OPERATION_ID, "git", "push", "-b", "massive-reworks-and-new-ui"),
             _REPOSITORY_ROOT,
         )
     ]
@@ -1844,7 +1844,7 @@ def test_push_fails_if_durable_evidence_changes_before_final_revalidation(
     def resolve(_root: Path, bookmark: str, *, operation_id: str | None = None) -> str:
         assert operation_id is None or operation_id == _OPERATION_ID
         resolver_calls.append(bookmark)
-        if bookmark == "cumulative-mpc-learning@origin":
+        if bookmark == "massive-reworks-and-new-ui@origin":
             evidence_path = artifact_root / _REVISION / "evidence.json"
             _ = evidence_path.write_text('{"status": "passed"}\n', encoding="utf-8")
         return _REVISION
@@ -1861,13 +1861,13 @@ def test_push_fails_if_durable_evidence_changes_before_final_revalidation(
     with pytest.raises(RuntimeError, match="durable evidence"):
         push_verified_bookmark(
             root=_REPOSITORY_ROOT,
-            bookmark="cumulative-mpc-learning",
+            bookmark="massive-reworks-and-new-ui",
             artifact_root=artifact_root,
             run_command=runner,
             resolve_operation=lambda: _OPERATION_ID,
         )
 
-    assert resolver_calls[-1] == "cumulative-mpc-learning@origin"
+    assert resolver_calls[-1] == "massive-reworks-and-new-ui@origin"
     assert len(runner.push_calls) == 1
 
 
@@ -1902,7 +1902,7 @@ def test_prek_pre_push_hook_verifies_the_cumulative_bookmark() -> None:
             "id": "exact-revision-gate",
             "name": "Exact revision integration gate",
             "entry": (
-                "uv run python scripts/exact_revision_gate.py verify-bookmark --bookmark cumulative-mpc-learning"
+                "uv run python scripts/exact_revision_gate.py verify-bookmark --bookmark massive-reworks-and-new-ui"
             ),
             "language": "system",
             "pass_filenames": False,

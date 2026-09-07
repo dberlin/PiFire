@@ -10,5 +10,5 @@ hooks = [
 [[repos]]
 repo = "local"
 hooks = [
-  { id = "exact-revision-gate", name = "Exact revision integration gate", entry = "uv run python scripts/exact_revision_gate.py verify-bookmark --bookmark cumulative-mpc-learning", language = "system", pass_filenames = false, stages = ["pre-push"] },
+  { id = "exact-revision-gate", name = "Exact revision integration gate", entry = "uv run python scripts/exact_revision_gate.py verify-bookmark --bookmark massive-reworks-and-new-ui", language = "system", pass_filenames = false, stages = ["pre-push"] },
 ]

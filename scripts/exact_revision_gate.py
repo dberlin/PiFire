@@ -93,7 +93,7 @@ _REQUIRED_COMMANDS = (
 )
 _FULL_REVISION = re.compile(r"[0-9a-f]{40}\Z")
 _FULL_OPERATION_ID = re.compile(r"[0-9a-f]{128}\Z")
-_VERIFIED_BOOKMARK = "cumulative-mpc-learning"
+_VERIFIED_BOOKMARK = "massive-reworks-and-new-ui"
 _DEFAULT_ARTIFACT_ROOT = Path(".artifacts/exact-revision")
 _BROWSER_BACKEND_OVERRIDES = ("PUBLIC_PIFIRE_URL", "PUBLIC_PIFIRE_TARGET")
 
