@@ -22,12 +22,12 @@ from controller.model_learning.contracts import (
     FrameObservation,
 )
 from controller.runtime.model_fitting import (
+    FIT_CADENCE_S,
     FitSubmission,
     GreyFitSuccess,
     GreyLearningOrchestrator,
     LiveLearningIdentity,
     TargetTimingEvidence,
-    TriggerConfig,
     segmented_corpus_fit_job,
 )
 from tests.unit.common._learning_trajectory_helpers import (
@@ -43,15 +43,15 @@ _CONFIG = "3" * 64
 def _frame(sequence: int, **changes) -> FrameObservation:
     q = (0.15, 0.50, 0.85)[sequence % 3]
     values: Any = {
-        "frame_start_s": sequence * 20.0,
-        "frame_end_s": (sequence + 1) * 20.0,
+        "frame_start_s": sequence * FIT_CADENCE_S,
+        "frame_end_s": (sequence + 1) * FIT_CADENCE_S,
         "temp_c": 75.0 + sequence,
         "setpoint_c": 120.0,
         "ambient_c": 20.0,
         "requested_q": q,
         "realized_q": q,
         "requested_auger_duty": q,
-        "delivered_on_s": q * 20.0,
+        "delivered_on_s": q * FIT_CADENCE_S,
         "requested_fan_duty": 0.5,
         "actual_fan_duty": 0.5,
         "result_revision": sequence + 1,
@@ -269,13 +269,6 @@ def _prepared_supersession_harness(tmp_path):
         estimator_factory=_Estimator,
         controller_factory=_Native,
         timing_probe=lambda _native: _timing(),
-        trigger_config=TriggerConfig(
-            min_effective_duration_s=180.0,
-            min_input_variance=0.02,
-            min_input_levels=3,
-            min_temperature_span_c=8.0,
-            min_identifiability=0.5,
-        ),
         worker=worker,
     )
     assert orchestrator.submit_corpus_fit(job) is FitSubmission.ACCEPTED

@@ -42,8 +42,10 @@ from controller.mpc import Controller
 from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.runtime.model_fitting import (
     CausalForecastInput,
+    FIT_CADENCE_S,
     GreyFitError,
     GreyFitSuccess,
+    TriggerConfig,
     fit_segmented_grey,
     paired_forecast_origin,
     segmented_corpus_fit_job,
@@ -56,9 +58,10 @@ HELD_OUT_SEEDS = (10, 11, 12, 13, 14)
 SCORED_FRAMES = 59
 PRE_ROLL_FRAMES = 8
 PRE_ROLL_DUTY = 0.15
-FRAME_SECONDS = 20
+FRAME_SECONDS = int(FIT_CADENCE_S)
 TARGET_C = (225.0 - 32.0) * 5.0 / 9.0
-HORIZONS = (3, 15, 45, 90, 180)
+HORIZONS = EvaluationConfig().required_horizons
+MIN_EFFECTIVE_DURATION_S = TriggerConfig().min_effective_duration_s
 
 _FRAME_MS = FRAME_SECONDS * 1_000
 _WALL_OFFSET_MS = 1_800_000_000_000
@@ -432,15 +435,17 @@ def _first_600_second_boundary(
                 ),
             )
         )
-        if incumbent_duration < 600.0:
+        if incumbent_duration < MIN_EFFECTIVE_DURATION_S:
             continue
         fit = _fit_result(snapshot, family, f"first-600s-r{revision}")
         if not isinstance(fit, GreyFitSuccess):
             continue
         boundary = _fit_boundary(snapshot, fit)
-        if boundary.effective_duration_s >= 600.0:
+        if boundary.effective_duration_s >= MIN_EFFECTIVE_DURATION_S:
             return boundary
-    raise AssertionError("no immutable corpus prefix reached 600 effective seconds")
+    raise AssertionError(
+        f"no immutable corpus prefix reached {MIN_EFFECTIVE_DURATION_S:g} effective seconds"
+    )
 
 
 def _forecast_observation(

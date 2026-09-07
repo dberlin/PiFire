@@ -8,13 +8,23 @@ import sqlite3
 import zipfile
 from collections.abc import Mapping
 from dataclasses import replace
+from math import ceil
 from pathlib import Path
-from typing import cast
+from threading import Condition, Event
+from time import monotonic
+from typing import Protocol, cast
 
 import pytest
 from pydantic import JsonValue
 
 import file_mgmt.cookfile as cookfile_mod
+from common.control_trace import (
+    AmbientSource,
+    ChallengerProgressTracePayload,
+    ControllerType,
+    ModelEvaluationPayload,
+    TraceEventKind,
+)
 from common.controller_model_state import ControllerModelStore
 from common.cook_diagnostics import ControllerLearningReport
 from common.defaults import default_metrics
@@ -27,14 +37,21 @@ from common.learning_trajectory import (
     LearningTrajectorySegment,
     ModelFitLineage,
     TrajectoryBreakReason,
+    canonical_model_fit_lineage_digest,
     canonical_trajectory_digest,
+    trajectory_json_value,
 )
 from common.model_evidence import (
     MODEL_EVIDENCE_SCHEMA_VERSION,
+    ActivationLifecycleEvidence,
     ChallengerRoundEvidence,
+    ConfidenceDecisionEvidence,
     EvidenceKind,
+    FitLifecycleEvidence,
+    ForecastOriginEvidence,
     ModelEvidenceRecord,
 )
+from common.persistence.control_trace import read_control_trace_session
 from common.persistence.history import append_metric, write_history
 from common.persistence.learning_trajectory import LearningTrajectoryRepository
 from common.persistence.model_challenger import (
@@ -43,9 +60,10 @@ from common.persistence.model_challenger import (
     create_model_challenger,
     prepare_model_challenger_activation,
     qualify_model_challenger,
+    read_model_challenger,
     recover_model_challenger,
 )
-from common.persistence.model_evidence import read_model_activation
+from common.persistence.model_evidence import read_model_activation, read_model_evidence
 from controller.acados.contracts import GreyBoxMPCConfig
 from controller.model_learning.activation import (
     ActivationPhase,
@@ -58,29 +76,41 @@ from controller.model_learning.contracts import (
     ActivationPolicy,
     CandidateOrigin,
     FitRequest,
+    FrameObservation,
     activation_policy_for_origin,
 )
+from controller.model_learning.grey_runtime import GreyLearningProcessOwner
 from controller.model_learning.report import build_learning_report
-from controller.mpc_model import replay_delay_chain_arrays, simulate_grey_box_intervals
+from controller.mpc import Controller
+from controller.mpc_config import DEFAULT_MPC_CONFIG
+from controller.mpc_factory import MpcPairFactory
+from controller.mpc_model import EstimatorSeed, replay_delay_chain_arrays, simulate_grey_box_intervals
 from controller.pid_sp_learning import current_pid_sp_learning_report
 from controller.runtime.actuation_delivery import DeliveredActuationIntegral
 from controller.runtime.learning_trajectory import (
     LearningTrajectoryRuntime,
     ModeEntered,
+    ModeExited,
     ThermalSample,
     TrajectoryBoundary,
 )
 from controller.runtime.model_fitting import (
+    FIT_CADENCE_S,
+    GreyFitJob,
     GreyFitSuccess,
+    GreyLearningDelivery,
     fit_segmented_grey,
     grey_config_digest,
     segmented_corpus_fit_job,
 )
 from controller.runtime.model_persistence import ModelPersistenceWorker
+from controller.runtime.modes.hold_learning import HoldLearningRuntime
+from controller.runtime.runner import ThreadedControllerRunner
 from file_mgmt.cookfile import create_cookfile, read_cookfile
+from tests.e2e._mpc_online_learning_helpers import _CYCLE
 
-_FRAME_MS = 20_000
-_FRAME_SECONDS = 20.0
+_FRAME_SECONDS = FIT_CADENCE_S
+_FRAME_MS = int(_FRAME_SECONDS * 1_000)
 _WALL_EPOCH_MS = 1_800_000_000_000
 _REQUIRED_HORIZONS = (3, 15, 45, 90, 180)
 _LOAD_LEVELS = (0.20, 0.55, 0.90)
@@ -575,14 +605,61 @@ def test_recovery_quarantines_one_corrupt_segment_without_poisoning_the_fit_corp
 
 
 class _Logger:
-    def info(self, _message: str) -> None:
-        return None
+    def info(self, message: str) -> None:
+        del message
 
-    def warning(self, _message: str) -> None:
-        return None
+    def warning(self, message: str) -> None:
+        del message
 
-    def error(self, _message: str) -> None:
-        return None
+    def error(self, message: str) -> None:
+        del message
+
+
+class _WarmupExclusionFit(Protocol):
+    warmup_excluded_segment_ids: tuple[str, ...]
+
+
+class _FrameBoundaryGate:
+    """Release the production controller worker one control boundary at a time."""
+
+    def __init__(self) -> None:
+        self._condition = Condition()
+        self._arrivals = 0
+        self._permits = 0
+        self._closed = False
+
+    def __call__(self, _period_s: float) -> None:
+        with self._condition:
+            self._arrivals += 1
+            self._condition.notify_all()
+            if not self._condition.wait_for(
+                lambda: self._permits > 0 or self._closed,
+                timeout=30.0,
+            ):
+                raise TimeoutError("controller worker did not receive a boundary permit")
+            if self._permits:
+                self._permits -= 1
+
+    def wait_until_blocked(self) -> None:
+        with self._condition:
+            if not self._condition.wait_for(lambda: self._arrivals > 0, timeout=30.0):
+                raise TimeoutError("controller worker did not reach its initial boundary")
+
+    def advance(self) -> None:
+        with self._condition:
+            target = self._arrivals + 1
+            self._permits += 1
+            self._condition.notify_all()
+            if not self._condition.wait_for(
+                lambda: self._arrivals >= target or self._closed,
+                timeout=30.0,
+            ):
+                raise TimeoutError("controller worker did not complete its boundary")
+
+    def close(self) -> None:
+        with self._condition:
+            self._closed = True
+            self._condition.notify_all()
 
 
 class _DeliveryJournal:
@@ -662,6 +739,54 @@ def _temperature_sample(at_ms: int, temperature_c: float) -> ThermalSample:
         settings_revision=9,
         recipe_step_id=None,
     )
+
+
+def _drive_exact_seed_trajectory(
+    runtime: LearningTrajectoryRuntime,
+    *,
+    cook_id: str,
+    frame_count: int = 180,
+) -> tuple[int, float]:
+    smoke = _mode_entered(cook_id)
+    runtime.mode_entered(smoke)
+    assert runtime.bind_trace_session(
+        "00000000-0000-4000-8000-000000000014",
+        cook_id,
+        lambda _segment: True,
+    )
+    for sequence in range(frame_count):
+        runtime.observe_temperature(
+            _temperature_sample(
+                (sequence + 1) * _FRAME_MS,
+                90.0 + sequence * 0.05,
+            ),
+        )
+        assert runtime.barrier(timeout=30.0)
+    transition_ms = frame_count * _FRAME_MS
+    runtime.mode_exited(
+        ModeExited(
+            effective_mode="Smoke",
+            next_effective_mode="Hold",
+            monotonic_ms=transition_ms,
+            wall_ms=_WALL_EPOCH_MS + transition_ms,
+        ),
+    )
+    runtime.mode_entered(
+        replace(
+            smoke,
+            effective_mode="Hold",
+            persisted_mode="Hold",
+            monotonic_ms=transition_ms,
+            wall_ms=_WALL_EPOCH_MS + transition_ms,
+        ),
+    )
+    anchor_ms = transition_ms + 25
+    anchor_temperature_c = 100.0
+    runtime.observe_temperature(
+        _temperature_sample(anchor_ms, anchor_temperature_c),
+    )
+    assert runtime.barrier(timeout=30.0)
+    return anchor_ms, anchor_temperature_c
 
 
 @pytest.mark.parametrize(
@@ -951,3 +1076,533 @@ def test_supplied_candidate_resumes_then_uses_the_same_two_win_durable_activatio
     assert durable_activation.rollback_pair == incumbent
     assert durable_activation.candidate_pair == candidate
     assert durable_activation.candidate_digest == candidate.model_digest
+
+
+def _evaluation_frame(
+    sequence: int,
+    *,
+    temperature_c: float,
+    probe_q: float = 0.0,
+) -> FrameObservation:
+    normalized_load = 0.55
+    return FrameObservation(
+        frame_start_s=sequence * FIT_CADENCE_S,
+        frame_end_s=(sequence + 1) * FIT_CADENCE_S,
+        temp_c=temperature_c,
+        setpoint_c=120.0,
+        ambient_c=_TRUTH.T_amb,
+        requested_q=normalized_load,
+        realized_q=normalized_load,
+        baseline_q=normalized_load - probe_q,
+        probe_q=probe_q,
+        allocated_q=normalized_load,
+        requested_auger_duty=normalized_load,
+        scheduled_on_s=normalized_load * FIT_CADENCE_S,
+        delivered_on_s=normalized_load * FIT_CADENCE_S,
+        realized_auger_duty=normalized_load,
+        requested_fan_duty=1.0,
+        actual_fan_duty=1.0,
+        result_revision=sequence + 1,
+        output_source="controller",
+        lid_open=False,
+        safety_inhibited=False,
+        manual_override=False,
+        stale=False,
+        skipped=False,
+        reset=False,
+        continuous=True,
+        role_generation=0,
+        observation_sequence=sequence,
+        probe_source="cumulative-e2e-evaluator",
+        ambient_source=AmbientSource.CONFIGURED,
+        temperature_band="deterministic-authority-proof",
+    )
+
+
+def _poll_real_fit(runtime: Controller) -> GreyLearningDelivery:
+    deadline = monotonic() + 90.0
+    waiter = Event()
+    while monotonic() < deadline:
+        delivery, payload = cast(
+            tuple[GreyLearningDelivery | None, ModelEvaluationPayload | None],
+            runtime.poll_learning_off_path(
+                live_origin=CandidateOrigin.PASSIVE_ONLINE,
+            ),
+        )
+        assert payload is None
+        if delivery is not None:
+            return delivery
+        waiter.wait(0.01)
+    raise AssertionError("real cumulative fit did not complete")
+
+
+def _expected_common_masks(
+    job: GreyFitJob,
+    *,
+    candidate_theta: float,
+    incumbent_theta: float,
+) -> tuple[tuple[bool, ...], ...]:
+    required_history_s = 3.0 * max(candidate_theta, incumbent_theta)
+    masks: list[tuple[bool, ...]] = []
+    for segment in job.segments:
+        available_history_s = sum(float(value) for value in segment.pre_roll_duration_s)
+        mask: list[bool] = []
+        for duration_s in segment.scored_duration_s:
+            mask.append(available_history_s >= required_history_s)
+            available_history_s += float(duration_s)
+        masks.append(tuple(mask))
+    return tuple(masks)
+
+
+def _complete_winning_evaluation_round(
+    runtime: Controller,
+    owner: GreyLearningProcessOwner,
+    *,
+    origin_sequence: int,
+) -> tuple[ModelEvaluationPayload, tuple[ForecastOriginEvidence, ...]]:
+    learning = owner.learning
+    assert learning is not None
+    origin_result = runtime.observe_frame(
+        _evaluation_frame(origin_sequence, temperature_c=100.0),
+    )
+    assert origin_result is not None
+    origins = learning.pending_origins
+    assert tuple(origin.horizon_steps for origin in origins) == _REQUIRED_HORIZONS
+    assert all(origin.origin_sequence == origin_sequence for origin in origins)
+    assert all(origin.incumbent_digest == runtime.active_control_pair.descriptor.model_digest for origin in origins)
+    expected = {
+        origin.origin_sequence + origin.horizon_steps: origin
+        for origin in origins
+    }
+    # Probe-bearing completion frames remain valid causal outcomes but cannot
+    # themselves become forecast origins, leaving exactly one five-horizon round.
+    completed: list[ForecastOriginEvidence] = []
+    for sequence in range(origin_sequence + 1, origin_sequence + max(_REQUIRED_HORIZONS) + 1):
+        forecast = expected.get(sequence)
+        temperature_c = 100.0 if forecast is None else forecast.challenger_prediction_c
+        observation = runtime.observe_frame(
+            _evaluation_frame(
+                sequence,
+                temperature_c=temperature_c,
+                probe_q=0.01,
+            ),
+        )
+        assert observation is not None
+        completed.extend(
+            cast(
+                tuple[ForecastOriginEvidence, ...],
+                observation["forecast_origin_evidence"],
+            ),
+        )
+    assert tuple(item.horizon_steps for item in completed) == _REQUIRED_HORIZONS
+    assert all(item.challenger_prediction_c == item.observed_temperature_c for item in completed)
+    assert all(item.incumbent_digest == origins[0].incumbent_digest for item in completed)
+    assert all(item.challenger_digest == origins[0].challenger_digest for item in completed)
+    delivery, evaluation = cast(
+        tuple[GreyLearningDelivery | None, ModelEvaluationPayload | None],
+        runtime.poll_learning_off_path(),
+    )
+    assert delivery is None
+    assert evaluation is not None
+    return evaluation, tuple(completed)
+
+
+def test_three_short_cooks_prepare_shadow_then_two_complete_rounds_durably_activate(
+    ds,
+) -> None:
+    repository = LearningTrajectoryRepository()
+    segments = tuple(
+        _persist_finalized(
+            repository,
+            _segment(
+                f"short-cumulative-segment-{index}",
+                cook_id=f"short-cumulative-cook-{index}",
+                start_ms=(index + 1) * 10_000_000,
+                pre_roll_count=8,
+                scored_count=59,
+                initial_temperature_c=temperature_c,
+            ),
+        )
+        for index, temperature_c in enumerate((70.0, 95.0, 120.0))
+    )
+    assert len({segment.cook_id for segment in segments}) == 3
+    assert len({segment.content_digest for segment in segments}) == 3
+    assert len({segment.fit_partition_digest for segment in segments}) == 1
+    partition_digest = segments[0].fit_partition_digest
+    snapshot = repository.snapshot_fit_corpus(partition_digest)
+    assert tuple((item.segment_id, item.scored_count) for item in snapshot.identity.slices) == (
+        ("short-cumulative-segment-0", 59),
+        ("short-cumulative-segment-1", 59),
+        ("short-cumulative-segment-2", 59),
+    )
+
+    model_store = ControllerModelStore()
+    persistence = ModelPersistenceWorker(
+        model_store,
+        _Logger(),
+        trajectory_repository=repository,
+    )
+    owner = GreyLearningProcessOwner()
+    configuration = dict(DEFAULT_MPC_CONFIG)
+    configuration["enable_online_adaptation"] = True
+    runtime = Controller(
+        configuration,
+        "C",
+        dict(_CYCLE),
+        activation_persistence=persistence,
+        trajectory_repository=repository,
+        fit_partition_digest=lambda: partition_digest,
+        grey_learning_process=owner,
+    )
+    gate = _FrameBoundaryGate()
+    runner = ThreadedControllerRunner(
+        runtime,
+        controller_type=ControllerType.MPC,
+        wait_for_period=gate,
+    )
+    gate.wait_until_blocked()
+    live_trajectory = LearningTrajectoryRuntime(
+        journal=_DeliveryJournal(unknown=False),
+        persistence=persistence,
+        segment_id_factory=_SegmentIds("short-cumulative-activation"),
+        trajectory_session_id_factory=lambda: "trajectory-short-cumulative-activation",
+    )
+    learning = HoldLearningRuntime(
+        runner=runner,
+        model_store=model_store,
+        persistence=persistence,
+        trajectory_repository=repository,
+        trace=None,
+        controller_name="mpc",
+        logger=_Logger(),
+        initial_generation=0,
+        learning_trajectory=live_trajectory,
+    )
+    incumbent_digest = runtime.active_control_pair.descriptor.model_digest
+    incumbent_config = MpcPairFactory._native_from_descriptor(runtime.active_control_pair.descriptor)
+    try:
+        runner.set_target(120.0)
+        runner.submit(100.0)
+        gate.advance()
+        incumbent_output = runner.latest()
+        assert incumbent_output.revision > 0
+        incumbent_snapshot = runner.get_model_snapshot()
+        assert isinstance(incumbent_snapshot, dict)
+        incumbent_identities = incumbent_snapshot["identities"]
+        assert isinstance(incumbent_identities, dict)
+        assert incumbent_identities["active_digest"] == incumbent_digest
+        runtime.bind_learning_identity(
+            "short-cumulative-evaluation-session",
+            "short-cumulative-evaluation-cook",
+            0,
+        )
+        assert runtime.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+        delivery = _poll_real_fit(runtime)
+        assert delivery.message is not None
+        fit = delivery.message.outcome
+        assert isinstance(fit, GreyFitSuccess)
+        prepared = delivery.preparation
+        assert fit.rejection_reasons == ()
+        assert fit.sample_count * FIT_CADENCE_S >= 600.0
+        assert fit.request.fit_corpus == snapshot.identity
+        fit_job = segmented_corpus_fit_job(snapshot, fit.request, incumbent_config)
+        actual_masks = tuple(
+            tuple(bool(value) for value in mask)
+            for mask in fit.effective_masks
+        )
+        expected_masks = _expected_common_masks(
+            fit_job,
+            candidate_theta=fit.config.theta,
+            incumbent_theta=incumbent_config.theta,
+        )
+        assert actual_masks == expected_masks
+        assert fit.sample_count == sum(sum(mask) for mask in expected_masks)
+        fit_exclusions = cast(
+            _WarmupExclusionFit,
+            cast(object, fit),
+        ).warmup_excluded_segment_ids
+        assert fit_exclusions == ()
+        assert fit.metrics is not None
+        assert fit.incumbent_metrics is not None
+        assert tuple(item.cook_id for item in fit.metrics.by_cook) == (
+            "short-cumulative-cook-0",
+            "short-cumulative-cook-1",
+            "short-cumulative-cook-2",
+        )
+        assert prepared is not None and prepared.accepted
+        assert runtime.active_control_pair.descriptor.model_digest == incumbent_digest
+        assert runtime.activation_output_authorized
+        assert prepared.candidate_digest != incumbent_digest
+
+        challenger = read_model_challenger()
+        assert challenger is not None
+        assert challenger.phase == "evaluating"
+        assert challenger.evaluation_round == challenger.consecutive_wins == 0
+        assert challenger.fit_corpus == snapshot.identity
+        assert challenger.fit_lineage == ModelFitLineage(
+            request_id=fit.request.request_id,
+            parent_incumbent_digest=fit.request.parent_incumbent_digest,
+            parent_incumbent_generation=fit.request.parent_incumbent_generation,
+            candidate_generation=fit.request.candidate_generation,
+            fit_corpus=snapshot.identity,
+            fit_corpus_digest=snapshot.identity.corpus_digest,
+            trigger_origin=CandidateOrigin.PASSIVE_ONLINE.value,
+            result_status="succeeded",
+            candidate_digest=prepared.candidate_digest,
+        )
+        replayed = repository.replay_fit(fit.request.request_id)
+        replayed_fit = fit_segmented_grey(
+            segmented_corpus_fit_job(replayed, fit.request, incumbent_config),
+        )
+        assert isinstance(replayed_fit, GreyFitSuccess)
+        assert replayed.identity == snapshot.identity
+        assert tuple(segment.content_digest for segment in replayed.segments) == tuple(
+            segment.content_digest for segment in segments
+        )
+        assert tuple(tuple(bool(value) for value in mask) for mask in replayed_fit.effective_masks) == tuple(
+            tuple(bool(value) for value in mask) for mask in fit.effective_masks
+        )
+        replayed_exclusions = cast(
+            _WarmupExclusionFit,
+            cast(object, replayed_fit),
+        ).warmup_excluded_segment_ids
+        assert replayed_exclusions == fit_exclusions
+        assert replayed_fit.metrics == fit.metrics
+        assert replayed_fit.incumbent_metrics == fit.incumbent_metrics
+        assert replayed_fit.config == fit.config
+        assert replayed_fit.result_digest == fit.result_digest
+
+        serialized_preparation = trajectory_json_value(challenger.fit_preparation)
+        assert isinstance(serialized_preparation, dict)
+        assert serialized_preparation["fit_result"] == {
+            "rmse_c": fit.rmse_c,
+            "max_error_c": fit.max_error_c,
+            "identifiability": fit.identifiability,
+            "sample_count": fit.sample_count,
+            "temperature_band_c": list(fit.temperature_band_c),
+            "nfev": fit.nfev,
+            "effective_masks": [
+                [bool(value) for value in mask]
+                for mask in fit.effective_masks
+            ],
+            "warmup_excluded_segment_ids": list(fit_exclusions),
+            "result_digest": fit.result_digest,
+        }
+        fit_lifecycle = tuple(
+            record.payload
+            for record in read_model_evidence(kind=EvidenceKind.FIT_LIFECYCLE)
+            if isinstance(record.payload, FitLifecycleEvidence)
+            and record.payload.request_id == fit.request.request_id
+        )
+        assert tuple(item.status for item in fit_lifecycle) == ("queued", "succeeded")
+
+        first_evaluation, first_origins = _complete_winning_evaluation_round(
+            runtime,
+            owner,
+            origin_sequence=1_000,
+        )
+        assert tuple(
+            score.horizon_steps
+            for score in first_evaluation.horizon_scores
+            if score.sample_count > 0
+        ) == _REQUIRED_HORIZONS
+        assert first_evaluation.rejection_reasons == ()
+        assert first_evaluation.consecutive_wins == 1
+        assert not first_evaluation.promoted
+        assert not first_evaluation.committed
+        assert len(first_origins) == 5
+        assert tuple(score.horizon_steps for score in first_evaluation.horizon_scores) == _REQUIRED_HORIZONS
+        assert all(
+            score.challenger_rmse_c is not None
+            and score.incumbent_rmse_c is not None
+            and score.challenger_rmse_c < score.incumbent_rmse_c
+            for score in first_evaluation.horizon_scores
+        )
+        assert all(item.incumbent_digest == incumbent_digest for item in first_origins)
+        assert all(item.challenger_digest == prepared.candidate_digest for item in first_origins)
+        first_round = read_model_challenger()
+        assert first_round is not None
+        assert (first_round.phase, first_round.evaluation_round, first_round.consecutive_wins) == (
+            "evaluating",
+            1,
+            1,
+        )
+        assert read_model_activation() is None
+        assert runtime.active_control_pair.descriptor.model_digest == incumbent_digest
+        assert runtime.activation_output_authorized
+
+        second_evaluation, second_origins = _complete_winning_evaluation_round(
+            runtime,
+            owner,
+            origin_sequence=2_000,
+        )
+        assert tuple(
+            score.horizon_steps
+            for score in second_evaluation.horizon_scores
+            if score.sample_count > 0
+        ) == _REQUIRED_HORIZONS
+        assert second_evaluation.rejection_reasons == ()
+        assert second_evaluation.consecutive_wins == 2
+        assert not second_evaluation.promoted
+        assert not second_evaluation.committed
+        assert len(second_origins) == 5
+        assert tuple(score.horizon_steps for score in second_evaluation.horizon_scores) == _REQUIRED_HORIZONS
+        assert all(
+            score.challenger_rmse_c is not None
+            and score.incumbent_rmse_c is not None
+            and score.challenger_rmse_c < score.incumbent_rmse_c
+            for score in second_evaluation.horizon_scores
+        )
+        assert all(item.incumbent_digest == incumbent_digest for item in second_origins)
+        assert all(item.challenger_digest == prepared.candidate_digest for item in second_origins)
+        activating = read_model_challenger()
+        assert activating is not None
+        assert (
+            activating.phase,
+            activating.evaluation_round,
+            activating.consecutive_wins,
+            activating.required_wins,
+        ) == ("activating", 2, 2, 2)
+        assert qualification_gates(activating).accepted
+        durable_prepared = read_model_activation()
+        assert durable_prepared is not None
+        assert durable_prepared.phase == ActivationPhase.PREPARED.value
+        assert durable_prepared.active_pair is not None
+        assert durable_prepared.active_pair.model_digest == incumbent_digest
+        assert durable_prepared.candidate_pair is not None
+        learned_digest = durable_prepared.candidate_pair.model_digest
+        assert learned_digest == prepared.candidate_digest
+        assert learned_digest != incumbent_digest
+        assert runtime.active_control_pair.descriptor.model_digest == incumbent_digest
+        assert runtime.activation_output_authorized
+
+        lineage_digest = canonical_model_fit_lineage_digest(activating.fit_lineage)
+        rounds = tuple(
+            record
+            for record in read_model_evidence(kind=EvidenceKind.CHALLENGER_ROUND)
+            if isinstance(record.payload, ChallengerRoundEvidence)
+            and record.payload.challenger_id == activating.challenger_id
+        )
+        round_payloads = tuple(cast(ChallengerRoundEvidence, record.payload) for record in rounds)
+        assert len(round_payloads) == 2
+        assert tuple(payload.completed_horizons for payload in round_payloads) == (
+            _REQUIRED_HORIZONS,
+            _REQUIRED_HORIZONS,
+        )
+        assert all(payload.required_horizons == _REQUIRED_HORIZONS for payload in round_payloads)
+        assert all(record.model_digest == learned_digest for record in rounds)
+        assert all(record.provenance_digest == incumbent_digest for record in rounds)
+        assert canonical_model_fit_lineage_digest(challenger.fit_lineage) == lineage_digest
+        progress = tuple(
+            record.payload
+            for record in read_control_trace_session(
+                "short-cumulative-evaluation-session",
+            )
+            if record.event_kind is TraceEventKind.CHALLENGER_PROGRESS
+            and isinstance(record.payload, ChallengerProgressTracePayload)
+        )
+        assert {
+            (item.phase, item.evaluation_round, item.consecutive_wins)
+            for item in progress
+        }.issuperset(
+            {
+                ("evaluating", 0, 0),
+                ("evaluating", 1, 1),
+                ("qualified", 2, 2),
+                ("activating", 2, 2),
+            },
+        )
+        assert all(item.lineage_digest == lineage_digest for item in progress)
+        assert all(item.result_digest == fit.result_digest for item in progress)
+        confidence = tuple(
+            record.payload
+            for record in read_model_evidence(kind=EvidenceKind.CONFIDENCE_DECISION)
+            if isinstance(record.payload, ConfidenceDecisionEvidence)
+        )
+        assert len(confidence) == 2
+        assert tuple(item.blocked for item in confidence) == (True, False)
+
+        required_seed_frames = min(
+            180,
+            ceil(3.0 * fit.config.theta / FIT_CADENCE_S),
+        )
+        anchor_ms, anchor_temperature_c = _drive_exact_seed_trajectory(
+            live_trajectory,
+            cook_id="short-cumulative-activation-cook",
+            frame_count=required_seed_frames,
+        )
+        anchor = live_trajectory.estimator_seed_anchor()
+        assert anchor == (anchor_ms, anchor_temperature_c)
+        expected_seed = live_trajectory.seed_for(
+            theta=fit.config.theta,
+            n_delay=fit.config.delay_states,
+            at_ms=anchor_ms,
+            measured_temp_c=anchor_temperature_c,
+        )
+        assert expected_seed.status == "exact"
+        assert expected_seed.segment_id.startswith("short-cumulative-activation-")
+        assert expected_seed.pre_roll_frame_count == expected_seed.required_frame_count
+        assert expected_seed.pre_roll_frame_count > 0
+        assert len(expected_seed.delay_states) == fit.config.delay_states
+
+        bound_seeds: list[EstimatorSeed] = []
+
+        def hold_candidate_seed(theta: float, n_delay: int):
+            current_anchor = live_trajectory.estimator_seed_anchor()
+            assert current_anchor == anchor
+            seed = live_trajectory.seed_for(
+                theta=theta,
+                n_delay=n_delay,
+                at_ms=anchor_ms,
+                measured_temp_c=anchor_temperature_c,
+            )
+            bound_seeds.append(seed)
+            return seed
+
+        runner.bind_estimator_seed_source(hold_candidate_seed)
+        learning.reconcile_activation()
+        runner.submit(anchor_temperature_c)
+        gate.advance()
+        assert bound_seeds == [expected_seed]
+        assert runtime.active_control_pair.descriptor.model_digest == learned_digest
+        assert runtime.active_control_pair.core.estimator_seed_status == "exact"
+        assert not runtime.activation_output_authorized
+        inert_output = runner.latest()
+        assert inert_output.revision == incumbent_output.revision
+        assert inert_output.cycle_ratio == incumbent_output.cycle_ratio
+        assert runner.get_model_snapshot() == incumbent_snapshot
+        assert persistence.barrier(timeout=30.0)
+        durable_active = read_model_activation()
+        assert durable_active is not None
+        assert durable_active.phase == ActivationPhase.ACTIVE.value
+        assert durable_active.active_pair is not None
+        assert durable_active.active_pair.model_digest == learned_digest
+        assert not runtime.activation_output_authorized
+        learning.reconcile_activation()
+        runner.submit(anchor_temperature_c)
+        gate.advance()
+        learned_output = runner.latest()
+        assert learned_output.revision > incumbent_output.revision
+        assert learned_output.input_temperature == anchor_temperature_c
+        assert runtime.active_control_pair.descriptor.model_digest == learned_digest
+        assert runtime.activation_output_authorized
+        learned_snapshot = runner.get_model_snapshot()
+        assert isinstance(learned_snapshot, dict)
+        learned_identities = learned_snapshot["identities"]
+        assert isinstance(learned_identities, dict)
+        assert learned_identities["active_digest"] == learned_digest
+        assert persistence.barrier(timeout=30.0)
+        lifecycle = tuple(
+            record.payload
+            for record in read_model_evidence(kind=EvidenceKind.ACTIVATION_LIFECYCLE)
+            if isinstance(record.payload, ActivationLifecycleEvidence)
+            and record.payload.decision_id == second_evaluation.decision_id
+        )
+        assert tuple(item.phase for item in lifecycle) == ("prepared", "active")
+    finally:
+        learning.finish_teardown(generation=0)
+        gate.close()
+        runner.stop()
+        assert live_trajectory.close()
+        owner.close()
+        assert persistence.close(timeout=30.0)

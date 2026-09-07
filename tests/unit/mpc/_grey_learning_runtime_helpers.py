@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from math import ceil
 from types import SimpleNamespace
 from typing import ClassVar
 
@@ -47,12 +48,14 @@ from controller.mpc_factory import MpcPairFactory, OwnedMpcPair
 from controller.runtime.model_fitting import (
     CandidatePair,
     CandidatePreparation,
+    FIT_CADENCE_S,
     FitSubmission,
     GreyFitMetric,
     GreyFitMetrics,
     GreyFitSuccess,
     GreyFitWorker,
     TargetTimingEvidence,
+    TriggerConfig,
 )
 from controller.runtime.model_persistence import (
     DurableActivationReceipt,
@@ -68,6 +71,10 @@ from tests.unit.mpc._solver_fixtures import (
     _Estimator,
     _Solver,
     inactive_calibration,
+)
+
+_DEFAULT_EFFECTIVE_FRAME_COUNT = ceil(
+    TriggerConfig().min_effective_duration_s / FIT_CADENCE_S
 )
 
 _REQUIRED_HORIZONS = (3, 15, 45, 90, 180)
@@ -821,8 +828,8 @@ def _operator_candidate(
 
 def _frame(sequence: int = 0) -> FrameObservation:
     return FrameObservation(
-        frame_start_s=sequence * 20.0,
-        frame_end_s=(sequence + 1) * 20.0,
+        frame_start_s=sequence * FIT_CADENCE_S,
+        frame_end_s=(sequence + 1) * FIT_CADENCE_S,
         temp_c=75.0 + sequence,
         setpoint_c=120.0,
         ambient_c=20.0,
@@ -881,15 +888,18 @@ def _reopened_corpus(tmp_path, *, include_incompatible: bool = False):
 def _reopened_ready_passive_corpus(tmp_path):
     database_path = tmp_path / "grey-learning-passive-ready.sqlite"
     repository = LearningTrajectoryRepository(str(database_path))
-    source = _segment("passive-ready", scored_count=120)
+    source = _segment(
+        "passive-ready",
+        scored_count=_DEFAULT_EFFECTIVE_FRAME_COUNT,
+    )
     scored_frames = []
     for ordinal, frame in enumerate(source.scored_hold_frames):
         load = (0.15, 0.50, 0.85)[ordinal % 3]
         scored_frames.append(
             replace(
                 frame,
-                chamber_temperature_c=80.0 + ordinal * 0.1,
-                delivered_auger_on_seconds=load * 20.0,
+                chamber_temperature_c=80.0 + ordinal * 0.5,
+                delivered_auger_on_seconds=load * FIT_CADENCE_S,
                 realized_auger_duty=load,
                 normalized_combustion_load=load,
             )
