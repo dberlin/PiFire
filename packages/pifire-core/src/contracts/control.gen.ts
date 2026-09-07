@@ -223,7 +223,7 @@ export type _PelletActionUnion =
   | DeletePelletLogRequest;
 
 export interface PiFireControlWebContracts {
-  [k: string]: unknown | undefined;
+  [k: string]: unknown;
 }
 /**
  * This interface was referenced by `PiFireControlWebContracts`'s JSON-Schema
@@ -380,7 +380,7 @@ export interface ManualPwmCommandRequest {
 export interface ControlPatchRequest {
   notify_data?: NotifyData;
   notify_updates?: NotifyUpdates;
-  [k: string]: unknown | undefined;
+  [k: string]: unknown;
 }
 /**
  * This interface was referenced by `PiFireControlWebContracts`'s JSON-Schema
@@ -397,7 +397,7 @@ export interface NotifyEntry {
   target?: FiniteNumber | null;
   triggered?: Triggered;
   type: Type;
-  [k: string]: unknown | undefined;
+  [k: string]: unknown;
 }
 /**
  * This interface was referenced by `PiFireControlWebContracts`'s JSON-Schema
@@ -658,7 +658,7 @@ export interface WledDevice {
   port?: Port;
   product?: Product;
   version?: Version;
-  [k: string]: unknown | undefined;
+  [k: string]: unknown;
 }
 /**
  * This interface was referenced by `PiFireControlWebContracts`'s JSON-Schema

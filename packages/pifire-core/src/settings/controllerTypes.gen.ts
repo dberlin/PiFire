@@ -534,7 +534,7 @@ export interface PidSpConfig {
 interface Config1 {
   [k: string]:
     | {
-        [k: string]: (number | boolean | string) | undefined;
+        [k: string]: number | boolean | string | undefined;
       }
     | undefined;
 }

@@ -68,7 +68,7 @@ type ParentIncumbentGeneration = number;
 type RequestId = string;
 type ResultStatus = "succeeded";
 type ParameterDeltas = {
-  [k: string]: (number | null) | undefined;
+  [k: string]: number | null | undefined;
 } | null;
 type CC = number;
 type KQ = number;
@@ -622,7 +622,7 @@ export interface ModelEvidenceReport {
   status: ModelEvidenceStatus;
 }
 interface Checks {
-  [k: string]: CheckStatus;
+  [k: string]: CheckStatus | undefined;
 }
 /**
  * This interface was referenced by `PiFireLearningWebContracts`'s JSON-Schema
