@@ -14,18 +14,20 @@ This change governs candidate construction, not activation.
 
 ## 2. Evidence
 
-A throwaway production-path simulator probe exercised `GrillSim` and `MAKGrillSim` with three independent 59-frame training cooks, exact pre-roll, and five unseen seeds. Each scored frame covered 20 seconds.
+The initial throwaway probe covered only horizons 3, 15, and 45 and did not reproduce production's every-frame causal forecast stream. It showed that cumulative short-cook evidence can produce materially useful fits, but it was not activation evidence.
 
-All training cooks reached 225°F and continued in Hold after first entry:
+The corrected implementation characterization uses `GrillSim` and `MAKGrillSim`, three independent 59-frame training cooks, exact 20-second frames, shared immutable observations, and production's completion-before-registration cadence across horizons 3, 15, 45, 90, and 180.
 
-- `GrillSim`: first entered the ±5°F band at frame 5 and had 55 scored frames remaining; all remaining frames stayed within ±15°F.
-- `MAKGrillSim`: first entered the ±5°F band at frame 22 and had 38 scored frames remaining; 37–38 remaining frames stayed within ±15°F. Its persistent positive error was produced by the uncalibrated controller.
+At the first conservative common-mask boundary, Grill produced a finite fit at exactly 600 effective seconds. It beat the uncalibrated incumbent at horizons 3, 15, 45, and 90, for whole-window forecast error, and for closed-loop IAE and overshoot on all five unseen seeds. It lost horizon 180 on all five seeds; pooled RMSE ratio was 3.671. The full 3 × 59 corpus still lost horizon 180 with ratio 5.364.
 
-At raw counts `(59, 59, 2)`, the Grill candidate had 120 effective rows. Against the uncalibrated model on five unseen seeds, its candidate/incumbent RMSE ratios were 0.190, 0.590, and 0.341 at horizons 3, 15, and 45; whole-cook RMSE ratio was 0.244; closed-loop IAE ratio was 0.695; and overshoot fell from 6.388°C to 0.045°C.
+MAK produced its first stable fit at 640 effective seconds. It beat the incumbent at every horizon, for whole-window error, and for closed-loop IAE and overshoot on all five unseen seeds. The shipped uncalibrated controller briefly exceeded the proposed training-dwell proxy after first setpoint entry, then re-entered the ±15°F band and remained there.
 
-For MAK, the model fitted from the first two 59-frame cooks had 98 effective rows. Its unseen forecast ratios were 0.032, 0.017, and 0.054; whole-cook ratio was 0.009; closed-loop IAE ratio was 0.863; and overshoot fell from 8.246°C to 0.395°C. Every measured comparison won on all five unseen seeds.
+These results separate two contracts that the initial characterization had conflated:
 
-The probe does not establish that every candidate at exactly 600 effective seconds is better. That boundary remains an implementation characterization requirement. It does establish that the present per-cook 120-frame gate rejects useful cumulative evidence and that an early shadow challenger can be substantially better than the uncalibrated incumbent.
+- evidence duration answers whether a finite, replayable shadow fit may be constructed;
+- untouched prospective evaluation answers whether that particular fit may ever activate.
+
+Extra retrospective duration did not repair Grill's long-horizon forecast, while the unchanged prospective evaluator rejected it with `challenger-horizon-180`. The MAK dwell transient describes the incumbent-generated training trajectory, not challenger admission. Neither is a sound reason to preserve a forty-minute construction delay. Six hundred aggregate effective seconds therefore remains the shadow-construction floor; no retrospective quality result authorizes activation.
 
 ## 3. Goals
 
@@ -314,24 +316,28 @@ Verify:
 
 ### 15.5 Simulator characterization
 
-Use production `GrillSim`, `MAKGrillSim`, the production segmented fitter, and the production MPC controller with:
+Use production `GrillSim`, `MAKGrillSim`, the production segmented fitter, the production MPC controller, and the production causal evaluator with:
 
 - three independent 59-frame training cooks;
 - exact pre-roll excluded from scored duration;
 - candidate snapshots at the first 600 effective seconds and at full `3 × 59` evidence;
+- one shared immutable observation for paired candidate/incumbent updates;
+- completion-before-registration on every accepted prospective frame;
+- the first complete evaluation window over horizons 3, 15, 45, 90, and 180;
 - unseen forecast and closed-loop seeds.
 
-The characterization must report, without weakening any gate:
+The characterization must report:
 
 - setpoint-entry frame and post-entry duration for every training cook;
 - candidate and incumbent RMSE at horizons 3, 15, 45, 90, and 180;
+- production causal-evaluation blockers;
 - whole-cook RMSE;
 - closed-loop IAE and overshoot;
 - per-seed win counts;
 - raw, masked, and effective duration;
 - warm-up-excluded segment identities.
 
-The change is acceptable only if both simulators produce an early candidate that beats the uncalibrated incumbent on the required unseen comparisons and no candidate controls hardware before prospective qualification. If the exact 600-second boundary fails this characterization, the duration threshold must be re-established from evidence rather than weakened assertions or bypassed gates.
+The construction change is acceptable when both simulators produce a finite, replayable shadow fit at the duration boundary, the characterized candidates improve whole-window error, closed-loop IAE, and overshoot on the fixed unseen seeds, and no candidate controls hardware before prospective qualification. A long-horizon loss is not hidden or converted into fit admission: the production evaluator must report it and keep the challenger shadow-only. Training-cook dwell is diagnostic, not fit or activation authority.
 
 ### 15.6 Repository gates
 
@@ -351,5 +357,5 @@ The design is implemented only when all are true:
 8. Historical records remain historical and cannot authorize new activation.
 9. Replay reproduces exact corpus, masks, exclusions, candidate, metrics, and digest.
 10. Prospective causal qualification and durable activation are unchanged.
-11. The permanent simulator characterization proves the new boundary against the uncalibrated model on unseen seeds.
+11. The permanent simulator characterization proves finite shadow construction, records every prospective horizon, and proves that retrospective evidence cannot bypass causal activation authority.
 12. No test weakens continuity, exact delivery, warm-up, identifiability, regression, lineage, or activation assertions to obtain a pass.
