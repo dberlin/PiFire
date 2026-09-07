@@ -270,6 +270,7 @@ class _CorpusWorker:
 
     def __init__(self) -> None:
         self.job = None
+        self.jobs = []
         self.closed = False
         self.__class__.instances.append(self)
 
@@ -282,6 +283,7 @@ class _CorpusWorker:
 
     def submit(self, job) -> FitSubmission:
         self.job = job
+        self.jobs.append(job)
         return FitSubmission.ACCEPTED
 
     def receive(self, *, timeout_s: float):
@@ -304,6 +306,30 @@ class _DeliveringCorpusWorker(_CorpusWorker):
         return SimpleNamespace(
             request=self.job.request,
             outcome=_fit_success(self.job),
+        )
+
+
+class _EffectiveDurationDeficitWorker(_CorpusWorker):
+    instances: ClassVar[list[_EffectiveDurationDeficitWorker]] = []
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._delivered_request_ids: set[str] = set()
+
+    def receive(self, *, timeout_s: float):
+        del timeout_s
+        assert self.job is not None
+        request_id = self.job.request.request_id
+        if request_id in self._delivered_request_ids:
+            raise TimeoutError
+        self._delivered_request_ids.add(request_id)
+        return SimpleNamespace(
+            request=self.job.request,
+            outcome=replace(
+                _fit_success(self.job),
+                sample_count=20,
+                rejection_reasons=("minimum-effective-duration",),
+            ),
         )
 
 

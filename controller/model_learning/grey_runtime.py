@@ -104,6 +104,7 @@ from controller.runtime.model_fitting import (
     CandidateOwnershipTransferredError,
     CandidatePair,
     CandidatePreparation,
+    FIT_CADENCE_S,
     FitSubmission,
     GreyFitError,
     GreyFitSuccess,
@@ -154,6 +155,19 @@ class _CorpusFitIntent:
     ticket: str
     origin: CandidateOrigin
     replace_owned_prepared: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class _FitRetryWatermark:
+    fit_partition_digest: str
+    incumbent_digest: str
+    incumbent_generation: int
+    through_corpus_revision: int
+    required_observed_duration_s: float
+
+
+def _corpus_observed_duration_s(identity: FitCorpusIdentity) -> float:
+    return sum(item.scored_count for item in identity.slices) * FIT_CADENCE_S
 
 
 class GreyLearningProcessOwner:
@@ -396,6 +410,7 @@ class GreyLearningRuntime:
         self._corpus_fit_intents: deque[_CorpusFitIntent] = deque()
         self._corpus_fit_failure: tuple[str, str] | None = None
         self._terminal_fit_tickets: dict[str, CandidateOrigin] = {}
+        self._fit_retry_watermark: _FitRetryWatermark | None = None
         self._challenger_state: ModelChallengerState | None = None
         self._restore_revalidation_candidate_digest: str | None = None
         self._checkpoint_origin: CandidateOrigin | None = None
@@ -1040,6 +1055,35 @@ class GreyLearningRuntime:
             self._fail_corpus_learning("corpus-snapshot-failed", error)
             return None
 
+        identity = self.learning_identity() if identity is None else identity
+        observed_duration_s = _corpus_observed_duration_s(snapshot.identity)
+        with self._learning_lock:
+            retry_watermark = self._fit_retry_watermark
+            if retry_watermark is not None and (
+                retry_watermark.fit_partition_digest
+                != snapshot.identity.fit_partition_digest
+                or retry_watermark.incumbent_digest != identity.incumbent_digest
+                or retry_watermark.incumbent_generation != identity.role_generation
+            ):
+                self._fit_retry_watermark = None
+                retry_watermark = None
+            retry_is_premature = (
+                retry_watermark is not None
+                and origin is CandidateOrigin.PASSIVE_ONLINE
+                and not intent.replace_owned_prepared
+                and snapshot.identity.corpus_revision
+                >= retry_watermark.through_corpus_revision
+                and observed_duration_s
+                < retry_watermark.required_observed_duration_s
+            )
+        if retry_is_premature:
+            self._terminalize_not_ready_corpus_fit(
+                intent,
+                origin,
+                "minimum-effective-duration",
+            )
+            return None
+
         if origin is CandidateOrigin.PASSIVE_ONLINE and not intent.replace_owned_prepared:
             trigger = persistent_corpus_trigger(
                 snapshot,
@@ -1052,7 +1096,6 @@ class GreyLearningRuntime:
                     ", ".join(trigger.blockers),
                 )
                 return None
-        identity = self.learning_identity() if identity is None else identity
         request = FitRequest(
             request_id=intent.ticket,
             origin=origin,
@@ -1114,6 +1157,14 @@ class GreyLearningRuntime:
                 )
             if submission is not FitSubmission.ACCEPTED:
                 raise RuntimeError("fitting worker was busy")
+            if (
+                retry_watermark is not None
+                and observed_duration_s
+                >= retry_watermark.required_observed_duration_s
+            ):
+                with self._learning_lock:
+                    if self._fit_retry_watermark is retry_watermark:
+                        self._fit_retry_watermark = None
             if superseded:
                 self._clear_superseded_prepared_candidate(prepared_to_replace)
         except Exception as error:
@@ -2403,6 +2454,45 @@ class GreyLearningRuntime:
         if not learning_is_current:
             return delivery, None
 
+        if delivered_preparation is not None:
+            with self._learning_lock:
+                self._fit_retry_watermark = None
+        elif (
+            isinstance(terminal_request, FitRequest)
+            and terminal_request.origin is CandidateOrigin.PASSIVE_ONLINE
+            and isinstance(outcome, GreyFitSuccess)
+            and not stale_reasons
+            and delivery_blockers == ("minimum-effective-duration",)
+        ):
+            effective_duration_s = outcome.sample_count * FIT_CADENCE_S
+            deficit_s = (
+                learning.trigger_config.min_effective_duration_s
+                - effective_duration_s
+            )
+            current_observed_duration_s = _corpus_observed_duration_s(
+                terminal_request.fit_corpus
+            )
+            required_observed_duration_s = (
+                current_observed_duration_s
+                + math.ceil(deficit_s / FIT_CADENCE_S) * FIT_CADENCE_S
+            )
+            with self._learning_lock:
+                self._fit_retry_watermark = _FitRetryWatermark(
+                    fit_partition_digest=(
+                        terminal_request.fit_corpus.fit_partition_digest
+                    ),
+                    incumbent_digest=terminal_request.parent_incumbent_digest,
+                    incumbent_generation=(
+                        terminal_request.parent_incumbent_generation
+                    ),
+                    through_corpus_revision=(
+                        terminal_request.fit_corpus.corpus_revision
+                    ),
+                    required_observed_duration_s=(
+                        required_observed_duration_s
+                    ),
+                )
+
         if delivery is not None and delivered_preparation is not None and delivered_preparation.accepted:
             try:
                 durable = self._persist_durable_challenger(
@@ -3443,6 +3533,8 @@ class GreyLearningRuntime:
         if self._closed:
             return
         self._closed = True
+        with self._learning_lock:
+            self._fit_retry_watermark = None
         learning = self._learning
         self._learning = None
         if learning is not None and self._process_owner is None:

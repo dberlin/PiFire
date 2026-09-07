@@ -21,7 +21,7 @@ from common.model_evidence import (
     EvidenceKind,
     ModelEvidenceRecord,
 )
-from common.persistence.learning_trajectory import FitCorpusSnapshot
+from common.persistence.learning_trajectory import FitCorpusSnapshot, LearningTrajectoryRepository
 from common.persistence.model_challenger import read_model_challenger
 from common.persistence.model_evidence import append_model_evidence, read_model_activation
 from controller.model_learning.contracts import (
@@ -57,6 +57,7 @@ from tests.unit.mpc._grey_learning_runtime_helpers import (
     _CheckpointStore,
     _close_prepared_candidate,
     _ControlledDeliveryCorpusWorker,
+    _EffectiveDurationDeficitWorker,
     _CorpusRepositoryProbe,
     _CorpusWorker,
     _DeliveringCorpusWorker,
@@ -538,6 +539,160 @@ def test_persistent_corpus_trigger_uses_exact_duration_across_segments(
         config=config,
     )
     assert accepted.ready
+
+
+def _duration_deficit_corpus(tmp_path):
+    database_path = tmp_path / "grey-learning-duration-deficit.sqlite"
+    repository = LearningTrajectoryRepository(str(database_path))
+    segment = _segment(
+        "duration-deficit",
+        pre_roll_count=0,
+        scored_count=30,
+    )
+    _finalize_segment(repository, segment)
+    return repository, segment.fit_partition_digest
+
+
+def _append_duration_frame(repository, ordinal: int) -> None:
+    _finalize_segment(
+        repository,
+        _segment(
+            f"duration-addition-{ordinal}",
+            epoch_ms=ordinal * 40_000,
+            start_sequence=ordinal,
+            pre_roll_count=0,
+            scored_count=1,
+        ),
+    )
+
+
+def _duration_retry_harness(repository, partition):
+    harness = _harness(
+        trajectory_repository=repository,
+        fit_partition_digest=partition,
+        fit_worker_factory=_EffectiveDurationDeficitWorker,
+        learning_enabled=True,
+    )
+    harness.runtime._learning.trigger_config = TriggerConfig(
+        min_effective_duration_s=600.0,
+        min_input_variance=0.0,
+        min_input_levels=1,
+        min_temperature_span_c=0.0,
+        min_identifiability=0.0,
+    )
+    return harness
+
+
+def _install_duration_retry_watermark(harness) -> None:
+    assert harness.runtime.request_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+    harness.runtime.poll_learning_off_path()
+    delivery, _evaluation = harness.runtime.poll_learning_off_path()
+    assert delivery is not None
+    assert delivery.blockers == ("minimum-effective-duration",)
+
+
+def test_effective_duration_rejection_defers_optimizer_until_deficit_can_close(
+    tmp_path,
+) -> None:
+    repository, partition = _duration_deficit_corpus(tmp_path)
+    _EffectiveDurationDeficitWorker.instances.clear()
+    harness = _duration_retry_harness(repository, lambda: partition)
+    _install_duration_retry_watermark(harness)
+    worker = _EffectiveDurationDeficitWorker.instances[-1]
+    assert len(worker.jobs) == 1
+
+    for ordinal in range(1, 10):
+        _append_duration_frame(repository, ordinal)
+        assert harness.runtime.request_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+        harness.runtime.poll_learning_off_path()
+        assert len(worker.jobs) == 1
+
+    _append_duration_frame(repository, 10)
+    assert harness.runtime.request_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+    harness.runtime.poll_learning_off_path()
+
+    assert len(worker.jobs) == 2
+    harness.runtime.close()
+    harness.activation.close()
+
+
+@pytest.mark.parametrize(
+    "identity_change",
+    ("partition", "incumbent-digest", "role-generation"),
+)
+def test_retry_watermark_is_discarded_when_incumbent_or_partition_changes(
+    tmp_path,
+    monkeypatch,
+    identity_change,
+) -> None:
+    repository, partition = _duration_deficit_corpus(tmp_path)
+    alternate = replace(
+        _segment(
+            "alternate-duration-partition",
+            epoch_ms=2_000_000,
+            pre_roll_count=0,
+            scored_count=30,
+        ),
+        ambient_semantics_digest="f" * 64,
+    )
+    _finalize_segment(repository, alternate)
+    current_partition = [partition]
+    _EffectiveDurationDeficitWorker.instances.clear()
+    harness = _duration_retry_harness(repository, lambda: current_partition[0])
+    _install_duration_retry_watermark(harness)
+    worker = _EffectiveDurationDeficitWorker.instances[-1]
+    assert harness.runtime.request_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+    harness.runtime.poll_learning_off_path()
+    assert len(worker.jobs) == 1
+
+
+    if identity_change == "partition":
+        current_partition[0] = alternate.fit_partition_digest
+    else:
+        identity = harness.runtime.learning_identity()
+        changed_identity = (
+            replace(identity, incumbent_digest="f" * 64)
+            if identity_change == "incumbent-digest"
+            else replace(
+                identity,
+                role_generation=identity.role_generation + 1,
+                candidate_generation=identity.candidate_generation + 1,
+            )
+        )
+        monkeypatch.setattr(
+            harness.runtime,
+            "learning_identity",
+            lambda: changed_identity,
+        )
+
+    assert harness.runtime.request_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+    harness.runtime.poll_learning_off_path()
+
+    assert len(worker.jobs) == 2
+    harness.runtime.close()
+    harness.activation.close()
+
+
+def test_restart_may_repeat_one_safe_fit_but_persists_no_retry_authority(
+    tmp_path,
+) -> None:
+    repository, partition = _duration_deficit_corpus(tmp_path)
+    _EffectiveDurationDeficitWorker.instances.clear()
+    first = _duration_retry_harness(repository, lambda: partition)
+    _install_duration_retry_watermark(first)
+    first.runtime.close()
+    first.activation.close()
+
+    restarted = _duration_retry_harness(repository, lambda: partition)
+    assert restarted.runtime.request_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+    restarted.runtime.poll_learning_off_path()
+
+    assert sum(
+        len(worker.jobs)
+        for worker in _EffectiveDurationDeficitWorker.instances
+    ) == 2
+    restarted.runtime.close()
+    restarted.activation.close()
 
 
 @pytest.mark.parametrize(("enabled", "scheduled"), ((False, False), (True, True)))
