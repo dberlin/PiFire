@@ -787,6 +787,12 @@ def _replay_exact_fit(
         "sample_count": replayed_result.sample_count,
         "temperature_band_c": list(replayed_result.temperature_band_c),
         "nfev": replayed_result.nfev,
+        "effective_masks": [
+            [bool(value) for value in mask] for mask in replayed_result.effective_masks
+        ],
+        "warmup_excluded_segment_ids": list(
+            replayed_result.warmup_excluded_segment_ids
+        ),
         "result_digest": replayed_result.result_digest,
     } == fit_result_value
     assert (

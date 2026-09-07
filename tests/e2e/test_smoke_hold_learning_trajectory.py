@@ -31,6 +31,7 @@ from common.control_trace import (
     ControllerType,
     FramedPulseFramePayload,
     GreyCandidateAssessmentPayload,
+    GreyFitLifecyclePayload,
     MpcFailureState,
     MpcUpdatePayload,
     PidSpUpdatePayload,
@@ -51,6 +52,7 @@ from common.persistence.control_trace import (
     read_control_trace_session,
 )
 from common.persistence.learning_trajectory import LearningTrajectoryRepository
+from common.persistence.model_challenger import ModelChallengerState, read_model_challenger
 from common.persistence.model_evidence import read_model_activation, read_model_evidence
 from controller.acados import GreyBoxMPCConfig
 from controller.applied_output import AppliedOutput, OutputSource
@@ -702,6 +704,51 @@ class _RealCookHoldResult:
     @property
     def finalized_segment_delta(self) -> int:
         return self.finalized_segments_after - self.finalized_segments_before
+
+
+def _accepted_durable_fit_request_ids(
+    current_cook_fit_lifecycle: tuple[GreyFitLifecyclePayload, ...],
+    durable_challenger: ModelChallengerState | None,
+) -> set[str]:
+    if durable_challenger is None:
+        return set()
+    lineage = durable_challenger.fit_lineage
+    if lineage.fit_corpus_digest != durable_challenger.fit_corpus.corpus_digest:
+        return set()
+    durable_identity = (lineage.request_id, lineage.fit_corpus_digest)
+    if not any(
+        payload.status == "succeeded"
+        and (payload.request_id, payload.fit_corpus_digest) == durable_identity
+        for payload in current_cook_fit_lifecycle
+    ):
+        return set()
+    return {lineage.request_id}
+
+
+def test_fit_acceptance_without_durable_shadow_does_not_count() -> None:
+    request_id = "fit-with-rejected-preparation"
+    fit_lifecycle = GreyFitLifecyclePayload(
+        request_id=request_id,
+        status="succeeded",
+        origin="passive-online",
+        policy="causal-auto",
+        fit_corpus_digest="a" * 64,
+    )
+    rejected_preparation = GreyCandidateAssessmentPayload(
+        decision_id=f"fit:{request_id}",
+        origin="passive-online",
+        policy="causal-auto",
+        fit_accepted=True,
+        identifiability_accepted=True,
+        native_build="failed",
+        native_dry_solve="not-run",
+        target_timing="not-run",
+        confidence_accepted=False,
+        rejection_reasons=("native-build-failed",),
+    )
+
+    assert rejected_preparation.fit_accepted
+    assert _accepted_durable_fit_request_ids((fit_lifecycle,), None) == set()
 
 
 def _load_real_cook_hold_stream(campaign_id: str, cook_name: str) -> _RealCookHoldStream:
@@ -1424,30 +1471,39 @@ def _assert_real_cook_hold_smoke(
         for record in records
         if record.event_kind is TraceEventKind.RECORDER_GAP
     )
-    fit_terminal_statuses = tuple(
-        record.payload.status
+    current_cook_fit_lifecycle = tuple(
+        cast(GreyFitLifecyclePayload, record.payload)
         for record in records
         if record.event_kind is TraceEventKind.FIT_LIFECYCLE
-        and record.payload.status in {"succeeded", "failed", "stale"}
+    )
+    fit_terminal_statuses = tuple(
+        payload.status
+        for payload in current_cook_fit_lifecycle
+        if payload.status in {"succeeded", "failed", "stale"}
     )
     fit_terminal_errors = tuple(
-        record.payload.error
-        for record in records
-        if record.event_kind is TraceEventKind.FIT_LIFECYCLE
-        and record.payload.status in {"succeeded", "failed", "stale"}
+        payload.error
+        for payload in current_cook_fit_lifecycle
+        if payload.status in {"succeeded", "failed", "stale"}
     )
     candidate_assessments = [
         cast(GreyCandidateAssessmentPayload, record.payload)
         for record in records
         if record.event_kind is TraceEventKind.CANDIDATE_ASSESSMENT
     ]
+    # A successful fit becomes durable challenger authority before prospective
+    # causal evaluations can emit candidate-assessment records.
+    accepted_fit_request_ids = _accepted_durable_fit_request_ids(
+        current_cook_fit_lifecycle,
+        read_model_challenger(),
+    )
     return _RealCookHoldResult(
         replay_only_count=len(replay_only_trajectory_frames),
         model_observation_count=len(observation_payloads),
         fit_terminal_statuses=fit_terminal_statuses,
         fit_terminal_errors=fit_terminal_errors,
         candidate_assessment_count=len(candidate_assessments),
-        candidate_fit_accepted_count=sum(payload.fit_accepted for payload in candidate_assessments),
+        candidate_fit_accepted_count=len(accepted_fit_request_ids),
         recorder_gap_reasons=recorder_gap_reasons,
         scored_before=corpus_before.scored_count,
         scored_after=report_before_restart.scored_count,
