@@ -1359,6 +1359,12 @@ class GreyLearningRuntime:
                     "sample_count": preparation.candidate.sample_count,
                     "temperature_band_c": list(preparation.candidate.temperature_band_c),
                     "nfev": preparation.candidate.nfev,
+                    "effective_masks": [
+                        [bool(value) for value in mask] for mask in preparation.candidate.effective_masks
+                    ],
+                    "warmup_excluded_segment_ids": list(
+                        preparation.candidate.warmup_excluded_segment_ids
+                    ),
                     "result_digest": preparation.candidate.result_digest,
                 },
             },
@@ -1443,6 +1449,12 @@ class GreyLearningRuntime:
                     "sample_count": preparation.candidate.sample_count,
                     "temperature_band_c": list(preparation.candidate.temperature_band_c),
                     "nfev": preparation.candidate.nfev,
+                    "effective_masks": [
+                        [bool(value) for value in mask] for mask in preparation.candidate.effective_masks
+                    ],
+                    "warmup_excluded_segment_ids": list(
+                        preparation.candidate.warmup_excluded_segment_ids
+                    ),
                     "result_digest": preparation.candidate.result_digest,
                 },
             },
@@ -2834,6 +2846,8 @@ class GreyLearningRuntime:
                 sample_count=fit_result["sample_count"],
                 temperature_band_c=tuple(fit_result["temperature_band_c"]),
                 nfev=fit_result["nfev"],
+                effective_masks=tuple(tuple(mask) for mask in fit_result["effective_masks"]),
+                warmup_excluded_segment_ids=tuple(fit_result["warmup_excluded_segment_ids"]),
                 result_digest=fit_result["result_digest"],
             )
             timing = TargetTimingEvidence(
@@ -3034,6 +3048,12 @@ class GreyLearningRuntime:
             )
             rmse = metadata["rmse"]
             band = metadata["band_c"]
+            if source_matches:
+                effective_masks = tuple(tuple(mask) for mask in fit_result["effective_masks"])
+                warmup_excluded_segment_ids = tuple(fit_result["warmup_excluded_segment_ids"])
+            else:
+                effective_masks = tuple((True,) * corpus_slice.scored_count for corpus_slice in fit_corpus.slices)
+                warmup_excluded_segment_ids = ()
             candidate = GreyFitSuccess(
                 request=request,
                 config=candidate_owner.solver.config,
@@ -3064,6 +3084,8 @@ class GreyLearningRuntime:
                         stored_descriptor.model_digest,
                     )
                 ),
+                effective_masks=effective_masks,
+                warmup_excluded_segment_ids=warmup_excluded_segment_ids,
             )
             preparation = CandidatePreparation(
                 candidate=candidate,

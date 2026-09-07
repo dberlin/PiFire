@@ -430,6 +430,73 @@ def test_anchor_preroll_and_leading_hold_warmup_are_not_residuals_or_effective_s
     assert result.metrics.pooled.error_band_c == pytest.approx((-6.0, 5.0), abs=0.03)
 
 
+def test_warming_segment_is_explicitly_excluded_without_poisoning_older_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config(theta=25.0)
+    usable = _segment(
+        "usable",
+        "cook-usable",
+        config=config,
+        sequence_start=0,
+        scored_load=tuple((0.1, 0.9, 0.3, 0.7)[index % 4] for index in range(30)),
+        pre_roll_load=(0.4,) * 4,
+        anchor_c=70.0,
+    )
+    warming = _segment(
+        "warming",
+        "cook-warming",
+        config=config,
+        sequence_start=40,
+        scored_load=(0.2, 0.8, 0.4),
+        pre_roll_load=(),
+        initial_load=0.2,
+        anchor_c=130.0,
+    )
+    monkeypatch.setattr(fitting, "_score_identifiability", lambda _columns, _masks: 0.8)
+    _pin_optimizer(monkeypatch, config, config)
+
+    result = fit_segmented_grey(_job((usable, warming), config))
+
+    assert isinstance(result, GreyFitSuccess)
+    assert result.warmup_excluded_segment_ids == ("warming",)
+    assert tuple(metric.segment_id for metric in result.metrics.by_segment) == ("usable",)
+    assert tuple(metric.cook_id for metric in result.metrics.by_cook) == ("cook-usable",)
+    assert tuple(result.effective_masks[1]) == (False,) * len(warming.scored_load)
+    assert result.metrics.pooled.sample_count == 30
+    assert result.rejection_reasons == ()
+
+
+def test_all_warming_segments_fail_with_typed_insufficient_warmup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config(theta=25.0)
+    first = _segment(
+        "warming-first",
+        "cook-first",
+        config=config,
+        sequence_start=0,
+        scored_load=(0.2, 0.8, 0.4),
+        pre_roll_load=(),
+        initial_load=0.2,
+    )
+    second = _segment(
+        "warming-second",
+        "cook-second",
+        config=config,
+        sequence_start=10,
+        scored_load=(0.8, 0.2, 0.6),
+        pre_roll_load=(),
+        initial_load=0.8,
+    )
+    _pin_optimizer(monkeypatch, config, config)
+
+    result = fit_segmented_grey(_job((first, second), config))
+
+    assert isinstance(result, GreyFitError)
+    assert result.error_type == "InsufficientWarmup"
+    assert result.detail == "segment-warmup-incomplete:warming-first"
+
 def test_candidate_dependent_masks_keep_optimizer_residual_dimension_fixed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -551,6 +618,47 @@ def test_candidate_and_incumbent_metrics_use_one_common_conservative_mask(
     )
 
 
+def test_candidate_theta_controls_the_exact_pooled_duration_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    incumbent = _config(theta=50.0)
+    candidate = _config(theta=55.0)
+    loads = tuple((0.1, 0.9, 0.3, 0.7)[index % 4] for index in range(38))
+    segment = _segment(
+        "candidate-theta",
+        "cook-candidate-theta",
+        config=candidate,
+        sequence_start=0,
+        scored_load=loads,
+        pre_roll_load=(),
+        initial_load=0.4,
+    )
+    monkeypatch.setattr(fitting, "_score_identifiability", lambda _columns, _masks: 0.8)
+    _pin_optimizer(monkeypatch, candidate, candidate)
+
+    longer_warmup = fit_segmented_grey(_job((segment,), incumbent))
+
+    assert isinstance(longer_warmup, GreyFitSuccess)
+    assert longer_warmup.metrics.pooled.sample_count == 29
+    assert longer_warmup.rejection_reasons == ("minimum-effective-duration",)
+
+    exact_segment = _segment(
+        "exact-theta",
+        "cook-exact-theta",
+        config=incumbent,
+        sequence_start=0,
+        scored_load=loads,
+        pre_roll_load=(),
+        initial_load=0.4,
+    )
+    _pin_optimizer(monkeypatch, incumbent, incumbent)
+
+    exact_boundary = fit_segmented_grey(_job((exact_segment,), incumbent))
+
+    assert isinstance(exact_boundary, GreyFitSuccess)
+    assert exact_boundary.metrics.pooled.sample_count == 30
+    assert exact_boundary.rejection_reasons == ()
+
 def test_pooled_segment_and_cook_metrics_and_excitation_are_exact(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -621,42 +729,220 @@ def test_pooled_segment_and_cook_metrics_and_excitation_are_exact(
     )
 
 
-def test_supported_cook_regression_vetoes_but_short_cooks_cannot_bless_or_veto(
+def test_aggregate_600_seconds_can_build_without_one_supported_cook(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config(theta=25.0)
+    first = _segment(
+        "aggregate-first",
+        "cook-short-first",
+        config=config,
+        sequence_start=0,
+        scored_load=tuple((0.1, 0.9, 0.3, 0.7)[index % 4] for index in range(15)),
+        pre_roll_load=(0.4,) * 4,
+        anchor_c=70.0,
+    )
+    second = _segment(
+        "aggregate-second",
+        "cook-short-second",
+        config=config,
+        sequence_start=30,
+        scored_load=tuple((0.9, 0.2, 0.8, 0.1)[index % 4] for index in range(15)),
+        pre_roll_load=(0.4,) * 4,
+        anchor_c=130.0,
+    )
+    monkeypatch.setattr(fitting, "_score_identifiability", lambda _columns, _masks: 0.8)
+    _pin_optimizer(monkeypatch, config, config)
+
+    result = fit_segmented_grey(_job((first, second), config))
+
+    assert isinstance(result, GreyFitSuccess)
+    assert result.metrics.pooled.sample_count == 30
+    assert not any(metric.supports_regression_gate for metric in result.metrics.by_cook)
+    assert result.rejection_reasons == ()
+
+
+@pytest.mark.parametrize(
+    ("duration_s", "expected_reasons"),
+    (
+        (599.999, ("minimum-effective-duration",)),
+        (600.0, ()),
+    ),
+)
+def test_pooled_duration_gate_has_exact_600_second_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+    duration_s: float,
+    expected_reasons: tuple[str, ...],
+) -> None:
+    config = _config(theta=25.0)
+    first = _segment(
+        "boundary-first",
+        "cook-boundary-first",
+        config=config,
+        sequence_start=0,
+        scored_load=tuple((0.1, 0.9, 0.3, 0.7)[index % 4] for index in range(15)),
+        pre_roll_load=(0.4,) * 4,
+        anchor_c=70.0,
+    )
+    second = _segment(
+        "boundary-second",
+        "cook-boundary-second",
+        config=config,
+        sequence_start=30,
+        scored_load=tuple((0.9, 0.2, 0.8, 0.1)[index % 4] for index in range(15)),
+        pre_roll_load=(0.4,) * 4,
+        anchor_c=130.0,
+    )
+    measured_duration = fitting._metric_duration_s
+
+    def exact_duration(metric: Any) -> float:
+        if metric.segment_id is None and metric.cook_id is None:
+            return duration_s
+        return measured_duration(metric)
+
+    monkeypatch.setattr(fitting, "_metric_duration_s", exact_duration)
+    monkeypatch.setattr(fitting, "_score_identifiability", lambda _columns, _masks: 0.8)
+    _pin_optimizer(monkeypatch, config, config)
+
+    result = fit_segmented_grey(_job((first, second), config))
+
+    assert isinstance(result, GreyFitSuccess)
+    assert result.rejection_reasons == expected_reasons
+
+
+@pytest.mark.parametrize(
+    ("case", "loads", "temperatures", "identifiability", "expected_reason"),
+    (
+        (
+            "excitation",
+            (0.4,) * 30,
+            tuple(75.0 + index * 0.5 for index in range(30)),
+            0.8,
+            "insufficient-excitation",
+        ),
+        (
+            "coverage",
+            tuple((0.1, 0.9, 0.3, 0.7)[index % 4] for index in range(30)),
+            tuple(75.0 + index * 0.1 for index in range(30)),
+            0.8,
+            "insufficient-coverage",
+        ),
+        (
+            "identifiability",
+            tuple((0.1, 0.9, 0.3, 0.7)[index % 4] for index in range(30)),
+            tuple(75.0 + index * 0.5 for index in range(30)),
+            0.49,
+            "identifiability",
+        ),
+    ),
+)
+def test_pooled_evidence_gates_remain_strict(
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+    loads: tuple[float, ...],
+    temperatures: tuple[float, ...],
+    identifiability: float,
+    expected_reason: str,
+) -> None:
+    config = _config(theta=25.0)
+    generated = _segment(
+        f"pooled-{case}",
+        f"cook-pooled-{case}",
+        config=config,
+        sequence_start=0,
+        scored_load=loads,
+        pre_roll_load=(0.4,) * 4,
+    )
+    segment = replace(generated, scored_temperature_c=temperatures)
+    monkeypatch.setattr(fitting, "_score_identifiability", lambda _columns, _masks: identifiability)
+    _pin_optimizer(monkeypatch, config, config)
+
+    result = fit_segmented_grey(_job((segment,), config))
+
+    assert isinstance(result, GreyFitSuccess)
+    assert result.rejection_reasons == (expected_reason,)
+
+
+def test_pooled_regression_blocks_when_no_cook_is_individually_supported(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     incumbent = _config(C_c=900.0, K_Q=420.0, theta=25.0)
     candidate = _config(C_c=1500.0, K_Q=260.0, theta=25.0)
-    supported_load = tuple((0.1, 0.9, 0.3, 0.7)[index % 4] for index in range(120))
-    short_load = tuple((0.9, 0.2, 0.8, 0.1)[index % 4] for index in range(24))
-    supported = _segment(
+    first = _segment(
+        "pooled-regression-first",
+        "cook-short-first",
+        config=incumbent,
+        sequence_start=0,
+        scored_load=tuple((0.1, 0.9, 0.3, 0.7)[index % 4] for index in range(15)),
+        pre_roll_load=(0.4,) * 4,
+        anchor_c=70.0,
+    )
+    second = _segment(
+        "pooled-regression-second",
+        "cook-short-second",
+        config=incumbent,
+        sequence_start=30,
+        scored_load=tuple((0.9, 0.2, 0.8, 0.1)[index % 4] for index in range(15)),
+        pre_roll_load=(0.4,) * 4,
+        anchor_c=130.0,
+    )
+    monkeypatch.setattr(fitting, "_score_identifiability", lambda _columns, _masks: 0.8)
+    _pin_optimizer(monkeypatch, candidate, candidate)
+
+    result = fit_segmented_grey(_job((first, second), incumbent))
+
+    assert isinstance(result, GreyFitSuccess)
+    assert not any(metric.supports_regression_gate for metric in result.metrics.by_cook)
+    assert result.metrics.pooled.rmse_c > result.incumbent_metrics.pooled.rmse_c
+    assert result.rejection_reasons == ("pooled-regression",)
+
+
+def test_supported_600_second_cook_still_vetoes_pooled_improvement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    incumbent = _config(C_c=900.0, K_Q=420.0, theta=25.0)
+    candidate = _config(C_c=1200.0, K_Q=420.0, theta=25.0)
+    supported_source = _segment(
         "supported",
         "cook-supported",
         config=incumbent,
         sequence_start=0,
-        scored_load=supported_load,
-        pre_roll_load=(0.4, 0.4, 0.4, 0.4),
+        scored_load=tuple((0.0, 0.5, 1.0, 0.5)[index % 4] for index in range(30)),
+        pre_roll_load=(0.4,) * 4,
+        anchor_c=20.0,
+    )
+    incumbent_prediction = _oracle_prediction(supported_source, incumbent)
+    candidate_prediction = _oracle_prediction(supported_source, candidate)
+    supported = replace(
+        supported_source,
+        scored_temperature_c=tuple(incumbent_prediction + 0.49 * (candidate_prediction - incumbent_prediction)),
     )
     short = _segment(
         "short",
         "cook-short",
         config=candidate,
-        sequence_start=200,
-        scored_load=short_load,
-        pre_roll_load=(0.4, 0.4, 0.4, 0.4),
+        sequence_start=40,
+        scored_load=tuple((1.0, 0.2, 0.8, 0.1)[index % 4] for index in range(29)),
+        pre_roll_load=(0.4,) * 4,
+        anchor_c=200.0,
     )
     monkeypatch.setattr(fitting, "_score_identifiability", lambda _columns, _masks: 0.8)
     _pin_optimizer(monkeypatch, candidate, candidate)
 
-    vetoed = fit_segmented_grey(_job((supported, short), incumbent))
+    result = fit_segmented_grey(_job((supported, short), incumbent))
 
-    assert isinstance(vetoed, GreyFitSuccess)
-    assert vetoed.rejection_reasons == ("per-cook-regression:cook-supported",)
-    assert _metric(vetoed.metrics.by_cook, "cook_id", "cook-supported").supports_regression_gate is True
-    assert _metric(vetoed.metrics.by_cook, "cook_id", "cook-short").supports_regression_gate is False
-    _pin_optimizer(monkeypatch, candidate, candidate)
-    no_bless = fit_segmented_grey(_job((short,), incumbent))
-    assert isinstance(no_bless, GreyFitSuccess)
-    assert no_bless.rejection_reasons == ("insufficient-supported-cooks",)
+    assert isinstance(result, GreyFitSuccess)
+    supported_metric = _metric(result.metrics.by_cook, "cook_id", "cook-supported")
+    short_metric = _metric(result.metrics.by_cook, "cook_id", "cook-short")
+    assert supported_metric.supports_regression_gate is True
+    assert short_metric.supports_regression_gate is False
+    assert supported_metric.rmse_c > _metric(
+        result.incumbent_metrics.by_cook,
+        "cook_id",
+        "cook-supported",
+    ).rmse_c
+    assert result.metrics.pooled.rmse_c <= result.incumbent_metrics.pooled.rmse_c
+    assert result.rejection_reasons == ("per-cook-regression:cook-supported",)
 
 
 def test_each_structurally_supported_cook_must_be_individually_identifiable(
@@ -870,6 +1156,98 @@ def _independent_result_digest(result: GreyFitSuccess, corpus: FitCorpusIdentity
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+def _warming_replay_job(config: GreyBoxMPCConfig) -> GreyFitJob:
+    usable = _segment(
+        "replay-usable",
+        "cook-replay-usable",
+        config=config,
+        sequence_start=0,
+        scored_load=tuple((0.1, 0.9, 0.3, 0.7)[index % 4] for index in range(30)),
+        pre_roll_load=(0.4,) * 4,
+        anchor_c=70.0,
+    )
+    warming = _segment(
+        "replay-warming",
+        "cook-replay-warming",
+        config=config,
+        sequence_start=40,
+        scored_load=(0.2, 0.8, 0.4),
+        pre_roll_load=(),
+        initial_load=0.2,
+        anchor_c=130.0,
+    )
+    return _job((usable, warming), config)
+
+
+def test_success_constructor_rejects_mismatched_warmup_exclusions_and_mask_cardinality(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config(theta=25.0)
+    job = _warming_replay_job(config)
+    monkeypatch.setattr(fitting, "_score_identifiability", lambda _columns, _masks: 0.8)
+    _pin_optimizer(monkeypatch, config, config)
+    result = fit_segmented_grey(job)
+    assert isinstance(result, GreyFitSuccess)
+
+    with pytest.raises(ValueError, match="warmup exclusions must exactly match all-false effective masks"):
+        replace(result, warmup_excluded_segment_ids=())
+    with pytest.raises(ValueError, match="effective mask count must equal corpus slice count"):
+        replace(
+            result,
+            effective_masks=result.effective_masks[:-1],
+            warmup_excluded_segment_ids=(),
+        )
+
+@pytest.mark.parametrize("length_delta", (-1, 1), ids=("truncated", "extended"))
+def test_success_constructor_rejects_inner_mask_cardinality_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+    length_delta: int,
+) -> None:
+    config = _config(theta=25.0)
+    job = _warming_replay_job(config)
+    monkeypatch.setattr(fitting, "_score_identifiability", lambda _columns, _masks: 0.8)
+    _pin_optimizer(monkeypatch, config, config)
+    result = fit_segmented_grey(job)
+    assert isinstance(result, GreyFitSuccess)
+    usable_mask = tuple(bool(value) for value in result.effective_masks[0])
+    malformed_usable_mask = usable_mask[:-1] if length_delta < 0 else (*usable_mask, True)
+
+    with pytest.raises(ValueError, match="effective mask length must equal corpus slice scored count"):
+        replace(
+            result,
+            effective_masks=(malformed_usable_mask, result.effective_masks[1]),
+        )
+
+
+def test_warming_result_replay_reproduces_masks_exclusions_metrics_config_and_digest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config(theta=25.0)
+    job = _warming_replay_job(config)
+    monkeypatch.setattr(fitting, "_score_identifiability", lambda _columns, _masks: 0.8)
+    _pin_optimizer(monkeypatch, config, config)
+    first = fit_segmented_grey(job)
+    _pin_optimizer(monkeypatch, config, config)
+    replayed = fit_segmented_grey(job)
+
+    assert isinstance(first, GreyFitSuccess)
+    assert isinstance(replayed, GreyFitSuccess)
+    independently_excluded = tuple(
+        corpus_slice.segment_id
+        for corpus_slice, mask in zip(job.request.fit_corpus.slices, replayed.effective_masks, strict=True)
+        if not any(bool(value) for value in mask)
+    )
+    assert replayed.config == first.config == config
+    assert all(
+        np.array_equal(first_mask, replayed_mask)
+        for first_mask, replayed_mask in zip(first.effective_masks, replayed.effective_masks, strict=True)
+    )
+    assert replayed.warmup_excluded_segment_ids == first.warmup_excluded_segment_ids == independently_excluded
+    assert replayed.metrics == first.metrics
+    assert replayed.incumbent_metrics == first.incumbent_metrics
+    assert replayed.result_digest == first.result_digest
+    assert replayed.result_digest == _independent_result_digest(replayed, job.corpus)
 
 
 def test_supplied_sequence_21_through_140_uses_warm_lineage_not_fabricated_zero_lags_and_pins_digest(

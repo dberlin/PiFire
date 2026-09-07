@@ -148,6 +148,8 @@ def _successful_kernel(job: GreyFitJob) -> GreyFitSuccess:
         sample_count=sum(len(segment.scored_load) for segment in job.segments),
         temperature_band_c=(float(np.min(temperatures)), float(np.max(temperatures))),
         nfev=17,
+        effective_masks=tuple((True,) * len(segment.scored_load) for segment in job.segments),
+        warmup_excluded_segment_ids=(),
     )
 
 

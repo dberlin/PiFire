@@ -132,8 +132,9 @@ def _identity(**changes) -> LiveLearningIdentity:
 
 
 def _fit(origin=CandidateOrigin.PASSIVE_ONLINE) -> GreyFitSuccess:
+    request = _request(origin=origin)
     return GreyFitSuccess(
-        request=_request(origin=origin),
+        request=request,
         config=GreyBoxMPCConfig(C_c=900.0, K_Q=700.0, theta=75.0, horizon_steps=12),
         rmse_c=1.0,
         max_error_c=2.0,
@@ -141,6 +142,8 @@ def _fit(origin=CandidateOrigin.PASSIVE_ONLINE) -> GreyFitSuccess:
         sample_count=12,
         temperature_band_c=(75.0, 110.0),
         nfev=11,
+        effective_masks=tuple((True,) * corpus_slice.scored_count for corpus_slice in request.fit_corpus.slices),
+        warmup_excluded_segment_ids=(),
     )
 
 
@@ -226,6 +229,10 @@ class _ImmediateFitWorker:
                 sample_count=len(temperatures),
                 temperature_band_c=(min(temperatures), max(temperatures)),
                 nfev=4,
+                effective_masks=tuple(
+                    (True,) * len(segment.scored_load) for segment in self.job.segments
+                ),
+                warmup_excluded_segment_ids=(),
             )
         )
 

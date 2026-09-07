@@ -77,6 +77,8 @@ def _success() -> GreyFitSuccess:
         temperature_band_c=(90.0, 106.0),
         nfev=12,
         metrics=metrics,
+        effective_masks=tuple((True,) * len(segment.scored_load) for segment in job.segments),
+        warmup_excluded_segment_ids=(),
     )
 
 

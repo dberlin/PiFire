@@ -389,6 +389,7 @@ class GreyFitComparison:
     metrics: GreyFitMetrics
     incumbent_metrics: GreyFitMetrics
     effective_masks: tuple[Any, ...]
+    warmup_excluded_segment_ids: tuple[str, ...]
     identifiability: float
     rejection_reasons: tuple[str, ...]
 
@@ -397,6 +398,12 @@ class GreyFitComparison:
             raise TypeError("comparison metrics must be GreyFitMetrics")
         masks = tuple(_owned_bool_array(mask, "effective_masks") for mask in self.effective_masks)
         object.__setattr__(self, "effective_masks", masks)
+        exclusions = tuple(self.warmup_excluded_segment_ids)
+        if not all(isinstance(segment_id, str) and segment_id.strip() for segment_id in exclusions):
+            raise ValueError("warmup_excluded_segment_ids must contain non-blank strings")
+        if len(set(exclusions)) != len(exclusions):
+            raise ValueError("warmup_excluded_segment_ids must not contain duplicates")
+        object.__setattr__(self, "warmup_excluded_segment_ids", exclusions)
         score = _finite(self.identifiability, "identifiability")
         if score < 0.0:
             raise ValueError("identifiability must be non-negative")
@@ -423,6 +430,7 @@ class GreyFitSuccess:
     optimizer_residual_count: int = 0
     rejection_reasons: tuple[str, ...] = ()
     result_digest: str = ""
+    warmup_excluded_segment_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         from controller.acados.contracts import GreyBoxMPCConfig
@@ -451,7 +459,21 @@ class GreyFitSuccess:
         if self.incumbent_metrics is not None and not isinstance(self.incumbent_metrics, GreyFitMetrics):
             raise TypeError("incumbent_metrics must be GreyFitMetrics when present")
         masks = tuple(_owned_bool_array(mask, "effective_masks") for mask in self.effective_masks)
+        if len(masks) != len(self.request.fit_corpus.slices):
+            raise ValueError("effective mask count must equal corpus slice count")
+        for corpus_slice, mask in zip(self.request.fit_corpus.slices, masks, strict=True):
+            if len(mask) != corpus_slice.scored_count:
+                raise ValueError("effective mask length must equal corpus slice scored count")
         object.__setattr__(self, "effective_masks", masks)
+        exclusions = tuple(self.warmup_excluded_segment_ids)
+        expected = tuple(
+            corpus_slice.segment_id
+            for corpus_slice, mask in zip(self.request.fit_corpus.slices, masks, strict=True)
+            if not any(bool(value) for value in mask)
+        )
+        if exclusions != expected:
+            raise ValueError("warmup exclusions must exactly match all-false effective masks")
+        object.__setattr__(self, "warmup_excluded_segment_ids", exclusions)
         object.__setattr__(
             self,
             "optimizer_residual_count",
@@ -696,8 +718,10 @@ def _grouped_metrics(
     temperatures_by_segment: list[Any] = []
     loads_by_segment: list[Any] = []
     by_segment: list[GreyFitMetric] = []
-    cook_indices: dict[str, list[int]] = {}
-    for index, (segment, trajectory, mask) in enumerate(zip(job.segments, predicted, masks, strict=True)):
+    cook_parts: dict[str, tuple[list[Any], list[Any], list[Any]]] = {}
+    for segment, trajectory, mask in zip(job.segments, predicted, masks, strict=True):
+        if not np.any(mask):
+            continue
         errors = (trajectory - segment.scored_temperature_c)[mask]
         temperatures = segment.scored_temperature_c[mask]
         loads = segment.scored_load[mask]
@@ -712,18 +736,24 @@ def _grouped_metrics(
                 segment_id=segment.segment_id,
             )
         )
-        cook_indices.setdefault(segment.cook_id, []).append(index)
+        cook_errors, cook_temperatures, cook_loads = cook_parts.setdefault(segment.cook_id, ([], [], []))
+        cook_errors.append(errors)
+        cook_temperatures.append(temperatures)
+        cook_loads.append(loads)
 
     pooled_errors = np.concatenate(errors_by_segment)
     pooled_temperatures = np.concatenate(temperatures_by_segment)
     pooled_loads = np.concatenate(loads_by_segment)
     pooled = _metric(pooled_errors, pooled_temperatures, pooled_loads)
-    by_cook: list[GreyFitMetric] = []
-    for cook_id, indices in cook_indices.items():
-        errors = np.concatenate([errors_by_segment[index] for index in indices])
-        temperatures = np.concatenate([temperatures_by_segment[index] for index in indices])
-        loads = np.concatenate([loads_by_segment[index] for index in indices])
-        by_cook.append(_metric(errors, temperatures, loads, cook_id=cook_id))
+    by_cook = [
+        _metric(
+            np.concatenate(error_parts),
+            np.concatenate(temperature_parts),
+            np.concatenate(load_parts),
+            cook_id=cook_id,
+        )
+        for cook_id, (error_parts, temperature_parts, load_parts) in cook_parts.items()
+    ]
     return GreyFitMetrics(pooled=pooled, by_segment=tuple(by_segment), by_cook=tuple(by_cook))
 
 
@@ -898,11 +928,13 @@ def compare_segmented_grey(
             strict=True,
         )
     )
-    incomplete = [
-        segment.segment_id for segment, mask in zip(job.segments, common_masks, strict=True) if not np.any(mask)
-    ]
-    if incomplete:
-        raise ValueError(f"segment-warmup-incomplete:{incomplete[0]}")
+    warmup_excluded_segment_ids = tuple(
+        segment.segment_id
+        for segment, mask in zip(job.segments, common_masks, strict=True)
+        if not np.any(mask)
+    )
+    if len(warmup_excluded_segment_ids) == len(job.segments):
+        raise ValueError(f"segment-warmup-incomplete:{warmup_excluded_segment_ids[0]}")
     candidate_metrics, identifiability = _metrics_with_identifiability(
         job,
         _grouped_metrics(job, candidate_prediction, common_masks),
@@ -916,22 +948,32 @@ def compare_segmented_grey(
         common_masks,
     )
 
-    supported = tuple(metric for metric in candidate_metrics.by_cook if metric.supports_regression_gate)
-    if not supported:
-        rejection_reasons = ("insufficient-supported-cooks",)
-    else:
-        incumbent_by_cook = {metric.cook_id: metric for metric in incumbent_metrics.by_cook}
-        rejection_reasons = tuple(
-            f"per-cook-regression:{metric.cook_id}"
-            for metric in supported
-            if metric.rmse_c > incumbent_by_cook[metric.cook_id].rmse_c
-        )
+    reasons: list[str] = []
+    pooled = candidate_metrics.pooled
+    thresholds = TriggerConfig()
+    if _metric_duration_s(pooled) < thresholds.min_effective_duration_s:
+        reasons.append("minimum-effective-duration")
+    if pooled.input_excitation < thresholds.min_input_variance or pooled.input_levels < thresholds.min_input_levels:
+        reasons.append("insufficient-excitation")
+    if pooled.temperature_span_c < thresholds.min_temperature_span_c:
+        reasons.append("insufficient-coverage")
+    if pooled.identifiability < thresholds.min_identifiability:
+        reasons.append("identifiability")
+    if pooled.rmse_c > incumbent_metrics.pooled.rmse_c:
+        reasons.append("pooled-regression")
+    incumbent_by_cook = {metric.cook_id: metric for metric in incumbent_metrics.by_cook}
+    reasons.extend(
+        f"per-cook-regression:{metric.cook_id}"
+        for metric in candidate_metrics.by_cook
+        if metric.supports_regression_gate and metric.rmse_c > incumbent_by_cook[metric.cook_id].rmse_c
+    )
     return GreyFitComparison(
         metrics=candidate_metrics,
         incumbent_metrics=incumbent_metrics,
         effective_masks=common_masks,
+        warmup_excluded_segment_ids=warmup_excluded_segment_ids,
         identifiability=identifiability,
-        rejection_reasons=rejection_reasons,
+        rejection_reasons=tuple(reasons),
     )
 
 
@@ -1123,6 +1165,7 @@ def fit_segmented_grey(job: GreyFitJob) -> GreyFitSuccess | GreyFitError:
     candidate_metrics = comparison.metrics
     incumbent_metrics = comparison.incumbent_metrics
     common_masks = comparison.effective_masks
+    warmup_excluded_segment_ids = comparison.warmup_excluded_segment_ids
     identifiability = comparison.identifiability
     rejection_reasons = comparison.rejection_reasons
     pooled_temperatures = np.concatenate(
@@ -1150,6 +1193,7 @@ def fit_segmented_grey(job: GreyFitJob) -> GreyFitSuccess | GreyFitError:
         metrics=candidate_metrics,
         incumbent_metrics=incumbent_metrics,
         effective_masks=common_masks,
+        warmup_excluded_segment_ids=warmup_excluded_segment_ids,
         optimizer_residual_count=residual_count,
         rejection_reasons=rejection_reasons,
         result_digest=digest,

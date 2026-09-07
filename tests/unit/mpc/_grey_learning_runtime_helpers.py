@@ -235,6 +235,7 @@ def _fit_success(job, *, rmse_c: float = 0.5) -> GreyFitSuccess:
         metrics=metrics,
         incumbent_metrics=incumbent_metrics,
         effective_masks=tuple((True,) * len(segment.scored_load) for segment in job.segments),
+        warmup_excluded_segment_ids=(),
         optimizer_residual_count=len(temperatures),
         result_digest=job.request.request_id,
     )
@@ -550,6 +551,12 @@ def _seed_durable_challenger(
                 "sample_count": getattr(preparation.candidate, "sample_count", 120),
                 "temperature_band_c": list(getattr(preparation.candidate, "temperature_band_c", (75.0, 160.0))),
                 "nfev": getattr(preparation.candidate, "nfev", 4),
+                "effective_masks": [
+                    [bool(value) for value in mask] for mask in preparation.candidate.effective_masks
+                ],
+                "warmup_excluded_segment_ids": list(
+                    preparation.candidate.warmup_excluded_segment_ids
+                ),
                 "result_digest": preparation.candidate.result_digest,
             },
         },
@@ -668,6 +675,8 @@ def _automatic_candidate(
             sample_count=120,
             temperature_band_c=(75.0, 160.0),
             nfev=4,
+            effective_masks=tuple((True,) * corpus_slice.scored_count for corpus_slice in request.fit_corpus.slices),
+            warmup_excluded_segment_ids=(),
             result_digest=request.request_id,
         ),
         candidate_digest=descriptor.model_digest,
@@ -742,6 +751,8 @@ def _operator_candidate(
         sample_count=120,
         temperature_band_c=(75.0, 160.0),
         nfev=4,
+        effective_masks=tuple((True,) * corpus_slice.scored_count for corpus_slice in request.fit_corpus.slices),
+        warmup_excluded_segment_ids=(),
         result_digest=request.request_id,
     )
     components = CandidatePair(_CandidateEstimator(), _ProbeSolver(native))

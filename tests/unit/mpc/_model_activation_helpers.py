@@ -61,6 +61,8 @@ def _seed_qualified_challenger(
                 "sample_count": 120,
                 "temperature_band_c": [75.0, 160.0],
                 "nfev": 4,
+                "effective_masks": [[True] * corpus_slice.scored_count for corpus_slice in corpus.slices],
+                "warmup_excluded_segment_ids": [],
                 "result_digest": "d" * 64,
             },
         },

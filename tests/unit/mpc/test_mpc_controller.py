@@ -607,6 +607,10 @@ def test_identity_rebind_fences_and_discards_an_inflight_old_generation_candidat
                 sample_count=1,
                 temperature_band_c=(20.0, 21.0),
                 nfev=1,
+                effective_masks=tuple(
+                    (True,) * corpus_slice.scored_count for corpus_slice in request.fit_corpus.slices
+                ),
+                warmup_excluded_segment_ids=(),
             )
             preparation = CandidatePreparation.accepted_for_test(
                 candidate=candidate,
@@ -708,6 +712,10 @@ def test_rejected_real_fit_candidate_is_released_and_a_later_fit_can_prepare(mon
                     sample_count=len(temperatures),
                     temperature_band_c=(min(temperatures), max(temperatures)),
                     nfev=4,
+                    effective_masks=tuple(
+                        (True,) * len(segment.scored_load) for segment in self.job.segments
+                    ),
+                    warmup_excluded_segment_ids=(),
                 ),
                 worker_start_method="spawn",
                 worker_thread_environment=(
