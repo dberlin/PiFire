@@ -263,7 +263,7 @@ def _prepared_supersession_harness(tmp_path):
         controller_factory=_Native,
         timing_probe=lambda _native: _timing(),
         trigger_config=TriggerConfig(
-            min_samples=9,
+            min_effective_duration_s=180.0,
             min_input_variance=0.02,
             min_input_levels=3,
             min_temperature_span_c=8.0,

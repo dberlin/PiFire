@@ -45,21 +45,26 @@ from tests.unit.mpc._grey_online_helpers import (
 )
 
 
-def test_trigger_retains_minimum_sample_excitation_coverage_continuity_and_identifiability_gates() -> None:
+def test_trigger_uses_elapsed_duration_and_retains_other_evidence_gates() -> None:
     config = TriggerConfig(
-        min_samples=9, min_input_variance=0.02, min_input_levels=3, min_temperature_span_c=8.0, min_identifiability=0.5
+        min_effective_duration_s=180.0,
+        min_input_variance=0.02,
+        min_input_levels=3,
+        min_temperature_span_c=8.0,
+        min_identifiability=0.5,
     )
     informative = tuple(_frame(index) for index in range(12))
-    accepted = fit_trigger(informative, identifiability=0.8, config=config)
+
+    below_minimum = fit_trigger(informative[:8], identifiability=0.8, config=config)
+    assert below_minimum.blockers == ("minimum-observed-duration",)
+    assert below_minimum.input_variance == pytest.approx(0.0746484375)
+    assert below_minimum.input_levels == 3
+    accepted = fit_trigger(informative[:9], identifiability=0.8, config=config)
     assert accepted.ready is True
     assert accepted.input_variance == pytest.approx(0.08166666666666667)
     assert accepted.input_levels == 3
-    below_minimum = fit_trigger(informative[:8], identifiability=0.8, config=config)
-    assert below_minimum.blockers == ("minimum-samples",)
-    assert below_minimum.input_variance == pytest.approx(0.0746484375)
-    assert below_minimum.input_levels == 3
     empty = fit_trigger((), identifiability=0.8, config=config)
-    assert empty.blockers == ("minimum-samples",)
+    assert empty.blockers == ("minimum-observed-duration",)
     assert empty.input_variance == 0.0
     assert empty.input_levels == 0
     constant = tuple(
@@ -75,6 +80,26 @@ def test_trigger_retains_minimum_sample_excitation_coverage_continuity_and_ident
     broken = informative[:6] + (replace(informative[6], continuous=False),) + informative[7:]
     assert fit_trigger(broken, identifiability=0.8, config=config).blockers == ("discontinuity",)
     assert fit_trigger(informative, identifiability=0.49, config=config).blockers == ("identifiability",)
+
+
+@pytest.mark.parametrize(
+    ("duration_s", "error_type", "message"),
+    (
+        (0.0, ValueError, "must be positive"),
+        (-1.0, ValueError, "must be positive"),
+        (True, TypeError, "must be finite"),
+        (float("nan"), ValueError, "must be finite"),
+        (float("inf"), ValueError, "must be finite"),
+        (float("-inf"), ValueError, "must be finite"),
+    ),
+)
+def test_trigger_rejects_invalid_effective_duration(
+    duration_s: float | bool,
+    error_type: type[Exception],
+    message: str,
+) -> None:
+    with pytest.raises(error_type, match=message):
+        TriggerConfig(min_effective_duration_s=duration_s)
 
 
 @pytest.mark.parametrize(
@@ -231,7 +256,7 @@ def test_orchestrator_connects_persistent_job_to_off_path_preparation_without_sw
         controller_factory=_Native,
         timing_probe=lambda _native: _timing(),
         trigger_config=TriggerConfig(
-            min_samples=9,
+            min_effective_duration_s=180.0,
             min_input_variance=0.02,
             min_input_levels=3,
             min_temperature_span_c=8.0,
@@ -270,7 +295,7 @@ def test_orchestrator_rechecks_actual_fit_identifiability_before_candidate_prepa
         controller_factory=_Native,
         timing_probe=lambda _native: _timing(),
         trigger_config=TriggerConfig(
-            min_samples=9,
+            min_effective_duration_s=180.0,
             min_input_variance=0.02,
             min_input_levels=3,
             min_temperature_span_c=8.0,
@@ -308,7 +333,7 @@ def test_identity_digest_changes_require_atomic_config_and_incumbent_replacement
         controller_factory=_Native,
         timing_probe=lambda _native: _timing(),
         trigger_config=TriggerConfig(
-            min_samples=9,
+            min_effective_duration_s=180.0,
             min_input_variance=0.02,
             min_input_levels=3,
             min_temperature_span_c=8.0,
@@ -373,7 +398,7 @@ def test_close_releases_an_untransferred_prepared_candidate_pair(tmp_path) -> No
         controller_factory=_Native,
         timing_probe=lambda _native: _timing(),
         trigger_config=TriggerConfig(
-            min_samples=9,
+            min_effective_duration_s=180.0,
             min_input_variance=0.02,
             min_input_levels=3,
             min_temperature_span_c=8.0,
@@ -418,7 +443,7 @@ def test_orchestrator_carries_both_origins_through_causal_evaluation_and_handoff
         controller_factory=_Native,
         timing_probe=lambda _native: _timing(),
         trigger_config=TriggerConfig(
-            min_samples=9,
+            min_effective_duration_s=180.0,
             min_input_variance=0.02,
             min_input_levels=3,
             min_temperature_span_c=8.0,

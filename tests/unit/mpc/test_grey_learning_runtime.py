@@ -7,16 +7,19 @@ import threading
 from dataclasses import replace
 from math import ceil
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
 from common.control_trace import AllocationClampReason, TraceEventKind
+from common.learning_trajectory import LearningTrajectorySegment
 from common.model_evidence import (
     AllocationEvidence,
     CalibrationSummaryEvidence,
     EvidenceKind,
     ModelEvidenceRecord,
 )
+from common.persistence.learning_trajectory import FitCorpusSnapshot
 from common.persistence.model_challenger import read_model_challenger
 from common.persistence.model_evidence import append_model_evidence, read_model_activation
 from controller.model_learning.contracts import (
@@ -40,6 +43,7 @@ from controller.runtime.model_fitting import (
     TargetTimingEvidence,
     TriggerConfig,
     TriggerDecision,
+    persistent_corpus_trigger,
     handoff_candidate,
     segmented_corpus_fit_job,
 )
@@ -218,7 +222,7 @@ def test_queued_fit_lifecycle_is_memory_only_until_off_path_poll(monkeypatch) ->
                 request=self.request,
                 completed_forecasts=(),
                 history=SimpleNamespace(accepted=True, reasons=()),
-                trigger=TriggerDecision(False, ("minimum-samples",), 0.0, 1),
+                trigger=TriggerDecision(False, ("minimum-observed-duration",), 0.0, 1),
             )
 
         def register_causal_forecasts(self, *_args, **_kwargs):
@@ -411,6 +415,69 @@ def test_completed_fit_terminalizes_before_challenger_persistence_failure(
     harness.activation.close()
 
 
+def _persistent_trigger_snapshot(
+    *,
+    observed_duration_s: int,
+    segment_count: int,
+) -> FitCorpusSnapshot:
+    total_duration_ms = observed_duration_s * 1_000
+    base_duration_ms, remainder_ms = divmod(total_duration_ms, segment_count)
+    start_ms = 0
+    segments: list[LearningTrajectorySegment] = []
+    for index in range(segment_count):
+        duration_ms = base_duration_ms + (1 if index < remainder_ms else 0)
+        end_ms = start_ms + duration_ms
+        frame = SimpleNamespace(
+            monotonic_start_ms=start_ms,
+            monotonic_end_ms=end_ms,
+            normalized_combustion_load=0.4,
+            chamber_temperature_c=110.0,
+            complete=True,
+            continuous=True,
+            partial=False,
+        )
+        segments.append(
+            cast(
+                LearningTrajectorySegment,
+                SimpleNamespace(scored_hold_frames=(frame,)),
+            )
+        )
+        start_ms = end_ms
+    return FitCorpusSnapshot(
+        identity=_corpus("duration-trigger"),
+        segments=tuple(segments),
+    )
+
+
+@pytest.mark.parametrize("segment_count", (1, 7))
+def test_persistent_corpus_trigger_uses_exact_duration_across_segments(
+    segment_count: int,
+) -> None:
+    config = TriggerConfig(
+        min_effective_duration_s=600.0,
+        min_input_variance=0.0,
+        min_input_levels=1,
+        min_temperature_span_c=0.0,
+    )
+
+    below_minimum = persistent_corpus_trigger(
+        _persistent_trigger_snapshot(
+            observed_duration_s=599,
+            segment_count=segment_count,
+        ),
+        config=config,
+    )
+    assert below_minimum.blockers == ("minimum-observed-duration",)
+    accepted = persistent_corpus_trigger(
+        _persistent_trigger_snapshot(
+            observed_duration_s=600,
+            segment_count=segment_count,
+        ),
+        config=config,
+    )
+    assert accepted.ready
+
+
 @pytest.mark.parametrize(("enabled", "scheduled"), ((False, False), (True, True)))
 def test_passive_mid_cook_corpus_submission_follows_only_online_adaptation(
     tmp_path,
@@ -429,7 +496,7 @@ def test_passive_mid_cook_corpus_submission_follows_only_online_adaptation(
     )
     if enabled:
         harness.runtime._learning.trigger_config = TriggerConfig(
-            min_samples=1,
+            min_effective_duration_s=20.0,
             min_input_variance=0.0,
             min_input_levels=1,
             min_temperature_span_c=0.0,
@@ -1452,7 +1519,7 @@ def test_rejected_evaluation_persists_causal_blocker_and_projects_once(
                 history=SimpleNamespace(accepted=True, reasons=()),
                 completed_forecasts=(),
                 request=None,
-                trigger=TriggerDecision(False, ("minimum-samples",), 0.125, 3),
+                trigger=TriggerDecision(False, ("minimum-observed-duration",), 0.125, 3),
             )
 
         def register_causal_forecasts(self, *_args, **_kwargs):
@@ -2145,7 +2212,7 @@ def test_real_orchestrator_detaches_raw_owner_after_queued_lifecycle_abort(
             25.0,
         ),
         trigger_config=TriggerConfig(
-            min_samples=9,
+            min_effective_duration_s=180.0,
             min_input_variance=0.02,
             min_input_levels=3,
             min_temperature_span_c=8.0,

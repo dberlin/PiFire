@@ -632,10 +632,14 @@ def _metric(
     )
 
 
+def _metric_duration_s(metric: GreyFitMetric) -> float:
+    return metric.sample_count * FIT_CADENCE_S
+
+
 def _cook_evidence_supported(metric: GreyFitMetric) -> bool:
     thresholds = TriggerConfig()
     return (
-        metric.sample_count >= thresholds.min_samples
+        _metric_duration_s(metric) >= thresholds.min_effective_duration_s
         and metric.input_excitation >= thresholds.min_input_variance
         and metric.input_levels >= thresholds.min_input_levels
         and metric.temperature_span_c >= thresholds.min_temperature_span_c
@@ -1337,14 +1341,17 @@ class HistoryDecision:
 
 @dataclass(frozen=True, slots=True)
 class TriggerConfig:
-    min_samples: int = 120
+    min_effective_duration_s: float = 600.0
     min_input_variance: float = 0.02
     min_input_levels: int = 3
     min_temperature_span_c: float = 8.0
     min_identifiability: float = 0.5
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "min_samples", _positive_int(self.min_samples, "min_samples"))
+        duration_s = _finite(self.min_effective_duration_s, "min_effective_duration_s")
+        if duration_s <= 0.0:
+            raise ValueError("min_effective_duration_s must be positive")
+        object.__setattr__(self, "min_effective_duration_s", duration_s)
         object.__setattr__(self, "min_input_levels", _positive_int(self.min_input_levels, "min_input_levels"))
         for name in ("min_input_variance", "min_temperature_span_c", "min_identifiability"):
             value = _finite(getattr(self, name), name)
@@ -1380,8 +1387,9 @@ def fit_trigger(
     else:
         input_variance = 0.0
         input_levels = 0
-    if len(frames) < resolved.min_samples:
-        return TriggerDecision(False, ("minimum-samples",), input_variance, input_levels)
+    observed_duration_s = sum(frame.frame_end_s - frame.frame_start_s for frame in frames)
+    if observed_duration_s < resolved.min_effective_duration_s:
+        return TriggerDecision(False, ("minimum-observed-duration",), input_variance, input_levels)
     blockers: list[str] = []
     if input_variance < resolved.min_input_variance or input_levels < resolved.min_input_levels:
         blockers.append("insufficient-excitation")
@@ -1422,10 +1430,15 @@ def persistent_corpus_trigger(
     else:
         input_variance = 0.0
         input_levels = 0
-    if len(frames) < resolved.min_samples:
+    observed_duration_s = sum(
+        (frame.monotonic_end_ms - frame.monotonic_start_ms) / 1_000.0
+        for segment in snapshot.segments
+        for frame in segment.scored_hold_frames
+    )
+    if observed_duration_s < resolved.min_effective_duration_s:
         return TriggerDecision(
             False,
-            ("minimum-samples",),
+            ("minimum-observed-duration",),
             input_variance,
             input_levels,
         )

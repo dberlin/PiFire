@@ -760,7 +760,7 @@ def test_rejected_real_fit_candidate_is_released_and_a_later_fit_can_prepare(mon
             limit_ms=5.0,
         ),
         trigger_config=TriggerConfig(
-            min_samples=9,
+            min_effective_duration_s=180.0,
             min_input_variance=0.02,
             min_input_levels=3,
             min_temperature_span_c=8.0,
