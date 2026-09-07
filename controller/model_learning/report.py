@@ -406,7 +406,12 @@ def build_learning_report(
     if live_candidate_digest is not None and candidate_digest is not None and live_candidate_digest != candidate_digest:
         errors.append("live-candidate-digest-mismatch")
     checkpoint_digest = live.get("checkpoint_digest")
-    if checkpoint_digest is not None and incumbent_digest is not None and checkpoint_digest != incumbent_digest:
+    durable_checkpoint_digest = _pair_digest(checkpoint_map, "active_pair")
+    if (
+        checkpoint_digest is not None
+        and durable_checkpoint_digest is not None
+        and checkpoint_digest != durable_checkpoint_digest
+    ):
         errors.append("live-checkpoint-digest-mismatch")
 
     live_origin = live.get("origin")

@@ -553,6 +553,42 @@ describe("MpcLearningView", () => {
     expect(screen.queryByLabelText("Required rollback reason")).not.toBeInTheDocument();
   });
 
+  it("explains warm-up and gives actions before technical learning codes", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        ...REPORT,
+        status: "warming",
+        candidate: null,
+        evaluation: null,
+        blockers: ["minimum-samples"],
+        errors: ["live-checkpoint-digest-mismatch"],
+      }),
+    );
+    renderPanel();
+    await openPanel();
+
+    expect(
+      screen.getByText(
+        "MPC control is active while learning rebuilds exact estimator history. Learning starts automatically after enough valid control frames.",
+      ),
+    ).toBeVisible();
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(
+      "The running MPC model does not match the saved learned model.",
+    );
+    expect(alert).toHaveTextContent("Restart Hold. If this returns, export diagnostics.");
+    expect(alert).toHaveTextContent("Technical code: live-checkpoint-digest-mismatch");
+    const readiness = screen
+      .getByRole("heading", { name: "Readiness and rejection" })
+      .closest("section");
+    expect(readiness).toHaveTextContent(
+      "Learning is still collecting enough usable control frames.",
+    );
+    expect(readiness).toHaveTextContent("Continue normal cooks; no corrective action is required.");
+    expect(readiness).toHaveTextContent("Technical code: minimum-samples");
+    expect(alert).not.toHaveTextContent("Report error:");
+  });
+
   it("renders rejected assessment, fallback reason, fit failure, and structured terminal failure", async () => {
     fetchMock.mockResolvedValue(
       jsonResponse({
@@ -569,7 +605,7 @@ describe("MpcLearningView", () => {
             ...REPORT.candidate!.assessment!,
             fit_accepted: false,
             confidence_accepted: false,
-            rejection_reasons: ["identifiability", "target-timing"],
+            rejection_reasons: ["identifiability", "target-timing-failed"],
           },
         },
         activation: {
@@ -577,8 +613,8 @@ describe("MpcLearningView", () => {
           phase: "aborted",
           reason: "swap-compensated",
         },
-        blockers: ["identifiability", "target-timing"],
-        errors: ["activation-terminal"],
+        blockers: ["identifiability", "target-timing-failed"],
+        errors: ["native-build-failed", "activation-terminal"],
         failure: {
           code: "activation-terminal",
           detail: "native solver crashed",
@@ -593,6 +629,8 @@ describe("MpcLearningView", () => {
     expect(alert).toHaveTextContent("activation-terminal");
     expect(alert).toHaveTextContent("native solver crashed");
     expect(alert).toHaveTextContent("terminal");
+    expect(alert).toHaveTextContent("The candidate model could not be built for this controller.");
+    expect(alert).toHaveTextContent("Technical code: native-build-failed");
     expect(
       screen.getByRole("heading", { name: "Fit request" }).closest("section"),
     ).toHaveTextContent("optimizer-nonconvergence");

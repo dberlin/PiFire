@@ -1176,6 +1176,8 @@ class HoldMode(ControlMode):
             try:
                 runner.seed_operating_state(cold_seed)
             except Exception as cold_error:
+                if learning is not None:
+                    learning.mark_evidence_unavailable()
                 self._trace_warning(f"MPC estimator cold-start seed failed closed: {cold_error}")
                 self._estimator_seed_status = "uncertain"
                 self._estimator_seed_digest = cold_digest
@@ -1194,11 +1196,8 @@ class HoldMode(ControlMode):
         )
         self._initial_seed_output_pending = True
         self._first_solve_pending = True
-        if learning is not None:
-            if seed.status == "short":
-                learning.set_seed_warmup_remaining(seed.required_frame_count - seed.pre_roll_frame_count)
-            elif seed.status in {"absent", "uncertain"}:
-                learning.mark_evidence_unavailable()
+        if learning is not None and seed.status in {"short", "absent", "uncertain"}:
+            learning.set_seed_warmup_remaining(seed.required_frame_count - seed.pre_roll_frame_count)
         self._estimator_seeded = True
         role_generation, candidate_generation = self._estimator_seed_generations(runner)
         trace = self._control_trace

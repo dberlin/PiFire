@@ -651,6 +651,9 @@ class _SeedSource:
     def mark_trace_unavailable(self, reason: str) -> None:
         self.events.append(f"trajectory:unavailable:{reason}")
 
+    def intervention(self, boundary: TrajectoryBoundary) -> None:
+        del boundary
+
     def observe_hold_frame(
         self,
         observation,
@@ -1013,33 +1016,97 @@ def test_first_solve_remains_pending_until_runner_has_completed_result(
         hold.teardown(110.0)
 
 
-def test_absent_seed_keeps_active_incumbent_control_but_withholds_learning(
+@pytest.mark.parametrize("seed_status", ("absent", "uncertain"))
+def test_cold_seed_keeps_active_incumbent_control_and_warms_learning(
     hold_cycle,
+    seed_status: Literal["absent", "uncertain"],
 ) -> None:
     events: list[str] = []
     runner = _OrderedSeedRunner(events).script([_ordered_runner_result()])
-    absent = _seed(
-        status="absent",
+    cold_seed = _seed(
+        status=seed_status,
         delay_states=(),
         frame_count=0,
         required_frame_count=8,
-        label="absent",
+        label=seed_status,
         chamber_temperature_c=(110.0 - 32.0) * 5.0 / 9.0,
     )
-    seed_source = _SeedSource(events, absent)
+    seed_source = _SeedSource(events, cold_seed)
     hold = hold_cycle(runner, controller="mpc")
     hold.ctx.learning_trajectory = seed_source
 
     try:
         hold.setup()
+        assert hold._hold_learning is not None
+        assert hold._hold_learning.evidence_available is True
         hold.on_tick(10.0, 110.0, hold.grill.get_output_status())
 
-        assert runner.seeds == [absent]
+        assert runner.seeds == [cold_seed]
         assert runner.submitted_temps == [110.0]
         assert "runner:solve" in events
         assert "runner:output" in events
         assert hold._hold_learning is not None
-        assert hold._hold_learning.evidence_available is False
+        assert hold._hold_learning.seed_warmup_remaining == 8
+    finally:
+        hold.teardown(110.0)
+
+
+def test_seed_application_failure_uses_cold_control_but_keeps_evidence_failed_closed(
+    hold_cycle,
+) -> None:
+    events: list[str] = []
+
+    class FirstSeedFailsRunner(_OrderedSeedRunner):
+        def seed_operating_state(self, seed: EstimatorSeed) -> None:
+            super().seed_operating_state(seed)
+            if len(self.seeds) == 1:
+                raise RuntimeError("injected initial seed failure")
+
+    runner = FirstSeedFailsRunner(events).script([_ordered_runner_result()])
+    source_seed = _seed(chamber_temperature_c=(110.0 - 32.0) * 5.0 / 9.0)
+    hold = hold_cycle(runner, controller="mpc")
+    hold.ctx.learning_trajectory = _SeedSource(events, source_seed)
+
+    try:
+        hold.setup()
+        hold.on_tick(10.0, 110.0, hold.grill.get_output_status())
+
+        assert runner.seeds[0] == source_seed
+        assert len(runner.seeds) == 2
+        assert runner.seeds[1].status == "absent"
+        assert runner.seeds[1].pre_roll_frame_count == 0
+        assert hold._hold_learning is not None
+        assert hold._hold_learning.seed_warmup_remaining == 8
+        hold._hold_learning.set_seed_warmup_remaining(0)
+        assert not hold._hold_learning.evidence_available
+    finally:
+        hold.teardown(110.0)
+
+
+def test_cold_start_seed_failure_keeps_learning_evidence_failed_closed(
+    hold_cycle,
+) -> None:
+    events: list[str] = []
+
+    class EverySeedFailsRunner(_OrderedSeedRunner):
+        def seed_operating_state(self, seed: EstimatorSeed) -> None:
+            super().seed_operating_state(seed)
+            raise RuntimeError("injected seed failure")
+
+    runner = EverySeedFailsRunner(events)
+    hold = hold_cycle(runner, controller="mpc")
+    hold.ctx.learning_trajectory = _SeedSource(
+        events,
+        _seed(chamber_temperature_c=(110.0 - 32.0) * 5.0 / 9.0),
+    )
+
+    try:
+        hold.setup()
+        hold.on_tick(10.0, 110.0, hold.grill.get_output_status())
+
+        assert [seed.status for seed in runner.seeds] == ["exact", "absent"]
+        assert hold._hold_learning is not None
+        assert not hold._hold_learning.evidence_available
     finally:
         hold.teardown(110.0)
 

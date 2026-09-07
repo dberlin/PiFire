@@ -102,6 +102,21 @@ CAMPAIGNS: tuple[JSON, ...] = (
             },
         ),
     },
+    {
+        "id": "mpc-sep06",
+        "controller": "mpc",
+        "diagnostic_arg": "diag_sep06",
+        "duplicate_arg": None,
+        "baseline_path": "baselines/mpc-sep06.sqlite",
+        "cooks": (
+            {
+                "arg": "cook_sep06",
+                "source_name": "2026-09-06--2005-CookFile.pifire",
+                "path": "cookfiles/2026-09-06--2005.pifire",
+                "replay_kind": "exact-evidence",
+            },
+        ),
+    },
 )
 
 
@@ -716,6 +731,7 @@ def generate(args: argparse.Namespace) -> None:
             "mpc-aug27": "PiFire_Diagnostics_20260827-202055.zip",
             "pid-sp-aug28": "PiFire_Diagnostics_20260828-210051.zip",
             "mpc-aug29": "PiFire_Diagnostics_20260829-Today.zip",
+            "mpc-sep06": "PiFire_Diagnostics_20260906-213037.zip",
         }[campaign["id"]]
         require_source(diagnostic, expected_diagnostic_name)
         if duplicate is not None:
@@ -914,11 +930,13 @@ def parser() -> argparse.ArgumentParser:
         "diag-aug28",
         "diag-aug28-duplicate",
         "diag-aug29",
+        "diag-sep06",
         "cook-aug22",
         "cook-aug27",
         "cook-aug28",
         "cook-aug29-1219",
         "cook-aug29-1625",
+        "cook-sep06",
         "output",
     ):
         generate_parser.add_argument(f"--{option}", required=True)

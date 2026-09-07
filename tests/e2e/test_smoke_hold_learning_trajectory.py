@@ -7,7 +7,7 @@ import logging
 import threading
 import time
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha256
 from io import BytesIO
 from itertools import count, pairwise
@@ -30,9 +30,11 @@ from common.control_trace import (
     AmbientUncertainty,
     ControllerType,
     FramedPulseFramePayload,
+    GreyCandidateAssessmentPayload,
     MpcFailureState,
     MpcUpdatePayload,
     PidSpUpdatePayload,
+    RecorderGapPayload,
     TraceEventKind,
 )
 from common.controller_model_state import ControllerModelStore
@@ -95,6 +97,11 @@ _FRAME_MS = _FRAME_SECONDS * 1_000
 _WALL_OFFSET_MS = 1_700_000_000_000
 _CORPUS_START_MS = 20_000_000
 _REAL_COOK_PROCESS_MONITOR_TIMEOUT_SECONDS = 300
+_REAL_GREY_FIT_WORKER_START = model_fitting_module.GreyFitWorker.start
+_REAL_PROCESS_MONITOR = base_mode_module.Process_Monitor
+_REAL_BUILD_RUNNER = runner_module.build_runner
+_REAL_CONTROL_TRACE_RECORDER = hold_module.ControlTraceRecorder
+_REAL_OBSERVE_HOLD_FRAME = LearningTrajectoryRuntime.observe_hold_frame
 
 
 def _digest(label: str) -> str:
@@ -658,7 +665,7 @@ def test_cold_and_smoke_started_hold_fit_stable_parameters_from_one_physical_tra
 
 
 _REAL_COOK_FIXTURE_ROOT = Path(__file__).parents[1] / "fixtures" / "real_cook_learning"
-_REAL_COOK_MANIFEST_SHA256 = "93be80c440e31bb34dfbc9dd13f8f04842e339e2dff7d796c8f17b6dd1164ae6"
+_REAL_COOK_MANIFEST_SHA256 = "0d924b9ff648fc40596423c1bb853a5d5bcadfa9f3e286cc387bc33ec72b5a2f"
 
 
 @dataclass(frozen=True, slots=True)
@@ -674,6 +681,29 @@ class _RealCookHoldStream:
     fan_pwm_capable: bool
 
 
+@dataclass(frozen=True, slots=True)
+class _RealCookHoldResult:
+    replay_only_count: int
+    model_observation_count: int
+    fit_terminal_statuses: tuple[str, ...]
+    fit_terminal_errors: tuple[str | None, ...]
+    candidate_assessment_count: int
+    candidate_fit_accepted_count: int
+    recorder_gap_reasons: tuple[str, ...]
+    scored_before: int
+    scored_after: int
+    finalized_segments_before: int
+    finalized_segments_after: int
+
+    @property
+    def scored_delta(self) -> int:
+        return self.scored_after - self.scored_before
+
+    @property
+    def finalized_segment_delta(self) -> int:
+        return self.finalized_segments_after - self.finalized_segments_before
+
+
 def _load_real_cook_hold_stream(campaign_id: str, cook_name: str) -> _RealCookHoldStream:
     manifest_bytes = (_REAL_COOK_FIXTURE_ROOT / "manifest.json").read_bytes()
     assert sha256(manifest_bytes).hexdigest() == _REAL_COOK_MANIFEST_SHA256
@@ -687,12 +717,15 @@ def _load_real_cook_hold_stream(campaign_id: str, cook_name: str) -> _RealCookHo
         metadata = json.loads(archive.read("metadata.json"))
         sessions = json.loads(archive.read("sessions.json"))
         transitions = json.loads(archive.read("transitions.json"))
+        frames = json.loads(archive.read("frames.json"))
         chamber_samples = json.loads(archive.read("chamber_samples.json"))
 
     assert metadata["controller"] == campaign["controller"]
     assert metadata["cook_start_ms"] == cook["cook_start_ms"]
     assert metadata["cook_end_ms"] == cook["cook_end_ms"]
     assert metadata["chamber_sample_count"] == len(chamber_samples)
+    assert len(frames) == cook["expected_input_frame_count"]
+    last_frame_end_ms = max(int(frame["frame_end_ms"]) for frame in frames)
     assert transitions
     first_transition = min(transitions, key=lambda item: item["timestamp_ms"])
     session = next(item for item in sessions if item["session_id"] == first_transition["session_id"])
@@ -708,12 +741,12 @@ def _load_real_cook_hold_stream(campaign_id: str, cook_name: str) -> _RealCookHo
             float(sample["setpoint_f"]),
         )
         for sample in chamber_samples
-        if metadata["cook_start_ms"] <= int(sample["timestamp_ms"]) <= metadata["cook_end_ms"]
+        if metadata["cook_start_ms"] <= int(sample["timestamp_ms"]) <= last_frame_end_ms
     )
     assert temperatures
     assert all(left[0] < right[0] for left, right in pairwise(temperatures))
     assert temperatures[0][0] == metadata["cook_start_ms"]
-    assert temperatures[-1][0] == metadata["cook_end_ms"]
+    assert temperatures[-1][0] <= last_frame_end_ms
     hold_start_index = next(
         index for index, sample in enumerate(temperatures) if sample[0] >= first_transition["timestamp_ms"]
     )
@@ -914,9 +947,48 @@ def _assert_real_cook_hold_smoke(
     campaign_id: str,
     cook_name: str,
     expected_controller: ControllerType,
-) -> None:
+    warm_with_smoke: bool | None = None,
+    cook_id: str | None = None,
+    timestamp_offset_ms: int = 0,
+    profile_repetitions: int = 1,
+    require_stop_fit: bool | None = None,
+) -> _RealCookHoldResult:
+    del ds
     stream = _load_real_cook_hold_stream(campaign_id, cook_name)
     assert stream.controller == expected_controller.value
+    if profile_repetitions < 1:
+        raise ValueError("profile_repetitions must be positive")
+    if profile_repetitions > 1:
+        profile = stream.temperatures[stream.hold_start_index :]
+        profile_start_ms = profile[0][0]
+        sample_period_ms = round((profile[-1][0] - profile_start_ms) / (len(profile) - 1))
+        profile_span_ms = profile[-1][0] - profile_start_ms + sample_period_ms
+        stream = replace(
+            stream,
+            temperatures=tuple(
+                (
+                    timestamp_ms - profile_start_ms + repetition * profile_span_ms + profile_start_ms,
+                    temperature_f,
+                    setpoint_f,
+                )
+                for repetition in range(profile_repetitions)
+                for timestamp_ms, temperature_f, setpoint_f in profile
+            ),
+            hold_start_index=0,
+        )
+    if timestamp_offset_ms or cook_id is not None:
+        stream = replace(
+            stream,
+            cook_id=stream.cook_id if cook_id is None else cook_id,
+            temperatures=tuple(
+                (timestamp_ms + timestamp_offset_ms, temperature_f, setpoint_f)
+                for timestamp_ms, temperature_f, setpoint_f in stream.temperatures
+            ),
+        )
+    if warm_with_smoke is None:
+        warm_with_smoke = expected_controller is ControllerType.MPC
+    if require_stop_fit is None:
+        require_stop_fit = expected_controller is ControllerType.MPC
 
     settings = base_settings()
     settings["globals"]["units"] = "F"
@@ -928,8 +1000,7 @@ def _assert_real_cook_hold_smoke(
     settings["platform"]["dc_fan"] = stream.fan_pwm_capable
     settings["safety"]["maxtemp"] = 600.0
 
-    warm_with_smoke = expected_controller is ControllerType.MPC
-    if expected_controller is ControllerType.MPC:
+    if warm_with_smoke:
         required_pre_roll_frames = ceil(3.0 * float(configured["theta"]) / stream.pulse_frame_seconds) + 2
         smoke_start_ms = stream.temperatures[stream.hold_start_index][0] - round(
             required_pre_roll_frames * stream.pulse_frame_seconds * 1_000
@@ -949,7 +1020,7 @@ def _assert_real_cook_hold_smoke(
     control["safety"]["afterstarttemp"] = 0
 
     store = SqliteStore()
-    real_grey_fit_worker_start = model_fitting_module.GreyFitWorker.start
+    real_grey_fit_worker_start = _REAL_GREY_FIT_WORKER_START
     captured_grey_fit_workers: list[Any] = []
 
     def capture_grey_fit_worker_start(worker):
@@ -962,7 +1033,7 @@ def _assert_real_cook_hold_smoke(
         "start",
         capture_grey_fit_worker_start,
     )
-    real_process_monitor = base_mode_module.Process_Monitor
+    real_process_monitor = _REAL_PROCESS_MONITOR
 
     def build_real_cook_process_monitor(process, on_timeout, timeout=5):
         assert timeout == 30
@@ -1008,10 +1079,13 @@ def _assert_real_cook_hold_smoke(
         trajectory_session_id_factory=lambda: f"{stream.cook_id}-trajectory",
     )
     observed_trajectory_frames: list[FrameObservation] = []
-    real_observe_hold_frame = LearningTrajectoryRuntime.observe_hold_frame
+    replay_only_trajectory_frames: list[FrameObservation] = []
+    real_observe_hold_frame = _REAL_OBSERVE_HOLD_FRAME
 
     def capture_observe_hold_frame(runtime, observation, *, replay_only=False):
         observed_trajectory_frames.append(observation)
+        if replay_only:
+            replay_only_trajectory_frames.append(observation)
         return real_observe_hold_frame(runtime, observation, replay_only=replay_only)
 
     monkeypatch.setattr(
@@ -1032,7 +1106,7 @@ def _assert_real_cook_hold_smoke(
     ctx.model_persistence = persistence
     ctx.learning_trajectory = trajectory
 
-    original_build_runner = runner_module.build_runner
+    original_build_runner = _REAL_BUILD_RUNNER
     captured_runners: list[tuple[Any, str]] = []
 
     def capture_production_runner(*args, **kwargs):
@@ -1050,7 +1124,7 @@ def _assert_real_cook_hold_smoke(
 
     monkeypatch.setattr(runner_module, "build_runner", capture_production_runner)
     monkeypatch.setattr(ControlMode, "_trajectory_clock_pair", staticmethod(clock.pair_ms))
-    real_recorder = hold_module.ControlTraceRecorder
+    real_recorder = _REAL_CONTROL_TRACE_RECORDER
     monkeypatch.setattr(
         hold_module,
         "ControlTraceRecorder",
@@ -1064,7 +1138,9 @@ def _assert_real_cook_hold_smoke(
     errors_before = tuple(runtime_persistence.read_errors(ErrorKind.CONTROL))
     trace_record_count_before = len(read_control_trace_cook(stream.cook_id))
     evidence_count_before = len(read_model_evidence())
+    corpus_before = repository.corpus_report()
     runner = None
+    stop_fit_request_id: str | None = None
     trajectory_closed = False
     report_before_restart = None
     grey_owner = getattr(ctx, "grey_learning_process", None)
@@ -1125,16 +1201,18 @@ def _assert_real_cook_hold_smoke(
             ]
             learning_core = getattr(runner, "_learning_core", None)
             grey_runtime = getattr(learning_core, "_grey_learning_runtime", None)
-            assert stop_fit_request_id is not None, getattr(
-                grey_runtime,
-                "_corpus_fit_failure",
-                None,
-            )
-            assert stop_fit_statuses[-1] in {"succeeded", "failed", "stale"}, (
-                stop_fit_request_id,
-                stop_fit_statuses,
-            )
-            assert sum(status in {"succeeded", "failed", "stale"} for status in stop_fit_statuses) == 1
+            if require_stop_fit:
+                assert stop_fit_request_id is not None, getattr(
+                    grey_runtime,
+                    "_corpus_fit_failure",
+                    None,
+                )
+            if stop_fit_request_id is not None:
+                assert stop_fit_statuses[-1] in {"succeeded", "failed", "stale"}, (
+                    stop_fit_request_id,
+                    stop_fit_statuses,
+                )
+                assert sum(status in {"succeeded", "failed", "stale"} for status in stop_fit_statuses) == 1
         worker = getattr(runner, "_thread", None)
         assert worker is None or not worker.is_alive()
         for attribute in (
@@ -1223,15 +1301,17 @@ def _assert_real_cook_hold_smoke(
             )
             assert recovery is not None
         fit_lifecycle = [record.payload for record in records if record.event_kind is TraceEventKind.FIT_LIFECYCLE]
-        assert fit_lifecycle
         assert all(payload.origin == "passive-online" for payload in fit_lifecycle)
+        if require_stop_fit:
+            assert fit_lifecycle
         fit_statuses_by_request: dict[str, list[str]] = {}
         for payload in fit_lifecycle:
             fit_statuses_by_request.setdefault(payload.request_id, []).append(payload.status)
-        stop_fit_statuses = fit_statuses_by_request[stop_fit_request_id]
-        assert stop_fit_statuses[0] == "queued"
-        assert sum(status in {"succeeded", "failed", "stale"} for status in stop_fit_statuses) == 1
-        assert stop_fit_statuses[-1] in {"succeeded", "failed", "stale"}
+        if stop_fit_request_id is not None:
+            stop_fit_statuses = fit_statuses_by_request[stop_fit_request_id]
+            assert stop_fit_statuses[0] == "queued"
+            assert sum(status in {"succeeded", "failed", "stale"} for status in stop_fit_statuses) == 1
+            assert stop_fit_statuses[-1] in {"succeeded", "failed", "stale"}
     else:
         pid_updates = [cast(PidSpUpdatePayload, payload) for payload in control_updates]
         allocations = [
@@ -1339,6 +1419,41 @@ def _assert_real_cook_hold_smoke(
     assert restarted_report.open_segment_count == 0
     assert restarted_report.finalized_segment_count == report_before_restart.finalized_segment_count
     assert restarted_report.scored_count == report_before_restart.scored_count
+    recorder_gap_reasons = tuple(
+        cast(RecorderGapPayload, record.payload).reason
+        for record in records
+        if record.event_kind is TraceEventKind.RECORDER_GAP
+    )
+    fit_terminal_statuses = tuple(
+        record.payload.status
+        for record in records
+        if record.event_kind is TraceEventKind.FIT_LIFECYCLE
+        and record.payload.status in {"succeeded", "failed", "stale"}
+    )
+    fit_terminal_errors = tuple(
+        record.payload.error
+        for record in records
+        if record.event_kind is TraceEventKind.FIT_LIFECYCLE
+        and record.payload.status in {"succeeded", "failed", "stale"}
+    )
+    candidate_assessments = [
+        cast(GreyCandidateAssessmentPayload, record.payload)
+        for record in records
+        if record.event_kind is TraceEventKind.CANDIDATE_ASSESSMENT
+    ]
+    return _RealCookHoldResult(
+        replay_only_count=len(replay_only_trajectory_frames),
+        model_observation_count=len(observation_payloads),
+        fit_terminal_statuses=fit_terminal_statuses,
+        fit_terminal_errors=fit_terminal_errors,
+        candidate_assessment_count=len(candidate_assessments),
+        candidate_fit_accepted_count=sum(payload.fit_accepted for payload in candidate_assessments),
+        recorder_gap_reasons=recorder_gap_reasons,
+        scored_before=corpus_before.scored_count,
+        scored_after=report_before_restart.scored_count,
+        finalized_segments_before=corpus_before.finalized_segment_count,
+        finalized_segments_after=report_before_restart.finalized_segment_count,
+    )
 
 
 @pytest.mark.slow
@@ -1371,3 +1486,105 @@ def test_real_cook_pid_sp_august_28_chamber_stream_completes_full_hold_and_drain
         cook_name="2026-08-28--1931.pifire",
         expected_controller=ControllerType.PID_SP,
     )
+
+
+@pytest.mark.slow
+def test_fresh_sep06_database_warms_then_persists_learning(
+    ds,
+    monkeypatch,
+    caplog,
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "sep06-fresh.sqlite"
+    ds._reset_for_tests(str(database_path))
+    ds.init()
+
+    result = _assert_real_cook_hold_smoke(
+        ds,
+        monkeypatch,
+        caplog,
+        campaign_id="mpc-sep06",
+        cook_name="2026-09-06--2005.pifire",
+        expected_controller=ControllerType.MPC,
+        warm_with_smoke=False,
+        cook_id="sep06-first-cook",
+        require_stop_fit=False,
+    )
+
+    assert result.replay_only_count == 8
+    assert result.scored_delta > 0
+    assert result.finalized_segment_delta > 0
+    assert result.replay_only_count + result.model_observation_count == 59
+    assert result.recorder_gap_reasons == ()
+
+
+@pytest.mark.slow
+def test_repeated_sep06_cook_adds_learning_to_the_same_database(
+    ds,
+    monkeypatch,
+    caplog,
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "sep06-repeated.sqlite"
+    ds._reset_for_tests(str(database_path))
+    ds.init()
+
+    first = _assert_real_cook_hold_smoke(
+        ds,
+        monkeypatch,
+        caplog,
+        campaign_id="mpc-sep06",
+        cook_name="2026-09-06--2005.pifire",
+        expected_controller=ControllerType.MPC,
+        warm_with_smoke=False,
+        cook_id="sep06-repeat-1",
+        require_stop_fit=False,
+    )
+    second = _assert_real_cook_hold_smoke(
+        ds,
+        monkeypatch,
+        caplog,
+        campaign_id="mpc-sep06",
+        cook_name="2026-09-06--2005.pifire",
+        expected_controller=ControllerType.MPC,
+        warm_with_smoke=False,
+        cook_id="sep06-repeat-2",
+        timestamp_offset_ms=3_000_000,
+        require_stop_fit=False,
+    )
+    assert first.replay_only_count == second.replay_only_count == 8
+    assert first.scored_delta > 0
+    assert second.scored_before == first.scored_after
+    assert second.scored_delta > 0
+    assert second.finalized_segments_before == first.finalized_segments_after
+    assert second.finalized_segment_delta > 0
+    assert first.recorder_gap_reasons == second.recorder_gap_reasons == ()
+
+
+@pytest.mark.slow
+def test_long_sep06_cook_produces_a_candidate_from_a_fresh_database(
+    ds,
+    monkeypatch,
+    caplog,
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "sep06-candidate.sqlite"
+    ds._reset_for_tests(str(database_path))
+    ds.init()
+
+    result = _assert_real_cook_hold_smoke(
+        ds,
+        monkeypatch,
+        caplog,
+        campaign_id="mpc-sep06",
+        cook_name="2026-09-06--2005.pifire",
+        expected_controller=ControllerType.MPC,
+        warm_with_smoke=False,
+        cook_id="sep06-candidate",
+        profile_repetitions=3,
+        require_stop_fit=True,
+    )
+
+    assert "succeeded" in result.fit_terminal_statuses, result.fit_terminal_errors
+    assert result.candidate_assessment_count > 0
+    assert result.candidate_fit_accepted_count > 0

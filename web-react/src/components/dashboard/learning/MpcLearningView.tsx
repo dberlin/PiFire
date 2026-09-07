@@ -1,4 +1,8 @@
-import type { CheckStatus, MpcCalibrationAction } from "@pifire/core/contracts/learning";
+import type {
+  CheckStatus,
+  ModelEvidenceStatus,
+  MpcCalibrationAction,
+} from "@pifire/core/contracts/learning";
 import type { Units } from "@pifire/core/settings/settingsTypes";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -23,6 +27,144 @@ const CALIBRATION_ACTION_LABEL: Record<MpcCalibrationAction, string> = {
   stop: "Stop calibration",
   "reset-progress": "Reset calibration progress",
 };
+
+interface LearningIssueCopy {
+  summary: string;
+  action: string;
+}
+
+const LEARNING_STATUS_COPY: Record<ModelEvidenceStatus, string> = {
+  warming:
+    "MPC control is active while learning rebuilds exact estimator history. Learning starts automatically after enough valid control frames.",
+  collecting: "MPC control is active and learning is collecting valid cook data.",
+  fitting: "MPC control is active while a candidate model is fitted away from the control loop.",
+  evaluating: "A candidate model is being compared with the active model during normal cooking.",
+  interrupted:
+    "Candidate evaluation was interrupted and will resume when compatible cooking data is available.",
+  qualified: "The candidate passed evaluation and is waiting for safe activation.",
+  activating: "The qualified candidate is being persisted before a safe frame-boundary swap.",
+  active: "The learned model is active.",
+  fallback: "MPC reverted to the last safe model.",
+  error:
+    "Learning is stopped until the reported problem is resolved. MPC control may still be active.",
+};
+
+const LEARNING_ISSUES: Readonly<Record<string, LearningIssueCopy>> = {
+  "learning-digest-checkpoint-mismatch": {
+    summary: "The running MPC model does not match the saved learned model.",
+    action: "Restart Hold. If this returns, export diagnostics.",
+  },
+  "live-checkpoint-digest-mismatch": {
+    summary: "The running MPC model does not match the saved learned model.",
+    action: "Restart Hold. If this returns, export diagnostics.",
+  },
+  "live-candidate-digest-mismatch": {
+    summary: "The candidate model does not match its saved learning record.",
+    action: "Restart Hold. If this returns, export diagnostics.",
+  },
+  "live-role-generation-mismatch": {
+    summary: "The running model generation does not match saved learning authority.",
+    action: "Restart Hold. If this returns, export diagnostics.",
+  },
+  "live-candidate-generation-mismatch": {
+    summary: "The candidate generation does not match saved learning authority.",
+    action: "Restart Hold. If this returns, export diagnostics.",
+  },
+  "minimum-samples": {
+    summary: "Learning is still collecting enough usable control frames.",
+    action: "Continue normal cooks; no corrective action is required.",
+  },
+  "insufficient-excitation": {
+    summary:
+      "The cook has not exercised enough distinct controller output levels for a reliable fit.",
+    action: "Continue normal cooking rather than changing grill operation solely for learning.",
+  },
+  "insufficient-coverage": {
+    summary:
+      "The collected cooks do not yet cover enough of the temperature range for a reliable fit.",
+    action: "Continue normal cooks at the temperatures you ordinarily use.",
+  },
+  discontinuity: {
+    summary:
+      "Recent control frames were interrupted and cannot be used as continuous learning evidence.",
+    action: "No action is required unless this repeats during an uninterrupted Hold.",
+  },
+  identifiability: {
+    summary: "The collected data cannot yet distinguish a reliable thermal model.",
+    action: "Continue normal cooks so learning can collect more varied evidence.",
+  },
+  "insufficient-supported-cooks": {
+    summary: "No individual cook yet has enough reliable evidence to validate the candidate.",
+    action: "Continue normal cooks; the existing evidence remains saved.",
+  },
+  "target-timing-failed": {
+    summary: "The candidate cannot solve quickly enough on this controller.",
+    action:
+      "The active model remains in use. Export diagnostics if later candidates fail the same check.",
+  },
+  "native-build-failed": {
+    summary: "The candidate model could not be built for this controller.",
+    action: "The active model remains in use. Export diagnostics.",
+  },
+  "native-dry-solve-failed": {
+    summary: "The candidate failed its safety check before live use.",
+    action: "The active model remains in use. Export diagnostics.",
+  },
+  "activation-terminal": {
+    summary:
+      "Candidate activation stopped because the learned model could not remain active safely.",
+    action:
+      "The last safe model remains in use. Export diagnostics before trying to diagnose the candidate.",
+  },
+  "evidence-schema-invalidation": {
+    summary: "Saved learning evidence uses an older incompatible format.",
+    action:
+      "New compatible evidence will be collected automatically. Export diagnostics if learning stays stopped.",
+  },
+};
+
+function learningIssue(code: string): LearningIssueCopy {
+  return (
+    LEARNING_ISSUES[code] ?? {
+      summary: "Learning reported a condition this version cannot explain.",
+      action: "Export diagnostics and include the technical code below.",
+    }
+  );
+}
+
+function LearningIssue({
+  code,
+  detail,
+  terminal = false,
+}: {
+  code: string;
+  detail?: string;
+  terminal?: boolean;
+}) {
+  const issue = learningIssue(code);
+  return (
+    <div className="grid gap-1">
+      <p className="font-semibold">{issue.summary}</p>
+      <p>{issue.action}</p>
+      {detail && <p>Details: {detail}</p>}
+      {terminal && <p>This is a terminal learning failure.</p>}
+      <p className="font-mono text-xs">Technical code: {code}</p>
+    </div>
+  );
+}
+
+function LearningIssueList({ codes }: { codes: string[] }) {
+  if (codes.length === 0) return <p>none</p>;
+  return (
+    <ul className="grid gap-2">
+      {codes.map((code) => (
+        <li key={code}>
+          <LearningIssue code={code} />
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 interface MpcLearningViewProps {
   apiBase: string;
@@ -210,6 +352,10 @@ function ActiveMpcLearningView({
   const deltaEntries = candidate?.parameter_deltas
     ? Object.entries(candidate.parameter_deltas)
     : [];
+  const reportedErrors =
+    report === undefined
+      ? []
+      : [...new Set([...report.errors, ...(report.failure ? [report.failure.code] : [])])];
 
   return (
     <LearningDialog
@@ -228,22 +374,25 @@ function ActiveMpcLearningView({
     >
       {report && (
         <>
-          {(report.errors.length > 0 || report.failure !== null) && (
+          {reportedErrors.length > 0 && (
             <div
-              className="grid gap-2 rounded-lg border border-danger p-3 text-danger"
+              className="grid gap-3 rounded-lg border border-danger p-3 text-danger"
               role="alert"
             >
-              {report.errors.map((error) => (
-                <p key={error}>Report error: {error}</p>
+              {reportedErrors.map((code) => (
+                <LearningIssue
+                  key={code}
+                  code={code}
+                  detail={report.failure?.code === code ? report.failure.detail : undefined}
+                  terminal={report.failure?.code === code && report.failure.terminal}
+                />
               ))}
-              {report.failure && (
-                <p>
-                  <strong>{report.failure.code}</strong> — {report.failure.detail}
-                  {report.failure.terminal ? " — terminal" : ""}
-                </p>
-              )}
             </div>
           )}
+
+          <p className="rounded-lg border border-card-border bg-inset p-3 text-sm" role="status">
+            {LEARNING_STATUS_COPY[report.status]}
+          </p>
 
           <section className={LEARNING_SECTION_CLASS}>
             <h3 className="font-bold">Operator calibration commands</h3>
@@ -540,8 +689,10 @@ function ActiveMpcLearningView({
                   Confidence accepted:{" "}
                   {assessment ? yesNo(assessment.confidence_accepted) : "not reported"}
                 </p>
-                <p>Rejection reasons: {assessment?.rejection_reasons.join(", ") || "none"}</p>
-                <p>Blockers: {report.blockers.join(", ") || "none"}</p>
+                <p className="font-semibold">Rejection reasons</p>
+                <LearningIssueList codes={assessment?.rejection_reasons ?? []} />
+                <p className="font-semibold">Blockers</p>
+                <LearningIssueList codes={report.blockers} />
               </div>
             </section>
           </div>

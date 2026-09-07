@@ -28,6 +28,7 @@ _EXPECTED_CAMPAIGNS = (
     ("mpc-aug27", "mpc", ("thermal-smoke-only", "exact-evidence")),
     ("pid-sp-aug28", "pid_sp", ("exact-evidence",)),
     ("mpc-aug29", "mpc", ("exact-evidence", "exact-evidence")),
+    ("mpc-sep06", "mpc", ("exact-evidence",)),
 )
 
 
@@ -42,7 +43,7 @@ def test_manifest_hash_schema_campaign_and_cook_order_are_authoritative(tmp_path
         )
         == _EXPECTED_CAMPAIGNS
     )
-    assert all(campaign.baseline.schema_version == 8 for campaign in manifest.campaigns)
+    assert [campaign.baseline.schema_version for campaign in manifest.campaigns] == [8, 8, 8, 12]
 
     for campaign in manifest.campaigns:
         copied = copy_campaign_baseline(campaign.campaign_id, tmp_path / f"{campaign.campaign_id}.sqlite")

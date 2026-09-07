@@ -1980,7 +1980,6 @@ def test_missing_checkpoint_for_new_controller_supersedes_old_pending_restore(
     def read_activation():
         nonlocal activation_reads
         activation_reads += 1
-        return None
 
     monkeypatch.setattr(learning_module, "read_model_activation", read_activation)
     monkeypatch.setattr(learning_module, "read_model_evidence", lambda: ())
@@ -2023,6 +2022,7 @@ def test_missing_checkpoint_for_new_controller_supersedes_old_pending_restore(
     assert runtime.submitted_restore_authority is None
     assert trace.model_authority is None
     assert activation_reads == 1
+
 
 @pytest.mark.parametrize(
     (
@@ -2507,6 +2507,29 @@ def test_status_fragment_returns_a_copy_of_live_learning_status() -> None:
     assert isinstance(progress, dict)
     progress["accepted"] = 99
     assert learning["progress"] == {"accepted": 3}
+
+
+def test_status_fragment_reports_seed_replay_as_warming() -> None:
+    runner = _LifecycleRunner()
+    runner.status = {
+        "learning": {
+            "status": "fitting",
+            "fit_status": "running",
+            "role_generation": 7,
+        }
+    }
+    runtime, _runner, _store, _trace_session, _recorder, _logger = _lifecycle_runtime(runner=runner)
+    runtime.set_seed_warmup_remaining(3)
+
+    fragment = runtime.status_fragment()
+
+    assert fragment == {
+        "learning": {
+            "status": "warming",
+            "fit_status": "running",
+            "role_generation": 7,
+        }
+    }
 
 
 @pytest.mark.parametrize("accepted", (True, False), ids=("accepted", "refused"))

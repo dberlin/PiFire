@@ -1163,6 +1163,25 @@ def test_hold_completed_frame_is_scored_once_and_generic_temperature_grid_is_not
     assert _pre_roll_frames(persistence) == []
 
 
+def test_replayed_hold_warmup_is_persisted_as_pre_roll_before_scoring() -> None:
+    runtime, _journal, persistence = _runtime()
+    runtime.mode_entered(_entered("Hold"))
+    runtime.observe_temperature(_sample(10, 109.0))
+    runtime.observe_temperature(_sample(_FRAME_MS, 110.0))
+
+    runtime.observe_hold_frame(_hold_frame(1, temp_c=110.0), replay_only=True)
+    assert runtime.barrier()
+
+    runtime.observe_temperature(_sample(2 * _FRAME_MS, 111.0))
+    runtime.observe_hold_frame(_hold_frame(2, start_ms=_FRAME_MS, temp_c=111.0))
+    assert runtime.barrier()
+
+    assert len(_pre_roll_frames(persistence)) == 1
+    assert len(_scored_frames(persistence)) == 1
+    assert runtime.status().pre_roll_count == 1
+    assert runtime.status().scored_count == 1
+
+
 @pytest.mark.parametrize(
     "reason",
     (TrajectoryBreakReason.STOP, TrajectoryBreakReason.ERROR),

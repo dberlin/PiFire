@@ -338,6 +338,7 @@ class HoldLearningRuntime:
     @property
     def seed_warmup_remaining(self) -> int:
         return self._seed_warmup_remaining
+
     @property
     def submitted_restore_authority(self) -> TraceModelAuthority | None:
         submitted = self._submitted_restore
@@ -347,7 +348,6 @@ class HoldLearningRuntime:
             cast(Mapping[str, JsonValue], submitted[1]),
             "restore_submitted",
         )
-
 
     def set_seed_warmup_remaining(self, frame_count: int) -> None:
         if isinstance(frame_count, bool) or not isinstance(frame_count, int) or frame_count < 0:
@@ -667,7 +667,10 @@ class HoldLearningRuntime:
         learning = status.get("learning")
         if not isinstance(learning, Mapping):
             return {}
-        return {"learning": deepcopy(dict(learning))}
+        projected = deepcopy(dict(learning))
+        if self._seed_warmup_remaining > 0:
+            projected["status"] = "warming"
+        return {"learning": projected}
 
     def submit_online_checkpoint(self, snapshot: dict[str, object]) -> bool:
         persistence = self._persistence

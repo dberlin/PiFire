@@ -51,6 +51,7 @@ from controller.model_learning.report import (
 )
 from controller.mpc import Controller
 from controller.mpc_config import DEFAULT_MPC_CONFIG
+from controller.mpc_snapshot import new_grey_learning_snapshot
 from controller.runtime.model_fitting import grey_config_digest
 from tests.unit.common._model_challenger_helpers import (
     _corpus,
@@ -882,6 +883,34 @@ def test_report_v3_projects_exact_causal_progress_and_lineage_for_every_phase(
         "fit_corpus_digest",
         "error",
     }
+
+
+def test_unidentified_placeholder_digest_is_not_a_live_checkpoint_mismatch(
+    ds,
+) -> None:
+    controller = Controller(dict(DEFAULT_MPC_CONFIG), "C", {"u_min": 0.1, "u_max": 0.9})
+    runtime_checkpoint = controller.get_model_snapshot()
+    live = controller._grey_learning_runtime.learning_status()
+    controller.close()
+    checkpoint = new_grey_learning_snapshot(
+        revision=0,
+        parameters=runtime_checkpoint["active"]["parameters"],
+        metadata=runtime_checkpoint["active"]["metadata"],
+    )
+
+    assert checkpoint["active_pair"] is None
+    assert live["checkpoint_digest"] != checkpoint["identities"]["active_digest"]
+
+    payload = build_learning_report(
+        (),
+        activation_state={},
+        checkpoint=checkpoint,
+        live_status=live,
+        calibration_command_high_water=0,
+    ).as_dict()
+
+    assert "live-checkpoint-digest-mismatch" not in payload["errors"]
+    assert payload["status"] == LearningStatus.COLLECTING.value
 
 
 def test_production_live_terminal_failure_overlays_prior_active_with_exact_reason(

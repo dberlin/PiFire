@@ -953,12 +953,14 @@ class LearningTrajectoryRuntime:
             self._finalize(TrajectoryBreakReason.RECORDER_GAP)
             self._last_break_reason = TrajectoryBreakReason.RECORDER_GAP
             return
-        if replay_only or self._submit_frame(
+        submitted = self._submit_frame(
             frame,
-            scored=True,
-            hold_entry=self._hold_entry,
-        ):
-            self._retain_replay_frame(frame)
+            scored=not replay_only,
+            hold_entry=None if replay_only else self._hold_entry,
+        )
+        if submitted:
+            if not replay_only:
+                self._retain_replay_frame(frame)
             self._seen_hold_frames.add(identity)
 
     @_replay_synchronized
