@@ -112,6 +112,7 @@ from controller.runtime.model_fitting import (
     GreyLearningOrchestrator,
     LiveLearningIdentity,
     TargetTimingEvidence,
+    fit_segmented_grey,
     grey_config_digest,
     persistent_corpus_trigger,
     segmented_corpus_fit_job,
@@ -126,6 +127,8 @@ class _FitCorpusRepository(Protocol):
         *,
         through_revision: int | None = None,
     ) -> FitCorpusSnapshot: ...
+
+    def replay_fit(self, request_id: str) -> FitCorpusSnapshot: ...
 
     def record_fit_request(
         self,
@@ -1403,21 +1406,7 @@ class GreyLearningRuntime:
                 "dry_solve": "passed" if preparation.dry_solve_finite else "failed",
                 "target_timing": (None if timing is None else trajectory_json_value(asdict(timing))),
                 "fit_corpus_digest": request.fit_corpus.corpus_digest,
-                "fit_result": {
-                    "rmse_c": preparation.candidate.rmse_c,
-                    "max_error_c": preparation.candidate.max_error_c,
-                    "identifiability": preparation.candidate.identifiability,
-                    "sample_count": preparation.candidate.sample_count,
-                    "temperature_band_c": list(preparation.candidate.temperature_band_c),
-                    "nfev": preparation.candidate.nfev,
-                    "effective_masks": [
-                        [bool(value) for value in mask] for mask in preparation.candidate.effective_masks
-                    ],
-                    "warmup_excluded_segment_ids": list(
-                        preparation.candidate.warmup_excluded_segment_ids
-                    ),
-                    "result_digest": preparation.candidate.result_digest,
-                },
+                "fit_result": self._durable_fit_result(preparation.candidate),
             },
             controller_configuration_digest=request.configuration_digest,
             incumbent=incumbent,
@@ -1487,27 +1476,14 @@ class GreyLearningRuntime:
             fit_preparation={
                 "request_id": request.request_id,
                 "accepted": True,
+                "restore_revalidation": True,
                 "candidate_digest": candidate.model_digest,
                 "required_horizons": list(learning.evaluation_config.required_horizons),
                 "native_build": "passed",
                 "dry_solve": ("passed" if preparation.dry_solve_finite else "failed"),
                 "target_timing": (None if timing is None else trajectory_json_value(asdict(timing))),
                 "fit_corpus_digest": request.fit_corpus.corpus_digest,
-                "fit_result": {
-                    "rmse_c": preparation.candidate.rmse_c,
-                    "max_error_c": preparation.candidate.max_error_c,
-                    "identifiability": preparation.candidate.identifiability,
-                    "sample_count": preparation.candidate.sample_count,
-                    "temperature_band_c": list(preparation.candidate.temperature_band_c),
-                    "nfev": preparation.candidate.nfev,
-                    "effective_masks": [
-                        [bool(value) for value in mask] for mask in preparation.candidate.effective_masks
-                    ],
-                    "warmup_excluded_segment_ids": list(
-                        preparation.candidate.warmup_excluded_segment_ids
-                    ),
-                    "result_digest": preparation.candidate.result_digest,
-                },
+                "fit_result": self._durable_fit_result(preparation.candidate),
             },
             controller_configuration_digest=request.configuration_digest,
             incumbent=incumbent,
@@ -2899,24 +2875,30 @@ class GreyLearningRuntime:
             return
         self._model_revision = max(self._model_revision, revision)
 
-    def _restore_challenger_preparation(
-        self,
-        state: ModelChallengerState,
-        incumbent_pair: CandidatePair,
-    ) -> CandidatePreparation:
-        """Rebuild one exact candidate owner solely from durable challenger lineage."""
+    @staticmethod
+    def _durable_fit_result(candidate: GreyFitSuccess) -> dict[str, object]:
+        """Project the exact replayable fit evidence into durable JSON."""
 
-        preparation = state.fit_preparation
-        fit_result = preparation.get("fit_result")
-        timing_value = preparation.get("target_timing")
-        if (
-            not isinstance(fit_result, Mapping)
-            or not isinstance(timing_value, Mapping)
-            or preparation.get("fit_corpus_digest") != state.fit_corpus.corpus_digest
-        ):
-            raise TypeError("durable challenger preparation is incomplete")
+        return {
+            "rmse_c": candidate.rmse_c,
+            "max_error_c": candidate.max_error_c,
+            "identifiability": candidate.identifiability,
+            "sample_count": candidate.sample_count,
+            "temperature_band_c": list(candidate.temperature_band_c),
+            "nfev": candidate.nfev,
+            "effective_masks": [
+                [bool(value) for value in mask] for mask in candidate.effective_masks
+            ],
+            "warmup_excluded_segment_ids": list(
+                candidate.warmup_excluded_segment_ids
+            ),
+            "result_digest": candidate.result_digest,
+        }
+
+    @staticmethod
+    def _durable_fit_request(state: ModelChallengerState) -> FitRequest:
         lineage = state.fit_lineage
-        request = FitRequest(
+        return FitRequest(
             request_id=lineage.request_id,
             origin=state.origin,
             fit_corpus=state.fit_corpus,
@@ -2925,21 +2907,18 @@ class GreyLearningRuntime:
             parent_incumbent_generation=lineage.parent_incumbent_generation,
             candidate_generation=lineage.candidate_generation,
         )
-        candidate_owner = self._pair_factory.restore(state.candidate)
+
+    @staticmethod
+    def _finish_restored_candidate(
+        state: ModelChallengerState,
+        incumbent_pair: CandidatePair,
+        candidate: GreyFitSuccess,
+        timing_value: Mapping[str, object],
+        candidate_owner: OwnedMpcPair,
+    ) -> CandidatePreparation:
         try:
-            candidate = GreyFitSuccess(
-                request=request,
-                config=candidate_owner.solver.config,
-                rmse_c=fit_result["rmse_c"],
-                max_error_c=fit_result["max_error_c"],
-                identifiability=fit_result["identifiability"],
-                sample_count=fit_result["sample_count"],
-                temperature_band_c=tuple(fit_result["temperature_band_c"]),
-                nfev=fit_result["nfev"],
-                effective_masks=tuple(tuple(mask) for mask in fit_result["effective_masks"]),
-                warmup_excluded_segment_ids=tuple(fit_result["warmup_excluded_segment_ids"]),
-                result_digest=fit_result["result_digest"],
-            )
+            if candidate_owner.solver.config != candidate.config:
+                raise ValueError("durable challenger candidate configuration changed")
             timing = TargetTimingEvidence(
                 target=timing_value["target"],
                 samples=timing_value["samples"],
@@ -2967,6 +2946,131 @@ class GreyLearningRuntime:
             candidate_owner.close()
             raise
         return restored
+
+    @staticmethod
+    def _close_restored_candidate(preparation: CandidatePreparation) -> None:
+        pair = preparation.candidate_pair
+        if pair is None:
+            return
+        closed: set[int] = set()
+        for component in (pair.controller, pair.estimator):
+            if id(component) in closed:
+                continue
+            close = getattr(component, "close", None)
+            if callable(close):
+                close()
+            closed.add(id(component))
+
+    def _restore_checkpoint_revalidation_preparation(
+        self,
+        state: ModelChallengerState,
+        incumbent_pair: CandidatePair,
+    ) -> CandidatePreparation:
+        """Resume only an explicitly self-contained restore revalidation."""
+
+        if not self._is_self_contained_restore_revalidation(state):
+            raise ValueError("challenger is not a self-contained restore revalidation")
+        preparation = state.fit_preparation
+        fit_result = preparation.get("fit_result")
+        timing_value = preparation.get("target_timing")
+        if (
+            not isinstance(fit_result, Mapping)
+            or not isinstance(timing_value, Mapping)
+            or preparation.get("fit_corpus_digest") != state.fit_corpus.corpus_digest
+        ):
+            raise TypeError("durable checkpoint revalidation preparation is incomplete")
+        candidate_owner = self._pair_factory.restore(state.candidate)
+        try:
+            candidate = GreyFitSuccess(
+                request=self._durable_fit_request(state),
+                config=candidate_owner.solver.config,
+                rmse_c=fit_result["rmse_c"],
+                max_error_c=fit_result["max_error_c"],
+                identifiability=fit_result["identifiability"],
+                sample_count=fit_result["sample_count"],
+                temperature_band_c=tuple(fit_result["temperature_band_c"]),
+                nfev=fit_result["nfev"],
+                effective_masks=tuple(
+                    tuple(mask) for mask in fit_result["effective_masks"]
+                ),
+                warmup_excluded_segment_ids=tuple(
+                    fit_result["warmup_excluded_segment_ids"]
+                ),
+                result_digest=fit_result["result_digest"],
+            )
+        except BaseException:
+            candidate_owner.close()
+            raise
+        return self._finish_restored_candidate(
+            state,
+            incumbent_pair,
+            candidate,
+            timing_value,
+            candidate_owner,
+        )
+
+    def _restore_challenger_preparation(
+        self,
+        state: ModelChallengerState,
+        incumbent_pair: CandidatePair,
+        *,
+        fit_snapshot: FitCorpusSnapshot,
+    ) -> CandidatePreparation:
+        """Replay exact durable fit evidence before rebuilding its candidate owner."""
+
+        preparation = state.fit_preparation
+        fit_result = preparation.get("fit_result")
+        timing_value = preparation.get("target_timing")
+        if (
+            not isinstance(fit_result, Mapping)
+            or not isinstance(timing_value, Mapping)
+            or preparation.get("fit_corpus_digest") != state.fit_corpus.corpus_digest
+        ):
+            raise TypeError("durable challenger preparation is incomplete")
+        if fit_snapshot.identity != state.fit_corpus:
+            raise ValueError("durable challenger fit replay corpus changed")
+        request = self._durable_fit_request(state)
+        replayed = fit_segmented_grey(
+            segmented_corpus_fit_job(
+                fit_snapshot,
+                request,
+                incumbent_pair.controller.config,
+            )
+        )
+        if not isinstance(replayed, GreyFitSuccess):
+            raise ValueError(
+                "durable challenger fit replay failed "
+                f"({replayed.code.value}: {replayed.detail})"
+            )
+        replayed_descriptor = self._pair_factory.descriptor(
+            self._pair_factory.native(
+                replayed.config,
+                estimator_kind=state.candidate.estimator_kind,
+                candidate_generation=state.candidate.candidate_generation,
+                role_generation=state.candidate.role_generation,
+            )
+        )
+        candidate_digest = replayed_descriptor.model_digest
+        if (
+            replayed_descriptor != state.candidate
+            or state.fit_lineage.candidate_digest != candidate_digest
+            or preparation.get("candidate_digest") != candidate_digest
+        ):
+            raise ValueError("durable challenger replayed candidate changed")
+        # The production result digest binds candidate parameters, exact masks,
+        # and detailed candidate metrics; the durable projection pins the
+        # remaining summaries, exclusions, optimizer count, and digest itself.
+        stored_fit_result = trajectory_json_value(fit_result)
+        if stored_fit_result != self._durable_fit_result(replayed):
+            raise ValueError("durable challenger replayed fit evidence changed")
+        candidate_owner = self._pair_factory.restore(state.candidate)
+        return self._finish_restored_candidate(
+            state,
+            incumbent_pair,
+            replayed,
+            timing_value,
+            candidate_owner,
+        )
 
     @staticmethod
     def _checkpoint_revalidation_corpus(
@@ -3028,6 +3132,20 @@ class GreyLearningRuntime:
             and state.fit_lineage.fit_corpus == state.fit_corpus
             and state.fit_lineage.request_id.startswith("restore-revalidation-")
             and state.fit_preparation.get("fit_corpus_digest") == state.fit_corpus.corpus_digest
+        )
+
+    def _is_self_contained_restore_revalidation(
+        self,
+        state: ModelChallengerState,
+    ) -> bool:
+        return self._is_checkpoint_revalidation_corpus(state) or (
+            state.fit_preparation.get("restore_revalidation") is True
+            and state.fit_lineage.request_id.startswith("restore-revalidation-")
+            and state.origin is CandidateOrigin.PASSIVE_ONLINE
+            and state.policy is ActivationPolicy.CAUSAL_AUTO
+            and state.calibration_manifest is None
+            and state.fit_preparation.get("fit_corpus_digest")
+            == state.fit_corpus.corpus_digest
         )
 
     def _restore_model_for_revalidation(
@@ -3439,8 +3557,10 @@ class GreyLearningRuntime:
             and authority["challenger_id"] == durable.challenger_id
             and authority["revision"] == durable.revision
         )
-        checkpoint_projection = (
-            authority_matches and durable is not None and self._is_checkpoint_revalidation_corpus(durable)
+        self_contained_revalidation = (
+            authority_matches
+            and durable is not None
+            and self._is_self_contained_restore_revalidation(durable)
         )
         if durable is not None and durable.phase != "retired" and not authority_matches:
             with self._learning_lock:
@@ -3452,24 +3572,34 @@ class GreyLearningRuntime:
             and restored_components is not None
             and restored_identity is not None
             and self._learning is not None
-            and (self._trajectory_repository is not None or checkpoint_projection)
+            and (
+                self._trajectory_repository is not None
+                or self_contained_revalidation
+            )
         ):
             preparation = None
             try:
-                if checkpoint_projection:
+                if self_contained_revalidation:
                     live_corpus = durable.fit_corpus
+                    preparation = self._restore_checkpoint_revalidation_preparation(
+                        durable,
+                        restored_components,
+                    )
                 else:
                     repository = self._trajectory_repository
                     if repository is None:
-                        raise RuntimeError("challenger trajectory repository is unavailable")
-                    live_corpus = repository.snapshot_fit_corpus(
-                        durable.fit_corpus.fit_partition_digest,
-                        through_revision=durable.fit_corpus.corpus_revision,
-                    ).identity
-                preparation = self._restore_challenger_preparation(
-                    durable,
-                    restored_components,
-                )
+                        raise RuntimeError(
+                            "challenger trajectory repository is unavailable"
+                        )
+                    fit_snapshot = repository.replay_fit(
+                        durable.fit_lineage.request_id
+                    )
+                    live_corpus = fit_snapshot.identity
+                    preparation = self._restore_challenger_preparation(
+                        durable,
+                        restored_components,
+                        fit_snapshot=fit_snapshot,
+                    )
                 recovered = recover_model_challenger(
                     incumbent=restored_descriptor,
                     candidate=durable.candidate,
@@ -3487,13 +3617,7 @@ class GreyLearningRuntime:
                         and latest.phase == "retired"
                     ):
                         self._trace_durable_challenger(latest)
-                    for component in (
-                        preparation.candidate_pair.controller,
-                        preparation.candidate_pair.estimator,
-                    ):
-                        close = getattr(component, "close", None)
-                        if callable(close):
-                            close()
+                    self._close_restored_candidate(preparation)
                 else:
                     self._trace_durable_challenger(recovered)
                     self._learning.restore_persisted_challenger(
@@ -3509,8 +3633,15 @@ class GreyLearningRuntime:
                             self._restore_revalidation_candidate_digest = preparation.candidate_digest
                     self._adopt_prepared_checkpoint_lineage(preparation)
             except Exception as error:
+                learning_owned_preparation = (
+                    preparation is not None
+                    and self._learning is not None
+                    and self._learning.prepared is preparation
+                )
                 if self._learning is not None:
                     self._learning._release_prepared()
+                if preparation is not None and not learning_owned_preparation:
+                    self._close_restored_candidate(preparation)
                 try:
                     latest = read_model_challenger()
                 except ValueError:

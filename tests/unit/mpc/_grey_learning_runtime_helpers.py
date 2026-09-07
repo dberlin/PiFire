@@ -45,6 +45,7 @@ from controller.model_learning.evaluation import (
 from controller.model_learning.grey_runtime import GreyLearningRuntime
 from controller.mpc_config import DEFAULT_MPC_CONFIG, MpcConfig
 from controller.mpc_factory import MpcPairFactory, OwnedMpcPair
+from controller.mpc_model import replay_delay_chain_arrays, simulate_grey_box_intervals
 from controller.runtime.model_fitting import (
     CandidatePair,
     CandidatePreparation,
@@ -56,6 +57,8 @@ from controller.runtime.model_fitting import (
     GreyFitWorker,
     TargetTimingEvidence,
     TriggerConfig,
+    fit_segmented_grey,
+    segmented_corpus_fit_job,
 )
 from controller.runtime.model_persistence import (
     DurableActivationReceipt,
@@ -914,3 +917,133 @@ def _reopened_ready_passive_corpus(tmp_path):
     )
     _finalize_segment(repository, ready)
     return repository, ready.fit_partition_digest
+
+
+def _reopened_replayable_passive_corpus(tmp_path):
+    database_path = tmp_path / "grey-learning-passive-replay.sqlite"
+    repository = LearningTrajectoryRepository(str(database_path))
+    config = GreyBoxMPCConfig(
+        C_c=410.0,
+        K_Q=390.0,
+        theta=62.0,
+        h_amb=0.65,
+        T_amb=18.0,
+    )
+    segments = []
+    for index, anchor_c in enumerate((80.0, 115.0)):
+        source = _segment(
+            f"passive-replay-{index}",
+            epoch_ms=index * 4_000_000,
+            pre_roll_count=1,
+            scored_count=140,
+        )
+        pre_roll_loads = (0.2,)
+        scored_loads = tuple(
+            (0.15, 0.50, 0.85)[(ordinal // 8) % 3]
+            for ordinal in range(len(source.scored_hold_frames))
+        )
+        delay_states = replay_delay_chain_arrays(
+            (FIT_CADENCE_S,),
+            pre_roll_loads,
+            theta=config.theta,
+            n_delay=config.delay_states,
+            initial_load=pre_roll_loads[0],
+        )
+        temperatures = simulate_grey_box_intervals(
+            (FIT_CADENCE_S,) * len(scored_loads),
+            scored_loads,
+            (config.T_amb,) * len(scored_loads),
+            C_c=config.C_c,
+            h_amb=config.h_amb,
+            T0=anchor_c,
+            K_Q=config.K_Q,
+            sigma=config.sigma,
+            theta=config.theta,
+            n_delay=config.delay_states,
+            initial_delay_states=delay_states,
+        )
+        pre_roll = tuple(
+            replace(
+                frame,
+                chamber_temperature_c=anchor_c,
+                ambient_temperature_c=config.T_amb,
+                delivered_auger_on_seconds=load * FIT_CADENCE_S,
+                realized_auger_duty=load,
+                normalized_combustion_load=load,
+            )
+            for frame, load in zip(
+                source.pre_roll_frames,
+                pre_roll_loads,
+                strict=True,
+            )
+        )
+        scored = tuple(
+            replace(
+                frame,
+                chamber_temperature_c=float(temperature),
+                ambient_temperature_c=config.T_amb,
+                delivered_auger_on_seconds=load * FIT_CADENCE_S,
+                realized_auger_duty=load,
+                normalized_combustion_load=load,
+            )
+            for frame, load, temperature in zip(
+                source.scored_hold_frames,
+                scored_loads,
+                temperatures,
+                strict=True,
+            )
+        )
+        assert source.hold_entry is not None
+        segment = replace(
+            source,
+            pre_roll_frames=pre_roll,
+            hold_entry=replace(
+                source.hold_entry,
+                chamber_temperature_c=anchor_c,
+            ),
+            scored_hold_frames=scored,
+        )
+        _finalize_segment(repository, segment)
+        segments.append(segment)
+    assert segments[0].fit_partition_digest == segments[1].fit_partition_digest
+    return repository, segments[0].fit_partition_digest
+
+
+def _seed_replayable_unchanged_challenger(
+    harness: _Harness,
+    repository,
+    partition: str,
+):
+    fit_snapshot = repository.snapshot_fit_corpus(partition)
+    preparation, _evaluation, _components = _automatic_candidate(
+        harness,
+        fit_corpus=fit_snapshot.identity,
+    )
+    request = preparation.candidate.request
+    harness.runtime._record_corpus_fit_request(
+        repository,
+        fit_snapshot,
+        request,
+    )
+    replayed = fit_segmented_grey(
+        segmented_corpus_fit_job(
+            fit_snapshot,
+            request,
+            harness.activation.active_pair.solver.config,
+        )
+    )
+    assert isinstance(replayed, GreyFitSuccess)
+    preparation.candidate = replayed
+    candidate = harness.runtime._prepared_candidate_descriptor(preparation)
+    preparation.candidate_digest = candidate.model_digest
+    repository.complete_fit(
+        request.request_id,
+        candidate_digest=candidate.model_digest,
+        error=None,
+    )
+    durable = _seed_durable_challenger(
+        harness,
+        preparation,
+        phase="evaluating",
+    )
+    return preparation, durable, replayed

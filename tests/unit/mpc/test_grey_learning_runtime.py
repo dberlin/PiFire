@@ -68,8 +68,10 @@ from tests.unit.mpc._grey_learning_runtime_helpers import (
     _operator_candidate,
     _ProbeSolver,
     _reopened_corpus,
+    _reopened_replayable_passive_corpus,
     _reopened_ready_passive_corpus,
     _seed_durable_challenger,
+    _seed_replayable_unchanged_challenger,
     _SubmissionFailureWorker,
     _SuccessfulWorker,
 )
@@ -264,6 +266,74 @@ def test_restore_model_retires_durably_corrupted_inner_mask_without_changing_act
         target.activation.close()
         source.runtime.close()
         source.activation.close()
+
+
+def test_restore_model_retires_same_shape_mask_bit_corruption_without_changing_active_descriptor(
+    ds,
+    tmp_path,
+) -> None:
+    repository, partition = _reopened_replayable_passive_corpus(tmp_path)
+    repository_probe = _CorpusRepositoryProbe(repository)
+    source = _harness(
+        trajectory_repository=repository_probe,
+        fit_partition_digest=lambda: partition,
+        learning_enabled=True,
+    )
+    preparation, durable, replayed = _seed_replayable_unchanged_challenger(
+        source,
+        repository,
+        partition,
+    )
+    snapshot = source.runtime.get_model_snapshot()
+    assert snapshot["challenger_authority"] == {
+        "challenger_id": durable.challenger_id,
+        "revision": durable.revision,
+    }
+    with datastore.connection() as connection:
+        row = connection.execute(
+            "SELECT state_json FROM model_challenger_state WHERE singleton=1"
+        ).fetchone()
+        assert row is not None
+        state_json = json.loads(row[0])
+        assert state_json["fit_preparation"]["fit_result"] == (
+            source.runtime._durable_fit_result(replayed)
+        )
+        serialized_mask = state_json["fit_preparation"]["fit_result"]["effective_masks"][0]
+        true_indices = [
+            index for index, included in enumerate(serialized_mask) if included
+        ]
+        false_indices = [
+            index for index, included in enumerate(serialized_mask) if not included
+        ]
+        assert true_indices
+        assert false_indices
+        serialized_mask[true_indices[0]] = False
+        serialized_mask[false_indices[0]] = True
+        connection.execute(
+            "UPDATE model_challenger_state SET state_json=? WHERE singleton=1",
+            (json.dumps(state_json, sort_keys=True, separators=(",", ":")),),
+        )
+
+    target = _harness(
+        trajectory_repository=_CorpusRepositoryProbe(repository),
+        fit_partition_digest=lambda: partition,
+        learning_enabled=True,
+    )
+    initial_active_descriptor = target.activation.active_pair.descriptor
+    try:
+        assert target.runtime.restore_model(snapshot)
+        assert target.activation.active_pair.descriptor == initial_active_descriptor
+        retired = read_model_challenger()
+        assert retired is not None
+        assert retired.phase == "retired"
+        assert retired.retirement_reason == "challenger-reconstruction-failed"
+    finally:
+        _close_prepared_candidate(preparation)
+        target.runtime.close()
+        target.activation.close()
+        source.runtime.close()
+        source.activation.close()
+
 
 def test_queued_fit_lifecycle_is_memory_only_until_off_path_poll(monkeypatch) -> None:
     instances = []

@@ -11,7 +11,13 @@ from controller.model_learning.installation_identity import (
     installation_identity_digest,
 )
 from controller.mpc_snapshot import GreySnapshotInvalid, migrate_grey_learning_snapshot, new_grey_learning_snapshot
-from tests.unit.mpc._grey_learning_runtime_helpers import _harness
+from tests.unit.mpc._grey_learning_runtime_helpers import (
+    _close_prepared_candidate,
+    _CorpusRepositoryProbe,
+    _harness,
+    _reopened_replayable_passive_corpus,
+    _seed_replayable_unchanged_challenger,
+)
 
 
 def test_installation_identity_is_domain_separated_before_persistence() -> None:
@@ -259,6 +265,81 @@ def test_digestless_restore_challenger_resumes_from_its_durable_projection(
         if not first_target.runtime._closed:
             first_target.runtime.close()
             first_target.activation.close()
+        source.runtime.close()
+        source.activation.close()
+
+
+def test_reused_fit_corpus_revalidation_challenger_survives_second_restart(
+    ds,
+    tmp_path,
+) -> None:
+    repository, partition = _reopened_replayable_passive_corpus(tmp_path)
+    source = _harness(
+        trajectory_repository=_CorpusRepositoryProbe(repository),
+        fit_partition_digest=lambda: partition,
+        learning_enabled=True,
+        installation_identity_provider=lambda: "installation-a",
+    )
+    preparation, source_durable, replayed = (
+        _seed_replayable_unchanged_challenger(
+            source,
+            repository,
+            partition,
+        )
+    )
+    source_snapshot = source.runtime.get_model_snapshot()
+    assert source_snapshot is not None
+    source_snapshot["active"]["metadata"] = {
+        "rmse": replayed.rmse_c,
+        "samples": replayed.sample_count,
+        "band_c": list(replayed.temperature_band_c),
+        "nfev": replayed.nfev,
+    }
+    source_snapshot["identification"] = {"status": "identified"}
+    first_target = _harness(
+        trajectory_repository=_CorpusRepositoryProbe(repository),
+        fit_partition_digest=lambda: partition,
+        learning_enabled=True,
+        installation_identity_provider=lambda: "installation-b",
+    )
+
+    restarted = None
+    try:
+        assert first_target.runtime.restore_model(source_snapshot)
+        fallback_snapshot = first_target.runtime.get_model_snapshot()
+        assert fallback_snapshot is not None
+        reused = read_model_challenger()
+        assert reused is not None
+        assert reused.fit_corpus == source_durable.fit_corpus
+        assert reused.fit_lineage.request_id.startswith("restore-revalidation-")
+        assert reused.fit_preparation["restore_revalidation"] is True
+        first_target.runtime.close()
+        first_target.activation.close()
+
+        restarted = _harness(
+            trajectory_repository=_CorpusRepositoryProbe(repository),
+            fit_partition_digest=lambda: partition,
+            learning_enabled=True,
+            installation_identity_provider=lambda: "installation-b",
+        )
+        assert restarted.runtime.restore_model(fallback_snapshot)
+        recovered = read_model_challenger()
+        assert recovered is not None
+        assert recovered.challenger_id == reused.challenger_id
+        assert recovered.phase == "evaluating"
+        assert recovered.evaluation_epoch == reused.evaluation_epoch + 1
+        assert restarted.runtime._learning is not None
+        restored = restarted.runtime._learning.prepared
+        assert restored is not None
+        assert restored.candidate_digest == reused.candidate.model_digest
+    finally:
+        if restarted is not None:
+            restarted.runtime.close()
+            restarted.activation.close()
+        if not first_target.runtime._closed:
+            first_target.runtime.close()
+            first_target.activation.close()
+        _close_prepared_candidate(preparation)
         source.runtime.close()
         source.activation.close()
 
