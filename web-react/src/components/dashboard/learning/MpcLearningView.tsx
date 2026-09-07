@@ -70,9 +70,19 @@ const LEARNING_ISSUES: Readonly<Record<string, LearningIssueCopy>> = {
     summary: "The candidate generation does not match saved learning authority.",
     action: "Restart Hold. If this returns, export diagnostics.",
   },
-  "minimum-samples": {
-    summary: "Learning is still collecting enough usable control frames.",
-    action: "Continue normal cooks; no corrective action is required.",
+  "minimum-observed-duration": {
+    summary: "Learning is still collecting enough usable cooking time.",
+    action: "Continue normal cooks; the existing evidence remains saved.",
+  },
+  "minimum-effective-duration": {
+    summary:
+      "Some collected cooking time is still warming the thermal model and cannot be scored yet.",
+    action:
+      "Continue normal cooking; masked warm-up evidence is never treated as a measurement.",
+  },
+  "pooled-regression": {
+    summary: "The new model fits the collected cooks worse than the active model.",
+    action: "The active model remains in use while later cooks add evidence.",
   },
   "insufficient-excitation": {
     summary:
@@ -92,10 +102,6 @@ const LEARNING_ISSUES: Readonly<Record<string, LearningIssueCopy>> = {
   identifiability: {
     summary: "The collected data cannot yet distinguish a reliable thermal model.",
     action: "Continue normal cooks so learning can collect more varied evidence.",
-  },
-  "insufficient-supported-cooks": {
-    summary: "No individual cook yet has enough reliable evidence to validate the candidate.",
-    action: "Continue normal cooks; the existing evidence remains saved.",
   },
   "target-timing-failed": {
     summary: "The candidate cannot solve quickly enough on this controller.",

@@ -73,13 +73,16 @@
  the probe alone.
 
  EVERYTHING THE RECOMMENDATION RESTS ON IS SCOPED TO WHAT THE GATE CAN SEE.
- The persistent trigger requires `TriggerConfig().min_effective_duration_s`
- effective fitted seconds before a fit may be submitted. Fitted rows use the
- nominal `FIT_CADENCE_S` cadence, not the raw 5-second source cadence. Every
- count, correlation, threshold and confusion matrix below is over records whose
+ The persistent trigger requires 600 observed seconds before a fit may be
+ submitted. Candidate comparison separately requires
+ `TriggerConfig().min_effective_duration_s` fitted seconds after resampling and
+ candidate-dependent warm-up exclusion. Fitted rows use the nominal
+ `FIT_CADENCE_S` cadence, not the raw 5-second source cadence. Every count,
+ correlation, threshold and confusion matrix below is over records whose
  successful segmented fit reports at least that much effective duration; shorter
- records remain printed as fitter
- diagnostics but cannot contribute evidence about the live gate.
+ records remain printed as fitter diagnostics but cannot contribute evidence
+ about the live gate.
+
  Records that are byte-identical to another (profiles that share their opening
  segments truncate to the same data) are collapsed to one, with the collapses
  listed, so no count is inflated by the same record appearing twice.
@@ -139,9 +142,9 @@ _NOMINAL_GATE_DURATION_S = TriggerConfig().min_effective_duration_s
 #: against the ~110 s dead time the suffix has to exercise.
 SPLIT_FRAC = 2.0 / 3.0
 
-#: Truncation lengths in seconds. The persistent trigger requires 600 seconds
-#: of effective fitted duration before any additional warm-up exclusion.
-#: Shorter records remain visible as out-of-scope fitter diagnostics.
+#: Truncation lengths in seconds. Candidate evaluation requires 600 seconds of
+#: effective fitted duration after resampling and candidate-dependent warm-up
+#: exclusion. Shorter records remain visible as out-of-scope fitter diagnostics.
 LENGTHS_S = (300, 450, 600, 900, 1200, 1800, 2400, 3600)
 
 RECORD_S = 3600
@@ -620,13 +623,13 @@ def _effective_duration_s(row):
 
 
 def in_scope(row):
-    """Whether the persistent effective-duration gate can reach this record.
+    """Whether the candidate effective-duration gate can admit this record.
 
     A successful segmented fit reports the scored effective-row count after
     resampling and exclusions. The fitted arrays use ``FIT_CADENCE_S`` exactly,
     so their row count represents an exact effective duration. Records below
-    the live trigger's duration minimum cannot reach candidate evaluation; raw
-    source-row count remains diagnostic only.
+    the production candidate gate cannot reach evaluation; raw source-row count
+    remains diagnostic only.
     """
     return _effective_duration_s(row) >= _NOMINAL_GATE_DURATION_S
 
@@ -678,10 +681,10 @@ def gate_verdict(row, incumbent, cand_rmse, inc_rmse):
     candidate model is always the FULL-record fit even when a held-out signal is
     used, because that is the model a gate would adopt -- the prefix fit exists
     only to produce a number about a record, not to be installed.
-    The persistent trigger's effective duration and the convergence veto both
-    sit in front of candidate evaluation, so both are applied here. A record
-    the runtime would never submit or successfully fit cannot be accepted by
-    any rule measured below.
+    The production observed-duration trigger and candidate effective-duration
+    gate both sit in front of evaluation, so the stricter post-fit duration is
+    applied here. A record the runtime would never evaluate or successfully fit
+    cannot be accepted by any rule measured below.
     """
     if not in_scope(row):
         return False, (
@@ -731,9 +734,8 @@ def main():
         f"sigma={SIGMA:g} n_delay={N_DELAY} free={list(_FREE)}"
     )
     say(
-        f"source cadence : {LOG_PERIOD_S:g}s; effective-duration gate "
-        f"{_NOMINAL_GATE_DURATION_S:g}s over {FIT_CADENCE_S:g}s fitted intervals "
-        "(before additional exclusions)"
+        f"production gate: {_NOMINAL_GATE_DURATION_S:g}s effective duration from TriggerConfig; "
+        f"fitted rows use {FIT_CADENCE_S:g}s intervals after resampling and exclusions"
     )
     say(f"held-out split : {SPLIT_FRAC:.4f} of the record")
     say("shipped incumb.: " + " ".join(f"{k}={SHIPPED[k]:g}" for k in MODEL_KEYS))
@@ -813,10 +815,10 @@ def main():
 
     all_rows = rows
     out_of_scope = [r for r in all_rows if not in_scope(r)]
-    #: EVERY population below is in-scope only. See `in_scope`: the persistent
-    #: trigger cannot submit a below-gate corpus for candidate evaluation, so
-    #: such a record cannot bind a threshold, enter a confusion matrix, or move
-    #: a correlation the recommendation rests on.
+    #: EVERY population below is in-scope only. See `in_scope`: the production
+    #: admission path cannot advance a below-gate corpus to candidate evaluation,
+    #: so such a record cannot bind a threshold, enter a confusion matrix, or
+    #: move a correlation the recommendation rests on.
     rows = [r for r in all_rows if in_scope(r)]
     sim_rows = [r for r in rows if r["plant"] is not None]
     real_rows = [r for r in rows if r["profile"] == "real_mak_cook"]
@@ -864,7 +866,8 @@ def main():
         "effective duration and used in every"
     )
     say(
-        "population below; '-' = the persistent trigger cannot reach candidate evaluation, so it is shown"
+        "population below; '-' = the production admission path cannot reach candidate evaluation, "
+        "so it is shown"
     )
     say("for what it says about the FITTER and enters no bound, matrix or correlation.")
     hdr = (
@@ -929,12 +932,12 @@ def main():
     bands = [
         ("all in-scope lengths", sim_rows, lambda r: True),
         (
-            f"nominal {_NOMINAL_GATE_DURATION_S:.0f}s gate duration",
+            f"recorded duration <= {_NOMINAL_GATE_DURATION_S:.0f}s (in scope)",
             sim_rows,
             lambda r: r["length_s"] <= _NOMINAL_GATE_DURATION_S,
         ),
         (
-            f"longer than {_NOMINAL_GATE_DURATION_S:.0f}s nominal",
+            f"recorded duration > {_NOMINAL_GATE_DURATION_S:.0f}s (in scope)",
             sim_rows,
             lambda r: r["length_s"] > _NOMINAL_GATE_DURATION_S,
         ),
@@ -947,7 +950,7 @@ def main():
     say("The last three columns are not fit-quality signals at all -- they are the informativeness")
     say("statistics, correlated against the same truth error. A negative s_min correlation is the")
     say("right sign: more information in the record, less error in the model it yields.")
-    say("The final row is the below-gate population the runtime never submits for candidate evaluation.")
+    say("The final row is the below-gate population the runtime never admits to candidate evaluation.")
     say("It remains fitter evidence only and is excluded from every other row and every section.")
     say()
     say(
@@ -972,11 +975,11 @@ def main():
     say()
     say("The inversion laid out per profile: in-sample RMSE / truth error against record length.")
     say(
-        f"An inversion is in-sample falling while truth rises. Columns below the nominal "
-        f"{_NOMINAL_GATE_DURATION_S:g}-second"
+        f"An inversion is in-sample falling while truth rises. Raw records shorter than the "
+        f"{_NOMINAL_GATE_DURATION_S:g}-second production minimum"
     )
-    say("effective-duration gate are marked [out of scope] and shown only so the shape remains visible;")
-    say("the actual 'sc' column also accounts for additional resampling and warm-up exclusions.")
+    say("are marked [out of scope] and shown only so the shape remains visible;")
+    say("the actual 'sc' column uses effective duration after resampling and warm-up exclusions.")
     for plant in ("mak", "generic"):
         say()
         say(f"  === {plant} ===  (each cell insample/truth, C)")
@@ -994,7 +997,7 @@ def main():
                 cells.append(f"{m[0]['insample']['cand']:6.2f}/{m[0]['truth_cand']:8.2f}" if m else "--")
             say(f"  {profile:15s} " + " ".join(f"{c:>15s}" for c in cells))
     say()
-    say("  * out of scope by nominal duration; actual scope uses the fitted effective duration")
+    say("  * raw duration is below the production minimum; actual scope uses effective duration")
 
     # ------------------------------------------------- confusion matrices
     say()
@@ -1137,7 +1140,7 @@ def main():
             f"{fmt(f_['C_c'], 9, 1)} {fmt(f_['K_Q'], 8, 3)} {fmt(f_['theta'], 7, 1)}"
         )
     say()
-    say("what the effective-row gate says about the full recorded cook:")
+    say("what the production effective-duration gate says about the full recorded cook:")
     full = max(real_all, key=lambda r: r["length_s"])
     for sig_label, sig_key in SIGNALS:
         cand, inc = full[sig_key].get("cand", float("nan")), full[sig_key].get("shipped", float("nan"))
@@ -1157,8 +1160,10 @@ def main():
     say("steady_hold is the plant's own version: warmed to steady state at 50% duty, then logged, so")
     say("it carries a truth error the synthetic one cannot.")
     say()
-    say("The 'gate today' column carries the persistent effective-row veto, so an out-of-scope row")
-    say("reads 'refuse' for that reason alone -- exactly as the runtime does before evaluation.")
+    say("The 'gate today' column carries the production 600-second effective-duration veto, so")
+    say(
+        "an out-of-scope row reads 'refuse' for that reason alone -- exactly as runtime does before evaluation."
+    )
     say(
         f"{'plant':8s} {'profile':15s} {'len_s':>6s} {'sc':>3s} {'insamp':>8s} {'s_min':>11s} {'cond':>10s} {'theta':>8s} "
         f"{'C_c':>9s} {'truth':>8s} {'c_err':>7s} {'gate today':>11s}"
@@ -1377,7 +1382,7 @@ def main():
         say("'best threshold' minimises wrong decisions, then DANGER. 'zero-DANGER thr' is the loosest")
         say("threshold at which no accepted model reads a shorter coast than the one it replaced, and")
         say("'wrong there' is what that costs in total wrong decisions. 'real cook' is the full")
-        say("record's diagnostic statistic; the effective-row gate may still keep it out of scope.")
+        say("record's diagnostic statistic; the production duration gate may still keep it out of scope.")
 
     say()
     say("Where the real MAK cook sits on every statistic, at each truncation:")
@@ -1467,14 +1472,14 @@ def main():
     say("=" * 104)
     say("SECTION 9 -- the operating point, derived from a two-sided interval")
     say("=" * 104)
-    say("The floor is bracketed from below and from above, using only records the persistent trigger")
+    say("The floor is bracketed from below and from above, using only records the production")
     say(
-        f"can reach (effective_duration_s >= {_NOMINAL_GATE_DURATION_S:g}). "
+        f"admission path can advance (effective_duration_s >= {_NOMINAL_GATE_DURATION_S:g}). "
         "Nothing rests on a below-gate record."
     )
     if not real_rows:
         say(
-            "No real-cook truncation reaches the persistent effective-duration gate; "
+            "No real-cook truncation reaches the production effective-duration gate; "
             "a real-cook upper bound and two-sided recommended floor cannot be derived."
         )
         say(f"total elapsed {time.time() - started:.0f}s")
@@ -1508,7 +1513,9 @@ def main():
     )
     say()
     say("UPPER bound -- the floor must keep the only real record there is, at the shortest length the")
-    say("persistent trigger can fit it at, or learning never promotes anything on a real grill:")
+    say(
+        "production admission can advance it at, or learning never promotes anything on a real grill:"
+    )
     say(
         f"  weakest in-scope real-cook truncation: s_min = {b_realcook:.6g}   "
         f"({b_realcook_row['length_s']}s, raw_n={b_realcook_row['n']}, "
@@ -1519,7 +1526,7 @@ def main():
     say("zero-DANGER thresholds. Scoped to what the gate can reach, they no longer bind: every")
     say("in-scope record that would shorten the coast has s_min at or near zero, so any positive")
     say("floor clears them. The 0.491118 the unscoped run reported came from 450 s records below")
-    say("the persistent trigger's effective-row gate, before candidate evaluation.")
+    say("the production effective-duration gate, before candidate evaluation.")
     for (inc_name, sig_key), v in b_safe.items():
         say(f"  zero DANGER, incumbent={inc_name:10s} signal={sig_key:9s}: s_min >= {v:.6g}")
     say()

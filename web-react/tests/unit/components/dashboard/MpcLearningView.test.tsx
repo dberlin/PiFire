@@ -553,14 +553,14 @@ describe("MpcLearningView", () => {
     expect(screen.queryByLabelText("Required rollback reason")).not.toBeInTheDocument();
   });
 
-  it("explains warm-up and gives actions before technical learning codes", async () => {
+  it("explains observed-duration collection before technical learning codes", async () => {
     fetchMock.mockResolvedValue(
       jsonResponse({
         ...REPORT,
         status: "warming",
         candidate: null,
         evaluation: null,
-        blockers: ["minimum-samples"],
+        blockers: ["minimum-observed-duration"],
         errors: ["live-checkpoint-digest-mismatch"],
       }),
     );
@@ -582,11 +582,63 @@ describe("MpcLearningView", () => {
       .getByRole("heading", { name: "Readiness and rejection" })
       .closest("section");
     expect(readiness).toHaveTextContent(
-      "Learning is still collecting enough usable control frames.",
+      "Learning is still collecting enough usable cooking time.",
     );
-    expect(readiness).toHaveTextContent("Continue normal cooks; no corrective action is required.");
-    expect(readiness).toHaveTextContent("Technical code: minimum-samples");
+    expect(readiness).toHaveTextContent(
+      "Continue normal cooks; the existing evidence remains saved.",
+    );
+    expect(readiness).toHaveTextContent("Technical code: minimum-observed-duration");
     expect(alert).not.toHaveTextContent("Report error:");
+  });
+
+  it("explains candidate-dependent warm-up before the effective-duration code", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        ...REPORT,
+        status: "collecting",
+        candidate: null,
+        evaluation: null,
+        blockers: ["minimum-effective-duration"],
+      }),
+    );
+    renderPanel();
+    await openPanel();
+
+    const readiness = screen
+      .getByRole("heading", { name: "Readiness and rejection" })
+      .closest("section");
+    expect(readiness).toHaveTextContent(
+      "Some collected cooking time is still warming the thermal model and cannot be scored yet.",
+    );
+    expect(readiness).toHaveTextContent(
+      "Continue normal cooking; masked warm-up evidence is never treated as a measurement.",
+    );
+    expect(readiness).toHaveTextContent("Technical code: minimum-effective-duration");
+  });
+
+  it("explains pooled regression before its technical rejection code", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        ...REPORT,
+        status: "collecting",
+        candidate: null,
+        evaluation: null,
+        blockers: ["pooled-regression"],
+      }),
+    );
+    renderPanel();
+    await openPanel();
+
+    const readiness = screen
+      .getByRole("heading", { name: "Readiness and rejection" })
+      .closest("section");
+    expect(readiness).toHaveTextContent(
+      "The new model fits the collected cooks worse than the active model.",
+    );
+    expect(readiness).toHaveTextContent(
+      "The active model remains in use while later cooks add evidence.",
+    );
+    expect(readiness).toHaveTextContent("Technical code: pooled-regression");
   });
 
   it("renders rejected assessment, fallback reason, fit failure, and structured terminal failure", async () => {
