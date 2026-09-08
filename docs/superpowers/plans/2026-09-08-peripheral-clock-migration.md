@@ -490,3 +490,7 @@ The slow real-cook harness also establishes its initial admission stamp on its
 replacement clock and joins terminal frames by wall provenance rather than
 monotonic frame coordinates. All six slow real-cook replay tests passed with
 the complete trajectory, learning, and outputs-off assertions retained.
+The cumulative three-cook activation test now observes fit delivery from the
+runner lifecycle dispatcher instead of racing it as a second result consumer.
+Its exact corpus, fit replay, and two-round durable activation assertions
+passed five consecutive runs.

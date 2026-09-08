@@ -10,8 +10,8 @@ from collections.abc import Mapping
 from dataclasses import replace
 from math import ceil
 from pathlib import Path
-from threading import Condition, Event
-from time import monotonic
+from queue import Queue
+from threading import Condition
 from typing import Protocol, cast
 
 import pytest
@@ -1122,23 +1122,6 @@ def _evaluation_frame(
     )
 
 
-def _poll_real_fit(runtime: Controller) -> GreyLearningDelivery:
-    deadline = monotonic() + 90.0
-    waiter = Event()
-    while monotonic() < deadline:
-        delivery, payload = cast(
-            tuple[GreyLearningDelivery | None, ModelEvaluationPayload | None],
-            runtime.poll_learning_off_path(
-                live_origin=CandidateOrigin.PASSIVE_ONLINE,
-            ),
-        )
-        assert payload is None
-        if delivery is not None:
-            return delivery
-        waiter.wait(0.01)
-    raise AssertionError("real cumulative fit did not complete")
-
-
 def _expected_common_masks(
     job: GreyFitJob,
     *,
@@ -1244,6 +1227,7 @@ def _complete_winning_evaluation_round(
 
 def test_three_short_cooks_prepare_shadow_then_two_complete_rounds_durably_activate(
     ds,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repository = LearningTrajectoryRepository()
     segments = tuple(
@@ -1289,6 +1273,17 @@ def test_three_short_cooks_prepare_shadow_then_two_complete_rounds_durably_activ
         fit_partition_digest=lambda: partition_digest,
         grey_learning_process=owner,
     )
+    fit_deliveries: Queue[GreyLearningDelivery] = Queue()
+    poll_learning = runtime.poll_learning_off_path
+
+    def observe_fit_delivery(*, live_origin: CandidateOrigin | None = None):
+        result = poll_learning(live_origin=live_origin)
+        delivery, _payload = result
+        if isinstance(delivery, GreyLearningDelivery):
+            fit_deliveries.put(delivery)
+        return result
+
+    monkeypatch.setattr(runtime, "poll_learning_off_path", observe_fit_delivery)
     gate = _FrameBoundaryGate()
     runner = ThreadedControllerRunner(
         runtime,
@@ -1332,7 +1327,8 @@ def test_three_short_cooks_prepare_shadow_then_two_complete_rounds_durably_activ
             0,
         )
         assert runtime.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
-        delivery = _poll_real_fit(runtime)
+        # The runner lifecycle dispatcher is the sole consumer of fit results.
+        delivery = fit_deliveries.get(timeout=90.0)
         assert delivery.message is not None
         fit = delivery.message.outcome
         assert isinstance(fit, GreyFitSuccess)
