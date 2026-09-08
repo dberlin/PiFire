@@ -1188,6 +1188,9 @@ def _assert_real_cook_hold_smoke(
     )
     ctx, _, _ = make_ctx(settings, control, base_pellet_db(), probes, grill=grill, store=store)
     ctx.clock = clock
+    # This direct mode harness bypasses the outer tick: its first observation
+    # establishes continuity on the replacement replay clock.
+    ctx.last_clock_stamp = None
     ctx.trajectory_repository = repository
     ctx.model_persistence = persistence
     ctx.learning_trajectory = trajectory
@@ -1478,7 +1481,7 @@ def _assert_real_cook_hold_smoke(
         (index, cast(FramedPulseFramePayload, record.payload))
         for index, record in enumerate(records)
         if record.event_kind is TraceEventKind.ACTUATION_FRAME
-        and cast(FramedPulseFramePayload, record.payload).frame_end_ms == stream.temperatures[-1][0]
+        and cast(FramedPulseFramePayload, record.payload).wall_end_ms == stream.temperatures[-1][0]
     ]
     assert len(terminal_frames) == 1
     assert terminal_frames[0][1].reset_reason in {"mode_change", "safety"}

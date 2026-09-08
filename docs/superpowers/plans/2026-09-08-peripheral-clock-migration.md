@@ -486,3 +486,7 @@ current constructor dependencies. Historical trace comparison preserves the
 literal source and expects unknown wall endpoints; fixed-frame replay joins
 the real fit lifecycle before submitting the next observation. The focused
 40-test selection passed five consecutive runs without relaxed assertions.
+The slow real-cook harness also establishes its initial admission stamp on its
+replacement clock and joins terminal frames by wall provenance rather than
+monotonic frame coordinates. All six slow real-cook replay tests passed with
+the complete trajectory, learning, and outputs-off assertions retained.
