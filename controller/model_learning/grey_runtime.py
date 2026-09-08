@@ -1054,6 +1054,13 @@ class GreyLearningRuntime:
         try:
             partition = partition_resolver()
             if partition is None:
+                if origin is CandidateOrigin.PASSIVE_ONLINE:
+                    # Observation outcomes reach durable trajectory storage
+                    # after this independent lifecycle worker can poll them.
+                    self._terminalize_not_ready_corpus_fit(
+                        intent, origin, "no compatible persistent corpus partition is available"
+                    )
+                    return None
                 self._fail_corpus_learning(
                     "corpus-snapshot-failed",
                     "no compatible persistent corpus partition is available",

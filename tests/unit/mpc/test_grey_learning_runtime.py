@@ -934,6 +934,41 @@ def test_passive_empty_corpus_terminalizes_ticket_without_disabling_learning(
     harness.activation.close()
 
 
+def test_passive_poll_before_partition_persistence_preserves_later_observations_and_fit(tmp_path) -> None:
+    repository, partition = _reopened_ready_passive_corpus(tmp_path)
+    probe = _CorpusRepositoryProbe(repository)
+    partition_ready = False
+    _CorpusWorker.instances.clear()
+    harness = _harness(
+        trajectory_repository=probe,
+        fit_partition_digest=lambda: partition if partition_ready else None,
+        fit_worker_factory=_CorpusWorker,
+        learning_enabled=True,
+    )
+    try:
+        ticket = harness.runtime._request_corpus_fit_ticket(CandidateOrigin.PASSIVE_ONLINE)
+        assert ticket is not None
+        harness.runtime.poll_learning_off_path()
+
+        assert harness.runtime.learning_status()["failure"] is None
+        assert not _CorpusWorker.instances or _CorpusWorker.instances[-1].job is None
+        assert all(event[0] != "record" for event in probe.events)
+        assert harness.runtime._consume_terminal_fit_ticket(ticket, CandidateOrigin.PASSIVE_ONLINE)
+        observation = harness.runtime.observe_frame(_frame(1))
+        assert observation is not None and observation["eligible"]
+
+        partition_ready = True
+        assert harness.runtime.request_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+        harness.runtime.poll_learning_off_path()
+        job = _CorpusWorker.instances[-1].job
+        assert isinstance(job, GreyFitJob)
+        replayed = repository.replay_fit(job.request.request_id)
+        assert replayed.identity == repository.snapshot_fit_corpus(partition).identity
+    finally:
+        harness.runtime.close()
+        harness.activation.close()
+
+
 def test_unresolved_fit_partition_terminalizes_the_queued_request() -> None:
     repository = _CorpusRepositoryProbe(SimpleNamespace())
     harness = _harness(

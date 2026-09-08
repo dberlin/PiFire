@@ -494,3 +494,13 @@ The cumulative three-cook activation test now observes fit delivery from the
 runner lifecycle dispatcher instead of racing it as a second result consumer.
 Its exact corpus, fit replay, and two-round durable activation assertions
 passed five consecutive runs.
+
+The release gate subsequently reproduced a production ordering race: passive
+fit polling could precede reconciliation and durable storage of the first Hold
+frame. A missing partition incorrectly latched a permanent learning failure,
+discarding later observation outcomes. Passive polling now uses the existing
+not-ready terminalization without admitting a fit or evidence; operator
+calibration and storage failures remain fail-closed. The deterministic
+regression failed before this fix and passes afterward, including later
+observation acceptance and exact durable corpus replay. All 76 grey-runtime
+tests and five consecutive full real-cook MPC replays passed.
