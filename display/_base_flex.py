@@ -70,7 +70,9 @@ from display.flexobject import (
     TimerStatus,  # noqa: F401  # dynamic-dispatch
     resolve_accent,
 )
-from display.staleness import resolve_reading
+from common.clock_domain import local_clock_stamp
+from common.persistence.runtime import read_control_heartbeat
+from display.staleness import last_reading_age_s, resolve_reading
 
 """
 ==================================================================================
@@ -772,9 +774,11 @@ class DisplayBase:
         age keeps climbing.
         """
         primary_key = next(iter(self.in_data["P"].keys()))  # Get the key for the primary gauge
-        now_ms = int(time.time() * 1000)
+        current = local_clock_stamp()
+        heartbeat = read_control_heartbeat()
+        entry = self.in_data.get("LAST", {}).get(primary_key)
         temp, has_temp, stale = resolve_reading(
-            self.in_data["P"][primary_key], self.in_data.get("LAST", {}).get(primary_key), now_ms
+            self.in_data["P"][primary_key], entry, age_s=last_reading_age_s(entry, current=current, heartbeat=heartbeat)
         )
         object_data = self.display_object_list[self.dash_map["primary_gauge"]].get_object_data()
         temps = [temp, self.in_data["NT"][primary_key], self.in_data["PSP"]]
@@ -824,13 +828,17 @@ class DisplayBase:
         the readings alone would freeze the staleness line at the age it had
         when the probe went quiet.
         """
-        now_ms = int(time.time() * 1000)
+        current = local_clock_stamp()
+        heartbeat = read_control_heartbeat()
         last_readings = self.in_data.get("LAST", {})
         for card in list(self.probe_card_label_map.keys()):
             if card not in self.dash_map:
                 continue
             key = self.probe_card_label_map[card]
-            temp, has_temp, stale = resolve_reading(self.in_data["F"][key], last_readings.get(key), now_ms)
+            entry = last_readings.get(key)
+            temp, has_temp, stale = resolve_reading(
+                self.in_data["F"][key], entry, age_s=last_reading_age_s(entry, current=current, heartbeat=heartbeat)
+            )
             target = self.in_data["NT"][key] if self.in_data["NT"][key] is not None else 0
             object_data = self.display_object_list[self.dash_map[card]].get_object_data()
             object_data.setdefault("data", {})

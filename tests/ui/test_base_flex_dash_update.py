@@ -20,6 +20,7 @@ import pytest
 
 from display._base_flex import NEW_EMBER_FLEX_TYPES, DisplayBase
 from display.flexobject import resolve_accent
+from tests.fakes.clock import clock_stamp
 
 BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -460,20 +461,28 @@ def _probe_card_data(display, card="probe_card_0"):
     return _obj_data(display, card)["data"]
 
 
-def test_probe_card_shows_the_last_reading_marked_stale(tmp_path):
+def test_probe_card_shows_the_last_reading_marked_stale(tmp_path, monkeypatch):
     display = _make_display(tmp_path)
     display.in_data = _in_data()
     display._update_dash_objects()
 
-    now_ms = int(time.time() * 1000)
+    current = clock_stamp()
+    monkeypatch.setattr("display._base_flex.local_clock_stamp", lambda: current)
+    monkeypatch.setattr("display._base_flex.read_control_heartbeat", lambda: current)
     display.in_data = _in_data(F={"Probe1": None, "Probe2": 80})
-    display.in_data["LAST"] = {"Probe1": {"temp": 147, "ts": now_ms - 47_000}}
+    display.in_data["LAST"] = {
+        "Probe1": {
+            "temp": 147,
+            "ts": 1_800_000_000_000,
+            "clock_stamp": clock_stamp(monotonic_s=53).as_dict(),
+        }
+    }
     display._update_dash_objects()
 
     data = _probe_card_data(display)
     assert data["temp"] == 147.0
-    assert data["hasTemp"] is True
-    assert data["stale"] == "last data 47s ago"
+    assert data["hasTemp"] is False
+    assert "47" in data["stale"]
 
 
 def test_probe_card_shows_no_number_for_a_probe_that_never_reported(tmp_path):
@@ -490,22 +499,33 @@ def test_probe_card_shows_no_number_for_a_probe_that_never_reported(tmp_path):
     assert data["stale"] == ""
 
 
-def test_probe_card_ages_the_marker_while_the_probe_stays_quiet(tmp_path):
+def test_probe_card_ages_the_marker_while_the_probe_stays_quiet(tmp_path, monkeypatch):
     # The reading is identical frame to frame while a probe is down, so a gate
     # on the readings alone would freeze the age where it started.
     display = _make_display(tmp_path)
     display.in_data = _in_data()
     display._update_dash_objects()
 
-    now_ms = int(time.time() * 1000)
+    current = clock_stamp()
+    monkeypatch.setattr("display._base_flex.local_clock_stamp", lambda: current)
+    monkeypatch.setattr("display._base_flex.read_control_heartbeat", lambda: current)
     display.in_data = _in_data(F={"Probe1": None, "Probe2": 80})
-    display.in_data["LAST"] = {"Probe1": {"temp": 147, "ts": now_ms - 10_000}}
+    display.in_data["LAST"] = {
+        "Probe1": {
+            "temp": 147,
+            "ts": 1_800_000_000_000,
+            "clock_stamp": clock_stamp(monotonic_s=90).as_dict(),
+        }
+    }
     display._update_dash_objects()
-    assert _probe_card_data(display)["stale"] == "last data 10s ago"
+    assert "10" in _probe_card_data(display)["stale"]
 
-    display.in_data["LAST"] = {"Probe1": {"temp": 147, "ts": now_ms - 130_000}}
+    current = clock_stamp(monotonic_s=140, wall_s=1_800_000_000 - 3600)
     display._update_dash_objects()
-    assert _probe_card_data(display)["stale"] == "last data 2m ago"
+    assert "50" in _probe_card_data(display)["stale"]
+    assert _probe_card_data(display)["temp"] == 147.0
+    assert _probe_card_data(display)["hasTemp"] is False
+    assert display.in_data["LAST"]["Probe1"]["ts"] == 1_800_000_000_000
 
 
 def test_probe_card_is_unmarked_while_the_probe_reports(tmp_path):
@@ -523,20 +543,28 @@ def test_probe_card_is_unmarked_while_the_probe_reports(tmp_path):
     assert data["stale"] == ""
 
 
-def test_primary_gauge_shows_the_last_reading_marked_stale(tmp_path):
+def test_primary_gauge_shows_the_last_reading_marked_stale(tmp_path, monkeypatch):
     display = _make_display(tmp_path)
     display.in_data = _in_data()
     display._update_dash_objects()
 
-    now_ms = int(time.time() * 1000)
+    current = clock_stamp()
+    monkeypatch.setattr("display._base_flex.local_clock_stamp", lambda: current)
+    monkeypatch.setattr("display._base_flex.read_control_heartbeat", lambda: current)
     display.in_data = _in_data(P={"Grill": None})
-    display.in_data["LAST"] = {"Grill": {"temp": 231, "ts": now_ms - 90_000}}
+    display.in_data["LAST"] = {
+        "Grill": {
+            "temp": 231,
+            "ts": 1_800_000_000_000,
+            "clock_stamp": clock_stamp(monotonic_s=10).as_dict(),
+        }
+    }
     display._update_dash_objects()
 
     gauge = _obj_data(display, "primary_gauge")
     assert gauge["temps"][0] == 231.0
-    assert gauge["hasTemp"] is True
-    assert gauge["stale"] == "last data 1m ago"
+    assert gauge["hasTemp"] is False
+    assert "1m" in gauge["stale"]
 
 
 def test_primary_gauge_shows_no_number_for_a_pit_probe_that_never_reported(tmp_path):

@@ -103,7 +103,7 @@ Rectangle {
 			spacing: 2
 			Text {
 				objectName: "foodTemperature-" + card.name
-				text: card.hasTemp ? Math.round(card.temp) : "—"
+				text: card.hasTemp || card.stale.length > 0 ? Math.round(card.temp) : "—"
 				font.family: Theme.condensed
 				font.pixelSize: card.compact ? 52 : 66
 				font.bold: true

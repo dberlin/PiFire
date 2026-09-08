@@ -1,6 +1,7 @@
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
 import { FIXTURE_DASH } from "@pifire/core/fixture";
-import { render, waitFor } from "@testing-library/react-native";
+import { monotonicNowMs } from "@pifire/core/liveConnection";
+import { act, render, waitFor } from "@testing-library/react-native";
 
 import type { LiveResult } from "../src/useLive";
 import { wireHealth } from "./healthFixture";
@@ -48,7 +49,7 @@ const command = {} as LiveResult["command"];
 function liveResult(
   thermocoupleHealth: NonNullable<DashSocketPayload["thermocoupleHealth"]>,
   phase: LiveResult["phase"] = "live",
-  lastPayloadAt: number | null = Date.now(),
+  lastPayloadMonotonicMs: number | null = monotonicNowMs(),
 ): LiveResult {
   return {
     live: { ...FIXTURE_DASH, thermocoupleHealth },
@@ -56,7 +57,7 @@ function liveResult(
     controlAlive: true,
     pellets: null,
     command,
-    lastPayloadAt,
+    lastPayloadMonotonicMs,
     host: "http://pifire.local:5000",
   };
 }
@@ -95,7 +96,7 @@ it("retains a current confirmed banner after disconnect, qualified as Last repor
 });
 
 it("ages a current confirmed banner to Last reported after a silent live socket stall", async () => {
-  mockLiveState.current = liveResult([CONFIRMED_PRIMARY_CURRENT], "live", Date.now() - 31_000);
+  mockLiveState.current = liveResult([CONFIRMED_PRIMARY_CURRENT], "live", monotonicNowMs() - 31_000);
   const screen = await render(<RootLayout />);
 
   await waitFor(() => expect(screen.getByText("Stale · 31s ago")).toBeTruthy());
@@ -127,4 +128,44 @@ it("requests no permission and schedules no confirmed alert when local alerts ar
 
   expect(mockRequestPermissionsAsync).not.toHaveBeenCalled();
   expect(mockScheduleNotificationAsync).not.toHaveBeenCalled();
+});
+
+it("does not alert for fixture data or the first real payload", async () => {
+  mockLiveState.current = liveResult([], "live", null);
+  const screen = await render(<RootLayout />);
+  await waitFor(() => expect(screen.getByText("No data yet")).toBeTruthy());
+  expect(mockScheduleNotificationAsync).not.toHaveBeenCalled();
+  mockLiveState.current = liveResult([CONFIRMED_PRIMARY_CURRENT]);
+  await screen.rerender(<RootLayout />);
+  await waitFor(() => expect(screen.getByText("FAULT")).toBeTruthy());
+  expect(mockScheduleNotificationAsync).not.toHaveBeenCalled();
+});
+
+it.each([-3_600_000, 3_600_000])("ages the header and health across a wall step of %s ms", async (step) => {
+  jest.useFakeTimers();
+  try {
+    const wall = Date.now();
+    mockLiveState.current = liveResult([CONFIRMED_PRIMARY_CURRENT]);
+    const screen = await render(<RootLayout />);
+    await waitFor(() => expect(screen.getByText("Live")).toBeTruthy());
+    jest.setSystemTime(wall + step);
+    await act(async () => jest.advanceTimersByTime(31_000));
+    expect(screen.getByText("Stale · 31s ago")).toBeTruthy();
+    expect(screen.getByText("Last reported")).toBeTruthy();
+    expect(mockScheduleNotificationAsync).not.toHaveBeenCalled();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+it("shows unknown producer age while keeping its retained fault visible", async () => {
+  mockLiveState.current = liveResult([wireHealth({
+    report: { state: "confirmed", faults: ["open"], temperatureValid: false },
+    outcome: "unavailable",
+    freshness: { current: false, lastReportedAgeS: null, reason: "unknown-clock" },
+  })]);
+  const screen = await render(<RootLayout />);
+  await waitFor(() => expect(screen.getByText("Age unknown")).toBeTruthy());
+  expect(screen.getByText("Last reported")).toBeTruthy();
+  expect(screen.getByRole("alert").props.accessibilityLabel).toContain("Age unknown");
 });

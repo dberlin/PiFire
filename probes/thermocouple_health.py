@@ -1,7 +1,12 @@
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
+from math import isfinite
 from types import MappingProxyType
+
+from common.clock_domain import ClockStamp
+
+THERMOCOUPLE_HEALTH_REPORT_SCHEMA = 2
 
 
 def _freeze_detail(value: object) -> object:
@@ -47,10 +52,15 @@ class ThermocoupleHealthReport:
     faults: tuple[ThermocoupleFault, ...] = ()
     evidence: tuple[ThermocoupleEvidence, ...] = ()
     temperature_valid: bool = True
-    observed_at: float = 0.0
+    observed_monotonic_s: float = 0.0
     detail: Mapping[str, object] = field(default_factory=dict)
+    clock_stamp: ClockStamp | None = None
 
     def __post_init__(self) -> None:
+        if isinstance(self.observed_monotonic_s, bool) or not isfinite(self.observed_monotonic_s):
+            raise ValueError("Thermocouple observation coordinate must be finite")
+        if self.clock_stamp is not None and self.clock_stamp.observed_monotonic_s != self.observed_monotonic_s:
+            raise ValueError("Thermocouple report coordinate disagrees with its clock stamp")
         owned_detail = MappingProxyType({key: _freeze_detail(value) for key, value in self.detail.items()})
         object.__setattr__(self, "detail", owned_detail)
         confirmed_valid_inferred_primary_observe = (
@@ -79,7 +89,7 @@ class ThermocoupleHealthReport:
 
     @classmethod
     def unmonitored(cls, now: float) -> ThermocoupleHealthReport:
-        return cls(state=ThermocoupleHealthState.UNMONITORED, observed_at=now)
+        return cls(state=ThermocoupleHealthState.UNMONITORED, observed_monotonic_s=now)
 
     @classmethod
     def healthy(
@@ -90,7 +100,7 @@ class ThermocoupleHealthReport:
         return cls(
             state=ThermocoupleHealthState.HEALTHY,
             evidence=evidence,
-            observed_at=now,
+            observed_monotonic_s=now,
         )
 
     @classmethod
@@ -105,17 +115,19 @@ class ThermocoupleHealthReport:
             faults=faults,
             evidence=(ThermocoupleEvidence.HARDWARE,),
             temperature_valid=False,
-            observed_at=now,
+            observed_monotonic_s=now,
             detail={"status": status},
         )
 
     def as_dict(self) -> dict[str, object]:
         return {
+            "report_schema_version": THERMOCOUPLE_HEALTH_REPORT_SCHEMA,
+            "clock_stamp": self.clock_stamp.as_dict() if self.clock_stamp is not None else None,
             "state": self.state.value,
             "faults": [item.value for item in self.faults],
             "evidence": [item.value for item in self.evidence],
             "temperature_valid": self.temperature_valid,
-            "observed_at": self.observed_at,
+            "observed_monotonic_s": self.observed_monotonic_s,
             "detail": {key: _thaw_detail(value) for key, value in self.detail.items()},
         }
 
@@ -156,7 +168,7 @@ class HardwareFaultLatch:
             return self._report
 
         if primary:
-            self._report = replace(self._report, observed_at=now)
+            self._report = replace(self._report, observed_monotonic_s=now)
             return self._report
 
         if self._clean_since is None:
@@ -165,5 +177,5 @@ class HardwareFaultLatch:
             self._report = ThermocoupleHealthReport.healthy(now)
             self._clean_since = None
         else:
-            self._report = replace(self._report, observed_at=now)
+            self._report = replace(self._report, observed_monotonic_s=now)
         return self._report

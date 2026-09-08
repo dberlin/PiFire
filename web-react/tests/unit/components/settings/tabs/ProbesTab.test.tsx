@@ -158,7 +158,7 @@ function health(
       policy: "observe",
     },
     outcome,
-    freshness: { current, lastReportedAgeS: current ? 0 : 75 },
+    freshness: { current, lastReportedAgeS: current ? 0 : 75, reason: current ? "current" : "stale" },
   };
 }
 
@@ -360,6 +360,18 @@ describe("ProbesTab", () => {
     const region = await screen.findByRole("region", { name: "Thermocouple health" });
     expect(region).toHaveTextContent("Last reported: PROBE UNAVAILABLE");
     expect(screen.getByText("Report age at last update").closest("div")).toHaveTextContent("0s");
+  });
+
+  it("retains an unknown-clock fault without displaying a zero-second age", async () => {
+    const report = health("Primary", "Grill", "confirmed", "unavailable", false);
+    report.freshness = { current: false, lastReportedAgeS: null, reason: "unknown-clock" };
+    renderTab(<ProbesTab />, { ...ctx(), thermocoupleHealth: [report] }, CATALOG);
+
+    const region = await screen.findByRole("region", { name: "Thermocouple health" });
+    expect(region).toHaveTextContent("Last reported");
+    expect(region).toHaveTextContent("open, short");
+    expect(screen.getByText("Report age").closest("div")).toHaveTextContent("Age unknown");
+    expect(screen.queryByText("0s")).toBeNull();
   });
 
   // The health card is folded away when nothing has been reported, because the

@@ -184,7 +184,7 @@ Item {
 			spacing: 4
 			Text {
 				objectName: "primaryTemperature"
-				text: g.hasValue ? Math.round(g.value) : "—"
+				text: g.hasValue || g.stale.length > 0 ? Math.round(g.value) : "—"
 				font.family: Theme.condensed
 				font.pixelSize: g.compact ? 66 : 84
 				font.bold: true

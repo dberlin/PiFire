@@ -316,7 +316,11 @@ export function ProbesTab() {
                   </div>
                   <div>
                     <dt>{phase === "unreachable" ? "Report age at last update" : "Report age"}</dt>
-                    <dd>{Math.round(health.lastReportedAgeS)}s</dd>
+                    <dd>
+                      {health.lastReportedAgeS === null
+                        ? "Age unknown"
+                        : `${Math.round(health.lastReportedAgeS)}s`}
+                    </dd>
                   </div>
                   {Object.entries(item.report.detail).map(([key, value]) => (
                     <div key={key}>

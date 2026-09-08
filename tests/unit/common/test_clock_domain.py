@@ -1,6 +1,13 @@
 import pytest
 
-from common.clock_domain import ClockStamp, RuntimeClockDomain, continuity_lost, stamp_age_s
+from common.clock_domain import (
+    CLOCK_STAMP_SCHEMA,
+    ClockStamp,
+    RuntimeClockDomain,
+    continuity_lost,
+    qualified_stamp_age_s,
+    stamp_age_s,
+)
 from controller.runtime.clock import ManualClock
 
 _BOOT = "9c898927-5e50-4c98-9e50-ae092e623629"
@@ -9,7 +16,7 @@ _RUNTIME = "01b4a094-8a2c-4780-915d-081f5a850a97"
 
 def _stamp(*, monotonic=100.0, wall=1_800_000_000.0, offset=3.0, boot=_BOOT, runtime=_RUNTIME):
     return ClockStamp(
-        schema_version=1,
+        schema_version=CLOCK_STAMP_SCHEMA,
         boot_id=boot,
         runtime_id=runtime,
         observed_monotonic_s=monotonic,
@@ -94,3 +101,40 @@ def test_malformed_clock_stamp_is_rejected(field, value):
     payload[field] = value
     with pytest.raises((TypeError, ValueError)):
         ClockStamp.from_dict(payload)
+
+
+def test_fresh_heartbeat_cannot_rejuvenate_an_old_observation():
+    observation = _stamp()
+    current = _stamp(monotonic=116.0, wall=1_799_996_400.0)
+    assert qualified_stamp_age_s(observation, heartbeat=current, current=current, heartbeat_stale_after_s=15.0) == 16.0
+    assert (
+        qualified_stamp_age_s(observation, heartbeat=observation, current=current, heartbeat_stale_after_s=15.0) is None
+    )
+    assert (
+        qualified_stamp_age_s(
+            observation,
+            heartbeat=_stamp(runtime="43f07126-f3bd-4a61-976a-4c8c6b39e395", monotonic=116.0),
+            current=current,
+            heartbeat_stale_after_s=15.0,
+        )
+        is None
+    )
+
+
+def test_acquisition_pair_does_not_turn_processing_latency_into_suspend():
+    clock = ManualClock(wall_start=1_800_000_000.0, monotonic_start=100.0)
+    domain = RuntimeClockDomain(
+        monotonic=clock.monotonic,
+        wall_time=clock.wall_time,
+        boot_id=_BOOT,
+        boottime=lambda: clock.monotonic() + 3.0,
+    )
+    clock.advance(10.0)
+    observed = domain.capture(monotonic_s=100.0, wall_s=1_800_000_000.0)
+    assert observed.suspend_offset_s == 3.0
+    assert (
+        stamp_age_s(observed, monotonic_s=110.0, boot_id=_BOOT, runtime_id=domain.runtime_id, suspend_offset_s=3.0)
+        == 10.0
+    )
+    with pytest.raises(ValueError):
+        domain.capture(monotonic_s=100.0)

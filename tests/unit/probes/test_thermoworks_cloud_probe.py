@@ -3,7 +3,7 @@ import importlib
 import sys
 import time
 import types
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -115,21 +115,187 @@ def test_channel_to_celsius_converts_fahrenheit(monkeypatch):
     assert probe._channel_to_celsius(FakeReading(value=None, units="F")) is None
 
 
-def test_get_channel_celsius_returns_fresh_value_and_none_when_stale(monkeypatch):
+@pytest.fixture
+def cloud_poll(monkeypatch):
     probe = _load_probe(monkeypatch)
 
+    class Clock:
+        monotonic_s = 100.0
+        wall = datetime(2026, 9, 8, tzinfo=UTC)
+
+        def monotonic(self) -> float:
+            return self.monotonic_s
+
+    clock = Clock()
+
+    class WallClock:
+        @staticmethod
+        def now(tz):
+            return clock.wall
+
+    class FakeClient:
+        response = types.SimpleNamespace(value=100.0, units="C")
+        before_response = None
+
+        async def get_device_channel(self, serial, channel):
+            if self.before_response is not None:
+                self.before_response()
+            if isinstance(self.response, Exception):
+                raise self.response
+            return self.response
+
+    client = FakeClient()
+
+    class FakeAuthFactory:
+        def __init__(self, session):
+            pass
+
+        async def build_auth(self, email, password):
+            return object()
+
+    async def finish_poll(delay):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(probe, "datetime", WallClock)
+    monkeypatch.setattr(probe, "AuthFactory", FakeAuthFactory)
+    monkeypatch.setattr(probe, "ThermoworksCloud", lambda auth: client)
+    monkeypatch.setattr(probe.asyncio, "sleep", finish_poll)
     device = probe.ThermoworksCloudDevice(
-        email="a@b.com", password="pw", device_serial="SN1", num_probes=2, poll_interval=10
+        email="a@b.com",
+        password="pw",
+        device_serial="SN1",
+        num_probes=1,
+        poll_interval=10,
+        monotonic=clock.monotonic,
     )
 
-    fresh_time = datetime.now(UTC)
-    stale_time = fresh_time - timedelta(seconds=1000)
-    device._cache[1] = (55.5, fresh_time)
-    device._cache[2] = (60.0, stale_time)
+    def poll():
+        async def run():
+            try:
+                await device._main()
+            except asyncio.CancelledError:
+                pass
 
-    assert device.get_channel_celsius(1) == pytest.approx(55.5)
-    assert device.get_channel_celsius(2) is None
-    assert device.get_channel_celsius(3) is None  # never populated
+        asyncio.run(run())
+
+    reader = probe.ReadProbes.__new__(probe.ReadProbes)
+    reader.device = device
+    reader.units = "C"
+    reader.num_probes = 1
+    reader.port_map = {"TWC0": "Grill"}
+    reader.primary_port = "TWC0"
+    reader.food_ports = []
+    reader.aux_ports = []
+    reader.output_data = {"primary": {"Grill": None}, "food": {}, "aux": {}, "tr": {}}
+    return types.SimpleNamespace(
+        probe=probe,
+        device=device,
+        clock=clock,
+        client=client,
+        poll=poll,
+        reader=reader,
+    )
+
+
+def test_cloud_cache_uses_receipt_monotonic_boundary(cloud_poll):
+    device, clock = cloud_poll.device, cloud_poll.clock
+    assert device.get_channel_celsius(1) is None
+    cloud_poll.poll()
+    assert device.get_channel_celsius(1) == 100.0
+    assert device.status["last_poll_time"] == "2026-09-08T00:00:00+00:00"
+    clock.monotonic_s = 130.0
+    assert device.get_channel_celsius(1) == 100.0
+    clock.monotonic_s = 130.001
+    assert device.get_channel_celsius(1) is None
+    clock.monotonic_s = 99.999
+    assert device.get_channel_celsius(1) is None
+
+
+def test_cloud_outage_does_not_revive_cache_on_wall_rollback(cloud_poll):
+    cloud_poll.poll()
+    cloud_poll.clock.monotonic_s = 120.0
+    cloud_poll.client.response = RuntimeError("network unavailable")
+    cloud_poll.poll()
+    assert cloud_poll.device.get_channel_celsius(1) == 100.0
+    cloud_poll.clock.monotonic_s = 130.001
+    cloud_poll.clock.wall -= timedelta(seconds=3600)
+    assert cloud_poll.device.get_channel_celsius(1) is None
+    assert cloud_poll.reader.read_all_ports({})["primary"]["Grill"] is None
+
+
+def test_cloud_wall_forward_step_does_not_expire_fresh_receipt(cloud_poll):
+    cloud_poll.poll()
+    cloud_poll.clock.wall += timedelta(seconds=3600)
+    cloud_poll.clock.monotonic_s = 130.0
+    assert cloud_poll.device.get_channel_celsius(1) == 100.0
+    assert cloud_poll.reader.read_all_ports({})["primary"]["Grill"] == 100.0
+    cloud_poll.clock.monotonic_s = 130.001
+    assert cloud_poll.device.get_channel_celsius(1) is None
+
+
+def test_missing_channel_does_not_renew_receipt(cloud_poll):
+    cloud_poll.poll()
+    cloud_poll.clock.monotonic_s = 120.0
+    cloud_poll.client.response = cloud_poll.probe.ResourceNotFoundError("missing")
+    cloud_poll.poll()
+    assert cloud_poll.device.get_channel_celsius(1) == 100.0
+    cloud_poll.clock.monotonic_s = 130.001
+    assert cloud_poll.device.get_channel_celsius(1) is None
+
+
+def test_successful_none_temperature_replaces_prior_value(cloud_poll):
+    cloud_poll.poll()
+    cloud_poll.client.response = types.SimpleNamespace(value=None, units="C")
+    cloud_poll.poll()
+    assert cloud_poll.device.get_channel_celsius(1) is None
+
+
+def test_stop_and_restart_require_new_cloud_receipt(cloud_poll, monkeypatch):
+    cloud_poll.poll()
+    cloud_poll.device.stop()
+    assert cloud_poll.device.get_channel_celsius(1) is None
+    monkeypatch.setattr(cloud_poll.device, "_run_loop", lambda stop_event: None)
+    cloud_poll.device.start()
+    assert cloud_poll.device.get_channel_celsius(1) is None
+    cloud_poll.poll()
+    assert cloud_poll.device.get_channel_celsius(1) == 100.0
+    cloud_poll.device.start()
+    assert cloud_poll.device.get_channel_celsius(1) is None
+    cloud_poll.device.stop()
+
+
+def test_clock_invalidation_discards_cached_and_inflight_receipts(cloud_poll):
+    cloud_poll.poll()
+    cloud_poll.reader.invalidate_clock_domain()
+    assert cloud_poll.reader.read_all_ports({})["primary"]["Grill"] is None
+    cloud_poll.client.before_response = cloud_poll.reader.invalidate_clock_domain
+    cloud_poll.poll()
+    assert cloud_poll.device.get_channel_celsius(1) is None
+    cloud_poll.client.before_response = None
+    cloud_poll.poll()
+    assert cloud_poll.device.get_channel_celsius(1) == 100.0
+
+
+@pytest.mark.parametrize("action", ["stop", "start"])
+def test_lifecycle_change_rejects_inflight_response(cloud_poll, monkeypatch, action):
+    cloud_poll.poll()
+    monkeypatch.setattr(cloud_poll.device, "_run_loop", lambda stop_event: None)
+    cloud_poll.client.before_response = getattr(cloud_poll.device, action)
+    cloud_poll.poll()
+    assert cloud_poll.device.get_channel_celsius(1) is None
+    cloud_poll.device.stop()
+
+
+def test_receipt_age_starts_when_response_arrives(cloud_poll):
+    def delay_response():
+        cloud_poll.clock.monotonic_s = 120.0
+
+    cloud_poll.client.before_response = delay_response
+    cloud_poll.poll()
+    cloud_poll.clock.monotonic_s = 150.0
+    assert cloud_poll.device.get_channel_celsius(1) == 100.0
+    cloud_poll.clock.monotonic_s = 150.001
+    assert cloud_poll.device.get_channel_celsius(1) is None
 
 
 def test_initial_status_is_disconnected(monkeypatch):

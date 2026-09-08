@@ -20,7 +20,7 @@ jest.mock("../app/_layout", () => ({
   useLiveContext: () => ({
     live: live.dash,
     phase: "live",
-    lastPayloadAt: Date.now(),
+    lastPayloadMonotonicMs: performance.now(),
     command: {},
     reconnect: jest.fn(),
   }),
@@ -138,7 +138,7 @@ describe("transport-retained probe health", () => {
 
   function qualifiedDash(
     phase: LiveResult["phase"],
-    lastPayloadAt: number,
+    lastPayloadMonotonicMs: number,
     healthItems: NonNullable<DashSocketPayload["thermocoupleHealth"]> = health,
   ) {
     return qualifyRetainedHealth(
@@ -148,7 +148,7 @@ describe("transport-retained probe health", () => {
         controlAlive: true,
         pellets: null,
         command: {} as LiveResult["command"],
-        lastPayloadAt,
+        lastPayloadMonotonicMs,
         host: "http://pifire.local:5000",
       },
       100_000,
@@ -160,8 +160,8 @@ describe("transport-retained probe health", () => {
     ["a silent live socket", "live" as const, 69_000],
   ])(
     "qualifies the gauge, food card, and Aux summary after %s",
-    async (_case, phase, lastPayloadAt) => {
-      live.dash = qualifiedDash(phase, lastPayloadAt);
+    async (_case, phase, lastPayloadMonotonicMs) => {
+      live.dash = qualifiedDash(phase, lastPayloadMonotonicMs);
 
       const screen = await render(<Dashboard />);
 

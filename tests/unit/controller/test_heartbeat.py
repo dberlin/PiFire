@@ -18,6 +18,7 @@ Two properties are load-bearing and pinned here:
 """
 
 import controller.runtime.heartbeat as heartbeat_mod
+from common.clock_domain import ClockStamp, RuntimeClockDomain
 from common.persistence.runtime import CONTROL_HEARTBEAT_KEY, CONTROL_HEARTBEAT_STALE_AFTER
 from controller.runtime.clock import ManualClock
 from controller.runtime.heartbeat import HEARTBEAT_WRITE_INTERVAL, stamp_control_heartbeat
@@ -28,6 +29,16 @@ class _Ctx:
     def __init__(self, clock, store):
         self.clock = clock
         self.store = store
+        self.domain = RuntimeClockDomain(
+            monotonic=clock.monotonic,
+            wall_time=clock.wall_time,
+            boot_id="9c898927-5e50-4c98-9e50-ae092e623629",
+            boottime=clock.monotonic,
+        )
+
+    @property
+    def last_clock_stamp(self) -> ClockStamp:
+        return self.domain.capture()
 
 
 def _ctx(start=1000.0):
@@ -36,13 +47,15 @@ def _ctx(start=1000.0):
 
 
 def _stamp(ctx):
-    return ctx.store._generic.get(CONTROL_HEARTBEAT_KEY)
+    raw = ctx.store._generic.get(CONTROL_HEARTBEAT_KEY)
+    return None if raw is None else ClockStamp.from_dict(raw)
 
 
 def test_first_stamp_writes_the_clock_reading():
     ctx = _ctx(1000.0)
     stamp_control_heartbeat(ctx)
-    assert _stamp(ctx) == 1000.0
+    assert _stamp(ctx).observed_monotonic_s == 0.0
+    assert _stamp(ctx).observed_wall_s == 1000.0
 
 
 def test_a_second_stamp_inside_the_interval_does_not_rewrite():
@@ -50,7 +63,7 @@ def test_a_second_stamp_inside_the_interval_does_not_rewrite():
     stamp_control_heartbeat(ctx)
     ctx.clock.advance(HEARTBEAT_WRITE_INTERVAL / 2)
     stamp_control_heartbeat(ctx)
-    assert _stamp(ctx) == 1000.0  # still the first reading
+    assert _stamp(ctx).observed_monotonic_s == 0.0
 
 
 def test_a_stamp_past_the_interval_refreshes():
@@ -58,7 +71,7 @@ def test_a_stamp_past_the_interval_refreshes():
     stamp_control_heartbeat(ctx)
     ctx.clock.advance(HEARTBEAT_WRITE_INTERVAL + 0.01)
     stamp_control_heartbeat(ctx)
-    assert _stamp(ctx) == 1000.0 + HEARTBEAT_WRITE_INTERVAL + 0.01
+    assert _stamp(ctx).observed_monotonic_s == HEARTBEAT_WRITE_INTERVAL + 0.01
 
 
 def test_the_hot_loops_cost_one_write_per_interval_not_one_per_tick():
@@ -103,7 +116,7 @@ def test_the_idle_tick_stamps(monkeypatch):
 
     c.tick()
 
-    assert store._generic[CONTROL_HEARTBEAT_KEY] == ctx.clock.wall_time()
+    assert ClockStamp.from_dict(store._generic[CONTROL_HEARTBEAT_KEY]) == ctx.last_clock_stamp
 
 
 def test_the_per_mode_work_cycle_stamps():
@@ -125,3 +138,18 @@ def test_the_per_mode_work_cycle_stamps():
     )
 
     assert CONTROL_HEARTBEAT_KEY in store._generic
+
+
+def test_backward_wall_step_does_not_suppress_generation_heartbeat():
+    ctx = _ctx(1_800_000_000.0)
+    stamp_control_heartbeat(ctx)
+    first = _stamp(ctx)
+    ctx.clock.jump_wall(-3600.0)
+    ctx.clock.advance(2.0)
+    stamp_control_heartbeat(ctx)
+    current = _stamp(ctx)
+    assert current.observed_monotonic_s - first.observed_monotonic_s == 2.0
+    assert current.observed_wall_s < first.observed_wall_s
+    ctx.domain.rotate_runtime()
+    stamp_control_heartbeat(ctx)
+    assert _stamp(ctx).runtime_id != current.runtime_id

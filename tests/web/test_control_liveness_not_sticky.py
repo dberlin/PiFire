@@ -31,7 +31,6 @@ These tests pin both consumers.
 """
 
 import os
-import time
 import types
 from unittest import mock
 
@@ -55,12 +54,13 @@ from common.persistence.runtime import (
     write_settings_store,
 )
 from tests.conftest import REPO_BASE
+from tests.fakes.clock import clock_stamp
 
 _DURABLE = "Grill Platform Error: Could not load the grill platform module."
 
 
 @pytest.fixture
-def consumers(ds):
+def consumers(ds, monkeypatch):
     """Seed a datastore the socket emitter can build a real payload against."""
     write_settings_store(default_settings())
     write_control_snapshot(default_control(), origin="test-liveness")
@@ -70,10 +70,12 @@ def consumers(ds):
 
     from blueprints.mobile import socket_io
 
+    monkeypatch.setattr(socket_io, "local_clock_stamp", clock_stamp)
+
     # The liveness verdict is process-local module state; a test that leaves it
     # False would poison every later test in the session.
     previous = socket_io._control_alive
-    socket_io._control_alive = True
+    socket_io._control_alive = False
     try:
         yield types.SimpleNamespace(sio=socket_io)
     finally:
@@ -83,8 +85,61 @@ def consumers(ds):
 def _check(consumers, alive):
     """Run one real liveness check against a fresh / stale control heartbeat."""
     age = 0 if alive else CONTROL_HEARTBEAT_STALE_AFTER + 5
-    write_generic_key(CONTROL_HEARTBEAT_KEY, time.time() - age)
+    write_generic_key(CONTROL_HEARTBEAT_KEY, clock_stamp(monotonic_s=100.0 - age).as_dict())
     consumers.sio._check_control_status()
+
+
+@pytest.mark.parametrize(
+    "heartbeat",
+    [
+        1_800_000_000.0,
+        {"observed_monotonic_s": 100.0},
+        clock_stamp(boot_id="5014e60d-4e18-41dd-9fc3-7c87c39a83f0").as_dict(),
+        clock_stamp(monotonic_s=101.0).as_dict(),
+    ],
+    ids=["legacy-scalar", "malformed", "previous-boot", "future"],
+)
+def test_unqualified_heartbeat_reports_down_without_erasing_durable_errors(consumers, heartbeat):
+    write_errors(ErrorKind.CONTROL, [_DURABLE])
+    write_generic_key(CONTROL_HEARTBEAT_KEY, heartbeat)
+
+    consumers.sio._check_control_status()
+
+    assert _socket_tick(consumers)["errors"] == [_DURABLE, CONTROL_DOWN_ERROR]
+    assert read_errors(ErrorKind.CONTROL) == [_DURABLE]
+
+
+@pytest.mark.parametrize("wall_jump", [-3600.0, 3600.0])
+def test_liveness_ignores_wall_steps(consumers, monkeypatch, wall_jump):
+    write_generic_key(CONTROL_HEARTBEAT_KEY, clock_stamp().as_dict())
+    monkeypatch.setattr(
+        consumers.sio,
+        "local_clock_stamp",
+        lambda: clock_stamp(monotonic_s=101.0, wall_s=1_800_000_001.0 + wall_jump),
+    )
+    consumers.sio._check_control_status()
+    assert CONTROL_DOWN_ERROR not in _socket_tick(consumers)["errors"]
+
+    monkeypatch.setattr(
+        consumers.sio,
+        "local_clock_stamp",
+        lambda: clock_stamp(monotonic_s=116.0, wall_s=1_800_000_016.0 + wall_jump),
+    )
+    consumers.sio._check_control_status()
+    assert CONTROL_DOWN_ERROR in _socket_tick(consumers)["errors"]
+
+
+def test_resume_invalidates_heartbeat_before_control_writes_again(consumers, monkeypatch):
+    write_generic_key(CONTROL_HEARTBEAT_KEY, clock_stamp().as_dict())
+    monkeypatch.setattr(
+        consumers.sio,
+        "local_clock_stamp",
+        lambda: clock_stamp(monotonic_s=101.0, suspend_offset_s=62.001),
+    )
+
+    consumers.sio._check_control_status()
+
+    assert CONTROL_DOWN_ERROR in _socket_tick(consumers)["errors"]
 
 
 def _socket_tick(consumers):

@@ -19,6 +19,8 @@ import logging
 import time
 from dataclasses import replace
 
+from common.clock_domain import ClockStamp, RuntimeClockDomain, continuity_lost
+
 from probes.thermocouple_health import (
     ThermocoupleHealthReport,
     ThermocoupleHealthState,
@@ -41,6 +43,8 @@ class ProbesMain:
         units,
         disable=False,
         inference_policy=ThermocoupleInferencePolicy.OBSERVE,
+        *,
+        clock_domain: RuntimeClockDomain | None = None,
     ):
         policy = ThermocoupleInferencePolicy(inference_policy)
         self.errors = []
@@ -51,6 +55,11 @@ class ProbesMain:
         self.probe_info = probe_map["probe_info"]
         self.device_info_list = []
         self.thermocouple_inference_policy = policy
+        self._clock_domain = clock_domain or RuntimeClockDomain.for_system(
+            monotonic=lambda: time.monotonic(),
+            wall_time=lambda: time.time(),
+        )
+        self.last_clock_stamp: ClockStamp | None = None
         self._thermocouple_inference_engines: dict[tuple[str, str], ThermocoupleInferenceEngine] = {}
         self._thermocouple_health: dict[str, ThermocoupleHealthReport] = {}
         self._thermocouple_health_by_device: dict[str, dict[str, ThermocoupleHealthReport]] = {}
@@ -102,6 +111,7 @@ class ProbesMain:
         self._thermocouple_health.clear()
         self._thermocouple_health_by_device.clear()
         self._thermocouple_health_transitions.clear()
+        self.last_clock_stamp = None
         self.probe_device_list = []
         for device in probe_devices:
             try:
@@ -136,7 +146,7 @@ class ProbesMain:
 
         return errors
 
-    def _reproject_cached_health_without_inference(self, observed_at: float) -> None:
+    def _reproject_cached_health_without_inference(self) -> None:
         probe_is_primary = {
             (str(probe["device"]), str(probe["label"])): probe["type"] == "Primary" for probe in self.probe_info
         }
@@ -154,12 +164,17 @@ class ProbesMain:
                     probe_is_primary.get((device_name, label), False),
                 )
             normalized = {}
+            previous_reports = self._thermocouple_health_by_device.get(device_name, {})
             for label, report in reports.items():
                 detail = dict(report.detail)
                 detail["policy"] = ThermocoupleInferencePolicy.OFF.value
+                previous = previous_reports.get(label)
                 normalized[label] = replace(
                     report,
-                    observed_at=observed_at,
+                    observed_monotonic_s=previous.observed_monotonic_s
+                    if previous is not None
+                    else report.observed_monotonic_s,
+                    clock_stamp=previous.clock_stamp if previous is not None else None,
                     detail=detail,
                 )
             health.update(normalized)
@@ -169,28 +184,51 @@ class ProbesMain:
         self._thermocouple_health_transitions.clear()
 
     def invalidate_control_history(self) -> None:
-        """Require fresh acquisition/inference after an unobserved control gap."""
-        self._thermocouple_inference_engines.clear()
-        self._thermocouple_health.clear()
-        self._thermocouple_health_by_device.clear()
+        """Discard timing authority, not confirmed fault acknowledgment state."""
+        for engine in self._thermocouple_inference_engines.values():
+            engine.invalidate_clock_domain()
+        for device in self.probe_device_list:
+            device.invalidate_clock_domain()
+        self.last_clock_stamp = None
+        self._thermocouple_health = {
+            label: replace(report, clock_stamp=None) for label, report in self._thermocouple_health.items()
+        }
+        self._thermocouple_health_by_device = {
+            device: {label: replace(report, clock_stamp=None) for label, report in reports.items()}
+            for device, reports in self._thermocouple_health_by_device.items()
+        }
         self._thermocouple_health_transitions.clear()
 
-    def set_thermocouple_inference_policy(self, policy, *, now=None) -> None:
+    def set_thermocouple_inference_policy(self, policy) -> None:
         next_policy = ThermocoupleInferencePolicy(policy)
         if next_policy is ThermocoupleInferencePolicy.OFF:
             self._thermocouple_inference_engines.clear()
-            observed_at = time.time() if now is None else now
-            self._reproject_cached_health_without_inference(observed_at)
+            self._reproject_cached_health_without_inference()
         self.thermocouple_inference_policy = next_policy
 
-    def read_probes(self, *, excitation=None, now=None):
-        """Read probes, fuse hardware and inferred health, then invalidate output."""
-        observed_at = time.monotonic() if now is None else now
+    def read_probes(
+        self,
+        *,
+        excitation=None,
+        monotonic_s: float | None = None,
+        wall_s: float | None = None,
+        clock_domain: RuntimeClockDomain | None = None,
+    ):
+        """Acquire using one identity-qualified monotonic/wall pair."""
+        domain = clock_domain or self._clock_domain
+        stamp = domain.capture(monotonic_s=monotonic_s, wall_s=wall_s)
+        previous_stamp = self.last_clock_stamp
+        discontinuous = previous_stamp is not None and continuity_lost(previous_stamp, stamp)
+        if discontinuous:
+            self.invalidate_control_history()
+        observed_monotonic_s = stamp.observed_monotonic_s
         base_excitation = excitation or ThermocoupleExcitationContext(
             active_cook=False,
             primary_setpoint_c=0.0,
             delivered_heat_on_s=0.0,
         )
+        if discontinuous:
+            base_excitation = replace(base_excitation, delivered_heat_on_s=0.0)
         output_data = {"primary": {}, "food": {}, "aux": {}, "tr": {}}
         probe_by_identity = {(str(probe["device"]), str(probe["port"])): probe for probe in self.probe_info}
         current_samples = {}
@@ -268,7 +306,7 @@ class ProbesMain:
                     sample,
                     replace(base_excitation, witnesses=witnesses),
                     probe["type"] == "Primary",
-                    observed_at,
+                    observed_monotonic_s,
                 )
                 fused = fuse_thermocouple_health(
                     hardware,
@@ -289,7 +327,8 @@ class ProbesMain:
                 detail["policy"] = policy.value
                 normalized = replace(
                     report,
-                    observed_at=observed_at,
+                    observed_monotonic_s=observed_monotonic_s,
+                    clock_stamp=stamp,
                     detail=detail,
                 )
                 normalized_reports[label] = normalized
@@ -311,11 +350,14 @@ class ProbesMain:
                 output_data[group][probe["label"]] = None
 
         for label, current in health.items():
-            previous = self._thermocouple_health.get(label, ThermocoupleHealthReport.unmonitored(current.observed_at))
+            previous = self._thermocouple_health.get(
+                label, ThermocoupleHealthReport.unmonitored(current.observed_monotonic_s)
+            )
             if (previous.state, previous.faults) != (current.state, current.faults):
                 self._thermocouple_health_transitions.append(ThermocoupleHealthTransition(label, previous, current))
         self._thermocouple_health = health
         self._thermocouple_health_by_device = fused_by_device
+        self.last_clock_stamp = stamp
         return output_data
 
     def update_probe_map(self, probe_map):

@@ -387,7 +387,6 @@ class Controller:
             self.settings = settings = store.read_settings()
             self.probe_complex.set_thermocouple_inference_policy(
                 settings["thermocouple_health"]["inference_policy"],
-                now=ctx.clock.monotonic(),
             )
 
         # Check if there are any notifications pending

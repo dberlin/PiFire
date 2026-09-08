@@ -1,6 +1,7 @@
 from probes.base import ProbeInterface
 from probes.main import ProbesMain
 from probes.thermocouple_health import (
+    THERMOCOUPLE_HEALTH_REPORT_SCHEMA,
     ThermocoupleFault,
     ThermocoupleHealthReport,
     ThermocoupleHealthState,
@@ -90,16 +91,16 @@ def test_observation_metadata_change_does_not_emit_transition():
     probes = _main_with_device_health(
         {"Grill": ThermocoupleHealthReport.confirmed_hardware((ThermocoupleFault.OPEN,), now=5.0, status=0x10)}
     )
-    probes.read_probes(now=5.0)
+    probes.read_probes(monotonic_s=5.0, wall_s=1_800_000_000.0 + 5.0)
     probes.consume_thermocouple_health_transitions()
     probes.probe_device_list[0].health = {
         "Grill": ThermocoupleHealthReport.confirmed_hardware((ThermocoupleFault.OPEN,), now=6.0, status=0x11)
     }
 
-    probes.read_probes(now=6.0)
+    probes.read_probes(monotonic_s=6.0, wall_s=1_800_000_000.0 + 6.0)
 
     assert probes.consume_thermocouple_health_transitions() == ()
-    assert probes.get_thermocouple_health()["Grill"].observed_at == 6.0
+    assert probes.get_thermocouple_health()["Grill"].observed_monotonic_s == 6.0
 
 
 def test_fault_kind_change_emits_transition():
@@ -149,11 +150,13 @@ def test_probe_device_info_serializes_health_when_reports_exist():
         "driver": "ready",
         "thermocouple_health": {
             "Grill": {
+                "report_schema_version": THERMOCOUPLE_HEALTH_REPORT_SCHEMA,
+                "clock_stamp": None,
                 "state": "confirmed",
                 "faults": ["open"],
                 "evidence": ["hardware"],
                 "temperature_valid": False,
-                "observed_at": 5.0,
+                "observed_monotonic_s": 5.0,
                 "detail": {"status": 0x10},
             }
         },

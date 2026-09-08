@@ -644,7 +644,7 @@ class ProbeCard(FlexObject):
             draw.polygon(triangle_points, fill=target_color)
 
         # Big temperature
-        temp_text = round(temp) if has_temp else "—"
+        temp_text = round(temp) if has_temp or stale else "—"
         temp_label = self._draw_text(temp_text, "./static/font/BarlowSemiCondensed-Bold.ttf", 90, light_color)
         card.paste(temp_label, (35, 75), temp_label)
 
@@ -808,7 +808,7 @@ class GaugeEmber(FlexObject):
         pieces.append(label_canvas)
 
         temp_canvas = self._draw_text(
-            round(current_temp) if has_temp else "—",
+            round(current_temp) if has_temp or stale else "—",
             "./static/font/BarlowSemiCondensed-Bold.ttf",
             round(size[0] * 0.22),
             light_color,

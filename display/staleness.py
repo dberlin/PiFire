@@ -13,8 +13,20 @@ between the panel and their phone reads one story about the same probe. Both
 sides are pinned against the same table of cases.
 """
 
+from collections.abc import Mapping
 
-def resolve_reading(value, last_entry, now_ms):
+from common.clock_domain import ClockStamp, parse_clock_stamp, qualified_stamp_age_s
+from common.persistence.runtime import CONTROL_HEARTBEAT_STALE_AFTER
+
+
+def last_reading_age_s(last_entry: object, *, current: ClockStamp | None, heartbeat: ClockStamp | None) -> float | None:
+    stamp = parse_clock_stamp(last_entry.get("clock_stamp")) if isinstance(last_entry, Mapping) else None
+    return qualified_stamp_age_s(
+        stamp, heartbeat=heartbeat, current=current, heartbeat_stale_after_s=CONTROL_HEARTBEAT_STALE_AFTER
+    )
+
+
+def resolve_reading(value, last_entry, *, age_s: float | None = None):
     """
     What a card should show for one probe, and whether that number is live.
 
@@ -28,14 +40,14 @@ def resolve_reading(value, last_entry, now_ms):
     :param value: the probe's current reading, or None if it had none to give
     :param last_entry: {"temp": x, "ts": epoch_ms} for its last real reading,
         or None if it has produced nothing at all
-    :param now_ms: wall clock, for the age
-    :return: (temp, has_temp, stale_text); temp is 0.0 when has_temp is False
+    :param age_s: identity-qualified acquisition age, or None when unknown
+    :return: (temp, has_temp, stale_text); has_temp is false for retained data
     """
     if value is not None:
         return float(value), True, ""
     if last_entry is None:
         return 0.0, False, ""
-    return float(last_entry["temp"]), True, stale_label((now_ms - last_entry["ts"]) / 1000)
+    return float(last_entry["temp"]), False, "Last known" if age_s is None else stale_label(age_s)
 
 
 def stale_label(seconds):

@@ -28,10 +28,11 @@ from PySide6.QtCore import (
     Slot,
 )
 
+from common.clock_domain import ClockStamp, continuity_lost, local_clock_stamp
 from common.modes import Mode
-from common.persistence.runtime import CONTROL_HEARTBEAT_STALE_AFTER
-from common.web_contracts.core import ThermocoupleHealthView, project_thermocouple_health_outcome
-from display.staleness import resolve_reading
+from common.persistence.runtime import CONTROL_HEARTBEAT_STALE_AFTER, read_control_heartbeat
+from common.web_contracts.core import ThermocoupleHealthView, project_thermocouple_health_views
+from display.staleness import last_reading_age_s, resolve_reading
 
 
 class FoodProbeModel(QAbstractListModel):
@@ -85,12 +86,12 @@ class FoodProbeModel(QAbstractListModel):
             self.StaleRole: row["stale"],
         }.get(role)
 
-    def update(self, in_data, now_ms=None, *, invalid_labels=None):
+    def update(self, in_data, *, current=None, heartbeat=None, invalid_labels=None):
         f = in_data.get("F", {})
         nt = in_data.get("NT", {})
         last = in_data.get("LAST", {})
-        if now_ms is None:
-            now_ms = int(time.time() * 1000)
+        current = local_clock_stamp() if current is None else current
+        heartbeat = read_control_heartbeat() if heartbeat is None else heartbeat
         invalid_labels = invalid_labels or set()
         changed = False
         for row in self._rows:
@@ -100,7 +101,10 @@ class FoodProbeModel(QAbstractListModel):
             if row["label"] in invalid_labels:
                 temp, has_temp, stale = 0.0, False, ""
             else:
-                temp, has_temp, stale = resolve_reading(f.get(row["label"]), last.get(row["label"]), now_ms)
+                entry = last.get(row["label"])
+                temp, has_temp, stale = resolve_reading(
+                    f.get(row["label"]), entry, age_s=last_reading_age_s(entry, current=current, heartbeat=heartbeat)
+                )
             target = nt.get(row["label"], 0)
             if (row["temp"], row["hasTemp"], row["stale"], row["target"]) != (temp, has_temp, stale, target):
                 row["temp"], row["hasTemp"], row["stale"], row["target"] = temp, has_temp, stale, target
@@ -123,107 +127,22 @@ def _finite_float(value):
     return number if math.isfinite(number) else None
 
 
-def project_thermocouple_health(settings, probe_device_info, *, now=None):
-    """Adapt producer reports to the validated shared health wire projection."""
-    if not isinstance(probe_device_info, list) or not isinstance(settings, Mapping):
-        return []
-    probe_settings = settings.get("probe_settings")
-    if not isinstance(probe_settings, Mapping):
-        return []
-    probe_map = probe_settings.get("probe_map")
-    if not isinstance(probe_map, Mapping):
-        return []
-    configured_probes = probe_map.get("probe_info")
-    if not isinstance(configured_probes, list):
-        return []
-
-    reports_by_probe = {}
-    for device_info in probe_device_info:
-        if not isinstance(device_info, Mapping):
-            continue
-        device = device_info.get("device")
-        status = device_info.get("status")
-        if not isinstance(device, str) or not isinstance(status, Mapping):
-            continue
-        reports = status.get("thermocouple_health")
-        if not isinstance(reports, Mapping):
-            continue
-        for label, report in reports.items():
-            if isinstance(label, str) and isinstance(report, Mapping):
-                reports_by_probe[(device, label)] = report
-
-    now = time.monotonic() if now is None else now
-    now = _finite_float(now)
-    if now is None:
-        return []
-
-    projected = []
-    for probe in configured_probes:
-        if not isinstance(probe, Mapping):
-            continue
-        device = probe.get("device")
-        port = probe.get("port")
-        label = probe.get("label")
-        display_name = probe.get("name")
-        role = probe.get("type")
-        if (
-            not isinstance(device, str)
-            or not isinstance(port, str)
-            or not isinstance(label, str)
-            or not isinstance(display_name, str)
-            or role not in {"Primary", "Food", "Aux"}
-        ):
-            continue
-
-        report = reports_by_probe.get((device, label))
-        if report is None:
-            continue
-        observed_at = _finite_float(report.get("observed_at"))
-        detail = report.get("detail")
-        evidence = report.get("evidence")
-        if observed_at is None or not isinstance(detail, Mapping) or not isinstance(evidence, list):
-            continue
-        policy = detail.get("policy")
-        if policy not in {"off", "observe", "enforce"}:
-            continue
-
-        age_s = max(0.0, now - observed_at)
-        has_hardware = "hardware" in evidence
-        has_software = any(item != "hardware" for item in evidence)
-        source = "mixed" if has_hardware and has_software else "hardware" if has_hardware else "software"
-
-        state = report.get("state")
-        temperature_valid = report.get("temperature_valid")
-        outcome = project_thermocouple_health_outcome(role, state, evidence, detail)
-
-        try:
-            view = ThermocoupleHealthView.model_validate(
-                {
-                    "device": device,
-                    "port": port,
-                    "label": label,
-                    "displayName": display_name,
-                    "role": role,
-                    "report": {
-                        "state": state,
-                        "faults": report.get("faults"),
-                        "evidence": evidence,
-                        "temperatureValid": temperature_valid,
-                        "detail": dict(detail),
-                    },
-                    "detector": {"source": source, "policy": policy},
-                    "outcome": outcome,
-                    "freshness": {
-                        "current": age_s <= CONTROL_HEARTBEAT_STALE_AFTER,
-                        "lastReportedAgeS": age_s,
-                    },
-                },
-                strict=True,
-            )
-        except ValidationError:
-            continue
-        projected.append(view.model_dump(mode="json", by_alias=True, exclude_none=False))
-    return projected
+def project_thermocouple_health(
+    settings,
+    probe_device_info,
+    *,
+    current: ClockStamp | None = None,
+    heartbeat: ClockStamp | None = None,
+):
+    """Use the same retained-health authority as remote projections."""
+    views = project_thermocouple_health_views(
+        settings,
+        probe_device_info,
+        heartbeat=read_control_heartbeat() if heartbeat is None else heartbeat,
+        current=local_clock_stamp() if current is None else current,
+        stale_after_s=CONTROL_HEARTBEAT_STALE_AFTER,
+    )
+    return [view.model_dump(mode="json", by_alias=True, exclude_none=False) for view in views]
 
 
 class ProbeHealthModel(QAbstractListModel):
@@ -362,7 +281,13 @@ class ProbeHealthModel(QAbstractListModel):
             "priority": priority,
             "freshnessCurrent": freshness["current"],
             "lastReportedAgeS": freshness["lastReportedAgeS"],
-            "freshnessQualifier": None if freshness["current"] else "Last reported",
+            "freshnessQualifier": (
+                None
+                if freshness["current"]
+                else "Last reported (Age unknown)"
+                if freshness["lastReportedAgeS"] is None
+                else "Last reported"
+            ),
         }
 
     @staticmethod
@@ -402,18 +327,21 @@ class ProbeHealthModel(QAbstractListModel):
 
     def advance_freshness(self, elapsed_s):
         elapsed_s = _finite_float(elapsed_s)
-        if elapsed_s is None or elapsed_s <= 0.0 or not self._rows:
+        if elapsed_s == 0.0 or not self._rows:
             return
         rows = []
         for row in self._rows:
-            age_s = row["lastReportedAgeS"] + elapsed_s
-            current = row["freshnessCurrent"] and age_s <= CONTROL_HEARTBEAT_STALE_AFTER
+            prior_age = row["lastReportedAgeS"]
+            age_s = None if prior_age is None or elapsed_s is None or elapsed_s < 0 else prior_age + elapsed_s
+            current = row["freshnessCurrent"] and age_s is not None and age_s <= CONTROL_HEARTBEAT_STALE_AFTER
             rows.append(
                 {
                     **row,
                     "freshnessCurrent": current,
                     "lastReportedAgeS": age_s,
-                    "freshnessQualifier": None if current else "Last reported",
+                    "freshnessQualifier": (
+                        None if current else "Last reported (Age unknown)" if age_s is None else "Last reported"
+                    ),
                 }
             )
         self.beginResetModel()
@@ -459,10 +387,13 @@ class PiFireBackend(QObject):
         self._command_fn = command_fn
         self._probe_info = probe_info or {}
         self._now = time.time
+        self._monotonic = time.monotonic
         self._accent_fn = accent_fn
         self._timeout_fn = timeout_fn
         self._health_fetch_fn = health_fetch_fn
         self._last_health_check = None
+        self._last_health_age_at = None
+        self._last_health_clock_stamp: ClockStamp | None = None
         self._accent_theme = "Ember"
         self._last_settings_check = 0.0
         primary = self._probe_info.get("primary", {})
@@ -508,40 +439,51 @@ class PiFireBackend(QObject):
             signal.emit()
 
     def _poll_health(self, now):
+        current_clock = local_clock_stamp()
+        previous_clock = self._last_health_clock_stamp
+        self._last_health_clock_stamp = current_clock
+        if current_clock is None or (previous_clock is not None and continuity_lost(previous_clock, current_clock)):
+            self._health_model.advance_freshness(None)
+            self._last_health_check = None
+        previous_age_at = self._last_health_age_at
+        self._last_health_age_at = now
+        if previous_age_at is not None:
+            self._health_model.advance_freshness(now - previous_age_at)
         if self._health_fetch_fn is None:
             return
         previous_check = self._last_health_check
-        if previous_check is not None and now - previous_check < self.HEALTH_POLL_SECONDS:
+        if previous_check is not None and 0 <= now - previous_check < self.HEALTH_POLL_SECONDS:
             return
         self._last_health_check = now
         try:
             health = self._health_fetch_fn()
         except Exception:
-            if previous_check is not None:
-                self._health_model.advance_freshness(max(0.0, now - previous_check))
             return
         self._health_model.update(health)
 
     @Slot()
     def poll(self):
+        self._poll_health(self._monotonic())
         in_data, status = self._fetch_fn()
         if status is None or in_data is None:
             return
         self._set("_mode", status.get("mode", Mode.STOP), self.modeChanged)
         self._set("_units", status.get("units", "F"), self.unitsChanged)
         now = self._now()
-        self._poll_health(now)
         invalid_labels = self._health_model.invalid_labels()
         p = in_data.get("P", {})
         primary_key = next(iter(p), self._primary_label)
-        now_ms = int(now * 1000)
+        current = local_clock_stamp()
+        heartbeat = read_control_heartbeat()
         if primary_key in invalid_labels:
             primary_temp, primary_has_temp, primary_stale = 0.0, False, ""
         else:
             primary_temp, primary_has_temp, primary_stale = resolve_reading(
                 p.get(primary_key),
                 in_data.get("LAST", {}).get(primary_key),
-                now_ms,
+                age_s=last_reading_age_s(
+                    in_data.get("LAST", {}).get(primary_key), current=current, heartbeat=heartbeat
+                ),
             )
         self._set("_primary_temp", primary_temp, self.primaryChanged)
         self._set("_primary_has_temp", primary_has_temp, self.primaryChanged)
@@ -562,7 +504,7 @@ class PiFireBackend(QObject):
         self._set("_recipe_paused", bool(status.get("recipe_paused", False)), self.statusChanged)
         self._set("_hopper_enabled", bool(status.get("hopper_level_enabled", False)), self.hopperChanged)
         self._set("_hopper_level", max(status.get("hopper_level", 0) or 0, 0), self.hopperChanged)
-        self._food_model.update(in_data, now_ms, invalid_labels=invalid_labels)
+        self._food_model.update(in_data, current=current, heartbeat=heartbeat, invalid_labels=invalid_labels)
         self._update_timer_text(status, now)
         self._update_cook_elapsed(status, now)
         mode = status.get("mode", Mode.STOP)

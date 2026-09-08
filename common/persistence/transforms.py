@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from common.clock_domain import ClockStamp
 from common.control_delta import apply_control_delta as _apply_control_delta
 from common.current_schema import CurrentSchema, build_current
 from common.persistence.protocols import JsonValue
@@ -50,9 +51,11 @@ def current_snapshot(
     previous: CurrentSchema | None,
     incoming: Mapping[str, JsonValue],
     now_ms: int,
+    *,
+    clock_stamp: ClockStamp | None = None,
 ) -> CurrentSchema:
     """Map one control-loop sample to the durable current schema."""
-    return build_current(incoming, previous, now_ms)
+    return build_current(incoming, previous, now_ms, clock_stamp=clock_stamp)
 
 
 def history_row_to_dict(row: HistorySqlRow) -> dict[str, JsonValue]:

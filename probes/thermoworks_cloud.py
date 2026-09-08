@@ -34,7 +34,9 @@ Requirements:
 import asyncio
 import logging
 import threading
-from datetime import UTC, datetime, timezone
+import time
+from collections.abc import Callable
+from datetime import UTC, datetime
 
 from aiohttp import ClientSession
 from thermoworks_cloud import (
@@ -102,12 +104,18 @@ def _channel_to_celsius(data):
 
 
 class ThermoworksCloudDevice:
-    """Owns the cache of last-known channel readings. The background thread
-    that populates the cache is started separately via start(), so unit
-    tests can construct this and poke _cache directly without spinning
-    a real thread."""
+    """Owns process-local channel receipts populated by a background poll thread."""
 
-    def __init__(self, email, password, device_serial, num_probes, poll_interval):
+    def __init__(
+        self,
+        email,
+        password,
+        device_serial,
+        num_probes,
+        poll_interval,
+        *,
+        monotonic: Callable[[], float] = time.monotonic,
+    ):
         self.email = email
         self.password = password
         self.device_serial = device_serial
@@ -115,63 +123,84 @@ class ThermoworksCloudDevice:
         self.poll_interval = poll_interval
         self.logger = logging.getLogger("control")
 
-        self._cache = {}  # {channel_number: (celsius_value, fetched_at_utc)}
+        self._monotonic = monotonic
+        self._cache: dict[int, tuple[float | None, float]] = {}
+        self._cache_generation = 0
         self._lock = threading.Lock()
         self.status = {"connected": False, "last_error": None, "last_poll_time": None}
 
         self._thread = None
-        self._stopped = False
+        self._stop_event = threading.Event()
 
     def get_channel_celsius(self, channel_number):
         with self._lock:
             entry = self._cache.get(channel_number)
-        if entry is None:
-            return None
-        celsius, fetched_at = entry
-        age = (datetime.now(UTC) - fetched_at).total_seconds()
-        if age > self.poll_interval * _STALE_MULTIPLIER:
-            return None
-        return celsius
+            if entry is None:
+                return None
+            celsius, received_monotonic_s = entry
+            age_s = self._monotonic() - received_monotonic_s
+            if age_s < 0 or age_s > self.poll_interval * _STALE_MULTIPLIER:
+                return None
+            return celsius
 
     def get_status(self):
         return self.status
 
     def start(self):
-        self._stopped = False
-        self._thread = threading.Thread(target=self._run_loop, daemon=True)
+        with self._lock:
+            self._stop_event.set()
+            self._stop_event = threading.Event()
+            self._cache.clear()
+            self._cache_generation += 1
+            stop_event = self._stop_event
+        self._thread = threading.Thread(target=self._run_loop, args=(stop_event,), daemon=True)
         self._thread.start()
 
     def stop(self):
         """Signal the background poll loop to exit and join its thread.
 
-        The loops in _main() check self._stopped, so the thread finishes its
-        current poll interval and returns cleanly (no lingering event loop at
-        interpreter shutdown, which otherwise delays process/test exit).
+        The loops in _main() check their own stop event, so a restarted device
+        cannot revive an old poll loop or admit its pending response.
         """
-        self._stopped = True
+        with self._lock:
+            self._stop_event.set()
+            self._cache.clear()
+            self._cache_generation += 1
         thread = self._thread
         if thread is not None:
             thread.join(timeout=2)
 
-    def _run_loop(self):
-        asyncio.new_event_loop().run_until_complete(self._main())
+    def invalidate_cache(self) -> None:
+        """Discard receipts, including any response already in flight."""
+        with self._lock:
+            self._cache.clear()
+            self._cache_generation += 1
 
-    async def _main(self):
-        while not self._stopped:
+    def _run_loop(self, stop_event: threading.Event):
+        asyncio.new_event_loop().run_until_complete(self._main(stop_event))
+
+    async def _main(self, stop_event: threading.Event | None = None):
+        if stop_event is None:
+            stop_event = self._stop_event
+        while not stop_event.is_set():
             try:
                 async with ClientSession() as session:
                     auth = await AuthFactory(session).build_auth(self.email, self.password)
                     client = ThermoworksCloud(auth)
                     self.status["connected"] = True
                     self.status["last_error"] = None
-                    while not self._stopped:
-                        channels = await poll_once(client, self.device_serial, self.num_probes)
-                        now = datetime.now(UTC)
+                    while not stop_event.is_set():
                         with self._lock:
-                            for channel, data in channels.items():
-                                if data is not None:
-                                    self._cache[channel] = (_channel_to_celsius(data), now)
-                        self.status["last_poll_time"] = now.isoformat()
+                            cache_generation = self._cache_generation
+                        channels = await poll_once(client, self.device_serial, self.num_probes)
+                        with self._lock:
+                            if not stop_event.is_set() and cache_generation == self._cache_generation:
+                                received_monotonic_s = self._monotonic()
+                                now = datetime.now(UTC)
+                                for channel, data in channels.items():
+                                    if data is not None:
+                                        self._cache[channel] = (_channel_to_celsius(data), received_monotonic_s)
+                                self.status["last_poll_time"] = now.isoformat()
                         await asyncio.sleep(self.poll_interval)
             except Exception as exc:  # AuthenticationError, ClientError, network errors, etc.
                 self.status["connected"] = False
@@ -202,6 +231,9 @@ class ReadProbes(ProbeInterface):
         the device, so a probe-map rebuild that only dropped this instance would
         leave it polling the cloud API forever."""
         self.device.stop()
+
+    def invalidate_clock_domain(self) -> None:
+        self.device.invalidate_cache()
 
     def read_all_ports(self, output_data):
         for port in self.port_map:

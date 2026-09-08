@@ -247,7 +247,6 @@ def test_active_mode_settings_reload_updates_inference_policy_without_probe_rebu
 
     probes = mode.probe_complex
     assert probes.inference_policy_calls == ["enforce"]
-    assert probes.inference_policy_now_calls == [controller_now]
     assert probes.update_probe_map_calls == []
 
 
@@ -277,5 +276,4 @@ def test_stopped_controller_settings_reload_updates_inference_policy_without_pro
 
     probes = ctx.devices.probe_complex
     assert probes.inference_policy_calls == ["off"]
-    assert probes.inference_policy_now_calls == [controller_now]
     assert probes.update_probe_map_calls == []

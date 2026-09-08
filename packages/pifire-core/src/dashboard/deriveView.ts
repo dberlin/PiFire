@@ -62,7 +62,7 @@ export function reading(
   if (typeof last !== "number") return { shown: null, stale: null };
   return {
     shown: last,
-    stale: staleLabel(typeof status.lastReadingAge === "number" ? status.lastReadingAge : 0),
+    stale: typeof status.lastReadingAge === "number" ? staleLabel(status.lastReadingAge) : "Last known",
   };
 }
 

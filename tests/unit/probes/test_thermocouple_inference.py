@@ -28,7 +28,7 @@ def _confirmed_inference(now: float = 10.0) -> ThermocoupleHealthReport:
             ThermocoupleEvidence.EXCITATION_RESPONSE,
         ),
         temperature_valid=False,
-        observed_at=now,
+        observed_monotonic_s=now,
         detail={"channel": "slow"},
     )
 
@@ -105,7 +105,7 @@ def test_nonconfirmed_inference_remains_valid_and_gains_effective_policy():
         state=ThermocoupleHealthState.SUSPECTED,
         faults=(ThermocoupleFault.MALFUNCTION,),
         evidence=(ThermocoupleEvidence.JUNCTION_COLLAPSE,),
-        observed_at=8.0,
+        observed_monotonic_s=8.0,
         detail={"metric": 1.0},
     )
 
@@ -147,7 +147,7 @@ def test_off_without_hardware_returns_unmonitored_at_inferred_timestamp():
     )
 
     assert fused.state is ThermocoupleHealthState.UNMONITORED
-    assert fused.observed_at == 12.0
+    assert fused.observed_monotonic_s == 12.0
     assert fused.detail == {"policy": "off"}
 
 
@@ -274,7 +274,7 @@ def test_clock_regression_resets_history_and_admits_new_sample():
     report = engine.observe(_sample(30.0, 20.0), _context(heat=0.25), is_primary=False, now=5.0)
 
     assert report.state is ThermocoupleHealthState.HEALTHY
-    assert report.observed_at == 5.0
+    assert report.observed_monotonic_s == 5.0
     assert report.detail["sample_count"] == 1
     assert report.detail["coverage_seconds"] == 0.0
     assert report.detail["heat_on_seconds"] == 0.25
@@ -917,6 +917,36 @@ def test_primary_fast_confirmation_remains_latched_until_reset():
     assert report.confirmed
     engine.reset()
     assert engine.current_report().state is ThermocoupleHealthState.UNMONITORED
+
+
+def test_clock_invalidation_preserves_primary_fault_without_old_heat_or_recovery():
+    engine, confirmed_at = _confirmed_fast_engine(is_primary=True)
+    faults = engine.current_report().faults
+    engine.observe(_sample(40.0, 30.0), _context(heat=0.25), is_primary=True, now=confirmed_at + 0.25)
+
+    engine.invalidate_clock_domain()
+    assert engine.current_report().confirmed
+    assert engine.current_report().clock_stamp is None
+    report = engine.observe(_sample(40.0, 30.0), _context(heat=0.5), is_primary=True, now=1_000.0)
+
+    assert report.confirmed
+    assert report.faults == faults
+    assert not report.temperature_valid
+    assert report.detail["sample_count"] == 1
+    assert report.detail["coverage_seconds"] == 0.0
+    assert report.detail["heat_on_seconds"] == 0.5
+
+
+def test_clock_invalidation_restarts_auxiliary_clean_recovery():
+    engine, confirmed_at = _confirmed_fast_engine(is_primary=False)
+    for offset in range(1, 60):
+        engine.observe(_sample(40.0, 30.0), _context(active=False), is_primary=False, now=confirmed_at + offset)
+
+    engine.invalidate_clock_domain()
+    for now in (1_000.0, 1_030.0, 1_059.0):
+        assert engine.observe(_sample(40.0, 30.0), _context(active=False), is_primary=False, now=now).confirmed
+    report = engine.observe(_sample(40.0, 30.0), _context(active=False), is_primary=False, now=1_060.0)
+    assert report.state is ThermocoupleHealthState.HEALTHY
 
 
 def test_slow_suspected_clears_only_on_later_eligible_clean_window():

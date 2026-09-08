@@ -4,7 +4,10 @@ from typing import Any
 
 import pytest
 
+from common.clock_domain import RuntimeClockDomain
+
 from probes.thermocouple_health import (
+    THERMOCOUPLE_HEALTH_REPORT_SCHEMA,
     HardwareFaultLatch,
     ThermocoupleEvidence,
     ThermocoupleFault,
@@ -19,19 +22,41 @@ def test_confirmed_report_is_invalid_and_json_safe():
         faults=(ThermocoupleFault.OPEN, ThermocoupleFault.SHORT),
         evidence=(ThermocoupleEvidence.HARDWARE,),
         temperature_valid=False,
-        observed_at=12.5,
+        observed_monotonic_s=12.5,
         detail={"status": 0x30},
     )
 
     assert report.confirmed is True
     assert report.as_dict() == {
+        "report_schema_version": THERMOCOUPLE_HEALTH_REPORT_SCHEMA,
+        "clock_stamp": None,
         "state": "confirmed",
         "faults": ["open", "short"],
         "evidence": ["hardware"],
         "temperature_valid": False,
-        "observed_at": 12.5,
+        "observed_monotonic_s": 12.5,
         "detail": {"status": 0x30},
     }
+
+
+def test_report_stamp_must_agree_with_observation_coordinate():
+    stamp = RuntimeClockDomain(
+        monotonic=lambda: 100.0,
+        wall_time=lambda: 1_800_000_000.0,
+        boot_id=None,
+    ).capture()
+    report = ThermocoupleHealthReport(
+        state=ThermocoupleHealthState.HEALTHY,
+        observed_monotonic_s=100.0,
+        clock_stamp=stamp,
+    )
+    assert report.as_dict()["clock_stamp"] == stamp.as_dict()
+    with pytest.raises(ValueError, match="coordinate"):
+        ThermocoupleHealthReport(
+            state=ThermocoupleHealthState.HEALTHY,
+            observed_monotonic_s=101.0,
+            clock_stamp=stamp,
+        )
 
 
 def test_report_owns_detail_and_returns_a_fresh_mutable_copy():
@@ -50,7 +75,7 @@ def test_report_owns_detail_and_returns_a_fresh_mutable_copy():
     with pytest.raises(TypeError):
         frozen_detail["status"] = 0
     with pytest.raises(FrozenInstanceError):
-        report.observed_at = 9.0
+        report.observed_monotonic_s = 9.0
 
 
 def test_report_recursively_owns_and_freezes_nested_detail():
@@ -121,19 +146,21 @@ def test_report_constructors_set_expected_states_and_evidence():
 
     assert unmonitored == ThermocoupleHealthReport(
         state=ThermocoupleHealthState.UNMONITORED,
-        observed_at=1.0,
+        observed_monotonic_s=1.0,
     )
     assert healthy == ThermocoupleHealthReport(
         state=ThermocoupleHealthState.HEALTHY,
         evidence=(ThermocoupleEvidence.STUCK_RESPONSE,),
-        observed_at=2.0,
+        observed_monotonic_s=2.0,
     )
     assert confirmed.as_dict() == {
+        "report_schema_version": THERMOCOUPLE_HEALTH_REPORT_SCHEMA,
+        "clock_stamp": None,
         "state": "confirmed",
         "faults": ["malfunction"],
         "evidence": ["hardware"],
         "temperature_valid": False,
-        "observed_at": 3.0,
+        "observed_monotonic_s": 3.0,
         "detail": {"status": None},
     }
 
@@ -270,7 +297,7 @@ def test_every_update_copies_the_monotonic_timestamp_into_its_result():
     recovering = latch.update((), now=11.0, primary=False)
     recovered = latch.update((), now=71.0, primary=False)
 
-    assert [fault.observed_at, recovering.observed_at, recovered.observed_at] == [
+    assert [fault.observed_monotonic_s, recovering.observed_monotonic_s, recovered.observed_monotonic_s] == [
         10.0,
         11.0,
         71.0,

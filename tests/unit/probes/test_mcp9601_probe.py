@@ -409,6 +409,35 @@ def test_secondary_fault_recovers_after_sixty_consecutive_clean_seconds(
     assert report.faults == ()
 
 
+@pytest.mark.parametrize("primary", [True, False])
+def test_clock_invalidation_retains_fault_and_requires_new_auxiliary_clean_interval(probe, monkeypatch, primary):
+    obj = _configured_probe(probe, primary=primary, detection="True", status=0x10, temp_c=100.0)
+    shared = sys.modules["probes._mcp960x_adafruit"]
+    clock = {"now": 0.0}
+    monkeypatch.setattr(shared.time, "monotonic", lambda: clock["now"])
+    group = "primary" if primary else "food"
+    assert obj.read_all_ports({})[group]["Grill"] is None
+    obj.device.sensor.status_value = 0x00
+    for now in (10.0, 69.0):
+        clock["now"] = now
+        assert obj.read_all_ports({})[group]["Grill"] is None
+
+    obj.invalidate_clock_domain()
+    assert obj.get_thermocouple_samples() == {}
+    for now in (1_000.0, 1_059.0):
+        clock["now"] = now
+        assert obj.read_all_ports({})[group]["Grill"] is None
+        assert obj.get_thermocouple_health()["Grill"].confirmed
+    clock["now"] = 1_060.0
+    value = obj.read_all_ports({})[group]["Grill"]
+    if primary:
+        assert value is None
+        assert obj.get_thermocouple_health()["Grill"].faults == (ThermocoupleFault.OPEN,)
+    else:
+        assert value == 212.0
+        assert obj.get_thermocouple_health()["Grill"].state is ThermocoupleHealthState.HEALTHY
+
+
 @pytest.mark.parametrize(
     ("failed_attribute", "expected_accesses"),
     [

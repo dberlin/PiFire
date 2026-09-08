@@ -47,7 +47,7 @@ function foodHealth(
     },
     detector: { source: state === "confirmed" ? "hardware" : "software", policy: "observe" },
     outcome,
-    freshness: { current, lastReportedAgeS: current ? 0 : 75 },
+    freshness: { current, lastReportedAgeS: current ? 0 : 75, reason: current ? "current" : "stale" },
   };
 }
 

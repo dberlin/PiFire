@@ -441,6 +441,9 @@ class ProbeInterface:
     def get_thermocouple_samples(self) -> Mapping[str, ThermocoupleJunctionSample]:
         return {}
 
+    def invalidate_clock_domain(self) -> None:
+        """Discard device-local timing authority after a runtime generation change."""
+
     def get_device_info(self):
         status = self.device.get_status()
         health = self.get_thermocouple_health()

@@ -1,45 +1,118 @@
+import { createCommand } from "@pifire/core/command";
+import { FIXTURE_DASH } from "@pifire/core/fixture";
+import { createLiveConnection, monotonicNowMs } from "@pifire/core/liveConnection";
 import { act, renderHook } from "@testing-library/react-native";
-import { AppState } from "react-native";
+import { AppState, type AppStateStatus } from "react-native";
 
-import { useLive } from "../src/useLive";
+import { qualifyRetainedHealth, receiptFreshness, useLive, type LiveResult } from "../src/useLive";
+import { wireHealth } from "./healthFixture";
 
 jest.mock("@pifire/core/liveConnection", () => ({
   createLiveConnection: jest.fn(() => ({ reconnect: jest.fn(), close: jest.fn() })),
+  monotonicNowMs: jest.fn(() => 100_000),
 }));
 
-it("reconnects when the app returns to the foreground", async () => {
-  const { createLiveConnection } = require("@pifire/core/liveConnection");
+beforeEach(() => {
+  jest.clearAllMocks();
+  jest.mocked(monotonicNowMs).mockReturnValue(100_000);
+});
+afterEach(() => jest.restoreAllMocks());
 
-  // react-native@0.86's real AppState wraps a native module through
-  // NativeEventEmitter and exposes only addEventListener/
-  // removeEventListener -- there is no `.emit` a test can drive directly,
-  // and replacing the whole "react-native" module forces eager evaluation
-  // of unrelated native modules (DevMenu, Clipboard) that aren't mocked in
-  // this environment. Instead, capture the handler useLive registers and
-  // invoke it directly to simulate an OS-driven foreground/background
-  // transition.
-  let handler: ((state: string) => void) | undefined;
+it("invalidates background receipts and requires a new real payload on resume", async () => {
+  let handler: ((state: AppStateStatus) => void) | undefined;
   jest.spyOn(AppState, "addEventListener").mockImplementation((_type, h) => {
-    handler = h as (state: string) => void;
-    return { remove: () => {} } as ReturnType<typeof AppState.addEventListener>;
+    handler = h;
+    return { remove: jest.fn() };
   });
+  const { result } = await renderHook(() => useLive("http://pifire.local:5000"));
+  const call = jest.mocked(createLiveConnection).mock.calls[0];
+  if (!call) throw new Error("connection was not opened");
+  const handlers = call[1];
+  const connection = jest.mocked(createLiveConnection).mock.results[0]?.value;
+  expect(result.current.lastPayloadMonotonicMs).toBeNull();
+  await act(async () => handlers.onPhase("live"));
+  expect(receiptFreshness(result.current, 100_000).retained).toBe(true);
 
-  // @testing-library/react-native@14's renderHook is async; it must be
-  // awaited before the effect that creates the connection has run.
-  await renderHook(() => useLive("http://pifire.local:5000"));
-  const connection = createLiveConnection.mock.results[0].value;
-
-  // Awaited async acts, not a sync one: a sync act() following renderHook's
-  // own (async) act makes React report "You called act(async () => ...)
-  // without await" on the console.
+  await act(async () => handlers.onDash(FIXTURE_DASH));
+  expect(receiptFreshness(result.current, 100_000).retained).toBe(false);
   await act(async () => handler?.("background"));
-
-  // Backgrounding is what breaks the socket; reconnecting from here would be
-  // reconnecting the app on its way out, and would leave the assertion below
-  // unable to tell "reconnects on foreground" from "reconnects on any change".
+  expect(result.current.lastPayloadMonotonicMs).toBeNull();
+  expect(receiptFreshness(result.current, 100_000).retained).toBe(true);
   expect(connection.reconnect).not.toHaveBeenCalled();
+  await act(async () => handlers.onDash(FIXTURE_DASH));
+  expect(result.current.lastPayloadMonotonicMs).toBeNull();
 
   await act(async () => handler?.("active"));
-
   expect(connection.reconnect).toHaveBeenCalledTimes(1);
+  await act(async () => handlers.onPhase("live"));
+  expect(receiptFreshness(result.current, 100_000).retained).toBe(true);
+  await act(async () => handlers.onDash(FIXTURE_DASH));
+  expect(result.current.lastPayloadMonotonicMs).toBe(monotonicNowMs());
+  expect(receiptFreshness(result.current, 100_000).retained).toBe(false);
+});
+
+function liveResult(health = wireHealth()): LiveResult {
+  return {
+    live: { ...FIXTURE_DASH, thermocoupleHealth: [health] },
+    phase: "live",
+    controlAlive: true,
+    pellets: null,
+    command: createCommand("http://pifire.local:5000"),
+    lastPayloadMonotonicMs: 100_000,
+    host: "http://pifire.local:5000",
+  };
+}
+
+it.each([-3_600_000, 3_600_000])("receipt freshness ignores a phone wall step of %s ms", (step) => {
+  const result = liveResult();
+  jest.spyOn(Date, "now").mockReturnValue(1_800_000_000_000 + step);
+  expect(receiptFreshness(result, 130_000).retained).toBe(false);
+  expect(receiptFreshness(result, 130_001).retained).toBe(true);
+  expect(qualifyRetainedHealth(result, 130_001).live.thermocoupleHealth?.[0]?.freshness.current).toBe(false);
+});
+
+it("rejects a backwards local receipt clock instead of clamping it to fresh", () => {
+  const result = liveResult();
+  expect(receiptFreshness(result, 99_999).retained).toBe(true);
+  expect(qualifyRetainedHealth(result, 99_999).live.thermocoupleHealth?.[0]?.freshness.current).toBe(false);
+});
+
+it("ages producer reports from receipt without promoting stale or inventing unknown age", () => {
+  const stale = liveResult(wireHealth({
+    freshness: { current: false, lastReportedAgeS: 20, reason: "stale" },
+  }));
+  const unknown = liveResult(wireHealth({
+    freshness: { current: false, lastReportedAgeS: null, reason: "unknown-clock" },
+  }));
+  expect(qualifyRetainedHealth(stale, 105_000).live.thermocoupleHealth?.[0]?.freshness).toEqual({
+    current: false, lastReportedAgeS: 25, reason: "stale",
+  });
+  expect(qualifyRetainedHealth(unknown, 140_000).live.thermocoupleHealth?.[0]?.freshness).toEqual({
+    current: false, lastReportedAgeS: null, reason: "unknown-clock",
+  });
+  expect(stale.live.thermocoupleHealth?.[0]?.freshness.lastReportedAgeS).toBe(20);
+});
+
+it("keeps a reset receipt invalid after the clock catches up until another payload", async () => {
+  jest.useFakeTimers();
+  try {
+    const { result } = await renderHook(() => useLive("http://pifire.local:5000"));
+    const call = jest.mocked(createLiveConnection).mock.calls[0];
+    if (!call) throw new Error("connection was not opened");
+    const handlers = call[1];
+    await act(async () => {
+      handlers.onPhase("live");
+      handlers.onDash(FIXTURE_DASH);
+    });
+    jest.mocked(monotonicNowMs).mockReturnValue(50_000);
+    await act(async () => jest.advanceTimersByTime(1000));
+    expect(result.current.lastPayloadMonotonicMs).toBeNull();
+    jest.mocked(monotonicNowMs).mockReturnValue(110_000);
+    await act(async () => jest.advanceTimersByTime(1000));
+    expect(receiptFreshness(result.current, 110_000).retained).toBe(true);
+    await act(async () => handlers.onDash(FIXTURE_DASH));
+    expect(receiptFreshness(result.current, 110_000).retained).toBe(false);
+  } finally {
+    jest.useRealTimers();
+  }
 });

@@ -921,7 +921,6 @@ class ControlMode:
                 )
             self.probe_complex.set_thermocouple_inference_policy(
                 self.settings["thermocouple_health"]["inference_policy"],
-                now=now,
             )
             if self.settings["globals"]["debug_mode"]:
                 self.ctx.event_log.setLevel(logging.DEBUG)
@@ -1211,7 +1210,9 @@ class ControlMode:
         )
         sensor_data = self.probe_complex.read_probes(
             excitation=excitation,
-            now=now,
+            monotonic_s=now,
+            wall_s=self.ctx.clock.wall_time(),
+            clock_domain=self.ctx.get_clock_domain(),
         )
         self.ctx.store.write_generic_key(
             "probe_device_info",
@@ -1488,7 +1489,7 @@ class ControlMode:
             in_data["notify_targets"] = ctx.notifications.get_targets(control["notify_data"])
 
             # Save current data to the database
-            ctx.store.write_current(in_data)
+            ctx.store.write_current(in_data, clock_stamp=self.probe_complex.last_clock_stamp)
 
             # Write Tr data to the database if in tuning mode
             if control["tuning_mode"]:

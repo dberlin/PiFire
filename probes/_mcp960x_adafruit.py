@@ -127,6 +127,10 @@ class MCP960xProbe(ProbeInterface):
 
         return self.output_data
 
+    def invalidate_clock_domain(self) -> None:
+        self._hardware_fault_latch.cancel_clean_recovery()
+        self._thermocouple_samples.clear()
+
     def get_thermocouple_health(self) -> dict[str, ThermocoupleHealthReport]:
         port = self.device_info["ports"][0]
         label = self.port_map.get(port)

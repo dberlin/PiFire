@@ -1,3 +1,8 @@
+import time
+from dataclasses import replace
+
+from common.clock_domain import ClockStamp, RuntimeClockDomain
+
 from probes.thermocouple_health import ThermocoupleHealthReport, ThermocoupleHealthTransition
 
 
@@ -14,7 +19,8 @@ class FakeProbes:
         self.update_probe_map_calls = []
         self.read_calls = []
         self.inference_policy_calls = []
-        self.inference_policy_now_calls = []
+        self.last_clock_stamp: ClockStamp | None = None
+        self._clock_domain = RuntimeClockDomain.for_system(monotonic=time.monotonic, wall_time=time.time)
 
     def script(self, items):
         norm = []
@@ -34,8 +40,19 @@ class FakeProbes:
         self._health_transitions = []
         return self
 
-    def read_probes(self, *, excitation=None, now=None):
-        self.read_calls.append({"excitation": excitation, "now": now})
+    def read_probes(
+        self, *, excitation=None, monotonic_s=None, wall_s=None, clock_domain: RuntimeClockDomain | None = None
+    ):
+        self.read_calls.append(
+            {
+                "excitation": excitation,
+                "monotonic_s": monotonic_s,
+                "wall_s": wall_s,
+                "clock_domain": clock_domain,
+            }
+        )
+        stamp = (clock_domain or self._clock_domain).capture(monotonic_s=monotonic_s, wall_s=wall_s)
+        self.last_clock_stamp = stamp
         if not self._script:
             item = {"primary": {"Grill": 0}, "food": {}, "aux": {}, "tr": {}}
         else:
@@ -43,12 +60,15 @@ class FakeProbes:
             self._i += 1
 
         if self._health_script:
-            health = self._health_script[min(self._health_i, len(self._health_script) - 1)]
+            health = {
+                label: replace(report, observed_monotonic_s=stamp.observed_monotonic_s, clock_stamp=stamp)
+                for label, report in self._health_script[min(self._health_i, len(self._health_script) - 1)].items()
+            }
             self._health_i += 1
             for label, current in health.items():
                 previous = self._health.get(
                     label,
-                    ThermocoupleHealthReport.unmonitored(current.observed_at),
+                    ThermocoupleHealthReport.unmonitored(current.observed_monotonic_s),
                 )
                 if (previous.state, previous.faults) != (current.state, current.faults):
                     self._health_transitions.append(ThermocoupleHealthTransition(label, previous, current))
@@ -78,12 +98,12 @@ class FakeProbes:
         return []
 
     def invalidate_control_history(self) -> None:
-        self._health.clear()
+        self._health = {label: replace(report, clock_stamp=None) for label, report in self._health.items()}
         self._health_transitions.clear()
+        self.last_clock_stamp = None
 
-    def set_thermocouple_inference_policy(self, policy, *, now=None):
+    def set_thermocouple_inference_policy(self, policy):
         self.inference_policy_calls.append(policy)
-        self.inference_policy_now_calls.append(now)
 
     def update_units(self, x):
         pass

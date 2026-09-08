@@ -36,6 +36,7 @@ const health = (
   freshness: {
     current: true,
     lastReportedAgeS: 0,
+    reason: "current",
     ...over.freshness,
   },
 });
@@ -234,14 +235,30 @@ describe("projectProbeHealth cause and source copy", () => {
 });
 
 describe("projectProbeHealth freshness", () => {
+  it("retains unknown-clock faults without inventing an age", () => {
+    const view = projectProbeHealth(health({
+      report: { state: "confirmed", faults: ["open"], temperatureValid: false },
+      outcome: "unavailable",
+      freshness: { current: false, lastReportedAgeS: null, reason: "unknown-clock" },
+    }));
+    expect(view).toMatchObject({
+      state: "confirmed",
+      availability: "unavailable",
+      freshnessCurrent: false,
+      freshnessReason: "unknown-clock",
+      freshnessQualifier: "Last reported",
+      lastReportedAgeS: null,
+    });
+  });
+
   it("qualifies retained health as Last reported without changing health semantics", () => {
     const current = projectProbeHealth(
-      health({ report: { state: "suspected" }, freshness: { current: true, lastReportedAgeS: 2 } }),
+      health({ report: { state: "suspected" }, freshness: { current: true, lastReportedAgeS: 2, reason: "current" } }),
     );
     const stale = projectProbeHealth(
       health({
         report: { state: "suspected" },
-        freshness: { current: false, lastReportedAgeS: 75 },
+        freshness: { current: false, lastReportedAgeS: 75, reason: "stale" },
       }),
     );
 

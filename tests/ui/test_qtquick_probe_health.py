@@ -57,7 +57,11 @@ def _health(
         },
         "detector": {"source": source, "policy": policy},
         "outcome": outcome,
-        "freshness": {"current": current, "lastReportedAgeS": age},
+        "freshness": {
+            "current": current,
+            "lastReportedAgeS": age,
+            "reason": "unknown-clock" if age is None else "current" if current else "stale",
+        },
     }
 
 
@@ -303,6 +307,29 @@ def test_last_reported_qualifies_retained_health_without_changing_priority():
     assert "CONTROL PROBE UNAVAILABLE" in summary
     assert _text(root, "primaryHealthStatus").startswith("Last reported: ")
     _save(root, "last-reported-1280x720")
+    _assert_no_qml_warnings(warnings)
+
+
+def test_unknown_age_retains_fault_and_qualifier_on_actual_dashboard():
+    _engine, backend, root, warnings = _load_main(
+        [
+            _health(
+                state="confirmed", outcome="stopped", temperature_valid=False, faults=["open"], current=False, age=None
+            )
+        ]
+    )
+    highest = backend.probeHealth.summary["highest"]
+    assert highest["lastReportedAgeS"] is None
+    assert highest["freshnessCurrent"] is False
+    qualifier = highest["freshnessQualifier"]
+    assert "unknown" in qualifier.lower()
+    assert qualifier in _text(root, "primaryHealthStatus")
+    banner_text = str(_find(root, "probeHealthBanner").property("summaryText"))
+    assert qualifier in banner_text
+    assert highest["headline"] in banner_text
+    _open_details(root)
+    assert "open" in _text(root, "healthDetailTechnical-Grill")
+    assert _text(root, "primaryTemperature") == "—"
     _assert_no_qml_warnings(warnings)
 
 

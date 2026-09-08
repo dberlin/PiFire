@@ -13,28 +13,40 @@ the code is read and written; the letters are serialization aliases, and
 consumers move off them one at a time.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError, field_serializer, field_validator
 
+from common.clock_domain import ClockStamp, ClockStampPayload
 from common.common import write_log
 
 
 class _CurrentSection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 
 class LastReading(_CurrentSection):
     """A probe's last real reading, and when it was taken."""
 
-    # frozen must be restated (assigning model_config here replaces, rather
-    # than merges with, _CurrentSection's) -- extra="forbid" carries over
-    # explicitly rather than by inheritance, matching _SystemConfig in
-    # common/settings_schema.py.
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True, allow_inf_nan=False)
 
     temp: int | float
     ts: int
+    clock_stamp: ClockStamp | None = None
+
+    @field_validator("clock_stamp", mode="before")
+    @classmethod
+    def _parse_clock_stamp(cls, value: object) -> ClockStamp | None:
+        if value is None or isinstance(value, ClockStamp):
+            return value
+        if not isinstance(value, Mapping):
+            raise ValueError("Last reading clock stamp must be an object or null")
+        return ClockStamp.from_dict(value)
+
+    @field_serializer("clock_stamp")
+    def _serialize_clock_stamp(self, stamp: ClockStamp | None) -> ClockStampPayload | None:
+        return None if stamp is None else stamp.as_dict()
 
 
 #: A probe device may have no reading to give -- a network-polled one whose
@@ -149,13 +161,14 @@ def snapshot_from(raw, probe_info):
     return to_snapshot(schema)
 
 
-def build_current(in_data, previous, now_ms):
+def build_current(in_data, previous, now_ms, *, clock_stamp: ClockStamp | None = None):
     """The structure one control pass produces.
 
     :param in_data: the control loop's probe_history-shaped dict
     :param previous: the preceding schema, or None on the first write
     :param now_ms: the timestamp to stamp, passed in so callers are not racing
         the wall clock
+    :param clock_stamp: the acquisition pass's stamp, never sampled here
     """
     primary = in_data["probe_history"]["primary"]
     food = in_data["probe_history"]["food"]
@@ -167,11 +180,11 @@ def build_current(in_data, previous, now_ms):
         primary_setpoint=in_data["primary_setpoint"],
         notify_targets=in_data["notify_targets"],
         timestamp=now_ms,
-        last_readings=_carry_last_readings((primary, food, aux), previous, now_ms),
+        last_readings=_carry_last_readings((primary, food, aux), previous, now_ms, clock_stamp),
     )
 
 
-def _carry_last_readings(sections, previous, now_ms):
+def _carry_last_readings(sections, previous, now_ms, clock_stamp: ClockStamp | None):
     """Per-probe last real reading, keyed by probe label.
 
     ``timestamp`` stamps the whole structure and keeps advancing while one
@@ -185,7 +198,7 @@ def _carry_last_readings(sections, previous, now_ms):
     for section in sections:
         for label, value in section.items():
             if value is not None:
-                last[label] = LastReading(temp=value, ts=now_ms)
+                last[label] = LastReading(temp=value, ts=now_ms, clock_stamp=clock_stamp)
             elif label in carried:
                 last[label] = carried[label]
     return last

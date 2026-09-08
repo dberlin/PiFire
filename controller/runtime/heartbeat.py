@@ -20,6 +20,7 @@ This module is the second shape.
 """
 
 from common.persistence.runtime import CONTROL_HEARTBEAT_KEY
+from controller.runtime.context import ControllerContext
 
 #: How often the control process refreshes the stamp. Both call sites run far
 #: hotter than this (the idle tick every 0.1s, the mode work cycle every
@@ -31,10 +32,10 @@ HEARTBEAT_WRITE_INTERVAL = 1.0
 #: "stamped at t=0" -- a 0.0 sentinel suppresses the very first stamp whenever
 #: the clock reads below HEARTBEAT_WRITE_INTERVAL, so the first heartbeat of a
 #: run goes missing until a full interval of uptime has passed.
-_last_write = None
+_last_write: tuple[str, float] | None = None
 
 
-def stamp_control_heartbeat(ctx):
+def stamp_control_heartbeat(ctx: ControllerContext) -> None:
     """Refresh the control-process liveness stamp, at most every
     HEARTBEAT_WRITE_INTERVAL.
 
@@ -42,20 +43,25 @@ def stamp_control_heartbeat(ctx):
     returns to the idle tick, so stamping in only one of the two would read as
     "control is down" for the whole cook.
 
-    The stamped value is `ctx.clock.wall_time()`, which RealClock defines as
-    `time.time()` -- the reader is a different PROCESS comparing this against
-    its own `time.time()`, so the stamp has to be wall-clock epoch seconds and
-    not a monotonic or otherwise process-local reading.
+    Only the shared loop's admitted stamp can publish authority. Wall provenance
+    is retained inside it, while throttling uses monotonic time per generation.
     """
     global _last_write
-    now = ctx.clock.wall_time()
-    if _last_write is not None and now - _last_write < HEARTBEAT_WRITE_INTERVAL:
+    stamp = ctx.last_clock_stamp
+    if stamp is None:
         return
-    _last_write = now
-    ctx.store.write_generic_key(CONTROL_HEARTBEAT_KEY, now)
+    now = stamp.observed_monotonic_s
+    if (
+        _last_write is not None
+        and _last_write[0] == stamp.runtime_id
+        and 0 <= now - _last_write[1] < HEARTBEAT_WRITE_INTERVAL
+    ):
+        return
+    ctx.store.write_generic_key(CONTROL_HEARTBEAT_KEY, stamp.as_dict())
+    _last_write = (stamp.runtime_id, now)
 
 
-def reset_for_tests():
+def reset_for_tests() -> None:
     """Clear the throttle so a test's first stamp always writes."""
     global _last_write
     _last_write = None

@@ -217,7 +217,7 @@ function dashboardProbeHealth(
     },
     detector: { source: "hardware", policy: "observe" },
     outcome,
-    freshness: { current: true, lastReportedAgeS: 0 },
+    freshness: { current: true, lastReportedAgeS: 0, reason: "current" },
   };
 }
 

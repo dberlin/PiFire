@@ -121,6 +121,7 @@ class _TimedNotifier(FakeNotifier):
 @dataclass
 class _ScenarioResult:
     clock: ManualClock
+    clock_domain: RuntimeClockDomain
     device: _SimulatedSinglePortThermocouple
     grill: _TimedGrill
     notifier: _TimedNotifier
@@ -200,7 +201,7 @@ def _run_scenario(ds, caplog, *, sample_at, duration, setpoint_f=425):
         for record in caplog.records
         if record.name == logger.name and record.message.startswith(_TRANSITION_LOG_PREFIX)
     ]
-    return _ScenarioResult(clock, device, grill, notifier, store, transition_logs)
+    return _ScenarioResult(clock, ctx.get_clock_domain(), device, grill, notifier, store, transition_logs)
 
 
 def _persisted_report(result):
@@ -212,7 +213,7 @@ def _assert_authoritative_stop(result, report):
     assert result.store.read_control()["mode"] == "Error"
     assert result.store.display_commands().list().count(["text", "ERROR"]) == 1
     assert result.notifier.sent == ["Thermocouple_Fault_Primary"]
-    assert result.notifier.timed_sent == [(pytest.approx(report["observed_at"]), "Thermocouple_Fault_Primary")]
+    assert result.notifier.timed_sent == [(pytest.approx(report["observed_monotonic_s"]), "Thermocouple_Fault_Primary")]
     assert result.transition_logs == [
         {
             "authority": "stop",
@@ -235,7 +236,7 @@ def _assert_authoritative_stop(result, report):
             "witness_source": report["detail"]["witness_source"],
         }
     ]
-    confirmed_at = report["observed_at"]
+    confirmed_at = report["observed_monotonic_s"]
     assert not [call for call in result.grill.timed_calls if call[0] >= confirmed_at and call[1] in _POSITIVE_ACTUATION]
     assert result.store.read_current()["P"][_LABEL] is None
 
@@ -243,7 +244,7 @@ def _assert_authoritative_stop(result, report):
 def _dash_health(result, monkeypatch):
     from blueprints.mobile import socket_io
 
-    monkeypatch.setattr(socket_io.time, "monotonic", result.clock.monotonic)
+    monkeypatch.setattr(socket_io, "local_clock_stamp", result.clock_domain.capture)
     payload = socket_io._get_dash_data(
         result.store.read_settings(),
         result.store.read_pellet_db(),
@@ -274,7 +275,7 @@ def test_live_pull_confirms_after_five_subsequent_collapsed_samples_and_stops(ds
         "implausible-step",
         "junction-collapse",
     ]
-    assert 6.0 <= report["observed_at"] <= 7.0
+    assert 6.0 <= report["observed_monotonic_s"] <= 7.0
     assert result.device.raw_reads[0][1] == ThermocoupleJunctionSample(
         hot_c=100.0,
         cold_c=25.0,
@@ -291,7 +292,7 @@ def test_live_pull_confirms_after_five_subsequent_collapsed_samples_and_stops(ds
     assert prior_sample.hot_c - prior_sample.cold_c >= 15.0
     assert prior_sample.hot_c - event_sample.hot_c >= 20.0
     assert abs(event_sample.hot_c - event_sample.cold_c) <= 1.0
-    assert 5.0 <= report["observed_at"] - event_at <= 6.0
+    assert 5.0 <= report["observed_monotonic_s"] - event_at <= 6.0
 
     _assert_authoritative_stop(result, report)
     assert _dash_health(result, monkeypatch) == [
@@ -310,7 +311,7 @@ def test_live_pull_confirms_after_five_subsequent_collapsed_samples_and_stops(ds
             },
             "detector": {"source": "software", "policy": "enforce"},
             "outcome": "stopped",
-            "freshness": {"current": True, "lastReportedAgeS": 0.0},
+            "freshness": {"current": True, "lastReportedAgeS": 0.0, "reason": "current"},
         }
     ]
     assert device_info[0]["device"] == _DEVICE
@@ -355,7 +356,7 @@ def test_startup_open_at_425f_confirms_on_first_complete_slow_window(ds, caplog,
         "junction-collapse",
         "excitation-response",
     ]
-    assert 240.0 <= report["observed_at"] <= 241.1
+    assert 240.0 <= report["observed_monotonic_s"] <= 241.1
     assert result.device.raw_reads[0][1] == ThermocoupleJunctionSample(
         hot_c=25.0,
         cold_c=25.0,
@@ -387,6 +388,6 @@ def test_startup_open_at_425f_confirms_on_first_complete_slow_window(ds, caplog,
             },
             "detector": {"source": "software", "policy": "enforce"},
             "outcome": "stopped",
-            "freshness": {"current": True, "lastReportedAgeS": 0.0},
+            "freshness": {"current": True, "lastReportedAgeS": 0.0, "reason": "current"},
         }
     ]

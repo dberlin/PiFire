@@ -1,6 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
+from common.clock_domain import CLOCK_STAMP_SCHEMA, ClockStamp
 from common.current_schema import (
     CurrentSchema,
     LastReading,
@@ -50,7 +51,7 @@ def test_canonical_names_are_accepted_too():
     assert schema.primary_setpoint == 225
 
 
-def test_full_blob_round_trips_byte_identically():
+def test_historical_last_reading_keeps_unknown_clock():
     blob = {
         "P": {"PitProbe": 210},
         "F": {"PinkProbe": None},
@@ -60,7 +61,13 @@ def test_full_blob_round_trips_byte_identically():
         "TS": 1707345482984,
         "LAST": {"PinkProbe": {"temp": 140, "ts": 1707345400000}},
     }
-    assert dump_legacy(CurrentSchema.model_validate(blob)) == blob
+    schema = CurrentSchema.model_validate(blob)
+    assert schema.last_readings["PinkProbe"].clock_stamp is None
+    assert dump_legacy(schema)["LAST"]["PinkProbe"] == {
+        "temp": 140,
+        "ts": 1707345400000,
+        "clock_stamp": None,
+    }
 
 
 def test_integer_zero_stays_an_integer():
@@ -182,3 +189,51 @@ def test_snapshot_last_readings_cannot_be_mutated():
     snap = to_snapshot(schema)
     with pytest.raises(ValidationError):
         snap.last_readings["PitProbe"].temp = 999
+
+
+def test_last_reading_stamp_round_trips_without_numeric_coercion():
+    stamp = ClockStamp(
+        CLOCK_STAMP_SCHEMA,
+        "11111111-1111-4111-8111-111111111111",
+        "22222222-2222-4222-8222-222222222222",
+        100.0,
+        1_800_000_000.0,
+        0.0,
+    )
+    schema = build_current(IN_DATA, None, 1_800_000_000_000, clock_stamp=stamp)
+    restored = CurrentSchema.model_validate_json(schema.model_dump_json(by_alias=True))
+    assert restored.last_readings["PinkProbe"].clock_stamp == stamp
+    assert dump_legacy(restored)["LAST"]["PinkProbe"]["clock_stamp"] == stamp.as_dict()
+
+
+@pytest.mark.parametrize(
+    "stamp",
+    [
+        1_800_000_000,
+        {},
+        {
+            "schema_version": 1,
+            "boot_id": "11111111-1111-4111-8111-111111111111",
+            "runtime_id": "22222222-2222-4222-8222-222222222222",
+            "observed_monotonic_s": "100",
+            "observed_wall_s": 1_800_000_000,
+            "suspend_offset_s": 0,
+        },
+        {
+            "schema_version": 1,
+            "boot_id": "11111111-1111-4111-8111-111111111111",
+            "runtime_id": "22222222-2222-4222-8222-222222222222",
+            "observed_monotonic_s": 100,
+            "observed_wall_s": float("nan"),
+            "suspend_offset_s": 0,
+        },
+    ],
+)
+def test_malformed_last_reading_stamp_discards_current_cache(stamp):
+    assert load_current({"LAST": {"PinkProbe": {"temp": 140, "ts": 1000, "clock_stamp": stamp}}}) is None
+
+
+@pytest.mark.parametrize("value", ["140", True, float("nan"), float("inf")])
+def test_malformed_numeric_reading_discards_current_cache(value):
+    assert load_current({"F": {"PinkProbe": value}}) is None
+    assert load_current({"LAST": {"PinkProbe": {"temp": value, "ts": 1000}}}) is None

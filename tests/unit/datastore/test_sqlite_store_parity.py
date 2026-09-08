@@ -1,8 +1,11 @@
 import copy
+import json
 
 import pytest
 
+from common.clock_domain import CLOCK_STAMP_SCHEMA, ClockStamp
 from common.persistence import runtime as runtime_persistence
+from common import datastore
 
 
 @pytest.fixture
@@ -317,6 +320,71 @@ def test_read_current_snapshot_parity(store):
     assert real.food == fake_snap.food == {"PinkProbe": 140}
     assert real.primary_setpoint == fake_snap.primary_setpoint == 225
     assert real.last_readings.keys() == fake_snap.last_readings.keys()
+
+
+def test_missing_reading_retains_acquisition_stamp_across_wall_rollback_on_both_stores(store, monkeypatch):
+    from controller.runtime.store import InMemoryStore
+
+    settings = _settings_with_probe_map(store)
+    runtime_persistence.write_settings(settings)
+    first_stamp = ClockStamp(
+        CLOCK_STAMP_SCHEMA,
+        "11111111-1111-4111-8111-111111111111",
+        "22222222-2222-4222-8222-222222222222",
+        100.0,
+        1_800_000_000.0,
+        0.0,
+    )
+    next_stamp = ClockStamp(
+        CLOCK_STAMP_SCHEMA,
+        first_stamp.boot_id,
+        first_stamp.runtime_id,
+        120.0,
+        1_799_996_400.0,
+        0.0,
+    )
+    # Serialization occurs much later; it must not replace acquisition time.
+    monkeypatch.setattr(runtime_persistence.time, "time", lambda: 1_900_000_000.0)
+    missing = copy.deepcopy(_PARITY_IN_DATA)
+    missing["probe_history"]["food"]["PinkProbe"] = None
+    missing["probe_history"]["primary"]["PitProbe"] = 212
+    for current_store in (store, InMemoryStore(settings=settings)):
+        current_store.write_current(_PARITY_IN_DATA, clock_stamp=first_stamp)
+        current_store.write_current(missing, clock_stamp=next_stamp)
+        snapshot = current_store.read_current_snapshot()
+        assert snapshot.food["PinkProbe"] is None
+        assert snapshot.last_readings["PinkProbe"].temp == 140
+        assert snapshot.last_readings["PinkProbe"].ts == 1_800_000_000_000
+        assert snapshot.last_readings["PinkProbe"].clock_stamp == first_stamp
+        assert snapshot.last_readings["PitProbe"].temp == 212
+        assert snapshot.last_readings["PitProbe"].ts == 1_799_996_400_000
+        assert snapshot.last_readings["PitProbe"].clock_stamp == next_stamp
+        assert snapshot.timestamp == 1_799_996_400_000
+        assert current_store.read_current()["LAST"]["PinkProbe"]["clock_stamp"] == first_stamp.as_dict()
+
+
+@pytest.mark.parametrize(
+    "corrupt",
+    [
+        {"F": {"PinkProbe": "140"}},
+        {"LAST": {"PinkProbe": {"temp": 140, "ts": 1000, "clock_stamp": {}}}},
+    ],
+)
+def test_corrupt_current_cache_is_discarded_and_refilled_on_both_stores(store, corrupt):
+    from controller.runtime.store import InMemoryStore
+
+    settings = _settings_with_probe_map(store)
+    runtime_persistence.write_settings(settings)
+    datastore.set_blob("control:current", json.dumps(corrupt))
+    for current_store in (store, InMemoryStore(settings=settings, current=corrupt)):
+        discarded = current_store.read_current_snapshot()
+        assert discarded.food["PinkProbe"] == 0
+        assert discarded.last_readings == {}
+        current_store.write_current(_PARITY_IN_DATA)
+        refilled = current_store.read_current_snapshot()
+        assert refilled.food["PinkProbe"] == 140
+        assert refilled.last_readings["PinkProbe"].temp == 140
+        assert refilled.last_readings["PinkProbe"].clock_stamp is None
 
 
 def test_status_initialization_and_snapshot_ownership_parity(store):

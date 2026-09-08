@@ -25,6 +25,7 @@ import pytest
 from common.defaults import default_control, default_pellets, default_settings
 from common.persistence.control import write_control_snapshot
 from common.persistence.runtime import (
+    CONTROL_HEARTBEAT_KEY,
     flush_current,
     init_status,
     write_generic_key,
@@ -32,13 +33,14 @@ from common.persistence.runtime import (
     write_settings_store,
 )
 from common.web_contracts.core import DashSocketPayload, PelletSocketPayload
+from tests.fakes.clock import clock_stamp
 
 #: The complete set of data events the in-tree clients subscribe to.
 LIVE_EVENTS = {"socket_dash_data", "socket_pellet_data"}
 
 
 @pytest.fixture
-def live(ds):
+def live(ds, monkeypatch):
     """Seed the blobs `_get_dash_data` reads, and hand back the module.
 
     Mirrors the seeding in test_socketio_app_data.py's `sio` fixture: status,
@@ -54,10 +56,14 @@ def live(ds):
 
     from blueprints.mobile import socket_io
 
-    # Process-local liveness state outlives the `ds` datastore, so a failure
-    # leaking in from another test would put CONTROL_DOWN_ERROR in the payload.
-    socket_io._set_control_alive(True)
-    return socket_io
+    previous = socket_io._control_alive
+    monkeypatch.setattr(socket_io, "local_clock_stamp", clock_stamp)
+    write_generic_key(CONTROL_HEARTBEAT_KEY, clock_stamp().as_dict())
+    socket_io._check_control_status()
+    try:
+        yield socket_io
+    finally:
+        socket_io._set_control_alive(previous)
 
 
 def _emitted_to_one_client(socket_io):

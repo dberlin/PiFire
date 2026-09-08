@@ -82,9 +82,9 @@ def test_current_snapshot_maps_the_existing_current_shape_and_timestamp_exactly(
         "notify_targets": {"PitProbe": 0, "PinkProbe": 165, "Ambient": None},
         "timestamp": 1_707_345_482_984,
         "last_readings": {
-            "PitProbe": {"temp": 210, "ts": 1_707_345_482_984},
-            "PinkProbe": {"temp": 140, "ts": 1_707_345_482_984},
-            "Ambient": {"temp": 72, "ts": 1_707_345_482_984},
+            "PitProbe": {"temp": 210, "ts": 1_707_345_482_984, "clock_stamp": None},
+            "PinkProbe": {"temp": 140, "ts": 1_707_345_482_984, "clock_stamp": None},
+            "Ambient": {"temp": 72, "ts": 1_707_345_482_984, "clock_stamp": None},
         },
     }
 
@@ -114,8 +114,8 @@ def test_current_snapshot_accepts_a_previous_schema_with_optional_fields_default
     assert previous.timestamp == 0
     assert previous.last_readings == {}
     assert snapshot.timestamp == 2_000
-    assert snapshot.last_readings["PitProbe"].model_dump() == {"temp": 210, "ts": 2_000}
-    assert snapshot.last_readings["PinkProbe"].model_dump() == {"temp": 140, "ts": 2_000}
+    assert snapshot.last_readings["PitProbe"].model_dump() == {"temp": 210, "ts": 2_000, "clock_stamp": None}
+    assert snapshot.last_readings["PinkProbe"].model_dump() == {"temp": 140, "ts": 2_000, "clock_stamp": None}
 
 
 def test_current_snapshot_carries_a_stale_reading_with_its_original_timestamp():
@@ -147,8 +147,8 @@ def test_current_snapshot_carries_a_stale_reading_with_its_original_timestamp():
 
     assert snapshot.timestamp == 5_000
     assert snapshot.food == {"PinkProbe": None}
-    assert snapshot.last_readings["PinkProbe"].model_dump() == {"temp": 140, "ts": 1_000}
-    assert snapshot.last_readings["PitProbe"].model_dump() == {"temp": 212, "ts": 5_000}
+    assert snapshot.last_readings["PinkProbe"].model_dump() == {"temp": 140, "ts": 1_000, "clock_stamp": None}
+    assert snapshot.last_readings["PitProbe"].model_dump() == {"temp": 212, "ts": 5_000, "clock_stamp": None}
 
 
 def test_current_snapshot_does_not_alias_previous_or_incoming_nested_values():
@@ -180,7 +180,7 @@ def test_current_snapshot_does_not_alias_previous_or_incoming_nested_values():
     snapshot.last_readings.clear()
 
     assert previous.food == {"PinkProbe": 140}
-    assert previous.last_readings["PinkProbe"].model_dump() == {"temp": 140, "ts": 1_000}
+    assert previous.last_readings["PinkProbe"].model_dump() == {"temp": 140, "ts": 1_000, "clock_stamp": None}
     assert incoming["probe_history"]["primary"] == {"PitProbe": 999}
     assert incoming["notify_targets"] == {"PitProbe": 0, "PinkProbe": 999}
 

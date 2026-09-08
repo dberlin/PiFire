@@ -55,7 +55,7 @@ it("shows Last reported independently of transport staleness", async () => {
     label: "Probe1",
     displayName: "Brisket",
     report: { state: "suspected" },
-    freshness: { current: false, lastReportedAgeS: 47 },
+    freshness: { current: false, lastReportedAgeS: 47, reason: "stale" },
   });
 
   const { getByText } = await render(

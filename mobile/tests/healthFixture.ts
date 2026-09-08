@@ -26,7 +26,7 @@ export function wireHealth(
       ...report,
     },
     detector: { source: "software", policy: "observe", ...detector },
-    freshness: { current: true, lastReportedAgeS: 0, ...freshness },
+    freshness: { current: true, lastReportedAgeS: 0, reason: "current", ...freshness },
   };
 }
 

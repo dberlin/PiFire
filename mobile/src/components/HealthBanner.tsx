@@ -17,6 +17,7 @@ function accessibilityCopy(health: ProbeHealthView, additionalCopy?: string | nu
     health.causeCopy,
     additionalCopy,
     health.freshnessQualifier,
+    health.lastReportedAgeS === null ? "Age unknown" : null,
   ]
     .filter((part): part is string => part !== null && part !== undefined)
     .join(". ");
@@ -61,6 +62,7 @@ function HealthCopy({
           {health.freshnessQualifier}
         </Text>
       ) : null}
+      {health.lastReportedAgeS === null ? <Text style={styles.freshness}>Age unknown</Text> : null}
     </View>
   );
 }

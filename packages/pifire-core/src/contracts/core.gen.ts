@@ -90,7 +90,8 @@ type Source = "hardware" | "software" | "mixed";
 type Device1 = string;
 type Displayname = string;
 type Current = boolean;
-type Lastreportedages = number;
+type Lastreportedages = number | null;
+type Reason = "current" | "stale" | "unknown-clock" | "retained";
 type Label1 = string;
 type Outcome = "none" | "notify_only" | "unavailable" | "stopped";
 type Port = string;
@@ -312,6 +313,7 @@ export interface ThermocoupleHealthDetectorView {
 export interface ThermocoupleHealthFreshnessView {
   current: Current;
   lastReportedAgeS: Lastreportedages;
+  reason: Reason;
 }
 /**
  * This interface was referenced by `PiFireCoreWebContracts`'s JSON-Schema

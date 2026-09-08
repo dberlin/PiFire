@@ -13,8 +13,11 @@ and the real cards showing a stale number as though it were live.
 
 import json
 
+import pytest
+
 from common import datastore
 from common.persistence.runtime import (
+    CONTROL_HEARTBEAT_KEY,
     flush_current,
     init_status,
     read_current,
@@ -24,6 +27,15 @@ from common.persistence.runtime import (
     write_generic_key,
 )
 from common.web_contracts.core import ProbeDataPayload, ProbeStatusPayload
+from tests.fakes.clock import clock_stamp
+
+
+@pytest.fixture(autouse=True)
+def reader_clock(ds, monkeypatch):
+    from blueprints.mobile import socket_io
+
+    monkeypatch.setattr(socket_io, "local_clock_stamp", clock_stamp)
+    write_generic_key(CONTROL_HEARTBEAT_KEY, clock_stamp().as_dict())
 
 
 def _labels():
@@ -33,7 +45,7 @@ def _labels():
     return primary, food
 
 
-def _write(primary_temp, food_temp):
+def _write(primary_temp, food_temp, *, stamp=None):
     """Write one control pass. `food_temp` lands on the FIRST food probe; the
     rest report normally, so a carried-forward value cannot be mistaken for
     something the whole structure does."""
@@ -52,7 +64,8 @@ def _write(primary_temp, food_temp):
             "probe_history": history,
             "primary_setpoint": 225,
             "notify_targets": {},
-        }
+        },
+        clock_stamp=clock_stamp() if stamp is None else stamp,
     )
 
 
@@ -125,7 +138,7 @@ def test_the_wire_carries_the_last_reading_and_its_age_for_a_null_probe(ds):
     # decide to show the previous one as stale.
     assert probe["temp"] is None
     assert probe["status"]["lastTemp"] == 140
-    assert probe["status"]["lastReadingAge"] >= 0
+    assert probe["status"]["lastReadingAge"] == 0
 
 
 def test_a_blob_written_before_LAST_existed_still_serves(ds):
@@ -173,3 +186,76 @@ def test_probe_status_preserves_plugin_specific_members():
     validated = ProbeStatusPayload.model_validate(payload, strict=True)
 
     assert validated.model_dump(mode="json", by_alias=True, exclude_none=False) == payload
+
+
+@pytest.mark.parametrize("wall_jump", [-3600.0, 3600.0])
+def test_last_reading_age_uses_acquisition_clock_without_resurrecting_missing_value(ds, monkeypatch, wall_jump):
+    from blueprints.mobile import socket_io
+
+    init_status()
+    write_generic_key("probe_device_info", {})
+    _write(225, 140)
+    _, food = _labels()
+    original = read_current()["LAST"][food]
+    current = clock_stamp(monotonic_s=117.75, wall_s=1_800_000_017.75 + wall_jump)
+    _write(225, None, stamp=current)
+    monkeypatch.setattr(socket_io, "local_clock_stamp", lambda: current)
+    write_generic_key(CONTROL_HEARTBEAT_KEY, current.as_dict())
+
+    probe = _food_probe(_dash_probes())
+
+    assert probe["temp"] is None
+    assert probe["status"]["lastTemp"] == 140
+    assert probe["status"]["lastReadingAge"] == 17
+    assert read_current()["LAST"][food] == original
+
+
+@pytest.mark.parametrize(
+    "stamp",
+    [
+        clock_stamp(boot_id="5014e60d-4e18-41dd-9fc3-7c87c39a83f0"),
+        clock_stamp(runtime_id="c82032ec-e223-41ca-a94c-7166010b7570"),
+    ],
+    ids=["previous-boot", "previous-runtime"],
+)
+def test_foreign_last_reading_has_nullable_age_and_remains_missing(ds, stamp):
+    init_status()
+    write_generic_key("probe_device_info", {})
+    _write(225, 140, stamp=stamp)
+    _write(225, None)
+
+    probe = _food_probe(_dash_probes())
+
+    assert probe["temp"] is None
+    assert probe["status"]["lastTemp"] == 140
+    assert probe["status"]["lastReadingAge"] is None
+
+
+def test_literal_legacy_last_reading_is_retained_with_unknown_age(ds):
+    init_status()
+    write_generic_key("probe_device_info", {})
+    _write(225, None)
+    _, food = _labels()
+    stored = read_current()
+    stored["LAST"][food] = {"temp": 140, "ts": 1_800_000_000_000}
+    datastore.set_blob("control:current", json.dumps(stored))
+
+    probe = _food_probe(_dash_probes())
+
+    assert probe["temp"] is None
+    assert probe["status"]["lastTemp"] == 140
+    assert probe["status"]["lastReadingAge"] is None
+
+
+def test_scalar_heartbeat_cannot_authorize_last_reading_age(ds):
+    init_status()
+    write_generic_key("probe_device_info", {})
+    _write(225, 140)
+    _write(225, None)
+    write_generic_key(CONTROL_HEARTBEAT_KEY, 1_800_000_000.0)
+
+    probe = _food_probe(_dash_probes())
+
+    assert probe["temp"] is None
+    assert probe["status"]["lastTemp"] == 140
+    assert probe["status"]["lastReadingAge"] is None

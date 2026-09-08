@@ -4,9 +4,11 @@ import json
 import logging
 import math
 import time
+from collections.abc import Mapping
 from typing import cast
 
 from common import datastore
+from common.clock_domain import ClockStamp
 from common.common import ErrorKind
 from common.current_schema import dump_legacy, load_current, snapshot_from, zeroed_current
 from common.defaults import default_pellets, default_settings
@@ -81,10 +83,11 @@ def write_pellets_store(pelletdb):
     _write_json_blob("pellets:general", pelletdb)
 
 
-def write_current(in_data):
+def write_current(in_data, *, clock_stamp: ClockStamp | None = None):
     """Merge one control-loop sample into the durable current wire shape."""
     previous = load_current(_read_json_blob("control:current", dict))
-    schema = current_snapshot(previous, in_data, int(time.time() * 1000))
+    wall_s = time.time() if clock_stamp is None else clock_stamp.observed_wall_s
+    schema = current_snapshot(previous, in_data, int(wall_s * 1000), clock_stamp=clock_stamp)
     _write_json_blob("control:current", dump_legacy(schema))
 
 
@@ -241,16 +244,19 @@ CONTROL_HEARTBEAT_KEY = "control:heartbeat"
 CONTROL_HEARTBEAT_STALE_AFTER = 15.0
 
 
-def read_control_heartbeat():
-    """Epoch seconds of the control process's last heartbeat, or None if it has
-    never stamped one (fresh DB, or a control process too old to publish it).
+def read_control_heartbeat() -> ClockStamp | None:
+    """Read a validated identity-qualified heartbeat, without deciding liveness.
 
-    A read, not a round trip: callers decide liveness by comparing this against
-    their own clock, so a stopped control process needs no cooperation to be
-    detected -- which is the whole point, since a stopped process cannot answer
-    a request.
+    Legacy wall-only scalars and malformed stamps cannot establish a clock
+    identity. Leave their persisted bytes untouched and return unknown.
     """
-    return _read_json_blob(CONTROL_HEARTBEAT_KEY, lambda: None)
+    try:
+        value = _read_json_blob(CONTROL_HEARTBEAT_KEY, lambda: None)
+        if not isinstance(value, Mapping):
+            return None
+        return ClockStamp.from_dict(value)
+    except ValueError, TypeError:
+        return None
 
 
 def read_probe_status(probe_info):

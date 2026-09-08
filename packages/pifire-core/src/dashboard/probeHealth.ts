@@ -34,7 +34,8 @@ export interface ProbeHealthView {
   readonly sourceCopy: string;
   readonly priority: ProbeHealthPriority;
   readonly freshnessCurrent: boolean;
-  readonly lastReportedAgeS: number;
+  readonly lastReportedAgeS: number | null;
+  readonly freshnessReason: ThermocoupleHealthView["freshness"]["reason"];
   readonly freshnessQualifier: ProbeHealthFreshnessQualifier;
 }
 
@@ -179,6 +180,7 @@ export function projectProbeHealth(input: ThermocoupleHealthView): ProbeHealthVi
     priority: presentation.priority,
     freshnessCurrent: input.freshness.current,
     lastReportedAgeS: input.freshness.lastReportedAgeS,
+    freshnessReason: input.freshness.reason,
     freshnessQualifier: input.freshness.current ? null : "Last reported",
   });
 }

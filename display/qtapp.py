@@ -29,12 +29,13 @@ def _fetch():
     return read_current(), read_status()
 
 
-def _fetch_health(*, now=None):
+def _fetch_health(*, current=None, heartbeat=None):
     """Read and project the slower generic health blob."""
     return project_thermocouple_health(
         read_settings_store(),
         read_generic_key("probe_device_info"),
-        now=now,
+        current=current,
+        heartbeat=heartbeat,
     )
 
 

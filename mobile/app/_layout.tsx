@@ -1,5 +1,6 @@
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
 import { projectProbeHealth } from "@pifire/core/dashboard/probeHealth";
+import { monotonicNowMs } from "@pifire/core/liveConnection";
 import * as Notifications from "expo-notifications";
 import { Stack, useRouter, usePathname } from "expo-router";
 import {
@@ -19,7 +20,7 @@ import { loadHosts } from "../src/host";
 import { defaultPrefs, loadPrefs, savePrefs, type Prefs } from "../src/prefs";
 import { THEME } from "../src/theme";
 import {
-  LIVE_STALE_AFTER_MS,
+  receiptFreshness,
   qualifyRetainedHealth,
   useLive,
   type LiveResult,
@@ -81,8 +82,7 @@ export function usePrefsContext(): PrefsContextValue {
 function StatusStrip({ live, now }: { live: LiveResult; now: number }) {
   const { prefs } = usePrefsContext();
   const tokens = THEME[prefs.accent];
-  const ageMs = live.lastPayloadAt === null ? null : now - live.lastPayloadAt;
-  const stale = ageMs === null || ageMs > LIVE_STALE_AFTER_MS;
+  const { payloadAgeMs: ageMs, retained: stale } = receiptFreshness(live, now);
 
   let label: string;
   let color: string = tokens.text;
@@ -119,7 +119,7 @@ function StatusStrip({ live, now }: { live: LiveResult; now: number }) {
 // very first real payload after launch from alerting on state the app just
 // discovered rather than state that just changed.
 //
-// `lastPayloadAt` (not `dash` alone) gates whether a payload is real: useLive
+// `lastPayloadMonotonicMs` (not `dash` alone) gates whether a payload is real: useLive
 // seeds its `live` state with FIXTURE_DASH before the socket has delivered
 // anything, and that placeholder must not be treated as "the first payload"
 // -- it would make the *actual* first real payload look like a transition
@@ -128,13 +128,13 @@ function StatusStrip({ live, now }: { live: LiveResult; now: number }) {
 // exists to avoid.
 function useAlertNotifications(
   dash: DashSocketPayload,
-  lastPayloadAt: number | null,
+  lastPayloadMonotonicMs: number | null,
   alertsEnabled: boolean,
 ) {
   const previousRef = useRef<DashSocketPayload | null>(null);
 
   useEffect(() => {
-    if (lastPayloadAt === null) {
+    if (lastPayloadMonotonicMs === null) {
       return;
     }
     const alerts = alertsFor(previousRef.current, dash);
@@ -149,7 +149,7 @@ function useAlertNotifications(
         trigger: null,
       });
     }
-  }, [alertsEnabled, dash, lastPayloadAt]);
+  }, [alertsEnabled, dash, lastPayloadMonotonicMs]);
 }
 
 function LiveShell({
@@ -165,17 +165,18 @@ function LiveShell({
   // One shell clock drives both the transport strip and retained health.
   // Without it, an open-but-silent socket could age the strip while every
   // health surface stayed permanently "current".
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState(monotonicNowMs);
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000);
+    const id = setInterval(() => setNow(monotonicNowMs()), 1000);
     return () => clearInterval(id);
   }, []);
+  useEffect(() => setNow(monotonicNowMs()), [live.lastPayloadMonotonicMs]);
   const displayLive = useMemo(() => qualifyRetainedHealth(live, now), [live, now]);
   const primaryWire = displayLive.live.thermocoupleHealth?.find(
     (health) => health.role === "Primary" && health.label === displayLive.live.primaryProbe.label,
   );
   const primaryHealth = primaryWire ? projectProbeHealth(primaryWire) : null;
-  useAlertNotifications(live.live, live.lastPayloadAt, alertsEnabled);
+  useAlertNotifications(live.live, live.lastPayloadMonotonicMs, alertsEnabled);
 
   useEffect(() => {
     if (!alertsEnabled) {

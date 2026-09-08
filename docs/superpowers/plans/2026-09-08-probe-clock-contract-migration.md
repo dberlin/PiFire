@@ -232,3 +232,28 @@ uv run python scripts/exact_revision_gate.py push --bookmark massive-reworks-and
 ```
 
 The push wrapper revalidates the remote revision and local evidence; never hand-edit, reuse, rename, or delete an earlier attempt's evidence. Plan creation does not constitute any of this validation.
+
+## Execution record — 2026-09-08
+
+Implemented report schema 2 with acquisition-owned `observed_monotonic_s` and
+identity-qualified `clock_stamp`; policy projection does not renew acquisition.
+Heartbeat, cloud receipt caches, retained readings, web/mobile receipt clocks,
+and Qt/fixed/flex freshness consumers migrated together. Legacy or incompatible
+stamps retain fault/last-reading information with unknown age, never current.
+The approved discontinuity boundary is an actual monotonic observation gap or
+boottime-minus-monotonic increase strictly greater than 60 seconds; the earlier
+0.25-second proposal is superseded.
+
+Verification: 816 focused Python cases passed together; the two SQLite-backed
+thermocouple scenarios then passed after their final clock-identity fixture
+migration. Independent runtime/controller coverage passed 1,714 cases.
+Core, web, and mobile suites passed (61, 677, and 52 cases respectively), with
+the additional retained-unknown-age core regression passing in its 31-case
+file. All three TypeScript typechecks and explicit `prek run --all-files` passed.
+Producer and freshness reviews completed with both freshness findings repaired.
+
+Chromium exercised the actual dashboard against a local production-projector
+feed: a suspected report at 225°F remained visible; after a one-hour wall
+rollback and 16 monotonic seconds, it became “Last reported” without discarding
+the temperature. The smoke services were stopped and temporary inputs removed.
+No release gate or push was run.

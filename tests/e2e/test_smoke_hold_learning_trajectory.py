@@ -161,7 +161,7 @@ class _TransitioningProbes:
         self._reads = 0
         self._requested = False
 
-    def read_probes(self, *, excitation=None, now=None):
+    def read_probes(self, *, excitation=None, monotonic_s=None, wall_s=None, clock_domain=None):
         self._reads += 1
         self._timeline.advance_frame()
         if self._reads >= self._transition_on_read and not self._requested:
@@ -176,7 +176,12 @@ class _TransitioningProbes:
                 ),
                 origin="e2e-mode-boundary",
             )
-        return self._probes.read_probes(excitation=excitation, now=now)
+        return self._probes.read_probes(
+            excitation=excitation,
+            monotonic_s=monotonic_s,
+            wall_s=wall_s,
+            clock_domain=clock_domain,
+        )
 
     def __getattr__(self, name: str):
         return getattr(self._probes, name)
@@ -952,7 +957,7 @@ class _RealCookProbes:
         self._terminal_requested = False
         self.visited_timestamps: list[int] = []
 
-    def read_probes(self, *, excitation=None, now=None):
+    def read_probes(self, *, excitation=None, monotonic_s=None, wall_s=None, clock_domain=None):
         timestamp_ms, temperature_f, setpoint_f = self._stream.temperatures[self._clock.index]
         self.visited_timestamps.append(timestamp_ms)
         if setpoint_f > 0.0 and setpoint_f != self._last_setpoint:
@@ -979,12 +984,22 @@ class _RealCookProbes:
                 ),
                 origin="real-cook-hold-terminal",
             )
-        return {
-            "primary": {"Grill": temperature_f},
-            "food": {},
-            "aux": {},
-            "tr": {},
-        }
+        self._probes.script(
+            [
+                {
+                    "primary": {"Grill": temperature_f},
+                    "food": {},
+                    "aux": {},
+                    "tr": {},
+                }
+            ]
+        )
+        return self._probes.read_probes(
+            excitation=excitation,
+            monotonic_s=monotonic_s,
+            wall_s=wall_s,
+            clock_domain=clock_domain,
+        )
 
     def arm_stop(self) -> None:
         self._terminal_index = len(self._stream.temperatures) - 1

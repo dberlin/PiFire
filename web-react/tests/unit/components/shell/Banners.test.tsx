@@ -33,7 +33,7 @@ function health(
     },
     detector: { source: "hardware", policy: "observe" },
     outcome,
-    freshness: { current, lastReportedAgeS: current ? 0 : 42 },
+    freshness: { current, lastReportedAgeS: current ? 0 : 42, reason: current ? "current" : "stale" },
   };
 }
 

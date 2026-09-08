@@ -874,18 +874,37 @@
         "lastReportedAgeS": {
           "anyOf": [
             {
-              "type": "integer"
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "ge": 0
             },
             {
-              "type": "number"
+              "type": "null"
             }
           ],
           "title": "Lastreportedages"
+        },
+        "reason": {
+          "enum": [
+            "current",
+            "stale",
+            "unknown-clock",
+            "retained"
+          ],
+          "title": "Reason",
+          "type": "string"
         }
       },
       "required": [
         "current",
-        "lastReportedAgeS"
+        "lastReportedAgeS",
+        "reason"
       ],
       "title": "ThermocoupleHealthFreshnessView",
       "type": "object"

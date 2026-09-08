@@ -128,6 +128,17 @@ class ThermocoupleInferenceEngine:
         self._pending_heat_on_s = 0.0
         self._report = ThermocoupleHealthReport.unmonitored(0.0)
 
+    def invalidate_clock_domain(self) -> None:
+        """Discard elapsed-time evidence without acknowledging confirmed faults."""
+        report = self._report
+        confirmation_path = self._confirmation_path
+        primary_latched = self._primary_latched
+        self.reset()
+        if report.confirmed:
+            self._report = replace(report, clock_stamp=None)
+            self._confirmation_path = confirmation_path
+            self._primary_latched = primary_latched
+
     def observe(
         self,
         sample: ThermocoupleJunctionSample,
@@ -137,7 +148,7 @@ class ThermocoupleInferenceEngine:
     ) -> ThermocoupleHealthReport:
         _require_finite("now", now)
         if self._last_observed_at is not None and now < self._last_observed_at:
-            self.reset()
+            self.invalidate_clock_domain()
         self._last_observed_at = now
         self._pending_heat_on_s += excitation.delivered_heat_on_s
         if self._last_admitted_at is not None and now - self._last_admitted_at < 1.0:
@@ -195,17 +206,17 @@ class ThermocoupleInferenceEngine:
                         (ThermocoupleFault.MALFUNCTION,) if slow.state is ThermocoupleHealthState.SUSPECTED else ()
                     ),
                     evidence=slow.evidence,
-                    observed_at=now,
+                    observed_monotonic_s=now,
                     detail=detail,
                 )
         elif self._report.state is ThermocoupleHealthState.UNMONITORED:
             self._report = ThermocoupleHealthReport(
                 state=ThermocoupleHealthState.HEALTHY,
-                observed_at=now,
+                observed_monotonic_s=now,
                 detail=detail,
             )
         else:
-            self._report = replace(self._report, observed_at=now, detail=detail)
+            self._report = replace(self._report, observed_monotonic_s=now, detail=detail)
         return self._report
 
     def _begin_confirmation(
@@ -226,7 +237,7 @@ class ThermocoupleInferenceEngine:
             faults=(ThermocoupleFault.MALFUNCTION,),
             evidence=evidence,
             temperature_valid=False,
-            observed_at=now,
+            observed_monotonic_s=now,
             detail=detail,
         )
 
@@ -242,7 +253,7 @@ class ThermocoupleInferenceEngine:
         self._primary_latched = self._primary_latched or is_primary
         if self._primary_latched:
             self._reset_recovery()
-            return replace(self._report, observed_at=now, detail=detail)
+            return replace(self._report, observed_monotonic_s=now, detail=detail)
 
         if self._confirmation_path == "slow":
             clean = (
@@ -260,20 +271,20 @@ class ThermocoupleInferenceEngine:
             )
         if not clean:
             self._reset_recovery()
-            return replace(self._report, observed_at=now, detail=detail)
+            return replace(self._report, observed_monotonic_s=now, detail=detail)
 
         if self._recovery_since is None or self._recovery_last_at is None or now - self._recovery_last_at > 30.0:
             self._recovery_since = now
         self._recovery_last_at = now
         if now - self._recovery_since < 60.0:
-            return replace(self._report, observed_at=now, detail=detail)
+            return replace(self._report, observed_monotonic_s=now, detail=detail)
 
         self._confirmation_path = None
         self._recovery_since = None
         self._recovery_last_at = None
         return ThermocoupleHealthReport(
             state=ThermocoupleHealthState.HEALTHY,
-            observed_at=now,
+            observed_monotonic_s=now,
             detail=detail,
         )
 
@@ -468,8 +479,8 @@ def fuse_thermocouple_health(
         if hardware is not None:
             fused = hardware
         else:
-            observed_at = inferred.observed_at if inferred is not None else 0.0
-            fused = ThermocoupleHealthReport.unmonitored(observed_at)
+            observed_monotonic_s = inferred.observed_monotonic_s if inferred is not None else 0.0
+            fused = ThermocoupleHealthReport.unmonitored(observed_monotonic_s)
     elif not inferred.confirmed:
         fused = inferred
     else:

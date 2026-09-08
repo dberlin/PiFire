@@ -5,6 +5,7 @@ import sqlite3
 import pytest
 
 from common import datastore
+from common.clock_domain import CLOCK_STAMP_SCHEMA, ClockStamp
 from common.common import ErrorKind
 from common.defaults import default_pellets, default_settings
 from common.pellets_schema import PelletDbValidationError
@@ -171,6 +172,42 @@ def test_current_snapshot_recovers_corrupt_cache_from_probe_map(configured_runti
     assert snapshot.primary == {"PitProbe": 0}
     assert snapshot.food == {"PinkProbe": 0}
     assert snapshot.last_readings == {}
+
+
+def test_control_heartbeat_round_trip_preserves_stamp_without_liveness_policy(ds):
+    stamp = ClockStamp(
+        CLOCK_STAMP_SCHEMA,
+        "11111111-1111-4111-8111-111111111111",
+        "22222222-2222-4222-8222-222222222222",
+        100.0,
+        1_800_000_000.0,
+        0.0,
+    )
+    runtime.write_generic_key(runtime.CONTROL_HEARTBEAT_KEY, stamp.as_dict())
+    assert runtime.read_control_heartbeat() == stamp
+
+
+@pytest.mark.parametrize("raw", ["1800000000", '"1800000000"', "null", "true", "[]", "{}"])
+def test_control_heartbeat_legacy_or_malformed_payload_is_unknown(ds, raw):
+    datastore.set_blob(runtime.CONTROL_HEARTBEAT_KEY, raw)
+    assert runtime.read_control_heartbeat() is None
+
+
+def test_control_heartbeat_does_not_coerce_numeric_stamp_coordinates(ds):
+    datastore.set_blob(
+        runtime.CONTROL_HEARTBEAT_KEY,
+        json.dumps(
+            {
+                "schema_version": 1,
+                "boot_id": "11111111-1111-4111-8111-111111111111",
+                "runtime_id": "22222222-2222-4222-8222-222222222222",
+                "observed_monotonic_s": "100",
+                "observed_wall_s": 1_800_000_000,
+                "suspend_offset_s": 0,
+            }
+        ),
+    )
+    assert runtime.read_control_heartbeat() is None
 
 
 def test_flush_current_rebuilds_zeroed_wire_shape(configured_runtime):

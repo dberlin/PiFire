@@ -10,6 +10,7 @@ tests/characterization/, which is the real behavior-preservation gate.
 """
 
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -141,7 +142,7 @@ def _inferred(policy, *, primary=True):
             ThermocoupleEvidence.EXCITATION_RESPONSE,
         ),
         temperature_valid=False,
-        observed_at=0.0,
+        observed_monotonic_s=0.0,
         detail={
             "policy_version": 1,
             "sample_count": 25,
@@ -208,7 +209,7 @@ def _suspected():
         state=ThermocoupleHealthState.SUSPECTED,
         faults=(ThermocoupleFault.MALFUNCTION,),
         evidence=(ThermocoupleEvidence.JUNCTION_COLLAPSE,),
-        observed_at=0.0,
+        observed_monotonic_s=0.0,
     )
 
 
@@ -301,7 +302,9 @@ def test_excitation_context_uses_active_mode_set_and_celsius_setpoint(mode_name,
     mode._read_probes_with_excitation()
 
     call = mode.probe_complex.read_calls[-1]
-    assert call["now"] == 0.0
+    assert call["monotonic_s"] == 0.0
+    assert call["wall_s"] == 0.0
+    assert call["clock_domain"] is mode.ctx.get_clock_domain()
     assert call["excitation"].active_cook is active_cook
     assert call["excitation"].primary_setpoint_c == pytest.approx(100.0)
 
@@ -337,7 +340,7 @@ def test_active_cook_read_publishes_current_fused_device_info_same_tick(report):
             "device": "test",
             "status": {
                 "thermocouple_health": {
-                    "Grill": report.as_dict(),
+                    "Grill": replace(report, clock_stamp=probes.last_clock_stamp).as_dict(),
                 }
             },
         }
@@ -352,7 +355,7 @@ def test_run_passes_excitation_context_at_preflight_post_setup_and_tick():
 
     assert len(ctx.devices.probe_complex.read_calls) == 3
     assert all(call["excitation"] is not None for call in ctx.devices.probe_complex.read_calls)
-    assert [call["now"] for call in ctx.devices.probe_complex.read_calls] == [0.0, 0.0, 0.0]
+    assert [call["monotonic_s"] for call in ctx.devices.probe_complex.read_calls] == [0.0, 0.0, 0.0]
 
 
 def test_confirmed_primary_fault_preflight_skips_mode_setup_and_positive_actuation(monkeypatch):
@@ -753,6 +756,14 @@ def test_secondary_recovery_clears_current_report_without_notification_or_log():
             role="secondary",
         )
     ]
+    recovered = {
+        label: replace(
+            report,
+            observed_monotonic_s=probe_complex.last_clock_stamp.observed_monotonic_s,
+            clock_stamp=probe_complex.last_clock_stamp,
+        )
+        for label, report in recovered.items()
+    }
     assert probe_complex.get_thermocouple_health() == recovered
     assert ctx.store.read_generic_key("probe_device_info") == [
         {

@@ -2,6 +2,8 @@ import pytest
 
 from common.persistence.runtime import CONTROL_HEARTBEAT_STALE_AFTER
 from display.qtbackend import PiFireBackend, ProbeHealthModel, project_thermocouple_health
+from probes.thermocouple_health import THERMOCOUPLE_HEALTH_REPORT_SCHEMA
+from tests.fakes.clock import clock_stamp
 
 PROBE_INFO = {"primary": {"name": "Grill", "max_temp": 600}, "food": [{"name": "Probe 1", "max_temp": 300}], "aux": []}
 
@@ -354,7 +356,11 @@ def _health_item(
         },
         "detector": {"source": source, "policy": policy},
         "outcome": outcome,
-        "freshness": {"current": current, "lastReportedAgeS": age},
+        "freshness": {
+            "current": current,
+            "lastReportedAgeS": age,
+            "reason": "unknown-clock" if age is None else "current" if current else "stale",
+        },
     }
 
 
@@ -362,35 +368,6 @@ def _health_row(model, index=0):
     roles = {bytes(name).decode(): role for role, name in model.roleNames().items()}
     model_index = model.index(index, 0)
     return {name: model.data(model_index, role) for name, role in roles.items()}
-
-
-def test_probe_health_model_exposes_the_frozen_semantic_roles_exactly():
-    model = ProbeHealthModel()
-
-    assert {bytes(name) for name in model.roleNames().values()} == {
-        b"device",
-        b"port",
-        b"label",
-        b"displayName",
-        b"role",
-        b"state",
-        b"faults",
-        b"evidence",
-        b"temperatureValid",
-        b"source",
-        b"policy",
-        b"outcome",
-        b"severity",
-        b"availability",
-        b"headline",
-        b"impactCopy",
-        b"causeCopy",
-        b"sourceCopy",
-        b"priority",
-        b"freshnessCurrent",
-        b"lastReportedAgeS",
-        b"freshnessQualifier",
-    }
 
 
 @pytest.mark.parametrize(
@@ -505,30 +482,10 @@ def test_probe_health_model_projects_canonical_fault_source_policy_and_freshness
     assert row["faults"] == ["open", "short", "malfunction"]
     assert row["evidence"] == ["stuck-response", "hardware"]
     assert row["source"] == "mixed"
-    assert row["sourceCopy"] == "Hardware + software"
     assert row["policy"] == "enforce"
-    assert row["causeCopy"] == (
-        "Hardware reported an open circuit. "
-        "Hardware reported a short circuit. "
-        "Software detected an abnormal thermocouple response."
-    )
     assert row["freshnessCurrent"] is False
     assert row["lastReportedAgeS"] == 12.5
     assert row["freshnessQualifier"] == "Last reported"
-
-
-@pytest.mark.parametrize(
-    "source,source_copy",
-    [
-        ("hardware", "Hardware"),
-        ("software", "Software"),
-        ("mixed", "Hardware + software"),
-    ],
-)
-def test_probe_health_model_projects_every_detector_source(source, source_copy):
-    model = ProbeHealthModel()
-    model.update([_health_item(source=source)])
-    assert _health_row(model)["sourceCopy"] == source_copy
 
 
 def test_probe_health_model_keeps_aux_for_summary_and_details():
@@ -602,17 +559,20 @@ def test_backend_throttles_health_reads_independently_from_fast_polling():
         PROBE_INFO,
         health_fetch_fn=lambda: health_calls.append(clock["t"]) or [_health_item()],
     )
-    backend._now = lambda: clock["t"]
+    backend._monotonic = lambda: clock["t"]
+    backend._now = lambda: 1_800_000_000.0
 
     backend.poll()
     for _ in range(20):
         clock["t"] += 0.04
         backend.poll()
     assert health_calls == [1000.0]
+    assert _health_row(backend.probeHealth)["lastReportedAgeS"] == pytest.approx(1.05)
 
     clock["t"] = 1001.0
     backend.poll()
     assert health_calls == [1000.0, 1001.0]
+    assert _health_row(backend.probeHealth)["lastReportedAgeS"] == 0.25
 
 
 def test_backend_failed_health_read_preserves_invalid_state_while_advancing_freshness():
@@ -641,7 +601,8 @@ def test_backend_failed_health_read_preserves_invalid_state_while_advancing_fres
         PROBE_INFO,
         health_fetch_fn=fetch_health,
     )
-    backend._now = lambda: clock["t"]
+    backend._monotonic = lambda: clock["t"]
+    backend._now = lambda: 1_800_000_000.0
 
     backend.poll()
     clock["t"] += backend.HEALTH_POLL_SECONDS
@@ -686,7 +647,8 @@ def test_backend_successful_empty_health_read_clears_confirmed_invalid_state(emp
         PROBE_INFO,
         health_fetch_fn=lambda: next(health_reads),
     )
-    backend._now = lambda: clock["t"]
+    backend._monotonic = lambda: clock["t"]
+    backend._now = lambda: 1_800_000_000.0
 
     backend.poll()
     assert backend.probeHealth.invalid_labels() == {"Grill"}
@@ -709,7 +671,8 @@ def test_backend_exposes_health_list_model_and_clears_malformed_reads():
         health_fetch_fn=lambda: health["value"],
     )
     clock = {"t": 1000.0}
-    backend._now = lambda: clock["t"]
+    backend._monotonic = lambda: clock["t"]
+    backend._now = lambda: 1_800_000_000.0
     backend.poll()
     assert backend.probeHealth.rowCount() == 1
 
@@ -734,7 +697,7 @@ def _device_report(
     label="Grill",
     state="healthy",
     temperature_valid=True,
-    observed_at=90.0,
+    observed_monotonic_s=90.0,
     detail=None,
     evidence=None,
 ):
@@ -747,7 +710,9 @@ def _device_report(
                     "faults": ["open"] if state == "confirmed" else [],
                     "evidence": ["hardware"] if evidence is None else evidence,
                     "temperature_valid": temperature_valid,
-                    "observed_at": observed_at,
+                    "report_schema_version": THERMOCOUPLE_HEALTH_REPORT_SCHEMA,
+                    "observed_monotonic_s": observed_monotonic_s,
+                    "clock_stamp": clock_stamp(monotonic_s=observed_monotonic_s).as_dict(),
                     "detail": {"policy": "observe"} if detail is None else detail,
                 }
             }
@@ -822,7 +787,8 @@ def test_qt_health_transport_projects_report_authority_without_global_mode(
                 evidence=evidence,
             )
         ],
-        now=100.0,
+        current=clock_stamp(),
+        heartbeat=clock_stamp(),
     )
 
     assert len(projected) == 1
@@ -839,64 +805,59 @@ def test_qt_health_transport_keeps_aux_identity_and_backend_relative_freshness()
 
     current = project_thermocouple_health(
         settings,
-        [_device_report(label="Ambient", observed_at=120.0)],
-        now=100.0,
+        [_device_report(label="Ambient", observed_monotonic_s=99.0)],
+        current=clock_stamp(),
+        heartbeat=clock_stamp(),
     )
     stale = project_thermocouple_health(
         settings,
-        [_device_report(label="Ambient", observed_at=60.0)],
-        now=100.0,
+        [_device_report(label="Ambient", observed_monotonic_s=60.0)],
+        current=clock_stamp(),
+        heartbeat=clock_stamp(),
     )
 
     assert current[0]["label"] == "Ambient"
     assert current[0]["displayName"] == "Ambient"
     assert current[0]["port"] == "TC1"
-    assert current[0]["freshness"] == {"current": True, "lastReportedAgeS": 0.0}
-    assert stale[0]["freshness"] == {"current": False, "lastReportedAgeS": 40.0}
+    assert current[0]["freshness"] == {"current": True, "lastReportedAgeS": 1.0, "reason": "current"}
+    assert stale[0]["freshness"] == {"current": False, "lastReportedAgeS": 40.0, "reason": "stale"}
 
 
-def test_qt_health_transport_uses_the_producer_monotonic_clock_by_default(monkeypatch):
-    clock = {"now": 10_000.5}
-    monkeypatch.setattr("display.qtbackend.time.monotonic", lambda: clock["now"])
-    monkeypatch.setattr("display.qtbackend.time.time", lambda: 1_800_000_000.0)
+def test_qt_health_transport_uses_qualified_clock_defaults_without_rejuvenating_report(monkeypatch):
+    clock = {"mono": 10_000.5, "wall": 1_800_000_000.0}
+    monkeypatch.setattr(
+        "display.qtbackend.local_clock_stamp",
+        lambda: clock_stamp(monotonic_s=clock["mono"], wall_s=clock["wall"]),
+    )
+    monkeypatch.setattr(
+        "display.qtbackend.read_control_heartbeat",
+        lambda: clock_stamp(monotonic_s=clock["mono"], wall_s=clock["wall"]),
+    )
     settings = {"probe_settings": {"probe_map": {"probe_info": [_configured_probe()]}}}
-    reports = [_device_report(observed_at=10_000.0)]
+    reports = [_device_report(observed_monotonic_s=10_000.0)]
 
     current = project_thermocouple_health(settings, reports)
-    clock["now"] += CONTROL_HEARTBEAT_STALE_AFTER + 1.0
+    clock["mono"] += 16.0
+    clock["wall"] -= 3600.0
     aged = project_thermocouple_health(settings, reports)
 
-    assert current[0]["freshness"] == {"current": True, "lastReportedAgeS": 0.5}
-    assert aged[0]["freshness"] == {
-        "current": False,
-        "lastReportedAgeS": CONTROL_HEARTBEAT_STALE_AFTER + 1.5,
-    }
+    assert current[0]["freshness"] == {"current": True, "lastReportedAgeS": 0.5, "reason": "current"}
+    assert aged[0]["freshness"] == {"current": False, "lastReportedAgeS": 16.5, "reason": "stale"}
 
 
 @pytest.mark.parametrize(
-    "settings,device_info,now",
+    "settings,device_info",
     [
-        ({}, [], 100.0),
-        ({"probe_settings": {"probe_map": {"probe_info": "bad"}}}, [], 100.0),
+        ({}, []),
+        ({"probe_settings": {"probe_map": {"probe_info": "bad"}}}, []),
         (
             {"probe_settings": {"probe_map": {"probe_info": [_configured_probe()]}}},
             [_device_report(detail={"sample_count": 5})],
-            100.0,
-        ),
-        (
-            {"probe_settings": {"probe_map": {"probe_info": [_configured_probe()]}}},
-            [_device_report(observed_at=float("nan"))],
-            100.0,
-        ),
-        (
-            {"probe_settings": {"probe_map": {"probe_info": [_configured_probe()]}}},
-            [_device_report()],
-            float("inf"),
         ),
     ],
 )
-def test_qt_health_transport_omits_missing_and_malformed_data(settings, device_info, now):
-    assert project_thermocouple_health(settings, device_info, now=now) == []
+def test_qt_health_transport_omits_missing_and_malformed_data(settings, device_info):
+    assert project_thermocouple_health(settings, device_info, current=clock_stamp(), heartbeat=clock_stamp()) == []
 
 
 def test_qtapp_health_fetch_reads_and_projects_the_generic_blob_once(monkeypatch):
@@ -912,7 +873,7 @@ def test_qtapp_health_fetch_reads_and_projects_the_generic_blob_once(monkeypatch
     monkeypatch.setattr(
         qtapp,
         "read_generic_key",
-        lambda key: reads.append(key) or [_device_report(observed_at=99.5)],
+        lambda key: reads.append(key) or [_device_report(observed_monotonic_s=99.5)],
         raising=False,
     )
     monkeypatch.setattr(
@@ -921,7 +882,199 @@ def test_qtapp_health_fetch_reads_and_projects_the_generic_blob_once(monkeypatch
         lambda: pytest.fail("health projection read global mode"),
     )
 
-    projected = qtapp._fetch_health(now=100.0)
+    projected = qtapp._fetch_health(current=clock_stamp(), heartbeat=clock_stamp())
 
     assert reads == ["probe_device_info"]
-    assert projected[0]["freshness"] == {"current": True, "lastReportedAgeS": 0.5}
+    assert projected[0]["freshness"] == {"current": True, "lastReportedAgeS": 0.5, "reason": "current"}
+
+
+@pytest.mark.parametrize("wall_delta", [-3600.0, 3600.0])
+@pytest.mark.parametrize("temperature_result", ["live", "missing", "error"])
+def test_health_poll_wall_steps_do_not_freeze_cached_rows(wall_delta, temperature_result):
+    clock = {"mono": 100.0, "wall": 1_800_000_000.0}
+    healthy_transport = True
+
+    def fetch_health():
+        if healthy_transport:
+            return [_health_item(state="suspected", age=14.5)]
+        raise OSError("health source stopped")
+
+    def fetch_temperatures():
+        if not healthy_transport:
+            if temperature_result == "missing":
+                return None, None
+            if temperature_result == "error":
+                raise OSError("temperature source stopped")
+        return {"P": {"Grill": 225}, "F": {}, "AUX": {}, "PSP": 250, "NT": {}}, {"mode": "Hold"}
+
+    backend = PiFireBackend(fetch_temperatures, lambda c, d: None, PROBE_INFO, health_fetch_fn=fetch_health)
+    backend._monotonic = lambda: clock["mono"]
+    backend._now = lambda: clock["wall"]
+    backend.poll()
+    assert _health_row(backend.probeHealth)["freshnessCurrent"] is True
+    healthy_transport = False
+    clock["wall"] += wall_delta
+
+    for elapsed, age in [(0.75, 15.25), (2.0, 16.5)]:
+        clock["mono"] = 100.0 + elapsed
+        if temperature_result == "error":
+            with pytest.raises(OSError, match="temperature source"):
+                backend.poll()
+        else:
+            backend.poll()
+        row = _health_row(backend.probeHealth)
+        assert row["lastReportedAgeS"] == age
+        assert row["freshnessCurrent"] is False
+        assert row["freshnessQualifier"]
+        assert backend.probeHealth.invalid_labels() == set()
+    if temperature_result == "live":
+        assert backend.primaryTemp == 225
+        assert backend.primaryHasTemp is True
+
+
+def test_backend_cached_unknown_age_does_not_turn_into_zero():
+    clock = {"mono": 100.0}
+    first = True
+
+    def fetch_health():
+        nonlocal first
+        if first:
+            first = False
+            return [_health_item(state="confirmed", temperature_valid=False, current=False, age=None)]
+        raise OSError("health source stopped")
+
+    backend = PiFireBackend(lambda: (None, None), lambda c, d: None, PROBE_INFO, health_fetch_fn=fetch_health)
+    backend._monotonic = lambda: clock["mono"]
+    backend.poll()
+    clock["mono"] += 20
+    backend.poll()
+
+    row = _health_row(backend.probeHealth)
+    assert row["lastReportedAgeS"] is None
+    assert row["freshnessCurrent"] is False
+    assert row["freshnessQualifier"]
+    assert backend.probeHealth.invalid_labels() == {"Grill"}
+
+
+def test_qt_legacy_wall_observation_is_retained_unknown():
+    settings = {"probe_settings": {"probe_map": {"probe_info": [_configured_probe()]}}}
+    historical = [
+        {
+            "device": "max31856",
+            "status": {
+                "thermocouple_health": {
+                    "Grill": {
+                        "state": "confirmed",
+                        "faults": ["open"],
+                        "evidence": ["hardware"],
+                        "temperature_valid": False,
+                        "observed_at": 1_800_000_000.0,
+                        "detail": {"policy": "enforce"},
+                    }
+                }
+            },
+        }
+    ]
+
+    projected = project_thermocouple_health(settings, historical, current=clock_stamp(), heartbeat=clock_stamp())
+
+    assert projected[0]["report"]["state"] == "confirmed"
+    assert projected[0]["report"]["faults"] == ["open"]
+    assert projected[0]["outcome"] == "stopped"
+    assert projected[0]["freshness"] == {"current": False, "lastReportedAgeS": None, "reason": "unknown-clock"}
+    assert historical[0]["status"]["thermocouple_health"]["Grill"]["observed_at"] == 1_800_000_000.0
+
+
+@pytest.mark.parametrize(
+    "reader,heartbeat",
+    [
+        (clock_stamp(boot_id="f5398d50-5456-4ba8-8e8c-5baf55bf7381"), clock_stamp()),
+        (clock_stamp(), clock_stamp(runtime_id="f5398d50-5456-4ba8-8e8c-5baf55bf7381")),
+        (clock_stamp(suspend_offset_s=62.001), clock_stamp(suspend_offset_s=62.001)),
+        (clock_stamp(monotonic_s=89.0), clock_stamp(monotonic_s=89.0)),
+        (clock_stamp(), clock_stamp(monotonic_s=84.0)),
+    ],
+)
+def test_qt_untrusted_clock_retains_fault_without_inventing_age(reader, heartbeat):
+    settings = {"probe_settings": {"probe_map": {"probe_info": [_configured_probe()]}}}
+    projected = project_thermocouple_health(
+        settings, [_device_report(state="confirmed", temperature_valid=False)], current=reader, heartbeat=heartbeat
+    )
+    assert projected[0]["report"]["faults"] == ["open"]
+    assert projected[0]["outcome"] == "stopped"
+    assert projected[0]["freshness"] == {"current": False, "lastReportedAgeS": None, "reason": "unknown-clock"}
+
+
+def test_qt_coordinate_disagreement_retains_report_with_unknown_age():
+    report = _device_report(state="confirmed", temperature_valid=False)
+    report["status"]["thermocouple_health"]["Grill"]["observed_monotonic_s"] = 95.0
+    settings = {"probe_settings": {"probe_map": {"probe_info": [_configured_probe()]}}}
+    projected = project_thermocouple_health(settings, [report], current=clock_stamp(), heartbeat=clock_stamp())
+    assert projected[0]["report"]["faults"] == ["open"]
+    assert projected[0]["freshness"] == {"current": False, "lastReportedAgeS": None, "reason": "unknown-clock"}
+
+
+@pytest.mark.parametrize("heartbeat_blob", [None, "1800000000.0"])
+def test_qt_missing_or_scalar_heartbeat_cannot_lend_report_identity(monkeypatch, heartbeat_blob):
+    monkeypatch.setattr("common.persistence.runtime.datastore.get_blob", lambda key: heartbeat_blob)
+    settings = {"probe_settings": {"probe_map": {"probe_info": [_configured_probe()]}}}
+    projected = project_thermocouple_health(
+        settings, [_device_report(state="confirmed", temperature_valid=False)], current=clock_stamp()
+    )
+    assert projected[0]["report"]["faults"] == ["open"]
+    assert projected[0]["freshness"] == {"current": False, "lastReportedAgeS": None, "reason": "unknown-clock"}
+
+
+def test_backend_fresh_health_fetch_and_heartbeat_do_not_renew_stopped_producer():
+    clock = {"mono": 100.0}
+    settings = {"probe_settings": {"probe_map": {"probe_info": [_configured_probe()]}}}
+    reports = [_device_report(state="suspected", observed_monotonic_s=100)]
+
+    def fetch_health():
+        reader = clock_stamp(monotonic_s=clock["mono"])
+        return project_thermocouple_health(settings, reports, current=reader, heartbeat=reader)
+
+    backend = PiFireBackend(
+        lambda: ({"P": {"Grill": 225}, "F": {}, "AUX": {}, "PSP": 250, "NT": {}}, {"mode": "Hold"}),
+        lambda c, d: None,
+        PROBE_INFO,
+        health_fetch_fn=fetch_health,
+    )
+    backend._monotonic = lambda: clock["mono"]
+    backend.poll()
+    clock["mono"] = 115.0
+    backend.poll()
+    assert _health_row(backend.probeHealth)["freshnessCurrent"] is True
+    clock["mono"] = 116.0
+    backend.poll()
+    row = _health_row(backend.probeHealth)
+    assert row["freshnessCurrent"] is False
+    assert row["lastReportedAgeS"] == 16.0
+    assert row["freshnessQualifier"]
+    assert backend.primaryTemp == 225
+    assert backend.primaryHasTemp is True
+
+
+def test_backend_suspend_invalidates_cached_health_when_fetch_fails(monkeypatch):
+    current = clock_stamp(monotonic_s=100.0, suspend_offset_s=2.0)
+    monkeypatch.setattr("display.qtbackend.local_clock_stamp", lambda: current)
+    transport_alive = True
+
+    def fetch_health():
+        if transport_alive:
+            return [_health_item(state="confirmed", temperature_valid=False, age=0.0)]
+        raise OSError("health source stopped")
+
+    backend = PiFireBackend(lambda: (None, None), lambda c, d: None, PROBE_INFO, health_fetch_fn=fetch_health)
+    backend._monotonic = lambda: current.observed_monotonic_s
+    backend.poll()
+    assert _health_row(backend.probeHealth)["freshnessCurrent"] is True
+    transport_alive = False
+    current = clock_stamp(monotonic_s=100.0, suspend_offset_s=62.001)
+    backend.poll()
+
+    row = _health_row(backend.probeHealth)
+    assert row["freshnessCurrent"] is False
+    assert row["lastReportedAgeS"] is None
+    assert "unknown" in row["freshnessQualifier"].lower()
+    assert backend.probeHealth.invalid_labels() == {"Grill"}

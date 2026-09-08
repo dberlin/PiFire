@@ -193,7 +193,7 @@ describe("SettingsShell", () => {
       },
       detector: { source: "hardware", policy: "observe" },
       outcome: "unavailable",
-      freshness: { current: true, lastReportedAgeS: 0 },
+      freshness: { current: true, lastReportedAgeS: 0, reason: "current" },
     };
     function LiveParent() {
       return <Outlet context={{ live: { thermocoupleHealth: [health] }, phase: "unreachable" }} />;

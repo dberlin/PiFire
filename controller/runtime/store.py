@@ -7,6 +7,7 @@ import time
 from collections import deque
 from collections.abc import Mapping
 
+from common.clock_domain import ClockStamp
 from common.common import ErrorKind, generate_uuid
 from common.control_delta import (
     ControlDeltaError,
@@ -168,12 +169,13 @@ class InMemoryStore:
         self._current = dump_legacy(zeroed_current(self._probe_info()), exclude_timestamp=True)
         return copy.deepcopy(self._current)
 
-    def write_current(self, in_data):
+    def write_current(self, in_data, *, clock_stamp: ClockStamp | None = None):
         # Mirror runtime_persistence.write_current: the caller hands in
         # probe_history-shaped data, and what is STORED is the transformed
         # blob.
         previous = load_current(self._current)
-        schema = current_snapshot(previous, in_data, int(time.time() * 1000))
+        wall_s = time.time() if clock_stamp is None else clock_stamp.observed_wall_s
+        schema = current_snapshot(previous, in_data, int(wall_s * 1000), clock_stamp=clock_stamp)
         self._current = dump_legacy(schema)
 
     def read_history(self, num_items=0):
@@ -376,8 +378,8 @@ class SqliteStore:
     def flush_current(self):
         return runtime_persistence.flush_current()
 
-    def write_current(self, in_data):
-        runtime_persistence.write_current(in_data)
+    def write_current(self, in_data, *, clock_stamp: ClockStamp | None = None):
+        runtime_persistence.write_current(in_data, clock_stamp=clock_stamp)
 
     def read_history(self, num_items=0):
         return history_persistence.read_history(num_items)

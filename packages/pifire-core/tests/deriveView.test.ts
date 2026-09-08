@@ -41,6 +41,12 @@ describe("probeCard with no current reading", () => {
     expect(v.stale).toBe("last data 47s ago");
   });
 
+  it("does not invent an age for a retained reading with unknown provenance", () => {
+    const v = withLast({ lastTemp: 147, lastReadingAge: null });
+    expect(v.tempInt).toBe(147);
+    expect(v.stale).toBe("Last known");
+  });
+
   it("shows nothing at all for a probe that has never reported", () => {
     const v = card({ temp: null, status: FIXTURE_DASH.foodProbes[0].status });
     expect(v.tempInt).toBeNull();
@@ -264,7 +270,7 @@ const wireHealth = (
     detail: {},
     ...over.report,
   },
-  freshness: { current: true, lastReportedAgeS: 0, ...over.freshness },
+  freshness: { current: true, lastReportedAgeS: 0, reason: "current", ...over.freshness },
 });
 
 describe("deriveView thermocouple health integration", () => {
@@ -385,7 +391,7 @@ describe("deriveView thermocouple health integration", () => {
       thermocoupleHealth: [
         wireHealth({
           report: { state: "suspected", temperatureValid: true },
-          freshness: { current: false, lastReportedAgeS: 70 },
+          freshness: { current: false, lastReportedAgeS: 70, reason: "stale" },
         }),
       ],
     });

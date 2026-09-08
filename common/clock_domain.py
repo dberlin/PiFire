@@ -104,6 +104,17 @@ class ClockStamp:
         return cls(schema, boot, runtime, monotonic, wall, offset)
 
 
+def parse_clock_stamp(value: object) -> ClockStamp | None:
+    """Parse untrusted persisted stamp data without guessing legacy coordinates."""
+    if not isinstance(value, Mapping) or any(not isinstance(key, str) for key in value):
+        return None
+    payload: dict[str, object] = {key: item for key, item in value.items() if isinstance(key, str)}
+    try:
+        return ClockStamp.from_dict(payload)
+    except ValueError:
+        return None
+
+
 def stamp_age_s(
     stamp: ClockStamp,
     *,
@@ -177,7 +188,9 @@ class RuntimeClockDomain:
         self.runtime_id = str(uuid4())
         return self.runtime_id
 
-    def capture(self) -> ClockStamp:
+    def capture(self, *, monotonic_s: float | None = None, wall_s: float | None = None) -> ClockStamp:
+        if (monotonic_s is None) != (wall_s is None):
+            raise ValueError("Acquisition coordinates must be supplied as a pair")
         monotonic = self._monotonic()
         if not _finite(monotonic):
             raise ValueError("Monotonic source must return finite seconds")
@@ -191,7 +204,59 @@ class RuntimeClockDomain:
             schema_version=CLOCK_STAMP_SCHEMA,
             boot_id=self.boot_id,
             runtime_id=self.runtime_id,
-            observed_monotonic_s=monotonic,
-            observed_wall_s=self._wall_time(),
+            observed_monotonic_s=monotonic if monotonic_s is None else monotonic_s,
+            observed_wall_s=self._wall_time() if wall_s is None else wall_s,
             suspend_offset_s=offset,
         )
+
+
+@cache
+def _reader_clock_domain() -> RuntimeClockDomain:
+    return RuntimeClockDomain.for_system(monotonic=time.monotonic, wall_time=time.time)
+
+
+def local_clock_stamp() -> ClockStamp | None:
+    """Sample this reader's local boot/offset; its runtime is not control authority."""
+    try:
+        return _reader_clock_domain().capture()
+    except OSError, ValueError:
+        return None
+
+
+def heartbeat_runtime_id(
+    heartbeat: ClockStamp | None,
+    current: ClockStamp | None,
+    *,
+    stale_after_s: float,
+) -> str | None:
+    """Accept a control generation only from its fresh identity-qualified heartbeat."""
+    if heartbeat is None or current is None:
+        return None
+    age = stamp_age_s(
+        heartbeat,
+        monotonic_s=current.observed_monotonic_s,
+        boot_id=current.boot_id,
+        runtime_id=heartbeat.runtime_id,
+        suspend_offset_s=current.suspend_offset_s,
+    )
+    return heartbeat.runtime_id if age is not None and age <= stale_after_s else None
+
+
+def qualified_stamp_age_s(
+    stamp: ClockStamp | None,
+    *,
+    heartbeat: ClockStamp | None,
+    current: ClockStamp | None,
+    heartbeat_stale_after_s: float,
+) -> float | None:
+    """Age a retained observation only against a live control generation."""
+    if stamp is None or current is None:
+        return None
+    runtime_id = heartbeat_runtime_id(heartbeat, current, stale_after_s=heartbeat_stale_after_s)
+    return stamp_age_s(
+        stamp,
+        monotonic_s=current.observed_monotonic_s,
+        boot_id=current.boot_id,
+        runtime_id=runtime_id,
+        suspend_offset_s=current.suspend_offset_s,
+    )

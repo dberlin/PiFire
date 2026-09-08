@@ -8,9 +8,13 @@ from pydantic import (
     SerializationInfo,
     SerializerFunctionWrapHandler,
     TypeAdapter,
+    ValidationError,
     field_validator,
     model_serializer,
 )
+
+from common.clock_domain import ClockStamp, parse_clock_stamp, qualified_stamp_age_s
+from probes.thermocouple_health import THERMOCOUPLE_HEALTH_REPORT_SCHEMA
 
 from .base import ExtensibleWireModel, FiniteFloat, WireModel
 from .control import JsonValue, PelletDbSchema
@@ -131,7 +135,8 @@ class ThermocoupleHealthDetectorView(WireModel):
 
 class ThermocoupleHealthFreshnessView(WireModel):
     current: bool
-    last_reported_age_s: FiniteNumber = Field(alias="lastReportedAgeS")
+    last_reported_age_s: FiniteNumber | None = Field(alias="lastReportedAgeS", ge=0)
+    reason: Literal["current", "stale", "unknown-clock", "retained"]
 
 
 def project_thermocouple_health_outcome(
@@ -165,6 +170,95 @@ class ThermocoupleHealthView(WireModel):
     detector: ThermocoupleHealthDetectorView
     outcome: Literal["none", "notify_only", "unavailable", "stopped"]
     freshness: ThermocoupleHealthFreshnessView
+
+
+def project_thermocouple_health_views(
+    settings: object,
+    probe_device_info: object,
+    *,
+    heartbeat: ClockStamp | None,
+    current: ClockStamp | None,
+    stale_after_s: float,
+) -> list[ThermocoupleHealthView]:
+    """Retain valid health content while qualifying acquisition authority once."""
+    if not isinstance(settings, Mapping) or not isinstance(probe_device_info, list):
+        return []
+    probe_settings = settings.get("probe_settings")
+    probe_map = probe_settings.get("probe_map") if isinstance(probe_settings, Mapping) else None
+    probes = probe_map.get("probe_info") if isinstance(probe_map, Mapping) else None
+    if not isinstance(probes, list):
+        return []
+    reports: dict[tuple[str, str], Mapping[str, object]] = {}
+    for device_info in probe_device_info:
+        if not isinstance(device_info, Mapping):
+            continue
+        device = device_info.get("device")
+        status = device_info.get("status")
+        health = status.get("thermocouple_health") if isinstance(status, Mapping) else None
+        if not isinstance(device, str) or not isinstance(health, Mapping):
+            continue
+        for label, report in health.items():
+            if isinstance(label, str) and isinstance(report, Mapping):
+                reports[(device, label)] = {key: value for key, value in report.items() if isinstance(key, str)}
+    views: list[ThermocoupleHealthView] = []
+    for probe in probes:
+        if not isinstance(probe, Mapping):
+            continue
+        device, label = probe.get("device"), probe.get("label")
+        if not isinstance(device, str) or not isinstance(label, str):
+            continue
+        report = reports.get((device, label))
+        if report is None:
+            continue
+        detail, evidence = report.get("detail"), report.get("evidence")
+        if not isinstance(detail, Mapping) or not isinstance(evidence, list):
+            continue
+        stamp = parse_clock_stamp(report.get("clock_stamp"))
+        observed = report.get("observed_monotonic_s")
+        if (
+            type(report.get("report_schema_version")) is not int
+            or report.get("report_schema_version") != THERMOCOUPLE_HEALTH_REPORT_SCHEMA
+            or type(observed) not in (int, float)
+            or stamp is None
+            or stamp.observed_monotonic_s != observed
+        ):
+            stamp = None
+        age = qualified_stamp_age_s(stamp, heartbeat=heartbeat, current=current, heartbeat_stale_after_s=stale_after_s)
+        fresh = age is not None and age <= stale_after_s
+        hardware = "hardware" in evidence
+        software = any(item != "hardware" for item in evidence)
+        source = "mixed" if hardware and software else "hardware" if hardware else "software"
+        role, state = probe.get("type"), report.get("state")
+        try:
+            views.append(
+                ThermocoupleHealthView.model_validate(
+                    {
+                        "device": device,
+                        "port": probe.get("port"),
+                        "label": label,
+                        "displayName": probe.get("name"),
+                        "role": role,
+                        "report": {
+                            "state": state,
+                            "faults": report.get("faults"),
+                            "evidence": evidence,
+                            "temperatureValid": report.get("temperature_valid"),
+                            "detail": dict(detail),
+                        },
+                        "detector": {"source": source, "policy": detail.get("policy")},
+                        "outcome": project_thermocouple_health_outcome(role, state, evidence, detail),
+                        "freshness": {
+                            "current": fresh,
+                            "lastReportedAgeS": age,
+                            "reason": "unknown-clock" if age is None else "current" if fresh else "stale",
+                        },
+                    },
+                    strict=True,
+                )
+            )
+        except ValidationError:
+            continue
+    return views
 
 
 class DashSocketPayload(WireModel):

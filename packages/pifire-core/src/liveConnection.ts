@@ -4,6 +4,9 @@ import type { DashSocketPayload } from "./contracts/core.gen";
 
 export type ConnectionPhase = "connecting" | "live" | "unreachable" | "demo";
 
+/** Process-local receipt time; never persist or compare with producer clocks. */
+export const monotonicNowMs = (): number => performance.now();
+
 /** Minimal shape createLiveConnection needs from a socket. socket.io-client's
  *  `Socket` satisfies this structurally; tests inject a fake one instead of
  *  opening a real connection. */

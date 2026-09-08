@@ -28,6 +28,13 @@ from common.app import (
     api_response,
     create_ui_hash,
 )
+from common.clock_domain import (
+    ClockStamp,
+    heartbeat_runtime_id,
+    local_clock_stamp,
+    parse_clock_stamp,
+    qualified_stamp_age_s,
+)
 from common.common import (
     ErrorKind,
     flush_events_records,
@@ -55,8 +62,7 @@ from common.persistence.runtime import (
 from common.web_contracts.core import (
     DashSocketPayload,
     PelletSocketPayload,
-    ThermocoupleHealthView,
-    project_thermocouple_health_outcome,
+    project_thermocouple_health_views,
 )
 from controller.learning_report import controller_learning_report_revision
 
@@ -86,12 +92,12 @@ thread = None
 #
 # Nor is it in the datastore: persisting a statement about "right now" is what
 # made this sticky in the first place, and a persisted copy would outlive the
-# web process that observed it. Starting each web process optimistic is correct
-# -- the first check either confirms it or corrects it within a second.
+# web process that observed it. A fresh process has no verified control authority
+# until its first identity-qualified heartbeat check.
 #
 # blueprints/dash/routes.py::dash_page needs no equivalent: it probes live on
 # every render and appends to the local list it hands the template.
-_control_alive = True
+_control_alive = False
 
 #: How long the broadcast loop waits between passes.
 #:
@@ -260,113 +266,18 @@ def _project_thermocouple_health(
     settings,
     probe_device_info,
     *,
-    now=None,
+    current: ClockStamp | None = None,
+    heartbeat: ClockStamp | None = None,
 ):
-    """Build the client health view without mutating persisted producer data."""
-    if not isinstance(probe_device_info, list):
-        return []
-    probe_settings = settings.get("probe_settings")
-    if not isinstance(probe_settings, Mapping):
-        return []
-
-    probe_map = probe_settings.get("probe_map")
-    if not isinstance(probe_map, Mapping):
-        return []
-    configured_probes = probe_map.get("probe_info")
-    if not isinstance(configured_probes, list):
-        return []
-
-    reports_by_probe = {}
-    for device_info in probe_device_info:
-        if not isinstance(device_info, Mapping):
-            continue
-        device = device_info.get("device")
-        status = device_info.get("status")
-        if not isinstance(device, str) or not isinstance(status, Mapping):
-            continue
-        reports = status.get("thermocouple_health")
-        if not isinstance(reports, Mapping):
-            continue
-        for label, report in reports.items():
-            if isinstance(label, str) and isinstance(report, Mapping):
-                reports_by_probe[(device, label)] = report
-
-    if now is None:
-        now = time.monotonic()
-    now = _finite_float(now)
-    if now is None:
-        return []
-
-    projected = []
-    for probe in configured_probes:
-        if not isinstance(probe, Mapping):
-            continue
-        device = probe.get("device")
-        port = probe.get("port")
-        label = probe.get("label")
-        display_name = probe.get("name")
-        role = probe.get("type")
-        if (
-            not isinstance(device, str)
-            or not isinstance(port, str)
-            or not isinstance(label, str)
-            or not isinstance(display_name, str)
-            or role not in {"Primary", "Food", "Aux"}
-        ):
-            continue
-
-        report = reports_by_probe.get((device, label))
-        if report is None:
-            continue
-        observed_at = _finite_float(report.get("observed_at"))
-        detail = report.get("detail")
-        evidence = report.get("evidence")
-        if observed_at is None or not isinstance(detail, Mapping) or not isinstance(evidence, list):
-            continue
-        policy = detail.get("policy")
-        if policy not in {"off", "observe", "enforce"}:
-            continue
-
-        age_s = max(0.0, now - observed_at)
-        has_hardware = "hardware" in evidence
-        has_software = any(item != "hardware" for item in evidence)
-        source = "mixed" if has_hardware and has_software else "hardware" if has_hardware else "software"
-
-        state = report.get("state")
-        temperature_valid = report.get("temperature_valid")
-        outcome = project_thermocouple_health_outcome(role, state, evidence, detail)
-
-        try:
-            view = ThermocoupleHealthView.model_validate(
-                {
-                    "device": device,
-                    "port": port,
-                    "label": label,
-                    "displayName": display_name,
-                    "role": role,
-                    "report": {
-                        "state": state,
-                        "faults": report.get("faults"),
-                        "evidence": evidence,
-                        "temperatureValid": temperature_valid,
-                        "detail": dict(detail),
-                    },
-                    "detector": {
-                        "source": source,
-                        "policy": policy,
-                    },
-                    "outcome": outcome,
-                    "freshness": {
-                        "current": age_s <= CONTROL_HEARTBEAT_STALE_AFTER,
-                        "lastReportedAgeS": age_s,
-                    },
-                },
-                strict=True,
-            )
-        except ValidationError:
-            continue
-        projected.append(view.model_dump(mode="json", by_alias=True, exclude_none=False))
-    return projected
+    """Project retained reports against a fresh identity-qualified heartbeat."""
+    views = project_thermocouple_health_views(
+        settings,
+        probe_device_info,
+        heartbeat=read_control_heartbeat() if heartbeat is None else heartbeat,
+        current=local_clock_stamp() if current is None else current,
+        stale_after_s=CONTROL_HEARTBEAT_STALE_AFTER,
+    )
+    return [view.model_dump(mode="json", by_alias=True, exclude_none=False) for view in views]
 
 
 def _get_dash_data(settings, pelletdb):
@@ -483,10 +394,8 @@ def _get_dash_data(settings, pelletdb):
 
 def _get_probe_data(probe_type, settings, current, probe_device_info, notify_data):
     probe_list = []
-    # Read against the wall clock rather than current["TS"]: if the control
-    # process stops writing, TS freezes and every age would freeze with it,
-    # reporting a stale reading as fresh for as long as the outage lasts.
-    now_ms = int(time.time() * 1000)
+    local_stamp = local_clock_stamp()
+    heartbeat = read_control_heartbeat()
 
     # Determine section based on probe type
     if probe_type == "Primary":
@@ -509,7 +418,13 @@ def _get_probe_data(probe_type, settings, current, probe_device_info, notify_dat
             last = current.get("LAST", {}).get(probe["label"])
             if last is not None:
                 probe_data["status"]["lastTemp"] = last["temp"]
-                probe_data["status"]["lastReadingAge"] = max(0, int((now_ms - last["ts"]) / 1000))
+                age_s = qualified_stamp_age_s(
+                    parse_clock_stamp(last.get("clock_stamp")),
+                    heartbeat=heartbeat,
+                    current=local_stamp,
+                    heartbeat_stale_after_s=CONTROL_HEARTBEAT_STALE_AFTER,
+                )
+                probe_data["status"]["lastReadingAge"] = None if age_s is None else int(age_s)
             if probe_type == "Primary":
                 probe_data["setTemp"] = current["PSP"]
             probe_list.append(probe_data)
@@ -626,14 +541,10 @@ def _check_control_status():
     this run every second. A restarted control process stamps on its first
     tick, so recovery is now immediate rather than eventual.
     """
-    heartbeat = read_control_heartbeat()
-    if heartbeat is None:
-        # Never stamped: either a fresh datastore whose control process has not
-        # completed a tick yet, or a control process too old to publish one.
-        # Stay optimistic -- the same reason _control_alive starts True -- so an
-        # upgrade in progress does not flash a control-down banner.
-        return
-    _set_control_alive((time.time() - heartbeat) < CONTROL_HEARTBEAT_STALE_AFTER)
+    runtime_id = heartbeat_runtime_id(
+        read_control_heartbeat(), local_clock_stamp(), stale_after_s=CONTROL_HEARTBEAT_STALE_AFTER
+    )
+    _set_control_alive(runtime_id is not None)
 
 
 # `_response` relocated to `common/app.py` as `api_response`.

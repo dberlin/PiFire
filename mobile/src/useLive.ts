@@ -7,6 +7,7 @@ import {
   type ConnectionPhase,
   type LiveConnection,
   createLiveConnection,
+  monotonicNowMs,
 } from "@pifire/core/liveConnection";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
@@ -21,10 +22,9 @@ export interface LiveResult {
   controlAlive: boolean;
   pellets: PelletSocketPayload["pellets"] | null;
   command: CommandClient;
-  /** Epoch ms of the newest dash payload, or null before the first one has
-   *  arrived. This is how the UI knows a reading is stale rather than
-   *  presenting an old value as current. */
-  lastPayloadAt: number | null;
+  /** Process-local monotonic ms of the newest dash payload; null before a real
+   *  payload or after background/resume invalidates the receipt. */
+  lastPayloadMonotonicMs: number | null;
   /** The connected grill's API base (same value `command` was built from).
    *  REST reads that are not part of the socket payload -- history.tsx's
    *  `/api/history/chart` fetch -- need this directly; `command` only
@@ -32,12 +32,21 @@ export interface LiveResult {
   host: string;
 }
 
+/** Shared by retained health and the transport header; never consult wall time. */
+export function receiptFreshness(result: LiveResult, now: number) {
+  const payloadAgeMs = result.lastPayloadMonotonicMs === null
+    ? null
+    : now - result.lastPayloadMonotonicMs;
+  const validAge = payloadAgeMs !== null && Number.isFinite(payloadAgeMs) && payloadAgeMs >= 0;
+  return {
+    payloadAgeMs: validAge ? payloadAgeMs : null,
+    retained: result.phase !== "live" || !validAge || payloadAgeMs > LIVE_STALE_AFTER_MS,
+  };
+}
+
 export function qualifyRetainedHealth(result: LiveResult, now: number): LiveResult {
-  const payloadAgeMs =
-    result.lastPayloadAt === null ? null : Math.max(0, now - result.lastPayloadAt);
-  const retained =
-    result.phase !== "live" || payloadAgeMs === null || payloadAgeMs > LIVE_STALE_AFTER_MS;
-  if (!retained || !result.live.thermocoupleHealth?.length) {
+  const { payloadAgeMs, retained } = receiptFreshness(result, now);
+  if (!result.live.thermocoupleHealth?.length) {
     return result;
   }
   return {
@@ -48,7 +57,14 @@ export function qualifyRetainedHealth(result: LiveResult, now: number): LiveResu
         ...health,
         freshness: {
           ...health.freshness,
-          current: false,
+          current: health.freshness.current && health.freshness.lastReportedAgeS !== null && !retained,
+          lastReportedAgeS:
+            health.freshness.lastReportedAgeS === null || payloadAgeMs === null
+              ? null
+              : health.freshness.lastReportedAgeS + payloadAgeMs / 1000,
+          reason: payloadAgeMs === null || health.freshness.lastReportedAgeS === null
+            ? "unknown-clock"
+            : retained ? "retained" : health.freshness.reason,
         },
       })),
     },
@@ -75,14 +91,16 @@ export function useLive(host: string): LiveResult {
   const [live, setLive] = useState<DashSocketPayload>(FIXTURE_DASH);
   const [phase, setPhase] = useState<ConnectionPhase>("connecting");
   const [pellets, setPellets] = useState<PelletSocketPayload["pellets"] | null>(null);
-  const [lastPayloadAt, setLastPayloadAt] = useState<number | null>(null);
+  const [lastPayloadMonotonicMs, setLastPayloadMonotonicMs] = useState<number | null>(null);
 
   const connectionRef = useRef<LiveConnection | null>(null);
+  const activeRef = useRef(AppState.currentState !== "background" && AppState.currentState !== "inactive");
 
   // Owns the connection's lifetime: open on mount (or host change), close
   // on unmount.
   useEffect(() => {
     let unreachableTimer: ReturnType<typeof setTimeout> | null = null;
+    setLastPayloadMonotonicMs(null);
 
     function showPhase(next: ConnectionPhase) {
       if (unreachableTimer) {
@@ -101,8 +119,9 @@ export function useLive(host: string): LiveResult {
 
     const connection = createLiveConnection(host, {
       onDash: (payload) => {
+        if (!activeRef.current) return;
         setLive(payload);
-        setLastPayloadAt(Date.now());
+        setLastPayloadMonotonicMs(monotonicNowMs());
       },
       onPellets: setPellets,
       onPhase: showPhase,
@@ -118,10 +137,23 @@ export function useLive(host: string): LiveResult {
     };
   }, [host]);
 
+  // A reset receipt clock cannot regain validity merely by catching up to its
+  // previous coordinate. Only onDash can establish a new receipt.
+  useEffect(() => {
+    if (lastPayloadMonotonicMs === null) return;
+    const timer = setInterval(() => {
+      const ageMs = monotonicNowMs() - lastPayloadMonotonicMs;
+      if (!Number.isFinite(ageMs) || ageMs < 0) setLastPayloadMonotonicMs(null);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [lastPayloadMonotonicMs]);
+
   // Mobile-only concern, kept separate from connection lifetime: force a
   // reconnect whenever the app comes back to the foreground.
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (next) => {
+      activeRef.current = next === "active";
+      setLastPayloadMonotonicMs(null);
       if (next === "active") {
         connectionRef.current?.reconnect();
       }
@@ -132,5 +164,5 @@ export function useLive(host: string): LiveResult {
   const command = useMemo(() => createCommand(host), [host]);
   const controlAlive = deriveControlAlive(live);
 
-  return { live, phase, controlAlive, pellets, command, lastPayloadAt, host };
+  return { live, phase, controlAlive, pellets, command, lastPayloadMonotonicMs, host };
 }

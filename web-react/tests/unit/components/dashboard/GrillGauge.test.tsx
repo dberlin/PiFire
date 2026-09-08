@@ -28,7 +28,7 @@ function primaryHealth(
     },
     detector: { source: "hardware", policy: "observe" },
     outcome,
-    freshness: { current, lastReportedAgeS: current ? 0 : 60 },
+    freshness: { current, lastReportedAgeS: current ? 0 : 60, reason: current ? "current" : "stale" },
   };
 }
 
