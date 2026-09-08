@@ -687,10 +687,7 @@ def gate_verdict(row, incumbent, cand_rmse, inc_rmse):
     cannot be accepted by any rule measured below.
     """
     if not in_scope(row):
-        return False, (
-            f"only {_effective_duration_s(row):g}s effective duration; "
-            f"need {_NOMINAL_GATE_DURATION_S:g}s"
-        )
+        return False, (f"only {_effective_duration_s(row):g}s effective duration; need {_NOMINAL_GATE_DURATION_S:g}s")
     if not row["converged"]:
         return False, "solve did not converge"
     if not (math.isfinite(cand_rmse) and math.isfinite(inc_rmse)):
@@ -862,13 +859,9 @@ def main():
     say("c_err is a model that believes the grill stops sooner than it does. s_min = C RMS per e-fold")
     say("of the worst-determined direction of (log K_Q, log C_c, log theta).")
     say(
-        f"'sc' marks scope: 'y' = at least {_NOMINAL_GATE_DURATION_S:g}s of scored "
-        "effective duration and used in every"
+        f"'sc' marks scope: 'y' = at least {_NOMINAL_GATE_DURATION_S:g}s of scored effective duration and used in every"
     )
-    say(
-        "population below; '-' = the production admission path cannot reach candidate evaluation, "
-        "so it is shown"
-    )
+    say("population below; '-' = the production admission path cannot reach candidate evaluation, so it is shown")
     say("for what it says about the FITTER and enters no bound, matrix or correlation.")
     hdr = (
         f"{'plant':8s} {'profile':15s} {'len_s':>6s} {'raw_n':>5s} {'eff_n':>5s} {'sc':>3s} {'cv':>3s} "
@@ -1161,9 +1154,7 @@ def main():
     say("it carries a truth error the synthetic one cannot.")
     say()
     say("The 'gate today' column carries the production 600-second effective-duration veto, so")
-    say(
-        "an out-of-scope row reads 'refuse' for that reason alone -- exactly as runtime does before evaluation."
-    )
+    say("an out-of-scope row reads 'refuse' for that reason alone -- exactly as runtime does before evaluation.")
     say(
         f"{'plant':8s} {'profile':15s} {'len_s':>6s} {'sc':>3s} {'insamp':>8s} {'s_min':>11s} {'cond':>10s} {'theta':>8s} "
         f"{'C_c':>9s} {'truth':>8s} {'c_err':>7s} {'gate today':>11s}"
@@ -1513,9 +1504,7 @@ def main():
     )
     say()
     say("UPPER bound -- the floor must keep the only real record there is, at the shortest length the")
-    say(
-        "production admission can advance it at, or learning never promotes anything on a real grill:"
-    )
+    say("production admission can advance it at, or learning never promotes anything on a real grill:")
     say(
         f"  weakest in-scope real-cook truncation: s_min = {b_realcook:.6g}   "
         f"({b_realcook_row['length_s']}s, raw_n={b_realcook_row['n']}, "

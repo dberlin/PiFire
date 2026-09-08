@@ -4,7 +4,6 @@ import copy
 import importlib
 import math
 import threading
-import time
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -50,6 +49,7 @@ from controller.pid_sp_observation import (
     PidSpObservationDecision,
     canonical_pid_sp_observation_model_digest,
 )
+from controller.runtime.clock import ManualClock
 from grillplat.actuator_capabilities import AUGER_TIMING
 
 CONFIG = {"PB": 60.0, "Ti": 180.0, "Td": 45.0, "stable_window": 12, "center_factor": 0.0010}
@@ -58,31 +58,16 @@ INSTALLATION_IDENTITY = b"pid-sp-test-installation"
 INSTALLATION_IDENTITY_DIGEST = installation_identity_digest(lambda: INSTALLATION_IDENTITY)
 
 
-class _Clock:
-    def __init__(self, t=1000.0):
-        self.t = t
-
-    def __call__(self):
-        return self.t
-
-
 @pytest.fixture
-def clock(monkeypatch):
-    c = _Clock()
-    monkeypatch.setattr(time, "time", c)
-    return c
+def clock():
+    return ManualClock(1_700_000_000.0, monotonic_start=1000.0)
 
 
 def _controller(name, clock, units="F", *, installation_identity=INSTALLATION_IDENTITY):
     mod = importlib.import_module(f"controller.{name}")
-    kwargs = (
-        {
-            "installation_identity_provider": lambda: installation_identity,
-            "monotonic_clock": clock,
-        }
-        if name == "pid_sp"
-        else {}
-    )
+    kwargs = {"clock": clock}
+    if name == "pid_sp":
+        kwargs["installation_identity_provider"] = lambda: installation_identity
     return mod.Controller(dict(CONFIG), units, dict(CYCLE_DATA), **kwargs)
 
 
@@ -398,7 +383,7 @@ def test_corpus_fit_confirms_once_offpath_and_never_trusts_in_ending_cook(
         dict(CONFIG),
         "F",
         {},
-        monotonic_clock=_Clock(),
+        clock=ManualClock(1_700_000_000.0, monotonic_start=1000.0),
         model_persistence=persistence,
         trajectory_repository=repository,
         fit_partition_digest=lambda: "c" * 64,
@@ -564,7 +549,7 @@ def _lifecycle_controller(
         dict(CONFIG if config is None else config),
         "F",
         {},
-        monotonic_clock=_Clock(),
+        clock=ManualClock(1_700_000_000.0, monotonic_start=1000.0),
         model_persistence=persistence,
         trajectory_repository=repository,
         fit_partition_digest=lambda: "c" * 64,
@@ -973,7 +958,7 @@ def test_fit_manifest_completion_failure_never_queues_activatable_checkpoint(
     assert persistence.evidence[0].payload.reason == "fit-run-persistence-failed"
     assert persistence.evidence[0].payload.selected_form == "fopdt"
     assert persistence.evidence[0].payload.confirmation_candidate_digest is not None
-    fresh = PidSpController(dict(CONFIG), "F", {}, monotonic_clock=_Clock())
+    fresh = PidSpController(dict(CONFIG), "F", {}, clock=ManualClock(1_700_000_000.0, monotonic_start=1000.0))
     assert fresh.predictor.active is False
 
 
@@ -1156,7 +1141,7 @@ def test_twentieth_offpath_decision_checkpoints_for_cold_next_cook_without_live_
         dict(CONFIG),
         "F",
         {},
-        monotonic_clock=_Clock(),
+        clock=ManualClock(1_700_000_000.0, monotonic_start=1000.0),
         installation_identity_provider=lambda: INSTALLATION_IDENTITY,
     )
     assert fresh.restore_model(checkpoint)
@@ -1278,7 +1263,7 @@ def test_prepared_checkpoint_cold_recovery_at_every_durable_boundary(
         dict(CONFIG),
         "F",
         {},
-        monotonic_clock=_Clock(),
+        clock=ManualClock(1_700_000_000.0, monotonic_start=1000.0),
         model_persistence=recovery_persistence,
         installation_identity_provider=lambda: INSTALLATION_IDENTITY,
     )
@@ -1360,7 +1345,7 @@ def test_prepared_checkpoint_aborts_when_terminal_commitment_is_not_exact(
         dict(CONFIG),
         "F",
         {},
-        monotonic_clock=_Clock(),
+        clock=ManualClock(1_700_000_000.0, monotonic_start=1000.0),
         model_persistence=recovery_persistence,
         installation_identity_provider=lambda: INSTALLATION_IDENTITY,
     )
@@ -1702,7 +1687,7 @@ def test_pid_sp_owns_bounded_direct_auger_allocation_after_every_update(
     sp.last = 225.0
     monkeypatch.setattr(sp, "_bias", lambda: raw_output)
     sp.kp = sp.ki = sp.kd = 0.0
-    clock.t += sp.cycle_time * 3
+    clock.advance(sp.cycle_time * 3)
 
     output = sp.update(225.0)
 
@@ -1741,7 +1726,7 @@ def test_pid_sp_nonfinite_output_fails_closed_before_allocation(clock, monkeypat
     sp.set_target(225.0)
     sp.new_target = False
     sp.last = 225.0
-    clock.t += sp.cycle_time * 3
+    clock.advance(sp.cycle_time * 3)
     monkeypatch.setattr(
         sp,
         "_seed_integral_from_identified_hold",
@@ -1895,7 +1880,7 @@ def test_the_startup_reduction_is_applied_to_the_new_output(clock):
     the two seed their first derivative."""
     sp = _controller("pid_sp", clock)
     sp.set_target(225.0)
-    clock.t += 20.0  # inside cycle_time * 3 of the setpoint change
+    clock.advance(20.0)  # inside cycle_time * 3 of the setpoint change
     out_sp = sp.update(200.0)
     status = sp.get_status()
     assert out_sp == pytest.approx((status["p"] + status["i"] + status["d"]) * STARTUP_REDUCTION)
@@ -1904,7 +1889,7 @@ def test_the_startup_reduction_is_applied_to_the_new_output(clock):
 def test_the_reduction_stops_after_three_cycles(clock):
     sp = _controller("pid_sp", clock)
     sp.set_target(225.0)
-    clock.t += 20.0 * 3 + 1
+    clock.advance(20.0 * 3 + 1)
     out_sp = sp.update(200.0)
     status = sp.get_status()
     assert out_sp == pytest.approx(status["p"] + status["i"] + status["d"])
@@ -1915,7 +1900,7 @@ def test_the_reduction_stops_exactly_at_the_three_cycle_boundary(clock):
     False on the boundary itself, not one tick early or late."""
     sp = _controller("pid_sp", clock)
     sp.set_target(225.0)
-    clock.t += 20.0 * 3  # current_time - last_set_time == 60, not < 60
+    clock.advance(20.0 * 3)  # current_time - last_set_time == 60, not < 60
     out_sp = sp.update(200.0)
     status = sp.get_status()
     assert out_sp == pytest.approx(status["p"] + status["i"] + status["d"])
@@ -1939,15 +1924,15 @@ def test_a_trusted_model_makes_the_selected_temperature_diverge_from_measured(cl
     sp = _controller("pid_sp", clock)
     sp.set_target(225.0)
     sp.restore_model(_fopdt_checkpoint(revision=1))
-    frame_start = clock.t
-    clock.t += 20.0
-    _observe_completed_frame(sp, frame_start, clock.t, (200.0 - 32.0) * 5.0 / 9.0)
+    frame_start = clock.monotonic()
+    clock.advance(20.0)
+    _observe_completed_frame(sp, frame_start, clock.monotonic(), (200.0 - 32.0) * 5.0 / 9.0)
     assert sp.update(200.0) is not None
     assert sp.get_status()["predictor"]["active"] is True
     assert sp.get_status()["selected_temp"] == 200.0  # anchored, correction still zero
-    frame_start = clock.t
-    clock.t += 20.0
-    _observe_completed_frame(sp, frame_start, clock.t, (200.0 - 32.0) * 5.0 / 9.0)
+    frame_start = clock.monotonic()
+    clock.advance(20.0)
+    _observe_completed_frame(sp, frame_start, clock.monotonic(), (200.0 - 32.0) * 5.0 / 9.0)
     sp.update(200.0)
     status = sp.get_status()
     selected = status["selected_temp"]
@@ -1964,12 +1949,12 @@ def test_disabled_predictor_reports_fallback_model_digest_while_identifier_remai
     assert sp.restore_model(_fopdt_checkpoint(revision=1, theta=5.0))
 
     for measured_f in (200.0, 400.0, 600.0, 800.0, 1000.0):
-        frame_start = clock.t
-        clock.t += 20.0
+        frame_start = clock.monotonic()
+        clock.advance(20.0)
         _observe_completed_frame(
             sp,
             frame_start,
-            clock.t,
+            clock.monotonic(),
             (measured_f - 32.0) * 5.0 / 9.0,
             duty=0.0,
         )
@@ -1981,12 +1966,12 @@ def test_disabled_predictor_reports_fallback_model_digest_while_identifier_remai
     assert sp.predictor.status()["disabled"] is True
     assert canonical_pid_sp_observation_model_digest(trusted_model) != fallback_digest
 
-    frame_start = clock.t
-    clock.t += 20.0
+    frame_start = clock.monotonic()
+    clock.advance(20.0)
     outcome = _observe_completed_frame(
         sp,
         frame_start,
-        clock.t,
+        clock.monotonic(),
         (1000.0 - 32.0) * 5.0 / 9.0,
         duty=0.0,
     )
@@ -2004,19 +1989,19 @@ def test_the_derivative_never_mixes_a_measured_and_a_predicted_sample(clock):
     sp = _controller("pid_sp", clock)
     sp.set_target(225.0)
     sp.restore_model(_fopdt_checkpoint(revision=1))
-    frame_start = clock.t
-    clock.t += 20.0
-    _observe_completed_frame(sp, frame_start, clock.t, (200.0 - 32.0) * 5.0 / 9.0)
+    frame_start = clock.monotonic()
+    clock.advance(20.0)
+    _observe_completed_frame(sp, frame_start, clock.monotonic(), (200.0 - 32.0) * 5.0 / 9.0)
     sp.update(200.0)  # anchors: selected == measured
-    frame_start = clock.t
-    clock.t += 20.0
-    _observe_completed_frame(sp, frame_start, clock.t, (205.0 - 32.0) * 5.0 / 9.0)
+    frame_start = clock.monotonic()
+    clock.advance(20.0)
+    _observe_completed_frame(sp, frame_start, clock.monotonic(), (205.0 - 32.0) * 5.0 / 9.0)
     sp.update(205.0)
     second = sp.get_status()["selected_temp"]
     assert second != 205.0, "the predictor is not correcting; the test proves nothing"
-    frame_start = clock.t
-    clock.t += 20.0
-    _observe_completed_frame(sp, frame_start, clock.t, (210.0 - 32.0) * 5.0 / 9.0)
+    frame_start = clock.monotonic()
+    clock.advance(20.0)
+    _observe_completed_frame(sp, frame_start, clock.monotonic(), (210.0 - 32.0) * 5.0 / 9.0)
     sp.update(210.0)
     status = sp.get_status()
     third = status["selected_temp"]
@@ -2031,20 +2016,6 @@ def test_set_target_preserves_the_learned_model(clock):
     assert sp.inter == 0.0  # but the target-dependent PID terms do reset
 
 
-def test_no_tau_or_theta_config_is_read(clock):
-    """A user-supplied tau=115 is outside the design's own trusted band.
-    controller/controllers.json still advertises the options; what this pins is
-    that pid_sp does not read them."""
-    import controller.pid_sp as mod
-
-    with open(mod.__file__) as handle:
-        source = handle.read()
-    assert 'config.get("tau"' not in source
-    assert 'config.get("theta"' not in source
-    assert "math.exp" not in source
-    assert "self.roc" not in source
-
-
 def test_the_first_update_computes_a_zero_derivative_regardless_of_starting_temperature(clock):
     """The first update's derivative is exactly zero regardless of the
     starting temperature, because self.last seeds from that same first
@@ -2057,7 +2028,7 @@ def test_the_first_update_computes_a_zero_derivative_regardless_of_starting_temp
     hot = _controller("pid_sp", clock)
     cold.set_target(150.0)
     hot.set_target(150.0)
-    clock.t += 20.0
+    clock.advance(20.0)
     cold.update(140.0)  # error == -10, inside the else branch
     hot.update(155.0)  # error == +5, inside the else branch
     assert cold.get_status()["d"] == 0.0
@@ -2074,7 +2045,7 @@ def test_start_change_temp_is_seeded_so_the_integral_guard_never_sees_none(clock
     seeding start_change_temp this raises TypeError in the live control loop."""
     sp = _controller("pid_sp", clock)
     sp.set_target(225.0)
-    clock.t += 20.0 * 3 + 5.0  # >= cycle_time * 3
+    clock.advance(20.0 * 3 + 5.0)  # >= cycle_time * 3
     result = sp.update(220.0)  # abs(error) == 5: inside (3, stable_window]
     assert math.isfinite(result)
 
@@ -2085,10 +2056,10 @@ def test_derivative_is_not_suppressed_on_a_downward_set_point_change(clock):
     reading -- no suppression fires in that case."""
     sp = _controller("pid_sp", clock)
     sp.set_target(225.0)
-    clock.t += 20.0
+    clock.advance(20.0)
     sp.update(230.0)
     sp.set_target(200.0)  # downward: new_target True, set_point < last selected
-    clock.t += 20.0
+    clock.advance(20.0)
     sp.update(205.0)
     status = sp.get_status()
     assert status["d"] == pytest.approx(sp.kd * (205.0 - 230.0) / 20.0)
@@ -2109,16 +2080,16 @@ def test_a_last_selected_temperature_of_exactly_zero_is_repaired_on_a_new_target
     """
     sp = _controller("pid_sp", clock)
     sp.set_target(225.0)
-    clock.t += 20.0
+    clock.advance(20.0)
     sp.update(200.0)
-    clock.t += 20.0
+    clock.advance(20.0)
     sp.update(0.0)  # a reading of exactly 0.0 in native units: self.last becomes exactly 0.0
     assert sp.last == 0.0
     sp.set_target(225.0)  # any setpoint change: new_target True
     # Past the startup-reduction window (>= cycle_time * 3), so the reduction
     # cannot be confused with this repair.
     dt = 20.0 * 3 + 1
-    clock.t += dt
+    clock.advance(dt)
     sp.update(220.0)
 
     assert sp.get_status()["d"] == pytest.approx(0.0)
@@ -2143,7 +2114,7 @@ def test_a_first_approach_that_misses_the_band_still_clears_new_target(clock):
     # Every sample sits at least 5 F from the set point, so `abs(error) <= 3`
     # is never satisfied at any point on the approach.
     for temp in (200.0, 220.0, 230.0):
-        clock.t += 20.0
+        clock.advance(20.0)
         sp.update(temp)
         assert abs(temp - 225.0) >= 5.0
 
@@ -2162,14 +2133,14 @@ def test_the_integral_accumulates_once_the_set_point_has_been_crossed(clock):
     sp = _controller("pid_sp", clock)
     sp.set_target(225.0)
     for temp in (200.0, 220.0, 230.0):
-        clock.t += 20.0
+        clock.advance(20.0)
         sp.update(temp)
 
-    clock.t += 20.0
+    clock.advance(20.0)
     sp.update(233.0)
     after_one = sp.inter
     for _ in range(2):
-        clock.t += 20.0
+        clock.advance(20.0)
         sp.update(233.0)
 
     # Two further ticks at +8 F over 20 s each.
@@ -2191,13 +2162,13 @@ def test_the_identified_hold_duty_becomes_the_loops_zero_error_output(clock, bia
     config = {**CONFIG, "bias_from_model": bias_from_model}
     import controller.pid_sp as mod
 
-    sp = mod.Controller(config, "F", dict(CYCLE_DATA), monotonic_clock=clock)
+    sp = mod.Controller(config, "F", dict(CYCLE_DATA), clock=clock)
     sp.set_target(225.0)
     held = 0.07
     sp.identifier.hold_duty = lambda u_max=1.0, target_f=None: held
 
     # Inside the stable window, so the seeding route is reachable at all.
-    clock.t += 20.0
+    clock.advance(20.0)
     sp.update(220.0)
 
     # u = bias + ki*inter + kd*derv, so this is the output at zero error.
@@ -2212,17 +2183,17 @@ def test_the_integral_seed_is_a_seed_and_not_a_control_law(clock):
     config = {**CONFIG, "bias_from_model": False}
     import controller.pid_sp as mod
 
-    sp = mod.Controller(config, "F", dict(CYCLE_DATA), monotonic_clock=clock)
+    sp = mod.Controller(config, "F", dict(CYCLE_DATA), clock=clock)
     sp.set_target(225.0)
     held = 0.07
     sp.identifier.hold_duty = lambda u_max=1.0, target_f=None: held
 
-    clock.t += 20.0
+    clock.advance(20.0)
     sp.update(220.0)
     assert sp.inter == pytest.approx((held - sp.center) / sp.ki)
 
     sp.inter = 0.0
-    clock.t += 20.0
+    clock.advance(20.0)
     sp.update(222.0)
     assert sp.inter != pytest.approx((held - sp.center) / sp.ki)
 
@@ -2230,17 +2201,17 @@ def test_the_integral_seed_is_a_seed_and_not_a_control_law(clock):
 def test_new_target_reseeds_the_identified_hold_duty(clock):
     import controller.pid_sp as mod
 
-    sp = mod.Controller({**CONFIG, "bias_from_model": False}, "F", dict(CYCLE_DATA), monotonic_clock=clock)
+    sp = mod.Controller({**CONFIG, "bias_from_model": False}, "F", dict(CYCLE_DATA), clock=clock)
     sp.set_target(225.0)
     sp.identifier.hold_duty = lambda u_max=1.0, target_f=None: 0.07
-    clock.t += 20.0
+    clock.advance(20.0)
     sp.update(220.0)
     assert sp._integral_seeded
 
     sp.set_target(300.0)
     sp.identifier.hold_duty = lambda u_max=1.0, target_f=None: 0.1
     for _ in range(2):
-        clock.t += 20.0
+        clock.advance(20.0)
         sp.update(300.0)
 
     assert sp._bias() + sp.ki * sp.inter == pytest.approx(0.1)
@@ -2252,7 +2223,7 @@ def test_no_identified_hold_duty_leaves_the_integral_alone(clock):
     sp.set_target(225.0)
     sp.identifier.hold_duty = lambda u_max=1.0, target_f=None: None
 
-    clock.t += 20.0
+    clock.advance(20.0)
     sp.update(220.0)
 
     assert not sp._integral_seeded
@@ -2263,8 +2234,8 @@ def test_progress_output_and_control_update_do_not_create_identifier_input(clock
     """Only exact completed frames own PID-SP identification input."""
     sp = _controller("pid_sp", clock)
     sp.set_target(225.0)
-    sp.set_output(AppliedOutput(0.9, OutputSource.CONTROLLER, clock.t))
-    clock.t += 20.0
+    sp.set_output(AppliedOutput(0.9, OutputSource.CONTROLLER, clock.monotonic()))
+    clock.advance(20.0)
     sp.update(200.0)
 
     assert sp.get_status()["identifier"]["duty_segments"] == 0
@@ -2280,7 +2251,7 @@ def test_a_celsius_install_scales_error_and_corrections_from_fahrenheit(clock):
     sp_f = _controller("pid_sp", clock, units="F")
     sp_c.set_target(107.0)
     sp_f.set_target(107.0 * 9 / 5 + 32)
-    clock.t += 20.0
+    clock.advance(20.0)
     sp_c.update(100.0)
     sp_f.update(100.0 * 9 / 5 + 32)
     error_c = sp_c.get_status()["error"]
@@ -2290,18 +2261,18 @@ def test_a_celsius_install_scales_error_and_corrections_from_fahrenheit(clock):
     model = _fopdt_checkpoint(revision=1)
     sp_c.restore_model(model)
     sp_f.restore_model(model)
-    frame_start = clock.t
-    clock.t += 20.0
-    _observe_completed_frame(sp_c, frame_start, clock.t, 100.0)
-    _observe_completed_frame(sp_f, frame_start, clock.t, 100.0)
+    frame_start = clock.monotonic()
+    clock.advance(20.0)
+    _observe_completed_frame(sp_c, frame_start, clock.monotonic(), 100.0)
+    _observe_completed_frame(sp_f, frame_start, clock.monotonic(), 100.0)
     sp_c.update(100.0)
     sp_f.update(100.0 * 9 / 5 + 32)
     before_c = sp_c.get_status()["selected_temp"]
     before_f = sp_f.get_status()["selected_temp"]
-    frame_start = clock.t
-    clock.t += 20.0
-    _observe_completed_frame(sp_c, frame_start, clock.t, 100.0)
-    _observe_completed_frame(sp_f, frame_start, clock.t, 100.0)
+    frame_start = clock.monotonic()
+    clock.advance(20.0)
+    _observe_completed_frame(sp_c, frame_start, clock.monotonic(), 100.0)
+    _observe_completed_frame(sp_f, frame_start, clock.monotonic(), 100.0)
     sp_c.update(100.0)
     sp_f.update(100.0 * 9 / 5 + 32)
     after_c = sp_c.get_status()["selected_temp"]
@@ -2401,7 +2372,7 @@ def test_a_restored_model_is_active_on_the_first_tick(clock):
     sp = _controller("pid_sp", clock)
     sp.restore_model(store.load("pid_sp"))
     sp.set_target(225.0)
-    clock.t += 20.0
+    clock.advance(20.0)
     sp.update(200.0)
     assert sp.get_status()["predictor"]["active"] is True
 
@@ -2419,7 +2390,7 @@ def test_an_integrating_model_survives_the_store(clock):
     sp = _controller("pid_sp", clock)
     assert sp.restore_model(store.load("pid_sp")) is True
     sp.set_target(225.0)
-    clock.t += 20.0
+    clock.advance(20.0)
     sp.update(200.0)
     assert sp.get_status()["predictor"]["active"] is True
     assert sp.get_model_snapshot()["selected"]["parameters"]["K_i"] == 0.46
@@ -2566,6 +2537,167 @@ def test_get_status_projects_one_identifier_and_predictor_snapshot(clock, monkey
 def test_get_status_survives_the_mqtt_encoder(clock):
     sp = _controller("pid_sp", clock)
     sp.set_target(225.0)
-    clock.t += 20.0
+    clock.advance(20.0)
     sp.update(200.0)
     json.dumps(sp.get_status(), allow_nan=False)
+
+
+@pytest.mark.parametrize("jump", [-3600.0, 3600.0])
+def test_pid_sp_target_window_uses_monotonic_seconds(jump):
+    clock = ManualClock(1_700_000_000.0, monotonic_start=1000.0)
+    sp = _controller("pid_sp", clock)
+    sp.set_target(225.0)
+    clock.advance(59.0)
+    clock.jump_wall(jump)
+    before = sp.update(200.0)
+    status = sp.get_status()
+    assert before == pytest.approx((status["p"] + status["i"] + status["d"]) * STARTUP_REDUCTION)
+    assert sp.trace_diagnostics().observed_dt_seconds == 59.0
+    clock.advance(1.0)
+    at_boundary = sp.update(200.0)
+    status = sp.get_status()
+    assert at_boundary == pytest.approx(status["p"] + status["i"] + status["d"])
+    assert sp.trace_diagnostics().observed_dt_seconds == 1.0
+
+
+@pytest.mark.parametrize("jump", [-3600.0, 3600.0])
+def test_wall_jump_preserves_signed_raw_demand_and_bounded_allocation(jump):
+    clocks = [ManualClock(1_700_000_000.0, monotonic_start=1000.0) for _ in range(2)]
+    cores = [_controller("pid_sp", clock) for clock in clocks]
+    for core in cores:
+        core.set_target(220.0)
+    for index, measured in enumerate((150, 160, 180, 200, 205, 210, 215, 218, 220, 221)):
+        for clock in clocks:
+            clock.advance(20.0)
+        if index == 2:
+            clocks[1].jump_wall(jump)
+        left, right = (core.update(measured) for core in cores)
+        assert right == left
+        if index == 3:
+            assert round(right, 6) == -0.15963
+            for core in cores:
+                assert core.u == core.trace_allocation().auger_duty == 0.0
+
+
+@pytest.mark.parametrize("jump", [-3600.0, 3600.0])
+def test_pid_sp_completed_history_and_uncompleted_gap_are_wall_invariant(jump):
+    clocks = [ManualClock(1_700_000_000.0, monotonic_start=1000.0) for _ in range(2)]
+    cores = [_controller("pid_sp", clock) for clock in clocks]
+    for core in cores:
+        core.set_target(225.0)
+        assert core.predictor.trust({"form": "fopdt", "K": 100.0, "tau": 100.0, "theta": 20.0})
+    for index, duty in enumerate((0.2, 0.8)):
+        outputs = []
+        for side, (clock, core) in enumerate(zip(clocks, cores, strict=True)):
+            start = clock.monotonic()
+            wall_start = int(clock.now() * 1000)
+            clock.advance(20.0)
+            if side == 1 and index == 1:
+                clock.jump_wall(jump)
+            outcome = _observe_completed_frame(
+                core,
+                start,
+                clock.monotonic(),
+                (200.0 - 32.0) * 5.0 / 9.0,
+                duty=duty,
+                wall_start_ms=wall_start,
+                wall_end_ms=int(clock.now() * 1000),
+            )
+            assert outcome["eligible"]
+            outputs.append(core.update(200.0))
+        assert outputs[1] == outputs[0]
+    expected = 200.0 + 60.0 * (1.0 - math.exp(-0.2))
+    for core in cores:
+        assert core.get_status()["selected_temp"] == pytest.approx(expected)
+        assert core.get_status()["predictor"]["truncated"] == 0
+    counts = [core.get_status()["identifier"]["duty_segments"] for core in cores]
+    for clock in clocks:
+        clock.advance(0.125)
+    assert cores[0].update(200.0) == cores[1].update(200.0)
+    for core, count in zip(cores, counts, strict=True):
+        assert core.get_status()["selected_temp"] == 200.0
+        assert core.get_status()["predictor"]["truncated"] == 1
+        assert core.get_status()["identifier"]["duty_segments"] == count
+
+
+def test_rejected_frame_does_not_add_pid_sp_history(clock):
+    core = _controller("pid_sp", clock)
+    start, wall = clock.monotonic(), int(clock.now() * 1000)
+    clock.advance(20.0)
+    assert _observe_completed_frame(
+        core, start, clock.monotonic(), 100.0, wall_start_ms=wall, wall_end_ms=int(clock.now() * 1000)
+    )["eligible"]
+    count = core.get_status()["identifier"]["duty_segments"]
+    start, wall = clock.monotonic(), int(clock.now() * 1000)
+    clock.advance(20.0)
+    outcome = _observe_completed_frame(
+        core,
+        start,
+        clock.monotonic(),
+        100.0,
+        safety_inhibited=True,
+        wall_start_ms=wall,
+        wall_end_ms=int(clock.now() * 1000),
+    )
+    assert not outcome["eligible"]
+    assert outcome["effective_updates"] == 0
+    assert core.get_status()["identifier"]["duty_segments"] == count
+
+
+def test_restart_restores_admitted_model_not_live_history():
+    old_clock = ManualClock(1_700_000_000.0, monotonic_start=10_000.0)
+    old = _controller("pid_sp", old_clock)
+    old.set_target(225.0)
+    assert old.restore_model(_fopdt_checkpoint(revision=1))
+    for _ in range(2):
+        start, wall = old_clock.monotonic(), int(old_clock.now() * 1000)
+        old_clock.advance(20.0)
+        _observe_completed_frame(
+            old,
+            start,
+            old_clock.monotonic(),
+            (200.0 - 32.0) * 5.0 / 9.0,
+            wall_start_ms=wall,
+            wall_end_ms=int(old_clock.now() * 1000),
+        )
+        old.update(200.0)
+    assert old.get_status()["selected_temp"] != 200.0
+    clock = ManualClock(1_700_000_100.0, monotonic_start=5.0)
+    core = _controller("pid_sp", clock)
+    assert core.restore_model(old.get_model_snapshot())
+    core.set_target(225.0)
+    clock.advance(2.0)
+    core.update(200.0)
+    assert core.trace_diagnostics().observed_dt_seconds == 2.0
+    assert core.get_status()["selected_temp"] == 200.0
+    assert core.get_status()["d"] == 0.0
+    assert core.get_status()["identifier"]["duty_segments"] == 0
+    assert core.get_model_snapshot()["selected"] == old.get_model_snapshot()["selected"]
+
+
+def test_set_target_preserves_admitted_model_across_wall_jump(clock):
+    core = _controller("pid_sp", clock)
+    assert core.restore_model(_fopdt_checkpoint(revision=1))
+    model = core.get_model_snapshot()["selected"]
+    clock.jump_wall(-3600.0)
+    core.set_target(275.0)
+    clock.advance(2.0)
+    core.update(270.0)
+    assert core.get_model_snapshot()["selected"] == model
+    assert core.trace_diagnostics().observed_dt_seconds == 2.0
+
+
+def test_duplicate_pid_sp_readings_are_wall_invariant():
+    clocks = [ManualClock(1_700_000_000.0, monotonic_start=1000.0) for _ in range(2)]
+    cores = [_controller("pid_sp", clock) for clock in clocks]
+    for core in cores:
+        core.set_target(225.0)
+        core.update(220.0)
+    clocks[1].jump_wall(-3600.0)
+    left, right = (core.update(221.0) for core in cores)
+    assert math.isfinite(left) and math.isfinite(right)
+    assert left == right
+    assert cores[0].trace_diagnostics() == cores[1].trace_diagnostics()
+    for clock in clocks:
+        clock.advance(20.0)
+    assert cores[0].update(222.0) == cores[1].update(222.0)

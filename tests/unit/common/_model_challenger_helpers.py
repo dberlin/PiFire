@@ -19,7 +19,6 @@ from controller.model_learning.activation import (
 from controller.model_learning.contracts import ActivationPolicy, CandidateOrigin
 
 
-
 def _digest(label: str) -> str:
     return sha256(label.encode()).hexdigest()
 

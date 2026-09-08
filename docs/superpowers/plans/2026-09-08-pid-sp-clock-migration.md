@@ -12,6 +12,17 @@
 
 **Integrated baseline:** The coupled learning implementation is now in the working tree: trace 10, observation 4, evidence 6, database 13, required independent wall endpoints, and callable clocks through Hold/runner factories and reconfiguration. References below to Main's “in-flight” work describe the drafting baseline, not remaining implementation. Reconcile those steps against the shared spec before executing; the destination shared `Clock` API and remaining timers are still proposals.
 
+## Execution record
+
+The user subsequently authorized sequential execution. PID supplied shared-base injection and complete runner/fallback/rebuild propagation first. PID-SP now defaults its physical and evidence sources from that shared clock; explicit evidence callbacks retain wall semantics. The temporary monotonic callback remains until the shared-mode consumer cutover, as required below.
+
+- Replaced this plan's main PID-SP test clock and global wall patch with explicit `ManualClock` injection and physical advancement. Removed the source-text-only obsolete-implementation test rather than repinning it.
+- Added target-window boundary, signed raw-demand/allocation, covered-history versus uncovered 125 ms solve, rejected observation, admitted-model restart, target-reset and duplicate-reading regressions. Actual current model admission remains in force; no history/checkpoint schema changes.
+- The covered numerical smoke selects **210.8761548153211°F**, with zero truncations; the uncovered solve selects measured **200°F** and records one truncation. Both wall-jump signs produce identical raw demand; physical allocation remains bounded. This preserves existing fallback behavior, including its raw derivative response.
+- Integrated focused verification: **898 passed**. Logs: `.artifacts/pid-sp-clock-integration.log` and `.artifacts/pid-sp-clock-smoke.log`. The shared real Hold trace regression now covers both PID variants with delayed solve/publication, independent wall provenance and monotonic diagnostic coordinates.
+- Real-cook E2E: **2 passed in 86.11s** with slow tests explicitly enabled (`tests/e2e/test_pid_sp_real_cook_learning.py -m ""`). Both independent scoped reviews found no defects. `prek run --all-files` passed after its formatter normalized five existing files; the separate focused contract preflight passed **37 tests**, with stdout/stderr hashes under `.artifacts/controller-clock-preflight/`.
+- Suspend detector/platform/threshold review, the full `Clock.now()` removal and the joint deployment/exact-revision gate remain pending. These results do not authorize a push or claim fueled-hardware suspend verification.
+
 ## Global Constraints
 
 - This remaining-work plan is a proposal, not authorization to implement it. Drafting performed source research only; no tests, build, lint or formatter commands were run.

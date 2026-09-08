@@ -179,7 +179,18 @@ def _role_generation(core) -> int:
 
 
 def _observe_frame(
-    core, frame, *, sequence, wall_start_ms, wall_end_ms, temp_c, setpoint_c, fan_frac, lid_open, manual_override, revision
+    core,
+    frame,
+    *,
+    sequence,
+    wall_start_ms,
+    wall_end_ms,
+    temp_c,
+    setpoint_c,
+    fan_frac,
+    lid_open,
+    manual_override,
+    revision,
 ):
     """Hand a completed pulse frame to the controller's corpus repository.
 
@@ -226,8 +237,6 @@ def _observe_frame(
             realized_auger_duty=realized_auger_duty,
         )
     )
-
-
 
 
 def _authority(core, cycle_data):

@@ -38,8 +38,8 @@ MAX_RESIDUAL_F = 100.0
 MAX_RESIDUAL_STREAK = 4
 #: Retention must outlast the deepest delayed window by more than the gap
 #: between the last recorded command and the tick that integrates it. The
-#: predictor does not choose that gap: it is whatever its caller's wall clock
-#: reports between one tick and the next, so a constant margin can only make
+#: predictor does not choose that gap: its caller's monotonic control clock
+#: measures it between ticks, so a constant margin can only make
 #: truncation unlikely, never impossible -- _integrate detects and refuses it
 #: instead of silently answering wrong.
 HISTORY_MARGIN_S = 1800.0
@@ -119,7 +119,7 @@ class SmithPredictor:
         self._history.prune(applied.timestamp)
 
     def record_interval(self, start_s, end_s, realized_duty):
-        """Record duty owned by one exact completed actuator interval."""
+        """Record duty owned by one exact completed monotonic actuator interval."""
         self._history.record_interval(start_s, end_s, realized_duty)
         if self._earliest_seen is None:
             self._earliest_seen = self._history.earliest()

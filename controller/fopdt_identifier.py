@@ -97,7 +97,7 @@ class DutyHistory:
         self._sync()
 
     def record_interval(self, start_s, end_s, ratio):
-        """Append duty owned by exactly ``[start_s, end_s)``.
+        """Append duty owned by exactly the monotonic interval ``[start_s, end_s)``.
 
         Adjacent intervals remain contiguous. Gaps remain uncovered rather than
         inheriting either neighboring duty, and overlaps are rejected because
@@ -589,7 +589,7 @@ class FOPDTIdentifier:
         self._note_transition(now, applied.ratio)
 
     def observe_interval(self, start_s, end_s, realized_duty, temperature_f):
-        """Record one completed duty interval and its terminal temperature."""
+        """Record one completed monotonic duty interval and its terminal temperature."""
         start = float(start_s)
         end = float(end_s)
         duty = float(realized_duty)

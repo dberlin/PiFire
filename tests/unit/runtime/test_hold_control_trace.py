@@ -540,12 +540,15 @@ def test_pid_family_hold_records_completed_framed_pulse(hold_cycle, monkeypatch,
     assert (replay := validate_records(recorder.records)).valid, [(issue.code, issue.detail) for issue in replay.issues]
 
 
-def test_real_pid_trace_keeps_delayed_publication_separate_from_elapsed_time(hold_cycle, monkeypatch, request):
+@pytest.mark.parametrize("controller,payload_type", [("pid", PidUpdatePayload), ("pid_sp", PidSpUpdatePayload)])
+def test_real_pid_family_trace_keeps_delayed_publication_separate_from_elapsed_time(
+    hold_cycle, monkeypatch, request, controller, payload_type
+):
     import controller.runtime.runner as runner_module
 
     clock = ManualClock(1_700_000_000.0, monotonic_start=100.0)
     recorder = _install_recorder(monkeypatch)
-    mode = hold_cycle(None, controller="pid", clock=clock)
+    mode = hold_cycle(None, controller=controller, clock=clock)
     monkeypatch.setattr(runner_module, "build_runner", build_runner)
     mode.setup()
     request.addfinalizer(lambda: mode.teardown(220.0))
@@ -574,7 +577,7 @@ def test_real_pid_trace_keeps_delayed_publication_separate_from_elapsed_time(hol
     monkeypatch.setattr(runner, "latest", delayed_publication)
     clock.advance(20.1)
     mode.on_tick(clock.now(), 220.0, mode.grill.get_output_status())
-    updates = [record for record in recorder.records if isinstance(record.payload, PidUpdatePayload)]
+    updates = [record for record in recorder.records if isinstance(record.payload, payload_type)]
     assert len(updates) == len(captured) == 1
     record = updates[0]
     payload = record.payload
@@ -585,9 +588,10 @@ def test_real_pid_trace_keeps_delayed_publication_separate_from_elapsed_time(hol
     assert record.ts_ms > 1_000_000_000_000
     assert payload.monotonic_ms == round(result.solve_end_monotonic * 1000)
     assert payload.wall_ms == int(result.completed_wall_time * 1000)
-    assert payload.raw_output == pytest.approx(
-        payload.proportional_term + payload.integral_term + payload.derivative_term
-    )
+    if controller == "pid":
+        assert payload.raw_output == pytest.approx(
+            payload.proportional_term + payload.integral_term + payload.derivative_term
+        )
     assert payload.raw_output == result.diagnostics.raw_output
     assert (report := validate_records(recorder.records)).valid, report.issues
 

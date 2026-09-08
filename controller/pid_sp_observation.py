@@ -45,6 +45,8 @@ class PidSpDutySegment:
 
 @dataclass(frozen=True, slots=True)
 class PidSpInterval:
+    """One same-runtime monotonic interval; wall provenance is not duration authority."""
+
     start_s: float
     end_s: float
     temperature_f: float

@@ -280,12 +280,10 @@ def test_reused_fit_corpus_revalidation_challenger_survives_second_restart(
         learning_enabled=True,
         installation_identity_provider=lambda: "installation-a",
     )
-    preparation, source_durable, replayed = (
-        _seed_replayable_unchanged_challenger(
-            source,
-            repository,
-            partition,
-        )
+    preparation, source_durable, replayed = _seed_replayable_unchanged_challenger(
+        source,
+        repository,
+        partition,
     )
     source_snapshot = source.runtime.get_model_snapshot()
     assert source_snapshot is not None

@@ -497,6 +497,7 @@ def test_all_warming_segments_fail_with_typed_insufficient_warmup(
     assert result.error_type == "InsufficientWarmup"
     assert result.detail == "segment-warmup-incomplete:warming-first"
 
+
 def test_candidate_dependent_masks_keep_optimizer_residual_dimension_fixed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -658,6 +659,7 @@ def test_candidate_theta_controls_the_exact_pooled_duration_boundary(
     assert isinstance(exact_boundary, GreyFitSuccess)
     assert exact_boundary.metrics.pooled.sample_count == 30
     assert exact_boundary.rejection_reasons == ()
+
 
 def test_pooled_segment_and_cook_metrics_and_excitation_are_exact(
     monkeypatch: pytest.MonkeyPatch,
@@ -936,11 +938,14 @@ def test_supported_600_second_cook_still_vetoes_pooled_improvement(
     short_metric = _metric(result.metrics.by_cook, "cook_id", "cook-short")
     assert supported_metric.supports_regression_gate is True
     assert short_metric.supports_regression_gate is False
-    assert supported_metric.rmse_c > _metric(
-        result.incumbent_metrics.by_cook,
-        "cook_id",
-        "cook-supported",
-    ).rmse_c
+    assert (
+        supported_metric.rmse_c
+        > _metric(
+            result.incumbent_metrics.by_cook,
+            "cook_id",
+            "cook-supported",
+        ).rmse_c
+    )
     assert result.metrics.pooled.rmse_c <= result.incumbent_metrics.pooled.rmse_c
     assert result.rejection_reasons == ("per-cook-regression:cook-supported",)
 
@@ -1157,6 +1162,7 @@ def _independent_result_digest(result: GreyFitSuccess, corpus: FitCorpusIdentity
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
     return hashlib.sha256(encoded).hexdigest()
 
+
 def _warming_replay_job(config: GreyBoxMPCConfig) -> GreyFitJob:
     usable = _segment(
         "replay-usable",
@@ -1198,6 +1204,7 @@ def test_success_constructor_rejects_mismatched_warmup_exclusions_and_mask_cardi
             effective_masks=result.effective_masks[:-1],
             warmup_excluded_segment_ids=(),
         )
+
 
 @pytest.mark.parametrize("length_delta", (-1, 1), ids=("truncated", "extended"))
 def test_success_constructor_rejects_inner_mask_cardinality_mismatch(

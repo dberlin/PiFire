@@ -930,9 +930,7 @@ def compare_segmented_grey(
         )
     )
     warmup_excluded_segment_ids = tuple(
-        segment.segment_id
-        for segment, mask in zip(job.segments, common_masks, strict=True)
-        if not np.any(mask)
+        segment.segment_id for segment, mask in zip(job.segments, common_masks, strict=True) if not np.any(mask)
     )
     if len(warmup_excluded_segment_ids) == len(job.segments):
         raise ValueError(f"segment-warmup-incomplete:{warmup_excluded_segment_ids[0]}")
@@ -2061,11 +2059,7 @@ class GreyLearningOrchestrator:
             return ()
         completed = self._evaluator.completed_origins[self._evaluation_cursor :]
         present = {origin.horizon_seconds for origin in completed}
-        return tuple(
-            horizon
-            for horizon in self.evaluation_config.required_horizon_seconds
-            if horizon in present
-        )
+        return tuple(horizon for horizon in self.evaluation_config.required_horizon_seconds if horizon in present)
 
     @property
     def pending_origins(self) -> tuple[Any, ...]:
