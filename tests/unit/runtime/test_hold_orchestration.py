@@ -234,7 +234,9 @@ def test_frame_boundary_commands_transition_before_one_identity_aligned_terminal
     hold.setup()
     hold.control["cook_id"] = "frame-order"
     hold.state.metrics = {"augerontime": 0.0}
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
     events.clear()
     auger_on = hold.grill.auger_on
@@ -245,6 +247,7 @@ def test_frame_boundary_commands_transition_before_one_identity_aligned_terminal
 
     monkeypatch.setattr(hold.grill, "auger_on", record_auger_on)
 
+    hold.ctx.clock.advance(22.0 - hold.ctx.clock.monotonic())
     hold.on_tick(22.0, 200.0, hold.grill.get_output_status())
 
     terminal = [
@@ -268,6 +271,7 @@ def test_inhibit_turns_actuator_off_before_terminal_feedback_and_safety_trace(ho
     hold.setup()
     hold.control["cook_id"] = f"inhibit-{scenario}"
     hold.state.metrics = {"augerontime": 0.0}
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     events.clear()
     auger_off = hold.grill.auger_off
@@ -281,12 +285,15 @@ def test_inhibit_turns_actuator_off_before_terminal_feedback_and_safety_trace(ho
     if scenario == "lid-opening":
         hold.state.target_temp_achieved = True
         hold.settings["cycle_data"]["LidOpenDetectEnabled"] = True
+        hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
         hold.on_tick(4.0, 100.0, hold.grill.get_output_status())
     elif scenario == "safety-inhibit":
+        hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
         hold._on_safety_event("temperature_guard", 4.0)
     else:
         stale = replace(runner.result, stale_state=ResultStaleState.STALE)
         runner.script([stale])
+        hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
         hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
 
     terminal = next(
@@ -316,10 +323,12 @@ def test_reconfigure_retires_old_frame_and_generation_before_replacement_is_used
     hold.setup()
     hold.control["cook_id"] = "reconfigure-order"
     hold.state.metrics = {"augerontime": 0.0}
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     events.clear()
     hold.control["controller_update"] = True
 
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
 
     terminal = next(
@@ -356,6 +365,7 @@ def test_unknown_safety_event_leaves_hardware_and_runner_unchanged(
     output_before = hold.grill.get_output_status()
     applied_before = tuple(runner.applied)
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold._on_safety_event("future_guard", 2.0)
 
     assert hold.grill.get_output_status() == output_before
@@ -376,13 +386,14 @@ def test_activation_lifecycle_evidence_keeps_fifo_ahead_of_checkpoint_and_trace_
     runner.activation_events[:] = [first, second]
     events.clear()
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
 
     evidence = ("persistence:evidence", ("fallback-1", "fallback-2"))
     _assert_relative_order(events, [evidence, "persistence:checkpoint"])
     assert persistence.evidence_batches == [(first, second)]
 
-    hold.ctx.clock.advance(3.0)
+    hold.ctx.clock.advance(3.0 - hold.ctx.clock.monotonic())
     hold.teardown(200.0)
     _assert_relative_order(
         events,
@@ -418,9 +429,10 @@ def test_teardown_orders_cleanup_and_owns_each_resource_at_most_once(hold_cycle,
     hold.setup()
     hold.control["cook_id"] = f"teardown-{failure or 'success'}"
     hold.state.metrics = {"augerontime": 0.0}
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     hold.grill.igniter_on()
-    hold.ctx.clock.advance(3.0)
+    hold.ctx.clock.advance(3.0 - hold.ctx.clock.monotonic())
     finishes_before_teardown = runner.finished_teardowns
     events.clear()
     _record_hardware(monkeypatch, events, hold.grill)
@@ -510,8 +522,9 @@ def test_teardown_retry_completes_cleanup_after_pre_cleanup_failure(hold_cycle, 
     hold.setup()
     hold.control["cook_id"] = "teardown-retry"
     hold.state.metrics = {"augerontime": 0.0}
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
-    hold.ctx.clock.advance(3.0)
+    hold.ctx.clock.advance(3.0 - hold.ctx.clock.monotonic())
     runtime = hold._framed_pulse
     assert runtime is not None
     original_advance = runtime.advance
@@ -553,8 +566,9 @@ def test_teardown_retry_resumes_delivery_after_scheduler_advance(
         "id": "teardown-delivery-retry",
         "augerontime": 0.0,
     }
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
-    hold.ctx.clock.advance(3.0)
+    hold.ctx.clock.advance(3.0 - hold.ctx.clock.monotonic())
     runtime = hold._framed_pulse
     learning = hold._hold_learning
     assert runtime is not None
@@ -637,8 +651,9 @@ def test_teardown_retry_reprepares_feedback_without_repeating_advance(
         "id": "teardown-feedback-preparation-retry",
         "augerontime": 0.0,
     }
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
-    hold.ctx.clock.advance(3.0)
+    hold.ctx.clock.advance(3.0 - hold.ctx.clock.monotonic())
     runtime = hold._framed_pulse
     assert runtime is not None
     calls = {"advance": 0, "feedback": 0, "reset": 0}
@@ -694,8 +709,9 @@ def test_teardown_retry_reuses_prepared_feedback_after_dispatch_failure(
         "id": "teardown-feedback-dispatch-retry",
         "augerontime": 0.0,
     }
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
-    hold.ctx.clock.advance(3.0)
+    hold.ctx.clock.advance(3.0 - hold.ctx.clock.monotonic())
     runtime = hold._framed_pulse
     assert runtime is not None
     calls = {"advance": 0, "feedback": 0, "dispatch": 0, "reset": 0}
@@ -762,8 +778,9 @@ def test_teardown_retry_latches_first_timestamp_and_temperature(
         "id": "teardown-latched-inputs",
         "augerontime": 0.0,
     }
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
-    hold.ctx.clock.advance(3.0)
+    hold.ctx.clock.advance(3.0 - hold.ctx.clock.monotonic())
     runtime = hold._framed_pulse
     assert runtime is not None
     feedback_times = []
@@ -818,8 +835,9 @@ def test_repeated_setup_starts_a_fresh_teardown_transaction(
         "id": "first-setup",
         "augerontime": 0.0,
     }
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
-    hold.ctx.clock.advance(3.0)
+    hold.ctx.clock.advance(3.0 - hold.ctx.clock.monotonic())
     hold.teardown(200.0)
 
     hold.setup()
@@ -828,8 +846,9 @@ def test_repeated_setup_starts_a_fresh_teardown_transaction(
         "id": "second-setup",
         "augerontime": 0.0,
     }
+    hold.ctx.clock.advance(6.0 - hold.ctx.clock.monotonic())
     hold.on_tick(6.0, 300.0, hold.grill.get_output_status())
-    hold.ctx.clock.advance(4.0)
+    hold.ctx.clock.advance(7.0 - hold.ctx.clock.monotonic())
     hold.grill.igniter_on()
     hold.teardown(300.0)
 
@@ -1091,6 +1110,7 @@ def test_partial_setup_failures_still_close_the_runner_once(hold_cycle, monkeypa
     hold.setup()
     hold.control["cook_id"] = "partial-setup"
     hold.state.metrics = {"augerontime": 0.0}
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     hold.ctx.clock.advance(1.0)
     finishes_before_teardown = runner.finished_teardowns

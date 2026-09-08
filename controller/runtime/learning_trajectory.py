@@ -8,6 +8,7 @@ from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from functools import wraps
+from itertools import pairwise
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal, Protocol
 from uuid import UUID, uuid4
@@ -597,7 +598,9 @@ class LearningTrajectoryRuntime:
                     break
             selected = tuple(reversed(suffix))
             expected_end_ms = at_ms if selected[-1].effective_mode == "Hold" else self._mode.monotonic_ms
-            if selected[-1].monotonic_end_ms != expected_end_ms:
+            if selected[-1].monotonic_end_ms != expected_end_ms or any(
+                previous.monotonic_end_ms != current.monotonic_start_ms for previous, current in pairwise(selected)
+            ):
                 status_uncertain: Literal["uncertain"] = "uncertain"
                 return EstimatorSeed(
                     delay_states=(),
@@ -705,7 +708,7 @@ class LearningTrajectoryRuntime:
         if self._closed:
             return
         self._reap_receipts()
-        if event.effective_mode == "Smoke" and not self._drain_due_smoke_boundary(event.monotonic_ms):
+        if event.effective_mode == "Smoke" and not self._drain_due_smoke_boundary(event.monotonic_ms, event.wall_ms):
             self.barrier()
             return
         if event.effective_mode == "Smoke" and event.next_effective_mode == "Hold" and event.reason is None:
@@ -771,7 +774,7 @@ class LearningTrajectoryRuntime:
                 )
             return
         if self._mode.effective_mode == "Smoke":
-            self._close_due_smoke_frames(sample.monotonic_ms)
+            self._close_due_smoke_frames(sample.monotonic_ms, sample.wall_ms)
 
     @_replay_synchronized
     def observe_hold_frame(
@@ -779,13 +782,20 @@ class LearningTrajectoryRuntime:
         observation: FrameObservation,
         *,
         replay_only: bool = False,
-    ) -> None:
+    ) -> bool:
+        """Accept a distinct valid frame, reporting capture rather than clock equality.
+
+        True means the frame entered the replay/capture path; persistence may
+        still be pending. Durable evidence continues to require its own barrier.
+        """
         if self._closed or not self._enabled or self._mode is None:
-            return
+            return False
         mode = self._mode
         if mode.effective_mode != "Hold":
-            return
+            return False
         self._reap_receipts()
+        if not self._enabled:
+            return False
         identity = (
             observation.frame_start_s,
             observation.frame_end_s,
@@ -793,32 +803,22 @@ class LearningTrajectoryRuntime:
             observation.observation_sequence,
         )
         if identity in self._seen_hold_frames:
-            return
-        raw_start_ms = round(observation.frame_start_s * 1_000)
-        raw_end_ms = round(observation.frame_end_s * 1_000)
-        clock_offset_ms = mode.wall_ms - mode.monotonic_ms
-        wall_domain = abs(raw_start_ms - mode.wall_ms) < abs(raw_start_ms - mode.monotonic_ms)
-        if wall_domain:
-            wall_start_ms = raw_start_ms
-            wall_end_ms = raw_end_ms
-            start_ms = raw_start_ms - clock_offset_ms
-            end_ms = raw_end_ms - clock_offset_ms
-        else:
-            start_ms = raw_start_ms
-            end_ms = raw_end_ms
-            wall_start_ms = raw_start_ms + clock_offset_ms
-            wall_end_ms = raw_end_ms + clock_offset_ms
+            return False
+        start_ms = round(observation.frame_start_s * 1_000)
+        end_ms = round(observation.frame_end_s * 1_000)
+        wall_start_ms = observation.wall_start_ms
+        wall_end_ms = observation.wall_end_ms
         if end_ms - start_ms != _FRAME_MS:
             self._split_at(
                 TrajectoryBreakReason.RECORDER_GAP,
                 end_ms,
                 wall_end_ms,
             )
-            return
+            return False
         if not observation.probe_valid or observation.probe_source is None:
             self._finalize(TrajectoryBreakReason.PROBE_GAP)
             self._last_break_reason = TrajectoryBreakReason.PROBE_GAP
-            return
+            return False
         # FrameObservation owns synchronized values and provenance. A fresh
         # independent sample published inside the physical frame contributes
         # only its actual timing and numeric uncertainty; a later publication
@@ -853,6 +853,21 @@ class LearningTrajectoryRuntime:
             settings_revision=mode.settings_revision,
             recipe_step_id=mode.recipe_step_id,
         )
+        if (
+            self._replay_frames
+            and self._replay_frames[-1].effective_mode == "Smoke"
+            and self._replay_frames[-1].monotonic_end_ms < start_ms
+        ):
+            # Mode exit, Hold setup, and the first pulse are distinct physical
+            # instants. Preserve Smoke durably, but never bridge their missing
+            # delivery interval into scored evidence or an exact replay seed.
+            self._split_at(
+                TrajectoryBreakReason.RECORDER_GAP,
+                start_ms,
+                wall_start_ms,
+            )
+            if not self._enabled or self._pending_boundary is not None:
+                return False
         segment_id = self._segment_id
         durable_scored = 0 if segment_id is None else self._counts.get(segment_id, [0, 0])[1]
         pending_scored = segment_id is not None and any(
@@ -926,7 +941,7 @@ class LearningTrajectoryRuntime:
             if delivered is None or delivered.fan_certainty is not FrameDeliveryCertainty.EXACT:
                 self._finalize(TrajectoryBreakReason.ACTUATION_UNKNOWN)
                 self._last_break_reason = TrajectoryBreakReason.ACTUATION_UNKNOWN
-                return
+                return False
             integral = replace(
                 delivered,
                 auger_on_seconds=float(observation.delivered_on_s),
@@ -952,7 +967,7 @@ class LearningTrajectoryRuntime:
         if not observation.continuous:
             self._finalize(TrajectoryBreakReason.RECORDER_GAP)
             self._last_break_reason = TrajectoryBreakReason.RECORDER_GAP
-            return
+            return False
         submitted = self._submit_frame(
             frame,
             scored=not replay_only,
@@ -962,6 +977,7 @@ class LearningTrajectoryRuntime:
             if not replay_only:
                 self._retain_replay_frame(frame)
             self._seen_hold_frames.add(identity)
+        return submitted
 
     @_replay_synchronized
     def intervention(self, boundary: TrajectoryBoundary) -> None:
@@ -989,7 +1005,7 @@ class LearningTrajectoryRuntime:
             self._reap_receipts()
             if not self._enabled:
                 return
-            if not self._drain_due_smoke_boundary(boundary.monotonic_ms):
+            if not self._drain_due_smoke_boundary(boundary.monotonic_ms, boundary.wall_ms):
                 return
             if self._mode is not None and self._mode.effective_mode == "Smoke":
                 self._close_smoke_partial(
@@ -1117,13 +1133,6 @@ class LearningTrajectoryRuntime:
             and math.isfinite(float(sample.ambient_uncertainty))
         )
 
-    def _sample_for_wall_end(self, wall_end_ms: int) -> ThermalSample | None:
-        for sample in reversed(self._samples):
-            if sample.wall_ms <= wall_end_ms:
-                age = wall_end_ms - sample.wall_ms
-                return sample if age <= self.sample_age_limit_ms else None
-        return None
-
     @staticmethod
     def _to_celsius(value: float | None, units: str) -> float:
         if value is None:
@@ -1138,7 +1147,7 @@ class LearningTrajectoryRuntime:
                 return sample if age <= self.sample_age_limit_ms else None
         return None
 
-    def _drain_due_smoke_boundary(self, boundary_ms: int) -> bool:
+    def _drain_due_smoke_boundary(self, boundary_ms: int, wall_ms: int) -> bool:
         if (
             self._mode is None
             or self._mode.effective_mode != "Smoke"
@@ -1149,7 +1158,7 @@ class LearningTrajectoryRuntime:
         if self._segment_id is not None and self._cursor is None:
             self._persistence_failed("pending-cursor-prevented-exact-boundary-closure")
             return False
-        self._close_due_smoke_frames(boundary_ms)
+        self._close_due_smoke_frames(boundary_ms, wall_ms)
         if not self._enabled:
             return False
         if self._smoke_frame_start_ms is not None and self._smoke_frame_start_ms + _FRAME_MS <= boundary_ms:
@@ -1157,7 +1166,7 @@ class LearningTrajectoryRuntime:
             return False
         return True
 
-    def _close_due_smoke_frames(self, through_ms: int) -> None:
+    def _close_due_smoke_frames(self, through_ms: int, wall_ms: int) -> None:
         while (
             self._enabled
             and self._smoke_frame_start_ms is not None
@@ -1171,8 +1180,8 @@ class LearningTrajectoryRuntime:
                 self._finalize(TrajectoryBreakReason.PROBE_GAP)
                 self._last_break_reason = TrajectoryBreakReason.PROBE_GAP
                 self._reset_capture_at(
-                    end_ms,
-                    self._smoke_frame_start_wall_ms + _FRAME_MS,
+                    through_ms,
+                    wall_ms,
                 )
                 return
             if self._next_sequence >= _MAX_PRE_ROLL_PER_SEGMENT:
@@ -1190,15 +1199,15 @@ class LearningTrajectoryRuntime:
                 self._discard_replay_suffix(uncertain=True)
                 self._last_break_reason = TrajectoryBreakReason.ACTUATION_UNKNOWN
                 self._reset_capture_at(
-                    end_ms,
-                    self._smoke_frame_start_wall_ms + _FRAME_MS,
+                    through_ms,
+                    wall_ms,
                 )
                 return
             frame = self._frame_from_integral(
                 start_ms=start_ms,
                 end_ms=end_ms,
                 wall_start_ms=self._smoke_frame_start_wall_ms,
-                wall_end_ms=self._smoke_frame_start_wall_ms + _FRAME_MS,
+                wall_end_ms=wall_ms,
                 sample=sample,
                 integral=integral,
                 effective_mode="Smoke",
@@ -1208,7 +1217,7 @@ class LearningTrajectoryRuntime:
             if not self._submit_frame(frame, scored=False):
                 return
             self._smoke_frame_start_ms = end_ms
-            self._smoke_frame_start_wall_ms += _FRAME_MS
+            self._smoke_frame_start_wall_ms = wall_ms
 
     def _close_smoke_partial(
         self,
@@ -1745,7 +1754,7 @@ class LearningTrajectoryRuntime:
         replacement: ModeEntered | None = None,
     ) -> None:
         self._reap_receipts()
-        if not self._drain_due_smoke_boundary(monotonic_ms):
+        if not self._drain_due_smoke_boundary(monotonic_ms, wall_ms):
             return
         if (
             self._mode is not None
@@ -1822,17 +1831,3 @@ class LearningTrajectoryRuntime:
         self._buffered_pre_roll.clear()
         self._next_sequence = 0
         self._hold_entry = None
-
-    def _wall_for_monotonic(
-        self,
-        monotonic_ms: int,
-        sample: ThermalSample | None = None,
-    ) -> int:
-        authority = sample
-        if authority is None and self._samples:
-            authority = self._samples[-1]
-        if authority is not None:
-            return authority.wall_ms + monotonic_ms - authority.monotonic_ms
-        if self._mode is not None:
-            return self._mode.wall_ms + monotonic_ms - self._mode.monotonic_ms
-        return monotonic_ms

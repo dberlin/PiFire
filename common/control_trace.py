@@ -31,8 +31,8 @@ from pydantic.dataclasses import dataclass
 from common.mpc_learning import MPC_FORECAST_HORIZON_SECONDS, forecast_horizon_spec
 from controller.applied_output import OutputSource
 
-COMPATIBLE_TRACE_SCHEMA_VERSIONS = (2, 3, 4, 5, 6, 7, 8, 9)
-TRACE_SCHEMA_VERSION = 9
+COMPATIBLE_TRACE_SCHEMA_VERSIONS = (2, 3, 4, 5, 6, 7, 8, 9, 10)
+TRACE_SCHEMA_VERSION = 10
 
 type FiniteFloat = Annotated[float, Field(allow_inf_nan=False, strict=True)]
 type NonNegativeFloat = Annotated[FiniteFloat, Field(ge=0)]
@@ -431,6 +431,9 @@ class FramedPulseFramePayload:
     stale_command: bool
     inhibit_reason: InhibitReason
     reset_reason: NonBlankString | None
+    # Schema 10 frame bounds are monotonic; these independent endpoints are wall provenance.
+    wall_start_ms: NonNegativeInt | None = None
+    wall_end_ms: NonNegativeInt | None = None
     payload_type: Literal["framed_pulse_frame"] = "framed_pulse_frame"
 
     @model_validator(mode="after")
@@ -488,6 +491,7 @@ class SafetyEventPayload:
     inhibit_reason: InhibitReason
     result_revision: NonNegativeInt | None
     detail: NonBlankString
+    monotonic_ms: NonNegativeInt | None = None
     payload_type: Literal["safety_event"] = "safety_event"
 
 
@@ -601,6 +605,8 @@ class ModelObservationPayload:
     skipped: bool | None = None
     reset: bool | None = None
     continuous: bool | None = None
+    wall_start_ms: NonNegativeInt | None = None
+    wall_end_ms: NonNegativeInt | None = None
     payload_type: Literal["model_observation"] = "model_observation"
 
     @model_validator(mode="after")
@@ -1120,7 +1126,7 @@ class ControlTraceRecord(BaseModel):
     cook_id: NonBlankString | None = None
     controller: ControllerType
     event_kind: TraceEventKind
-    schema_version: Literal[2, 3, 4, 5, 6, 7, 8, 9] = TRACE_SCHEMA_VERSION
+    schema_version: Literal[2, 3, 4, 5, 6, 7, 8, 9, 10] = TRACE_SCHEMA_VERSION
     payload: ControlTracePayload
 
     @model_validator(mode="after")
@@ -1128,6 +1134,18 @@ class ControlTraceRecord(BaseModel):
         expected_event = _payload_event_kind(self.payload)
         if self.event_kind is not expected_event:
             raise ValueError("event_kind does not match payload_type")
+        if (
+            self.schema_version >= 10
+            and isinstance(self.payload, (ModelObservationPayload, FramedPulseFramePayload))
+            and (self.payload.wall_start_ms is None or self.payload.wall_end_ms is None)
+        ):
+            raise ValueError("current physical frames require independent wall endpoints")
+        if (
+            self.schema_version >= 10
+            and isinstance(self.payload, SafetyEventPayload)
+            and self.payload.monotonic_ms is None
+        ):
+            raise ValueError("current safety events require a monotonic boundary")
         if self.schema_version < 4 and isinstance(
             self.payload, (CalibrationTracePayload, ModelObservationPayload, ModelEvaluationPayload)
         ):
@@ -1158,7 +1176,7 @@ class ControlTraceRecord(BaseModel):
             legacy_horizons = all(
                 origin.horizon_steps is not None for origin in self.payload.completed_origins
             ) and all(score.horizon_steps is not None for score in self.payload.horizon_scores)
-            if self.schema_version == TRACE_SCHEMA_VERSION:
+            if self.schema_version >= 9:
                 valid_horizons = current_horizons
             else:
                 valid_horizons = legacy_horizons
@@ -1166,9 +1184,9 @@ class ControlTraceRecord(BaseModel):
                 raise ValueError("model evaluation horizon contract does not match trace schema")
         if isinstance(self.payload, ChallengerProgressTracePayload):
             current_horizons = self.payload.required_horizon_seconds is not None
-            if (self.schema_version == TRACE_SCHEMA_VERSION) != current_horizons:
+            if (self.schema_version >= 9) != current_horizons:
                 raise ValueError("challenger progress horizon contract does not match trace schema")
-        if self.schema_version == TRACE_SCHEMA_VERSION and isinstance(
+        if self.schema_version >= 9 and isinstance(
             self.payload,
             (GreyFitLifecyclePayload, GreyCandidateAssessmentPayload, GreyActivationLifecyclePayload),
         ):
@@ -1182,7 +1200,7 @@ class ControlTraceRecord(BaseModel):
                 except ValidationError as exc:
                     raise ValueError("current fit corpus digest must be lowercase SHA-256") from exc
         if (
-            self.schema_version == TRACE_SCHEMA_VERSION
+            self.schema_version >= 9
             and isinstance(self.payload, ModelEventPayload)
             and self.payload.event is ModelEventType.SCHEMA_INVALIDATED
         ):

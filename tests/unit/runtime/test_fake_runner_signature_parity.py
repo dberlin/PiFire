@@ -15,6 +15,8 @@ def _frame() -> FrameObservation:
     return FrameObservation(
         frame_start_s=0.0,
         frame_end_s=20.0,
+        wall_start_ms=round((0.0) * 1_000),
+        wall_end_ms=round((20.0) * 1_000),
         temp_c=100.0,
         setpoint_c=120.0,
         ambient_c=20.0,

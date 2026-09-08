@@ -369,8 +369,10 @@ class _LearningTrajectoryHookSpy:
         self.samples.append(sample)
         self.events.append(("sample", sample))
 
-    def observe_hold_frame(self, observation):
+    def observe_hold_frame(self, observation, *, replay_only=False) -> bool:
+        del replay_only
         self.events.append(("hold-frame", observation))
+        return True
 
     def intervention(self, boundary):
         self.events.append(("intervention", boundary))

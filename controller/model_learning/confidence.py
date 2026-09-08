@@ -160,7 +160,7 @@ class _Origin:
 def evaluate_confidence(
     evidence: Sequence[object], *, activation_state: object, target_timing: object, config: ConfidenceConfig
 ) -> ConfidenceReport:
-    """Evaluate typed persisted grey-candidate evidence without control effects."""
+    """Evaluate typed persisted evidence supplied in durable append order."""
     del target_timing  # Timing authority is a persisted TimingDistributionEvidence record.
     if not isinstance(config, ConfidenceConfig):
         raise TypeError("config must be ConfidenceConfig")
@@ -280,8 +280,7 @@ def evaluate_confidence(
         _gate(
             gates,
             f"absolute-rmse:{label}",
-            interval.challenger_rmse_c is not None
-            and interval.challenger_rmse_c <= horizon.maximum_rmse_c,
+            interval.challenger_rmse_c is not None and interval.challenger_rmse_c <= horizon.maximum_rmse_c,
             f"absolute-rmse:{label}",
         )
         _gate(
@@ -325,11 +324,11 @@ def _records(evidence: Sequence[object]) -> tuple[tuple[ModelEvidenceRecord, ...
     if not all(isinstance(record, ModelEvidenceRecord) for record in evidence):
         return (), False
     records = tuple(record for record in evidence if isinstance(record, ModelEvidenceRecord))
-    return tuple(sorted(records, key=lambda record: (record.timestamp_ms, record.evidence_id))), True
+    return records, True
 
 
 def _origins(records: Sequence[ModelEvidenceRecord]) -> tuple[tuple[_Origin, ...], bool]:
-    unique: dict[tuple[str, int, int, int, int], _Origin] = {}
+    unique: dict[tuple[str, str, int, int, int, int], _Origin] = {}
     conflict = False
     for record in records:
         if (
@@ -346,6 +345,7 @@ def _origins(records: Sequence[ModelEvidenceRecord]) -> tuple[tuple[_Origin, ...
             conflict = True
             continue
         identity = (
+            record.session_id,
             record.cook_id,
             record.role_generation,
             payload.horizon_seconds,
@@ -363,15 +363,14 @@ def _origins(records: Sequence[ModelEvidenceRecord]) -> tuple[tuple[_Origin, ...
                 conflict = True
             continue
         unique[identity] = origin
-    return tuple(unique[key] for key in sorted(unique)), conflict
+    return tuple(unique.values()), conflict
 
 
 def _newest_payload(
     records: Sequence[ModelEvidenceRecord],
     payload_type: type[CandidateAssessmentEvidence | TimingDistributionEvidence],
 ) -> CandidateAssessmentEvidence | TimingDistributionEvidence | None:
-    matches = [record for record in records if isinstance(record.payload, payload_type)]
-    return max(matches, key=lambda record: (record.timestamp_ms, record.evidence_id)).payload if matches else None
+    return next((record.payload for record in reversed(records) if isinstance(record.payload, payload_type)), None)
 
 
 def _calibration_complete(records: Sequence[ModelEvidenceRecord]) -> bool:

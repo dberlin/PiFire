@@ -28,6 +28,7 @@ from common.learning_trajectory import (
     canonical_generation_audit_ranges,
     canonical_trajectory_digest,
     trajectory_json_value,
+    validate_historical_frame_wall_mapping,
 )
 
 _MAX_SCORED_ROWS = 8_640
@@ -222,7 +223,7 @@ def _frame_payload(frame: LearningTrajectoryFrame) -> dict[str, object]:
     return payload
 
 
-def _frame_from_json(canonical_json: str) -> LearningTrajectoryFrame:
+def _frame_from_json(canonical_json: str, payload_schema_version: int) -> LearningTrajectoryFrame:
     payload = json.loads(canonical_json)
     payload.setdefault("calibration_origin", False)
     payload.setdefault("role_generation", None)
@@ -230,7 +231,12 @@ def _frame_from_json(canonical_json: str) -> LearningTrajectoryFrame:
     payload["fan_delivery_certainty"] = FrameDeliveryCertainty(payload["fan_delivery_certainty"])
     if payload["boundary_reason"] is not None:
         payload["boundary_reason"] = TrajectoryBreakReason(payload["boundary_reason"])
-    return LearningTrajectoryFrame(**payload)
+    frame = LearningTrajectoryFrame(**payload)
+    if payload_schema_version in {2, 3}:
+        validate_historical_frame_wall_mapping(frame)
+    elif payload_schema_version != TRAJECTORY_OBSERVATION_SCHEMA_VERSION:
+        raise ValueError("unsupported trajectory frame payload schema")
+    return frame
 
 
 def _hold_payload(sample: HoldEntrySample) -> dict[str, object]:
@@ -322,7 +328,7 @@ def _with_frames(
         scored_hold_frames=scored,
         generation_audit_ranges=(
             canonical_generation_audit_ranges(all_frames)
-            if segment.observation_schema_version == TRAJECTORY_OBSERVATION_SCHEMA_VERSION
+            if segment.observation_schema_version >= 3
             else segment.generation_audit_ranges
         ),
         start_monotonic_ms=all_frames[0].monotonic_start_ms,
@@ -355,7 +361,7 @@ def _rolled_segment(
         scored_hold_frames=(),
         generation_audit_ranges=(
             canonical_generation_audit_ranges(carried)
-            if source.observation_schema_version == TRAJECTORY_OBSERVATION_SCHEMA_VERSION
+            if source.observation_schema_version >= 3
             else source.generation_audit_ranges
         ),
         start_monotonic_ms=first.monotonic_start_ms,
@@ -502,7 +508,8 @@ class LearningTrajectoryRepository:
                 self._set_revision(connection, before.corpus_revision + 1)
             corrupt_rows: list[sqlite3.Row] = []
             for row in connection.execute(
-                "SELECT * FROM learning_trajectory_segment WHERE state!='quarantined' ORDER BY start_wall_ms,segment_id"
+                "SELECT * FROM learning_trajectory_segment WHERE state!='quarantined' "
+                "ORDER BY created_corpus_revision,rowid"
             ).fetchall():
                 try:
                     self._materialize_segment(connection, row)
@@ -705,6 +712,7 @@ class LearningTrajectoryRepository:
                 raise ValueError("trajectory frame ordinals are not contiguous")
             if row["payload_schema_version"] not in {
                 2,
+                3,
                 TRAJECTORY_OBSERVATION_SCHEMA_VERSION,
             }:
                 raise ValueError("unsupported trajectory frame payload schema")
@@ -714,7 +722,7 @@ class LearningTrajectoryRepository:
                 raise ValueError("trajectory frame payload is not canonical JSON")
             if sha256(canonical_json.encode()).hexdigest() != row["frame_digest"]:
                 raise ValueError("trajectory frame digest is corrupt")
-            frame = _frame_from_json(canonical_json)
+            frame = _frame_from_json(canonical_json, row["payload_schema_version"])
             if _interval_identity(frame) != row["interval_identity"]:
                 raise ValueError("trajectory frame interval identity is corrupt")
             chain_digest = _next_chain_digest(chain_digest, canonical_json)
@@ -748,6 +756,8 @@ class LearningTrajectoryRepository:
         if not frames:
             raise ValueError("trajectory segment has no retained frames")
         header = json.loads(row["header_json"])
+        if any(frame["payload_schema_version"] != header["observation_schema_version"] for frame in frames):
+            raise ValueError("trajectory frame payload schema does not match segment observation schema")
         hold_entry = _hold_from_json(row["hold_entry_json"])
         if (
             through_revision is not None
@@ -788,7 +798,7 @@ class LearningTrajectoryRepository:
             scored_hold_frames=scored,
             generation_audit_ranges=(
                 canonical_generation_audit_ranges((*pre_roll, *scored))
-                if header["observation_schema_version"] == TRAJECTORY_OBSERVATION_SCHEMA_VERSION
+                if header["observation_schema_version"] >= 3
                 else tuple(header["generation_audit_ranges"])
             ),
             start_monotonic_ms=first.monotonic_start_ms,
@@ -808,9 +818,7 @@ class LearningTrajectoryRepository:
             build_provenance=header["build_provenance"],
         )
         verification_header = _segment_header(segment)
-        if header["observation_schema_version"] == TRAJECTORY_OBSERVATION_SCHEMA_VERSION and (
-            through_revision is not None or through_ordinal is not None
-        ):
+        if header["observation_schema_version"] >= 3 and (through_revision is not None or through_ordinal is not None):
             verification_header["generation_audit_ranges"] = header["generation_audit_ranges"]
         if _canonical_json(verification_header) != row["header_json"]:
             raise ValueError("trajectory segment header is corrupt")
@@ -1097,7 +1105,7 @@ class LearningTrajectoryRepository:
                 " WHERE f.segment_id=s.segment_id AND f.kind='scored') "
                 "AS physical_scored_count "
                 "FROM learning_trajectory_segment s WHERE s.state='finalized' "
-                "ORDER BY s.end_wall_ms,s.segment_id LIMIT 1"
+                "ORDER BY s.created_corpus_revision,s.rowid LIMIT 1"
             ).fetchone()
             if victim is None:
                 raise ValueError("retention caps cannot be met without evicting an open segment")
@@ -1606,7 +1614,8 @@ class LearningTrajectoryRepository:
         interrupted_ids: list[str] = []
         with self._write() as connection:
             candidate_rows = connection.execute(
-                "SELECT * FROM learning_trajectory_segment WHERE state!='quarantined' ORDER BY start_wall_ms,segment_id"
+                "SELECT * FROM learning_trajectory_segment WHERE state!='quarantined' "
+                "ORDER BY created_corpus_revision,rowid"
             ).fetchall()
             interrupted_ids = [
                 row["request_id"]
@@ -1726,7 +1735,7 @@ class LearningTrajectoryRepository:
                 "SELECT * FROM learning_trajectory_segment "
                 "WHERE state!='quarantined' "
                 "AND json_extract(header_json,'$.cook_id')=? "
-                "ORDER BY start_wall_ms,segment_id LIMIT ?",
+                "ORDER BY created_corpus_revision,rowid LIMIT ?",
                 (cook_id, _MAX_SEGMENTS),
             ).fetchall()
             return tuple(self._materialize_segment(connection, row) for row in rows)
@@ -1805,7 +1814,7 @@ class LearningTrajectoryRepository:
             rows = connection.execute(
                 "SELECT * FROM learning_trajectory_segment "
                 "WHERE fit_partition_digest=? AND state!='quarantined' "
-                "AND created_corpus_revision<=? ORDER BY start_wall_ms,segment_id",
+                "AND created_corpus_revision<=? ORDER BY created_corpus_revision,rowid",
                 (fit_partition_digest, revision),
             ).fetchall()
             segments: list[LearningTrajectorySegment] = []

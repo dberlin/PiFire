@@ -22,7 +22,7 @@ from pydantic.dataclasses import dataclass
 from common.control_trace import AllocationClampReason, AmbientSource
 from common.mpc_learning import MPC_FORECAST_HORIZON_SECONDS, forecast_horizon_spec
 
-MODEL_EVIDENCE_SCHEMA_VERSION = 5
+MODEL_EVIDENCE_SCHEMA_VERSION = 6
 
 type FiniteFloat = Annotated[float, Field(allow_inf_nan=False, strict=True)]
 type NonNegativeFloat = Annotated[FiniteFloat, Field(ge=0)]
@@ -119,9 +119,19 @@ class CalibrationSummaryEvidence:
     rank_progress: NonNegativeFloat = 0.0
     coverage_progress: NonNegativeFloat = 0.0
     continuous: bool = True
+    frame_start_ms: NonNegativeInt | None = None
+    frame_end_ms: NonNegativeInt | None = None
 
     @model_validator(mode="after")
     def validate_completed_frame(self) -> CalibrationSummaryEvidence:
+        if (self.frame_start_ms is None) != (self.frame_end_ms is None):
+            raise ValueError("calibration frame monotonic endpoints must coexist")
+        if (
+            self.frame_start_ms is not None
+            and self.frame_end_ms is not None
+            and self.frame_end_ms <= self.frame_start_ms
+        ):
+            raise ValueError("calibration frame monotonic interval must be positive")
         values = (
             self.result_revision,
             self.command_revision,
@@ -187,6 +197,8 @@ class CalibrationSummaryEvidence:
 
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
 class ForecastOriginEvidence:
+    """Completed origin; schema six coordinates are session/cook-local monotonic milliseconds."""
+
     origin_sequence: NonNegativeInt
     origin_time_ms: NonNegativeInt
     completion_time_ms: NonNegativeInt
@@ -228,10 +240,7 @@ class ForecastOriginEvidence:
                 or self.observation_frames != horizon.observation_frames
             ):
                 raise ValueError("forecast evidence horizon clocks do not match")
-        elif any(
-            value is not None
-            for value in (self.horizon_seconds, self.prediction_steps, self.observation_frames)
-        ):
+        elif any(value is not None for value in (self.horizon_seconds, self.prediction_steps, self.observation_frames)):
             raise ValueError("forecast evidence horizon contract is incomplete")
         return self
 
@@ -442,10 +451,7 @@ class ChallengerRoundEvidence:
     @model_validator(mode="after")
     def validate_complete_round(self) -> ChallengerRoundEvidence:
         legacy = self.required_horizons is not None and self.completed_horizons is not None
-        current = (
-            self.required_horizon_seconds is not None
-            and self.completed_horizon_seconds is not None
-        )
+        current = self.required_horizon_seconds is not None and self.completed_horizon_seconds is not None
         if legacy == current:
             raise ValueError("challenger round requires exactly one horizon contract")
         required = self.required_horizons if legacy else self.required_horizon_seconds
@@ -461,8 +467,7 @@ class ChallengerRoundEvidence:
         if current and required != MPC_FORECAST_HORIZON_SECONDS:
             raise ValueError("current challenger round horizons do not match the MPC contract")
         if legacy and any(
-            value is not None
-            for value in (self.required_horizon_seconds, self.completed_horizon_seconds)
+            value is not None for value in (self.required_horizon_seconds, self.completed_horizon_seconds)
         ):
             raise ValueError("challenger round horizon contract is incomplete")
         if current and any(value is not None for value in (self.required_horizons, self.completed_horizons)):
@@ -564,7 +569,7 @@ class ModelEvidenceDbRow:
 
 
 class ModelEvidenceRecord(BaseModel):
-    """Immutable, indexed envelope around exactly one compact evidence payload."""
+    """Immutable evidence; wall provenance never overrides the containing ledger's append order."""
 
     model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid", frozen=True, strict=True)
 
@@ -576,7 +581,7 @@ class ModelEvidenceRecord(BaseModel):
     role_generation: NonNegativeInt
     model_digest: Digest | None
     provenance_digest: Digest | None
-    schema_version: Literal[1, 2, 3, 4, 5] = MODEL_EVIDENCE_SCHEMA_VERSION
+    schema_version: Literal[1, 2, 3, 4, 5, 6] = MODEL_EVIDENCE_SCHEMA_VERSION
     payload: ModelEvidencePayload
 
     @model_validator(mode="after")
@@ -584,17 +589,24 @@ class ModelEvidenceRecord(BaseModel):
         expected = EvidenceKind(self.payload.payload_type)
         if self.kind is not expected:
             raise ValueError("evidence kind does not match payload_type")
-        if self.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION and isinstance(
+        if (
+            self.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION
+            and isinstance(self.payload, CalibrationSummaryEvidence)
+            and self.payload.result_revision is not None
+            and (self.payload.frame_start_ms is None or self.payload.frame_end_ms is None)
+        ):
+            raise ValueError("current calibration frame requires monotonic interval")
+        if self.schema_version >= 5 and isinstance(
             self.payload,
             RefreshDiagnosticsEvidence,
         ):
             raise ValueError("retired refresh diagnostics cannot be current grey evidence")
-        if self.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION and isinstance(
+        if self.schema_version >= 5 and isinstance(
             self.payload,
             SchemaInvalidationEvidence,
         ):
             raise ValueError("retired schema invalidation cannot be current model evidence")
-        if self.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION and isinstance(
+        if self.schema_version >= 5 and isinstance(
             self.payload,
             (FitLifecycleEvidence, CandidateAssessmentEvidence, ActivationLifecycleEvidence),
         ):
@@ -616,13 +628,13 @@ class ModelEvidenceRecord(BaseModel):
             ):
                 raise ValueError("forecast envelope digests must match precommitted payload digests")
             current_horizon = self.payload.horizon_seconds is not None
-            if (self.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION) != current_horizon:
+            if (self.schema_version >= 5) != current_horizon:
                 raise ValueError("forecast horizon contract does not match evidence schema")
         if isinstance(self.payload, ChallengerRoundEvidence):
-            if self.schema_version not in {4, MODEL_EVIDENCE_SCHEMA_VERSION}:
-                raise ValueError("challenger round evidence requires schema four or current")
+            if self.schema_version not in {4, 5, MODEL_EVIDENCE_SCHEMA_VERSION}:
+                raise ValueError("challenger round evidence requires schema four or later")
             current_horizon = self.payload.required_horizon_seconds is not None
-            if (self.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION) != current_horizon:
+            if (self.schema_version >= 5) != current_horizon:
                 raise ValueError("challenger round horizon contract does not match evidence schema")
             if (
                 self.model_digest != self.payload.candidate_digest
@@ -630,8 +642,8 @@ class ModelEvidenceRecord(BaseModel):
             ):
                 raise ValueError("challenger round envelope digests must match its causal payload")
         if isinstance(self.payload, PidSpFitDecisionEvidence):
-            if self.schema_version not in {4, MODEL_EVIDENCE_SCHEMA_VERSION}:
-                raise ValueError("PID-SP fit decision requires schema four or current")
+            if self.schema_version not in {4, 5, MODEL_EVIDENCE_SCHEMA_VERSION}:
+                raise ValueError("PID-SP fit decision requires schema four or later")
             expected_model_digest = (
                 self.payload.candidate_digest
                 if self.payload.candidate_digest is not None
@@ -640,7 +652,7 @@ class ModelEvidenceRecord(BaseModel):
             if self.model_digest != expected_model_digest or self.provenance_digest != self.payload.fit_corpus_digest:
                 raise ValueError("PID-SP decision envelope digests must match its exact lineage")
         if (
-            self.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION
+            self.schema_version >= 5
             and isinstance(self.payload, TimingDistributionEvidence)
             and (self.payload.p99_ms is None or self.payload.hardware_provenance is None)
         ):

@@ -9,7 +9,7 @@ from typing import Any, Literal, cast
 import numpy as np
 import pytest
 
-from common.control_trace import ControllerType, RecorderGapPayload, TraceEventKind
+from common.control_trace import TRACE_SCHEMA_VERSION, ControllerType, RecorderGapPayload, TraceEventKind
 from common.learning_trajectory import FrameDeliveryCertainty, TrajectoryBreakReason
 from common.persistence.learning_trajectory import SegmentCursor
 from controller.acados import GreyBoxMPCConfig
@@ -152,7 +152,7 @@ def _entered(
         scored_fan_regime_digest=_digest("fan-regime-v1"),
         ambient_semantics_digest=_digest("ambient-v1"),
         source_trace_digest=_digest("source-trace-v1"),
-        source_schema_version=7,
+        source_schema_version=TRACE_SCHEMA_VERSION,
         source_row_digest=_digest("source-rows-v1"),
         build_provenance={"revision": 1},
     )
@@ -659,8 +659,9 @@ class _SeedSource:
         observation,
         *,
         replay_only: bool = False,
-    ) -> None:
+    ) -> bool:
         del observation, replay_only
+        return True
 
     def barrier(self, timeout: float = 2.0) -> bool:
         del timeout
@@ -766,7 +767,9 @@ def test_hold_rejects_evidence_without_durable_cook_identity(
             return record(kind, payload, timestamp_ms)
 
         monkeypatch.setattr(trace, "record", capture_record)
+        hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
         hold.on_tick(2.0, 110.0, hold.grill.get_output_status())
+        hold.ctx.clock.advance(22.0 - hold.ctx.clock.monotonic())
         hold.on_tick(22.0, 110.0, hold.grill.get_output_status())
 
         status = trajectory.status()
@@ -794,6 +797,7 @@ def test_hold_rejects_an_incomplete_mpc_seed_source(hold_cycle) -> None:
             TypeError,
             match="learning trajectory is missing the estimator seed capability",
         ):
+            hold.ctx.clock.advance(10.0 - hold.ctx.clock.monotonic())
             hold.on_tick(10.0, 110.0, hold.grill.get_output_status())
     finally:
         hold.teardown(110.0)
@@ -806,6 +810,7 @@ def test_hold_accepts_none_mpc_seed_source_as_cold_start(hold_cycle) -> None:
     hold.ctx.learning_trajectory = None
 
     try:
+        hold.ctx.clock.advance(10.0 - hold.ctx.clock.monotonic())
         hold.on_tick(10.0, 110.0, hold.grill.get_output_status())
 
         assert len(runner.seeds) == 1
@@ -852,6 +857,7 @@ def test_hold_seeds_before_first_submit_solve_or_controller_output(
             )
         )
 
+        hold.ctx.clock.advance(10.0 - hold.ctx.clock.monotonic())
         hold.on_tick(10.0, 110.0, hold.grill.get_output_status())
 
         _assert_order(
@@ -894,11 +900,13 @@ def test_controller_update_adoption_reuses_valid_trajectory_for_reseed(
 
     try:
         hold.setup()
+        hold.ctx.clock.advance(10.0 - hold.ctx.clock.monotonic())
         hold.on_tick(10.0, 110.0, hold.grill.get_output_status())
         assert runner.seeds == [initial_seed]
 
         seed_source.seed = replacement_seed
         hold.control["controller_update"] = True
+        hold.ctx.clock.advance(20.0 - hold.ctx.clock.monotonic())
         hold.on_tick(20.0, 110.0, hold.grill.get_output_status())
 
         assert runner.seeds == [initial_seed, replacement_seed]
@@ -923,11 +931,13 @@ def test_pid_to_mpc_controller_update_uses_valid_trajectory_seed(
 
     try:
         hold.setup()
+        hold.ctx.clock.advance(10.0 - hold.ctx.clock.monotonic())
         hold.on_tick(10.0, 110.0, hold.grill.get_output_status())
         assert runner.seeds == []
 
         hold.ctx.store._settings["controller"]["selected"] = "mpc"
         hold.control["controller_update"] = True
+        hold.ctx.clock.advance(20.0 - hold.ctx.clock.monotonic())
         hold.on_tick(20.0, 110.0, hold.grill.get_output_status())
 
         assert runner.seeds == [seed]
@@ -954,6 +964,7 @@ def test_pid_to_mpc_controller_update_rejects_incomplete_trajectory_before_trace
             TypeError,
             match="learning trajectory is missing the estimator seed capability",
         ):
+            hold.ctx.clock.advance(20.0 - hold.ctx.clock.monotonic())
             hold.on_tick(20.0, 110.0, hold.grill.get_output_status())
     finally:
         hold.teardown(110.0)
@@ -971,6 +982,7 @@ def test_first_seeded_tick_bypasses_normal_controller_cadence(hold_cycle) -> Non
 
     try:
         hold.setup()
+        hold.ctx.clock.advance(1.0 - hold.ctx.clock.monotonic())
         hold.on_tick(1.0, 110.0, hold.grill.get_output_status())
 
         assert "runner:seed" in events
@@ -1005,10 +1017,12 @@ def test_first_solve_remains_pending_until_runner_has_completed_result(
 
     try:
         hold.setup()
+        hold.ctx.clock.advance(1.0 - hold.ctx.clock.monotonic())
         hold.on_tick(1.0, 110.0, hold.grill.get_output_status())
         assert hold._first_solve_pending
         assert runner.applied == []
 
+        hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
         hold.on_tick(2.0, 110.0, hold.grill.get_output_status())
         assert not hold._first_solve_pending
         assert runner.applied[0].source.value == "seed"
@@ -1039,6 +1053,7 @@ def test_cold_seed_keeps_active_incumbent_control_and_warms_learning(
         hold.setup()
         assert hold._hold_learning is not None
         assert hold._hold_learning.evidence_available is True
+        hold.ctx.clock.advance(10.0 - hold.ctx.clock.monotonic())
         hold.on_tick(10.0, 110.0, hold.grill.get_output_status())
 
         assert runner.seeds == [cold_seed]
@@ -1069,6 +1084,7 @@ def test_seed_application_failure_uses_cold_control_but_keeps_evidence_failed_cl
 
     try:
         hold.setup()
+        hold.ctx.clock.advance(10.0 - hold.ctx.clock.monotonic())
         hold.on_tick(10.0, 110.0, hold.grill.get_output_status())
 
         assert runner.seeds[0] == source_seed
@@ -1102,6 +1118,7 @@ def test_cold_start_seed_failure_keeps_learning_evidence_failed_closed(
 
     try:
         hold.setup()
+        hold.ctx.clock.advance(10.0 - hold.ctx.clock.monotonic())
         hold.on_tick(10.0, 110.0, hold.grill.get_output_status())
 
         assert [seed.status for seed in runner.seeds] == ["exact", "absent"]

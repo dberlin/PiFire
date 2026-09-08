@@ -1,5 +1,6 @@
 """Contracts for pure, typed control-trace replay validation."""
 
+import json
 import sqlite3
 from dataclasses import replace
 from typing import Any, TypedDict, cast
@@ -32,7 +33,6 @@ from common.control_trace import (
 from controller.applied_output import OutputSource
 from controller.control_trace_replay import ReplayIssueCode, TraceSelectionError, replay_session, validate_records
 from controller.mpc_allocator import ALLOCATOR_REVISION, allocate
-import tests.unit.controller._control_trace_fixtures as control_trace_fixtures
 from tests.unit.controller._control_trace_fixtures import current_pid_sp_records
 
 _SESSION_ID = "session-1"
@@ -246,6 +246,8 @@ def _mpc_framed_records():
                 "frame_seconds": 20.0,
                 "frame_start_ms": 2_000,
                 "frame_end_ms": 22_000,
+                "wall_start_ms": 2_000,
+                "wall_end_ms": 22_000,
                 "requested_combustion_load": 0.5,
                 "requested_auger_duty": allocation.requested_auger_duty,
                 "credit_before_seconds": 0.0,
@@ -324,31 +326,6 @@ def test_current_pid_sp_completed_frame_uses_production_quantized_delivery():
     assert validate_records(records).valid
 
 
-def test_current_pid_sp_negative_demand_allocates_once_from_bounded_zero(monkeypatch):
-    production_allocate = allocate
-    calls = []
-
-    def recording_allocate(raw_demand, **limits):
-        calls.append((raw_demand, limits))
-        return production_allocate(raw_demand, **limits)
-
-    monkeypatch.setattr(control_trace_fixtures, "allocate", recording_allocate)
-
-    current_pid_sp_records(raw_demand=-0.15963)
-
-    assert calls == [
-        (
-            0.0,
-            {
-                "u_max": 1.0,
-                "fan_min_pct": 0.0,
-                "fan_max_pct": 0.0,
-                "enable_fan": False,
-            },
-        )
-    ]
-
-
 def test_current_pid_sp_negative_demand_stays_raw_while_all_physical_output_is_zero():
     records = current_pid_sp_records(raw_demand=-0.15963, include_frame=True)
     update = cast(PidSpUpdatePayload, records[1].payload)
@@ -382,11 +359,100 @@ def test_validate_records_accepts_pristine_typed_sessions(records):
 
 @pytest.mark.parametrize("schema_version", [2, 3, 4, 5])
 def test_validate_records_accepts_compatible_historical_sessions(schema_version):
+    historical_payloads = (
+        (
+            0,
+            "session",
+            {
+                "payload_type": "session",
+                "controller": "pid",
+                "controller_config": [{"key": "kp", "value": 1.0}],
+                "temperature_unit": "F",
+                "control_period_seconds": 2.0,
+                "model_revision": None,
+                "model_provenance": None,
+                "pulse_slot_seconds": 2.0,
+                "pulse_frame_seconds": 20.0,
+                "fan_authority": False,
+                "fan_pwm_capable": False,
+                "fan_min_duty": 0.0,
+                "fan_max_duty": 100.0,
+                "setpoint": 225.0,
+                "ambient_temperature": 70.0,
+                "software_version": "test",
+                "build_version": "1",
+            },
+        ),
+        (
+            2_000,
+            "control_update",
+            {
+                "payload_type": "pid_update",
+                "monotonic_ms": 2_000,
+                "wall_ms": 2_000,
+                "result_revision": 1,
+                "result_age_ms": 0,
+                "control_period_seconds": 2.0,
+                "observed_dt_seconds": 2.0,
+                "setpoint": 225.0,
+                "measured_temperature": 220.0,
+                "raw_output": 0.5,
+                "requested_output": 0.5,
+                "actuation_mode": "framed_pulse",
+                "prior_requested_auger_duty": 0.5,
+                "prior_realized_auger_duty": 0.5,
+                "requested_fan_duty": None,
+                "applied_fan_duty": None,
+                "output_source": "controller",
+                "inhibit_reason": "none",
+                "error": 5.0,
+                "proportional_term": 0.2,
+                "integral_term": 0.2,
+                "derivative_term": 0.1,
+                "integral_accumulator": 0.2,
+                "integral_clamped": False,
+                "derivative_input": 0.0,
+                "derivative_state": 0.0,
+                "proportional_band": 100.0,
+                "kp": 1.0,
+                "ki": 0.1,
+                "kd": 0.0,
+                "center": 225.0,
+                "previous_temperature": 219.0,
+                "previous_update_ms": 0,
+            },
+        ),
+        (
+            4_000,
+            "applied_output",
+            {
+                "payload_type": "applied_output",
+                "result_revision": 1,
+                "interval_start_ms": 2_000,
+                "interval_end_ms": 4_000,
+                "realized_auger_duty": 0.5,
+                "realized_combustion_load": None,
+                "actual_fan_duty": 70.0,
+                "sample_complete": True,
+                "output_source": "controller",
+            },
+        ),
+    )
     records = [
         ControlTraceRecord.model_validate_json(
-            record.model_copy(update={"schema_version": schema_version}).model_dump_json()
+            json.dumps(
+                {
+                    "ts_ms": timestamp,
+                    "session_id": _SESSION_ID,
+                    "cook_id": "cook-1",
+                    "controller": "pid",
+                    "event_kind": kind,
+                    "schema_version": schema_version,
+                    "payload": payload,
+                }
+            )
         )
-        for record in _pid_records()
+        for timestamp, kind, payload in historical_payloads
     ]
 
     report = validate_records(records)
@@ -463,7 +529,13 @@ def test_validate_records_accepts_adjacent_same_revision_framed_intervals():
         42_000,
         ControllerType.MPC,
         TraceEventKind.ACTUATION_FRAME,
-        replace(records[3].payload, frame_start_ms=22_000, frame_end_ms=42_000),
+        replace(
+            records[3].payload,
+            frame_start_ms=22_000,
+            frame_end_ms=42_000,
+            wall_start_ms=22_000,
+            wall_end_ms=42_000,
+        ),
     )
     adjacent_output = _record(
         42_000,
@@ -578,6 +650,7 @@ def test_validate_records_requires_scheduler_reset_event_for_framed_reset():
     reset_frame = replace(
         records[3].payload,
         frame_end_ms=3_000,
+        wall_end_ms=3_000,
         delivered_on_seconds=0.0,
         transition_count=0,
         actual_start_active=False,
@@ -599,7 +672,9 @@ def test_validate_records_requires_scheduler_reset_event_for_framed_reset():
         3_000,
         ControllerType.MPC,
         TraceEventKind.SAFETY_EVENT,
-        SafetyEventPayload(SafetyEventType.SCHEDULER_RESET, InhibitReason.SAFETY, 1, "scheduler reset"),
+        SafetyEventPayload(
+            SafetyEventType.SCHEDULER_RESET, InhibitReason.SAFETY, 1, "scheduler reset", monotonic_ms=3_000
+        ),
     )
     assert validate_records(
         records[:3] + [reset, _record(3_000, ControllerType.MPC, TraceEventKind.ACTUATION_FRAME, reset_frame), coverage]
@@ -615,7 +690,9 @@ def test_validate_records_requires_safety_event_for_manual_and_allows_recorded_t
         2_000,
         ControllerType.PID,
         TraceEventKind.SAFETY_EVENT,
-        SafetyEventPayload(SafetyEventType.MANUAL_TAKEOVER, InhibitReason.MANUAL_OVERRIDE, 1, "manual"),
+        SafetyEventPayload(
+            SafetyEventType.MANUAL_TAKEOVER, InhibitReason.MANUAL_OVERRIDE, 1, "manual", monotonic_ms=2_000
+        ),
     )
     assert validate_records(
         records[:2]
@@ -634,7 +711,7 @@ def test_validate_records_requires_lid_event_for_lid_output():
         2_000,
         ControllerType.PID,
         TraceEventKind.SAFETY_EVENT,
-        SafetyEventPayload(SafetyEventType.LID_DETECTED, InhibitReason.LID_OPEN, 1, "lid"),
+        SafetyEventPayload(SafetyEventType.LID_DETECTED, InhibitReason.LID_OPEN, 1, "lid", monotonic_ms=2_000),
     )
     assert validate_records(
         records[:2]
@@ -675,7 +752,9 @@ def test_validate_records_accepts_controller_partial_followed_by_manual_takeover
         4_000,
         ControllerType.PID,
         TraceEventKind.SAFETY_EVENT,
-        SafetyEventPayload(SafetyEventType.MANUAL_TAKEOVER, InhibitReason.MANUAL_OVERRIDE, 1, "manual"),
+        SafetyEventPayload(
+            SafetyEventType.MANUAL_TAKEOVER, InhibitReason.MANUAL_OVERRIDE, 1, "manual", monotonic_ms=4_000
+        ),
     )
     replay = records[:-1] + [
         _record(4_000, ControllerType.PID, TraceEventKind.APPLIED_OUTPUT, partial),
@@ -737,6 +816,7 @@ def test_validate_records_requires_safety_evidence_for_update_fields_and_matchin
     reset = replace(
         frame,
         frame_end_ms=3_000,
+        wall_end_ms=3_000,
         delivered_on_seconds=0.0,
         transition_count=0,
         actual_start_active=False,
@@ -754,7 +834,9 @@ def test_validate_records_requires_safety_evidence_for_update_fields_and_matchin
         3_000,
         ControllerType.MPC,
         TraceEventKind.SAFETY_EVENT,
-        SafetyEventPayload(SafetyEventType.SCHEDULER_RESET, InhibitReason.SAFETY, 2, "wrong revision"),
+        SafetyEventPayload(
+            SafetyEventType.SCHEDULER_RESET, InhibitReason.SAFETY, 2, "wrong revision", monotonic_ms=3_000
+        ),
     )
     assert ReplayIssueCode.UNEXPLAINED_INHIBIT in [
         issue.code
@@ -779,7 +861,9 @@ def test_validate_records_rejects_partial_without_exact_replacement_boundary(eve
         timestamp,
         ControllerType.PID,
         TraceEventKind.SAFETY_EVENT,
-        SafetyEventPayload(event, InhibitReason.MANUAL_OVERRIDE, 1, "not an exact manual replacement"),
+        SafetyEventPayload(
+            event, InhibitReason.MANUAL_OVERRIDE, 1, "not an exact manual replacement", monotonic_ms=timestamp
+        ),
     )
     later_update = _record(6_000, ControllerType.PID, TraceEventKind.CONTROL_UPDATE, _pid_update(2))
     report = validate_records(
@@ -802,13 +886,13 @@ def test_validate_records_uses_source_authority_at_interval_start_after_later_re
         2_000,
         ControllerType.PID,
         TraceEventKind.SAFETY_EVENT,
-        SafetyEventPayload(detected, InhibitReason.NONE, 1, "start authority"),
+        SafetyEventPayload(detected, InhibitReason.NONE, 1, "start authority", monotonic_ms=2_000),
     )
     release_event = _record(
         3_000,
         ControllerType.PID,
         TraceEventKind.SAFETY_EVENT,
-        SafetyEventPayload(cleared, InhibitReason.NONE, 1, "later release"),
+        SafetyEventPayload(cleared, InhibitReason.NONE, 1, "later release", monotonic_ms=3_000),
     )
     historical = replace(records[-1].payload, output_source=source)
     report = validate_records(

@@ -43,7 +43,8 @@ def _run_variant(module_name, monkeypatch):
     clock = _Clock()
     monkeypatch.setattr(time, "time", clock)
     mod = importlib.import_module(f"controller.{module_name}")
-    c = mod.Controller(dict(PID_CONFIGS[module_name]), "F", dict(CYCLE_DATA))
+    kwargs = {"monotonic_clock": clock} if module_name == "pid_sp" else {}
+    c = mod.Controller(dict(PID_CONFIGS[module_name]), "F", dict(CYCLE_DATA), **kwargs)
     c.set_target(SETPOINT)
     out = []
     for i, current in enumerate(SERIES, 1):

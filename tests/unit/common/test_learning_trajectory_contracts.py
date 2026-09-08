@@ -11,6 +11,7 @@ import pytest
 from pydantic import ValidationError
 
 from common.learning_trajectory import (
+    TRAJECTORY_OBSERVATION_SCHEMA_VERSION,
     FitCorpusIdentity,
     FitCorpusSlice,
     FrameDeliveryCertainty,
@@ -205,7 +206,8 @@ def test_partial_frame_is_forbidden_in_scored_hold_observations() -> None:
 
     pre_roll_segment = _segment(
         pre_roll_frames=(_frame(0), _frame(1, end_ms=30_000, partial=True)),
-        scored_hold_frames=(_frame(2), _frame(3)),
+        scored_hold_frames=(),
+        hold_entry=None,
     )
     assert pre_roll_segment.pre_roll_frames[-1].partial is True
 
@@ -412,13 +414,12 @@ def test_previous_observation_schema_remains_decodable_without_role_generation()
     assert previous.observation_schema_version == 2
     assert all(frame.role_generation is None for frame in previous.pre_roll_frames)
     current = _segment(
-        observation_schema_version=3,
         pre_roll_frames=smoke_pre_roll,
         scored_hold_frames=(),
         hold_entry=None,
         generation_audit_ranges=(),
     )
-    assert current.observation_schema_version == 3
+    assert current.observation_schema_version == TRAJECTORY_OBSERVATION_SCHEMA_VERSION
     assert current.generation_audit_ranges == ()
     with pytest.raises(ValidationError, match="scored trajectory frames require role generation"):
         _segment(
@@ -429,7 +430,7 @@ def test_previous_observation_schema_remains_decodable_without_role_generation()
         )
     with pytest.raises(ValidationError, match="unsupported trajectory observation schema"):
         _segment(
-            observation_schema_version=4,
+            observation_schema_version=TRAJECTORY_OBSERVATION_SCHEMA_VERSION + 1,
             pre_roll_frames=smoke_pre_roll,
             scored_hold_frames=(),
             hold_entry=None,
@@ -618,10 +619,9 @@ def test_segment_refreezes_existing_public_provenance_instances() -> None:
     assert segment.content_digest == original_digest
 
 
-def test_hold_entry_matches_both_clocks_and_supports_entry_before_first_score() -> None:
-    mismatched_wall_anchor = replace(_hold_entry(), wall_ms=1_040_001)
-    with pytest.raises(ValidationError, match="Hold-entry.*wall|wall.*Hold-entry"):
-        _segment(hold_entry=mismatched_wall_anchor)
+def test_hold_entry_preserves_independent_wall_provenance_and_required_physical_anchor() -> None:
+    independent_wall_anchor = replace(_hold_entry(), wall_ms=1_040_001)
+    assert _segment(hold_entry=independent_wall_anchor).hold_entry == independent_wall_anchor
     with pytest.raises(ValidationError, match="scored.*anchor|anchor.*scored"):
         _segment(hold_entry=None)
 
@@ -658,12 +658,12 @@ def test_hold_entry_matches_both_clocks_and_supports_entry_before_first_score() 
             scored_hold_frames=(),
             hold_entry=replace(_hold_entry(), monotonic_ms=40_001),
         )
-    with pytest.raises(ValidationError, match="Hold-entry.*wall|wall.*Hold-entry"):
-        _segment(
-            pre_roll_frames=smoke_pre_roll,
-            scored_hold_frames=(),
-            hold_entry=replace(_hold_entry(), wall_ms=1_040_001),
-        )
+    independent_wall_only = _segment(
+        pre_roll_frames=smoke_pre_roll,
+        scored_hold_frames=(),
+        hold_entry=independent_wall_anchor,
+    )
+    assert independent_wall_only.hold_entry == independent_wall_anchor
 
 
 def test_oversized_metadata_and_provenance_are_rejected() -> None:

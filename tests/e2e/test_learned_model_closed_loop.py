@@ -182,6 +182,8 @@ def _frame_observation(
     return FrameObservation(
         frame_start_s=frame_start_ms / 1_000,
         frame_end_s=(frame_start_ms + _FRAME_MS) / 1_000,
+        wall_start_ms=round((frame_start_ms / 1_000) * 1_000),
+        wall_end_ms=round(((frame_start_ms + _FRAME_MS) / 1_000) * 1_000),
         temp_c=plant.measured(),
         setpoint_c=setpoint_c,
         ambient_c=plant.T_amb,

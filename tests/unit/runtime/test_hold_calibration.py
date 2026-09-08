@@ -34,6 +34,7 @@ def _trace(mode):
 
 
 def _advance_runtime(mode, now, actual_auger_on, *, ptemp=None, apply_transition=True):
+    mode.ctx.clock.advance(now - mode.ctx.clock.monotonic())
     result = _runtime(mode).advance(
         now,
         actual_auger_on,
@@ -128,6 +129,7 @@ def test_safety_ceiling_uses_current_grill_limit_and_units_each_tick(
     hold.settings["globals"]["units"] = units
     hold.setup()
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
 
     assert runner.safety_ceiling_c == pytest.approx(expected_c)
@@ -168,20 +170,28 @@ def test_invalid_safety_ceiling_fault_deduplicates_and_recovers(
     assert trace.ensure_open(context, timestamp_ms=0) is not None
     hold.settings["globals"]["units"] = "K"
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
     hold.settings["globals"]["units"] = "C"
     hold.settings["safety"]["maxtemp"] = 260.0
+    hold.ctx.clock.advance(6.0 - hold.ctx.clock.monotonic())
     hold.on_tick(6.0, 200.0, hold.grill.get_output_status())
     hold.settings["globals"]["units"] = "K"
+    hold.ctx.clock.advance(8.0 - hold.ctx.clock.monotonic())
     hold.on_tick(8.0, 200.0, hold.grill.get_output_status())
     hold.settings["globals"]["units"] = "C"
+    hold.ctx.clock.advance(10.0 - hold.ctx.clock.monotonic())
     hold.on_tick(10.0, 200.0, hold.grill.get_output_status())
     hold.settings["safety"]["maxtemp"] = float("nan")
+    hold.ctx.clock.advance(12.0 - hold.ctx.clock.monotonic())
     hold.on_tick(12.0, 200.0, hold.grill.get_output_status())
     hold.settings["safety"]["maxtemp"] = 260.0
+    hold.ctx.clock.advance(14.0 - hold.ctx.clock.monotonic())
     hold.on_tick(14.0, 200.0, hold.grill.get_output_status())
     hold.settings["safety"]["maxtemp"] = True
+    hold.ctx.clock.advance(16.0 - hold.ctx.clock.monotonic())
     hold.on_tick(16.0, 200.0, hold.grill.get_output_status())
 
     faults = [
@@ -216,15 +226,19 @@ def test_safety_ceiling_callback_failure_deduplicates_and_recovers(
         raise NotImplementedError("ceiling unsupported")
 
     monkeypatch.setattr(runner, "set_safety_ceiling_c", unsupported)
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
     monkeypatch.setattr(
         runner,
         "set_safety_ceiling_c",
         lambda ceiling: setattr(runner, "safety_ceiling_c", ceiling),
     )
+    hold.ctx.clock.advance(6.0 - hold.ctx.clock.monotonic())
     hold.on_tick(6.0, 200.0, hold.grill.get_output_status())
     monkeypatch.setattr(runner, "set_safety_ceiling_c", unsupported)
+    hold.ctx.clock.advance(8.0 - hold.ctx.clock.monotonic())
     hold.on_tick(8.0, 200.0, hold.grill.get_output_status())
 
     assert attempted_ceilings == pytest.approx([(550.0 - 32.0) * 5.0 / 9.0] * 3)
@@ -247,6 +261,7 @@ def test_safety_ceiling_and_calibration_command_precede_result_consumption(hold_
     }
     hold.setup()
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
 
     assert events == ["safety-ceiling", "calibration-command", "temperature-submit", "result"]
@@ -265,9 +280,12 @@ def test_hold_consumes_latest_calibration_revision_once_across_reconfiguration(h
     }
     hold.setup()
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     hold.control["controller_update"] = True
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
+    hold.ctx.clock.advance(6.0 - hold.ctx.clock.monotonic())
     hold.on_tick(6.0, 200.0, hold.grill.get_output_status())
 
     assert [command.command_revision for command in runner.calibration_requests] == [1]
@@ -278,6 +296,7 @@ def test_hold_cancels_active_probe_without_reserving_an_operator_revision(hold_c
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
     hold.state.lid.open_detected = True
+    hold.ctx.clock.advance(22.0 - hold.ctx.clock.monotonic())
     hold.on_tick(22.0, 200.0, hold.grill.get_output_status())
 
     assert runner.calibration_cancellations == ["lid_open"]
@@ -289,7 +308,9 @@ def test_hold_records_baseline_and_probe_on_framed_observation(hold_cycle):
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
+    hold.ctx.clock.advance(22.0 - hold.ctx.clock.monotonic())
     hold.on_tick(22.0, 200.0, hold.grill.get_output_status())
 
     assert runner.observations[0].baseline_q == 0.3
@@ -302,7 +323,9 @@ def test_active_zero_probe_dwell_does_not_claim_completed_probe_evidence(hold_cy
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
+    hold.ctx.clock.advance(22.0 - hold.ctx.clock.monotonic())
     hold.on_tick(22.0, 200.0, hold.grill.get_output_status())
 
     observation = runner.observations[0]
@@ -360,6 +383,7 @@ def test_default_five_second_polls_terminalize_only_the_twenty_second_frame(hold
     hold.state.controller.cycle_start = -5.0
 
     for now in (1.0, 7.0, 13.0, 19.0, 27.0):
+        hold.ctx.clock.advance(now - hold.ctx.clock.monotonic())
         hold.on_tick(now, 200.0, hold.grill.get_output_status())
 
     terminal = [item for item in runner.applied if item.feedback_disposition.value != "progress"]
@@ -378,6 +402,7 @@ def test_automatic_lid_detection_cancels_active_probe_before_pause(
     hold.state.target_temp_achieved = True
     hold.settings["cycle_data"]["LidOpenDetectEnabled"] = True
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 100.0, hold.grill.get_output_status())
 
     assert hold.state.lid.open_detected is True
@@ -391,9 +416,11 @@ def test_operator_lid_open_cancels_active_probe_before_pause(
     runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1)])
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     hold.control["lid_open_toggle"] = True
 
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
 
     assert hold.state.lid.open_detected is True
@@ -406,8 +433,10 @@ def test_hold_stamps_latched_probe_frame_before_lid_reset(hold_cycle):
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     hold.state.lid.open_detected = True
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
 
     cancelled = runner.observations[-1]
@@ -424,8 +453,10 @@ def test_boundary_cancellation_preserves_completed_frame_and_marks_reset_partial
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     hold.state.lid.open_detected = True
+    hold.ctx.clock.advance(23.0 - hold.ctx.clock.monotonic())
     hold.on_tick(23.0, 200.0, hold.grill.get_output_status())
 
     completed, cancelled = runner.observations[-2:]
@@ -460,12 +491,14 @@ def test_multiboundary_cancellation_reports_exact_old_frame_then_skipped_gap_and
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     traces = []
     assert hold._control_trace is not None
     hold._control_trace.record = lambda kind, payload, _at: traces.append((kind, payload)) or True
     _advance_runtime(hold, 10.0, True, ptemp=200.0)
     hold.state.lid.open_detected = True
+    hold.ctx.clock.advance(63.0 - hold.ctx.clock.monotonic())
     hold.on_tick(63.0, 200.0, hold.grill.get_output_status())
 
     terminal = [item for item in runner.applied if item.feedback_disposition is not FrameFeedbackDisposition.PROGRESS]
@@ -493,6 +526,7 @@ def test_multiframe_catchup_pairs_each_exact_feedback_with_its_observation(hold_
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     _advance_runtime(hold, 10.0, True, ptemp=200.0)
     _advance_runtime(hold, 63.0, True, ptemp=201.0)
@@ -512,8 +546,10 @@ def test_hold_stamps_latched_probe_frame_before_reconfigure_reset(hold_cycle):
     hold.control["cook_id"] = "reconfigure-calibration-reset"
     hold.setup()
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     hold.control["controller_update"] = True
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
 
     cancelled = runner.observations[-1]
@@ -530,9 +566,12 @@ def test_hold_does_not_carry_cancelled_frame_status_into_later_baseline(hold_cyc
     hold.control["cook_id"] = "reconfigure-calibration-baseline"
     hold.setup()
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     hold.control["controller_update"] = True
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
+    hold.ctx.clock.advance(24.0 - hold.ctx.clock.monotonic())
     hold.on_tick(24.0, 200.0, hold.grill.get_output_status())
 
     cancelled, baseline = runner.observations[-2:]
@@ -571,6 +610,7 @@ def test_runtime_intervention_cancels_probe_to_exact_grey_box_baseline(
     hold = hold_cycle(runner, controller="mpc")
     hold.control["cook_id"] = f"calibration-intervention-{intervention}"
     hold.setup()
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
 
     if intervention == "lid-opening":
@@ -580,6 +620,7 @@ def test_runtime_intervention_cancels_probe_to_exact_grey_box_baseline(
     elif intervention == "scheduler-reset":
         hold.control["controller_update"] = True
 
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
 
     cancelled = runner.observations[-1]
@@ -591,6 +632,7 @@ def test_runtime_intervention_cancels_probe_to_exact_grey_box_baseline(
     assert hold.state.controller.pulse_requested_duty == pytest.approx(following.baseline_allocation.auger_duty)
 
     if intervention == "scheduler-reset":
+        hold.ctx.clock.advance(24.0 - hold.ctx.clock.monotonic())
         hold.on_tick(24.0, 200.0, hold.grill.get_output_status())
         baseline = runner.observations[-1]
         assert baseline.result_revision == following.revision
@@ -610,13 +652,16 @@ def test_manual_callback_then_in_flight_result_uses_one_cancellation_path(
     hold = hold_cycle(runner, controller="mpc")
     hold.control["cook_id"] = "manual-callback-calibration"
     hold.setup()
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
 
     hold.state.manual_override["auger"] = 30.0
 
+    hold.ctx.clock.advance(3.0 - hold.ctx.clock.monotonic())
     hold._last_now = 3.0
     hold._last_ptemp = 200.0
     hold._on_manual_output("auger", True)
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
 
     cancelled = [observation for observation in runner.observations if observation.calibration_status == "cancelled"]
@@ -637,6 +682,7 @@ def test_stale_calibration_cancellation_resets_framed_pulse_once(
     runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1), stale])
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     runtime = _runtime(hold)
     resets = []
@@ -648,6 +694,7 @@ def test_stale_calibration_cancellation_resets_framed_pulse_once(
 
     monkeypatch.setattr(runtime, "reset", record_reset)
 
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
 
     assert resets == [resets[0]]
@@ -669,13 +716,17 @@ def test_callbacks_cancel_active_frame_once_before_in_flight_result(
     runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1), _result(2, probe=0.1)])
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
 
     if intervention == "lid-toggle":
         hold.control["lid_open_toggle"] = True
+        hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
         hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
     else:
+        hold.ctx.clock.advance(3.0 - hold.ctx.clock.monotonic())
         hold._on_safety_event("temperature_guard", 3.0)
+        hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
         hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
 
     cancelled = [observation for observation in runner.observations if observation.calibration_status == "cancelled"]
@@ -713,8 +764,10 @@ def test_thermocouple_fault_cancels_calibration_inhibits_pulse_and_records_error
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
     hold.control["cook_id"] = "thermocouple-fault"
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
 
+    hold.ctx.clock.advance(3.0 - hold.ctx.clock.monotonic())
     hold._on_safety_event("thermocouple_fault", 3.0)
 
     safety = [record.payload for record in recorder.records if isinstance(record.payload, SafetyEventPayload)]
@@ -742,6 +795,7 @@ def test_repeated_stale_active_result_is_handled_without_repeat_or_restart(
     runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1), stale, stale])
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     runtime = _runtime(hold)
     resets = 0
@@ -762,9 +816,11 @@ def test_repeated_stale_active_result_is_handled_without_repeat_or_restart(
     monkeypatch.setattr(runtime, "reset", record_reset)
     monkeypatch.setattr(runtime, "advance", record_advance)
 
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
     assert resets == 1
     assert hold.state.controller.pulse_frame_calibration_status == "cancelled"
+    hold.ctx.clock.advance(6.0 - hold.ctx.clock.monotonic())
     hold.on_tick(6.0, 200.0, hold.grill.get_output_status())
 
     baseline = stale.baseline_allocation
@@ -786,6 +842,7 @@ def test_malformed_newer_command_does_not_cancel_active_probe(
         "revision": "malformed",
     }
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
 
     assert runner.calibration_cancellations == []
@@ -801,6 +858,7 @@ def test_absent_operator_command_leaves_active_probe_running(
     hold.setup()
     hold.control.pop("mpc_calibration", None)
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
 
     assert runner.calibration_cancellations == []
@@ -820,6 +878,7 @@ def test_cancelling_probe_without_baseline_keeps_hardware_inhibited(
     hold.setup()
     hold.control["mode"] = "Smoke"
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
 
     assert runner.calibration_cancellations == ["safety"]
@@ -835,6 +894,7 @@ def test_mode_transition_cancels_in_flight_probe_as_safety(
     hold.setup()
     hold.control["mode"] = "Smoke"
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
 
     assert runner.calibration_cancellations == ["safety"]
@@ -858,6 +918,7 @@ def test_operator_command_before_first_probe_frame_is_forwarded_and_cancels(
         "pellets_confirmed": True,
     }
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
 
     controller = hold.state.controller
@@ -899,6 +960,7 @@ def test_operator_cancellation_is_admitted_before_command_aware_latest(
     runner = _CommandAwareRunner()
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     hold.control["mpc_calibration"] = {
         "action": action,
@@ -909,6 +971,7 @@ def test_operator_cancellation_is_admitted_before_command_aware_latest(
         "pellets_confirmed": True,
     }
 
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
 
     cancelled = runner.observations[-1]
@@ -944,6 +1007,7 @@ def test_operator_cancellation_accepts_runner_ack_without_calibration_payload(
     runner = _NoCalibrationAckRunner()
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     hold.control["mpc_calibration"] = {
         "action": "stop",
@@ -954,6 +1018,7 @@ def test_operator_cancellation_accepts_runner_ack_without_calibration_payload(
         "pellets_confirmed": True,
     }
 
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
 
     assert [command.command_revision for command in runner.calibration_requests] == [2]
@@ -982,7 +1047,9 @@ def test_cancelled_old_identity_does_not_strip_distinct_active_result(
     runner = FakeControllerRunner(period=1.0).script([old, distinct])
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
+    hold.ctx.clock.advance(3.0 - hold.ctx.clock.monotonic())
     hold._last_now = 3.0
     hold._on_manual_output("auger", True)
     hold.state.manual_override["auger"] = 0.0
@@ -996,6 +1063,7 @@ def test_cancelled_old_identity_does_not_strip_distinct_active_result(
         return advance(*args, **kwargs)
 
     monkeypatch.setattr(runtime, "advance", record_advance)
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
 
     assert hold.state.controller.pulse_calibration_status == "active"
@@ -1034,6 +1102,7 @@ def test_manual_callback_adopts_same_revision_inactive_baseline_without_restart(
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
     hold.state.controller.cycle_start = -1.0
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     runtime = _runtime(hold)
     advances = 0
@@ -1045,8 +1114,10 @@ def test_manual_callback_adopts_same_revision_inactive_baseline_without_restart(
         return advance(*args, **kwargs)
 
     monkeypatch.setattr(runtime, "advance", record_advance)
+    hold.ctx.clock.advance(3.0 - hold.ctx.clock.monotonic())
     hold._last_now = 3.0
     hold._on_manual_output("auger", True)
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
 
     baseline = runner.inactive.baseline_allocation
@@ -1095,6 +1166,7 @@ def test_operator_cancellation_inside_control_period_waits_for_post_command_resu
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
     hold.state.controller.cycle_start = -11.0
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     runtime = _runtime(hold)
     runner.calibration_cancellations.clear()
@@ -1118,12 +1190,14 @@ def test_operator_cancellation_inside_control_period_waits_for_post_command_resu
         "pellets_confirmed": True,
     }
 
+    hold.ctx.clock.advance(3.0 - hold.ctx.clock.monotonic())
     hold.on_tick(3.0, 200.0, hold.grill.get_output_status())
     assert advances == 0
     assert runner.calibration_cancellations == []
     assert hold.state.controller.pulse_frame_calibration_status == "cancelled"
 
     hold.state.controller.cycle_start = 2.0
+    hold.ctx.clock.advance(14.0 - hold.ctx.clock.monotonic())
     hold.on_tick(14.0, 200.0, hold.grill.get_output_status())
 
     baseline = runner.after_command.baseline_allocation
@@ -1148,6 +1222,7 @@ def test_newer_operator_cancellation_keeps_exact_command_identity(
     runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1)])
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     hold.control["mpc_calibration"] = {
         "action": action,
@@ -1158,6 +1233,7 @@ def test_newer_operator_cancellation_keeps_exact_command_identity(
         "pellets_confirmed": True,
     }
 
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
 
     cancelled = runner.observations[-1]
@@ -1175,6 +1251,7 @@ def test_manual_release_records_one_release_trace_when_cancelling_probe(
     runner = FakeControllerRunner(period=1.0).script([_result(probe=0.1)])
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     trace = _trace(hold)
     releases = []
@@ -1187,6 +1264,7 @@ def test_manual_release_records_one_release_trace_when_cancelling_probe(
 
     monkeypatch.setattr(trace, "record_safety", capture_release)
 
+    hold.ctx.clock.advance(3.0 - hold.ctx.clock.monotonic())
     hold._on_manual_release("auger", 3.0)
 
     assert len(releases) == 1
@@ -1201,6 +1279,7 @@ def test_manual_release_still_records_once_without_active_probe(
     runner = FakeControllerRunner(period=1.0).script([_result(active=active)])
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     trace = _trace(hold)
     releases = []
@@ -1213,6 +1292,7 @@ def test_manual_release_still_records_once_without_active_probe(
 
     monkeypatch.setattr(trace, "record_safety", capture_release)
 
+    hold.ctx.clock.advance(3.0 - hold.ctx.clock.monotonic())
     hold._on_manual_release("auger", 3.0)
 
     assert len(releases) == 1
@@ -1224,9 +1304,12 @@ def test_manual_release_cancels_an_active_probe_once(hold_cycle) -> None:
     hold = hold_cycle(runner, controller="mpc")
     hold.control["cook_id"] = "manual-release-calibration"
     hold.setup()
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
 
+    hold.ctx.clock.advance(3.0 - hold.ctx.clock.monotonic())
     hold._on_manual_release("auger", 3.0)
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
 
     cancelled = [observation for observation in runner.observations if observation.calibration_status == "cancelled"]
@@ -1239,9 +1322,11 @@ def test_scheduler_reset_does_not_notify_inactive_calibration_owner(hold_cycle) 
     runner = FakeControllerRunner(period=1.0).script([_result(), _result(2)])
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
 
     hold.control["controller_update"] = True
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
 
     assert runner.calibration_cancellations == []
@@ -1301,9 +1386,12 @@ def test_cancelled_frame_persists_matching_raw_and_compact_evidence_once(hold_cy
     hold.setup()
     hold.control["cook_id"] = "cook-calibration"
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     hold.state.lid.open_detected = True
+    hold.ctx.clock.advance(23.0 - hold.ctx.clock.monotonic())
     hold.on_tick(23.0, 200.0, hold.grill.get_output_status())
+    hold.ctx.clock.advance(25.0 - hold.ctx.clock.monotonic())
     hold.on_tick(25.0, 200.0, hold.grill.get_output_status())
     assert workers[0].barrier(timeout=1.0)
 
@@ -1404,8 +1492,11 @@ def test_current_stale_probe_result_does_not_claim_prior_interval_evidence(
     hold.setup()
     hold.control["cook_id"] = "current-stale-calibration"
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
+    hold.ctx.clock.advance(25.0 - hold.ctx.clock.monotonic())
     hold.on_tick(25.0, 200.0, hold.grill.get_output_status())
     assert workers[0].barrier(timeout=1.0)
 
@@ -1510,9 +1601,13 @@ def test_hold_persists_measured_completed_stages_on_coast_evidence(hold_cycle, m
     hold.setup()
     hold.control["cook_id"] = "cook-calibration"
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
+    hold.ctx.clock.advance(23.0 - hold.ctx.clock.monotonic())
     hold.on_tick(23.0, 200.0, hold.grill.get_output_status())
+    hold.ctx.clock.advance(25.0 - hold.ctx.clock.monotonic())
     hold.on_tick(25.0, 200.0, hold.grill.get_output_status())
+    hold.ctx.clock.advance(26.0 - hold.ctx.clock.monotonic())
     hold.on_tick(26.0, 200.0, hold.grill.get_output_status())
     learning = hold._hold_learning
     assert learning is not None
@@ -1550,8 +1645,11 @@ def test_a_command_that_cannot_be_built_is_rejected_once_and_named(hold_cycle, c
     hold.setup()
 
     with caplog.at_level(logging.ERROR, logger="control"):
+        hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
         hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
+        hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
         hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
+        hold.ctx.clock.advance(6.0 - hold.ctx.clock.monotonic())
         hold.on_tick(6.0, 200.0, hold.grill.get_output_status())
 
     assert runner.calibration_requests == []
@@ -1593,7 +1691,9 @@ def test_unsupported_calibration_request_is_consumed_and_traced_once(
 
     monkeypatch.setattr(runner, "request_calibration", unsupported)
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
 
     assert [command.command_revision for command in attempted_commands] == [1]

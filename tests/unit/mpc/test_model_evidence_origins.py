@@ -26,6 +26,8 @@ def _frame(
     return FrameObservation(
         frame_start_s=sequence * 20.0,
         frame_end_s=(sequence + 1) * 20.0,
+        wall_start_ms=round((sequence * 20.0) * 1_000),
+        wall_end_ms=round(((sequence + 1) * 20.0) * 1_000),
         temp_c=100.0 + sequence,
         setpoint_c=180.0,
         ambient_c=20.0,
@@ -121,9 +123,7 @@ def test_origins_complete_once_at_the_exact_future_observation() -> None:
         evaluator.observe(_frame(sequence))
 
     assert {item.horizon_seconds for item in evaluator.completed_origins} == {100, 200, 300, 400, 600}
-    assert {
-        item.completion_time_s - item.forecast.origin_time_s for item in evaluator.completed_origins
-    } == {
+    assert {item.completion_time_s - item.forecast.origin_time_s for item in evaluator.completed_origins} == {
         100.0,
         200.0,
         300.0,

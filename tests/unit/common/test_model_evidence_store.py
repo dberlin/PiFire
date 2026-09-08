@@ -9,7 +9,6 @@ import pytest
 from pydantic import ValidationError
 
 from common.control_trace import AllocationClampReason, AmbientSource
-from common.mpc_learning import forecast_horizon_spec
 from common.model_evidence import (
     MODEL_EVIDENCE_SCHEMA_VERSION,
     ActivationEvidence,
@@ -29,6 +28,7 @@ from common.model_evidence import (
     SchemaInvalidationEvidence,
     TimingDistributionEvidence,
 )
+from common.mpc_learning import forecast_horizon_spec
 from common.persistence.model_evidence import (
     ModelActivationPair,
     append_model_evidence,
@@ -442,7 +442,6 @@ def test_v1_timing_row_reads_with_unavailable_new_measurements(ds) -> None:
 
     record = read_model_evidence(session_id="session-a")[0]
 
-    assert MODEL_EVIDENCE_SCHEMA_VERSION == 5
     assert record.schema_version == 1
     assert isinstance(record.payload, TimingDistributionEvidence)
     assert record.payload.p99_ms is None

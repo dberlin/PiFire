@@ -39,6 +39,7 @@ from common.control_trace import (
 from common.cook_diagnostics import ControllerLearningReport
 from common.defaults import default_metrics
 from common.learning_trajectory import (
+    TRAJECTORY_OBSERVATION_SCHEMA_VERSION,
     FrameDeliveryCertainty,
     HoldEntrySample,
     LearningTrajectoryFrame,
@@ -101,15 +102,12 @@ _EXPECTED_TRACE_SESSIONS = [
     _MPC_SESSION_ID,
 ]
 _EXPECTED_EVIDENCE_IDS = ["mpc-confidence-v2", "mpc-confidence-v3"]
-type _TraceSchemaVersion = Literal[6, 7, 8]
 
 
 def _session(
     controller: ControllerType,
     session_id: str,
     timestamp_ms: int,
-    *,
-    schema_version: _TraceSchemaVersion = TRACE_SCHEMA_VERSION,
 ) -> ControlTraceRecord:
     return ControlTraceRecord(
         ts_ms=timestamp_ms,
@@ -117,7 +115,7 @@ def _session(
         cook_id=_COOK_ID,
         controller=controller,
         event_kind=TraceEventKind.SESSION,
-        schema_version=schema_version,
+        schema_version=TRACE_SCHEMA_VERSION,
         payload=SessionPayload(
             controller=controller,
             controller_config=(TraceSetting(key="policy", value=controller.value),),
@@ -167,8 +165,6 @@ def _frame(
     session_id: str,
     revision: int,
     start_ms: int,
-    *,
-    schema_version: _TraceSchemaVersion = TRACE_SCHEMA_VERSION,
 ) -> ControlTraceRecord:
     mpc = controller is ControllerType.MPC
     return ControlTraceRecord(
@@ -177,13 +173,15 @@ def _frame(
         cook_id=_COOK_ID,
         controller=controller,
         event_kind=TraceEventKind.ACTUATION_FRAME,
-        schema_version=schema_version,
+        schema_version=TRACE_SCHEMA_VERSION,
         payload=FramedPulseFramePayload(
             result_revision=revision,
             pulse_slot_seconds=2.0,
             frame_seconds=20.0,
             frame_start_ms=start_ms,
             frame_end_ms=start_ms + 20_000,
+            wall_start_ms=start_ms,
+            wall_end_ms=start_ms + 20_000,
             requested_combustion_load=0.6 if mpc else 0.45,
             requested_auger_duty=0.54 if mpc else 0.45,
             credit_before_seconds=0.0,
@@ -203,14 +201,14 @@ def _frame(
     )
 
 
-def _mpc_update(*, schema_version: _TraceSchemaVersion = TRACE_SCHEMA_VERSION) -> ControlTraceRecord:
+def _mpc_update() -> ControlTraceRecord:
     return ControlTraceRecord(
         ts_ms=31_000,
         session_id=_MPC_SESSION_ID,
         cook_id=_COOK_ID,
         controller=ControllerType.MPC,
         event_kind=TraceEventKind.CONTROL_UPDATE,
-        schema_version=schema_version,
+        schema_version=TRACE_SCHEMA_VERSION,
         payload=MpcUpdatePayload(
             monotonic_ms=31_000,
             wall_ms=31_000,
@@ -258,14 +256,14 @@ def _mpc_update(*, schema_version: _TraceSchemaVersion = TRACE_SCHEMA_VERSION) -
     )
 
 
-def _mpc_allocation(*, schema_version: _TraceSchemaVersion = TRACE_SCHEMA_VERSION) -> ControlTraceRecord:
+def _mpc_allocation() -> ControlTraceRecord:
     return ControlTraceRecord(
         ts_ms=31_000,
         session_id=_MPC_SESSION_ID,
         cook_id=_COOK_ID,
         controller=ControllerType.MPC,
         event_kind=TraceEventKind.ALLOCATION,
-        schema_version=schema_version,
+        schema_version=TRACE_SCHEMA_VERSION,
         payload=AllocationPayload(
             result_revision=2,
             normalized_combustion_load=0.6,
@@ -283,14 +281,14 @@ def _mpc_allocation(*, schema_version: _TraceSchemaVersion = TRACE_SCHEMA_VERSIO
     )
 
 
-def _mpc_applied(*, schema_version: _TraceSchemaVersion = TRACE_SCHEMA_VERSION) -> ControlTraceRecord:
+def _mpc_applied() -> ControlTraceRecord:
     return ControlTraceRecord(
         ts_ms=52_000,
         session_id=_MPC_SESSION_ID,
         cook_id=_COOK_ID,
         controller=ControllerType.MPC,
         event_kind=TraceEventKind.APPLIED_OUTPUT,
-        schema_version=schema_version,
+        schema_version=TRACE_SCHEMA_VERSION,
         payload=AppliedOutputPayload(
             result_revision=2,
             interval_start_ms=32_000,
@@ -304,38 +302,40 @@ def _mpc_applied(*, schema_version: _TraceSchemaVersion = TRACE_SCHEMA_VERSION) 
     )
 
 
-def _mpc_model_event(*, schema_version: _TraceSchemaVersion) -> ControlTraceRecord:
+def _mpc_model_event() -> ControlTraceRecord:
     return ControlTraceRecord(
         ts_ms=30_500,
         session_id=_MPC_SESSION_ID,
         cook_id=_COOK_ID,
         controller=ControllerType.MPC,
         event_kind=TraceEventKind.MODEL_EVENT,
-        schema_version=schema_version,
+        schema_version=TRACE_SCHEMA_VERSION,
         payload=ModelEventPayload(
             event=ModelEventType.RESTORE,
             model_revision=7,
             provenance="learned",
-            detail="restored exact v7 fixture",
+            detail="restored exact current fixture",
             model_kind="grey-box",
             model_schema="grey-v4",
             role_generation=3,
-            snapshot_digest=canonical_trajectory_digest({"fixture": "exact-v7-model", "generation": 3}),
+            snapshot_digest=canonical_trajectory_digest({"fixture": "exact-current-model", "generation": 3}),
         ),
     )
 
 
-def _mpc_observation(*, schema_version: _TraceSchemaVersion) -> ControlTraceRecord:
+def _mpc_observation() -> ControlTraceRecord:
     return ControlTraceRecord(
         ts_ms=52_000,
         session_id=_MPC_SESSION_ID,
         cook_id=_COOK_ID,
         controller=ControllerType.MPC,
         event_kind=TraceEventKind.MODEL_OBSERVATION,
-        schema_version=schema_version,
+        schema_version=TRACE_SCHEMA_VERSION,
         payload=ModelObservationPayload(
             frame_start_ms=32_000,
             frame_end_ms=52_000,
+            wall_start_ms=32_000,
+            wall_end_ms=52_000,
             temp_c=105.0,
             setpoint_c=107.22222222222223,
             ambient_c=21.11111111111111,
@@ -364,7 +364,7 @@ def _mpc_observation(*, schema_version: _TraceSchemaVersion) -> ControlTraceReco
             input_levels=2,
             effective_updates=1,
             role_generation=3,
-            model_digest=canonical_trajectory_digest({"fixture": "exact-v7-model", "generation": 3}),
+            model_digest=canonical_trajectory_digest({"fixture": "exact-current-model", "generation": 3}),
             requested_fan_duty=0.55,
             actual_fan_duty=0.55,
             output_source=OutputSource.CONTROLLER,
@@ -379,28 +379,24 @@ def _mpc_observation(*, schema_version: _TraceSchemaVersion) -> ControlTraceReco
     )
 
 
-def _exact_mpc_trace(
-    schema_version: _TraceSchemaVersion,
-) -> tuple[ControlTraceRecord, ...]:
+def _exact_mpc_trace() -> tuple[ControlTraceRecord, ...]:
     return (
         _session(
             ControllerType.MPC,
             _MPC_SESSION_ID,
             30_000,
-            schema_version=schema_version,
         ),
-        _mpc_model_event(schema_version=schema_version),
-        _mpc_update(schema_version=schema_version),
-        _mpc_allocation(schema_version=schema_version),
+        _mpc_model_event(),
+        _mpc_update(),
+        _mpc_allocation(),
         _frame(
             ControllerType.MPC,
             _MPC_SESSION_ID,
             2,
             32_000,
-            schema_version=schema_version,
         ),
-        _mpc_applied(schema_version=schema_version),
-        _mpc_observation(schema_version=schema_version),
+        _mpc_applied(),
+        _mpc_observation(),
     )
 
 
@@ -518,7 +514,7 @@ def _trajectory_segment(
     )
     return LearningTrajectorySegment(
         schema_version=1,
-        observation_schema_version=3,
+        observation_schema_version=TRAJECTORY_OBSERVATION_SCHEMA_VERSION,
         segment_id=segment_id,
         cook_id=cook_id,
         trajectory_session_id=f"trajectory-{segment_id}",
@@ -552,7 +548,7 @@ def _trajectory_segment(
         terminal_break_reason=TrajectoryBreakReason.STOP,
         state="finalized",
         source_trace_digest=_digest(f"{segment_id}:source-trace"),
-        source_schema_version=7,
+        source_schema_version=TRACE_SCHEMA_VERSION,
         source_row_digest=_digest(f"{segment_id}:source-rows"),
         build_provenance={"builder": "trajectory-runtime", "revision": 1},
     )
@@ -790,7 +786,7 @@ def test_cookfile_exports_current_cook_segment_references_and_one_global_corpus_
     assert repository.status() == status_before_read
 
 
-def test_explicit_v7_import_is_exact_and_second_import_is_idempotent(
+def test_explicit_current_import_is_exact_and_second_import_is_idempotent(
     ds,
     tmp_path,
     monkeypatch,
@@ -798,7 +794,7 @@ def test_explicit_v7_import_is_exact_and_second_import_is_idempotent(
     archive = _create_trace_archive(
         tmp_path / "history",
         monkeypatch,
-        _exact_mpc_trace(7),
+        _exact_mpc_trace(),
     )
     repository = LearningTrajectoryRepository(str(tmp_path / "imported.db"))
     empty = repository.status()
@@ -810,17 +806,19 @@ def test_explicit_v7_import_is_exact_and_second_import_is_idempotent(
     first = import_cookfile_learning_trajectory(archive, repository=repository)
     assert isinstance(first, CookLearningImportResult)
     assert first.outcome == "imported"
-    assert first.source_schema_version == 7
+    assert first.source_schema_version == TRACE_SCHEMA_VERSION
     assert len(first.segment_ids) == 1
 
     imported = repository.read_segment(first.segment_ids[0])
     assert imported is not None
     assert imported.cook_id == _COOK_ID
     assert imported.trace_session_ids == (_MPC_SESSION_ID,)
-    assert imported.source_schema_version == 7
+    assert imported.source_schema_version == TRACE_SCHEMA_VERSION
     assert imported.pre_roll_frames == ()
     assert len(imported.scored_hold_frames) == 1
     frame = imported.scored_hold_frames[0]
+    assert (frame.monotonic_start_ms, frame.monotonic_end_ms) == (32_000, 52_000)
+    assert (frame.wall_start_ms, frame.wall_end_ms) == (32_000, 52_000)
     assert frame.chamber_temperature_c == 105.0
     assert frame.delivered_auger_on_seconds == 10.8
     assert frame.realized_auger_duty == 0.54
@@ -834,13 +832,13 @@ def test_explicit_v7_import_is_exact_and_second_import_is_idempotent(
     second = import_cookfile_learning_trajectory(archive, repository=repository)
     assert isinstance(second, CookLearningImportResult)
     assert second.outcome == "idempotent"
-    assert second.source_schema_version == 7
+    assert second.source_schema_version == TRACE_SCHEMA_VERSION
     assert second.segment_ids == first.segment_ids
     assert repository.status() == imported_status
     assert repository.read_segment(first.segment_ids[0]) == imported
 
 
-def test_historical_v1_diagnostics_migrate_strictly_for_exact_v7_import(
+def test_historical_v1_diagnostics_migrate_strictly_for_exact_current_import(
     ds,
     tmp_path,
     monkeypatch,
@@ -848,7 +846,7 @@ def test_historical_v1_diagnostics_migrate_strictly_for_exact_v7_import(
     archive = _create_trace_archive(
         tmp_path / "history",
         monkeypatch,
-        _exact_mpc_trace(7),
+        _exact_mpc_trace(),
     )
     payload, status = read_cookfile(archive)
     assert status == "OK"
@@ -866,20 +864,20 @@ def test_historical_v1_diagnostics_migrate_strictly_for_exact_v7_import(
     )
 
     assert result.outcome == "imported"
-    assert result.source_schema_version == 7
+    assert result.source_schema_version == TRACE_SCHEMA_VERSION
     assert len(result.segment_ids) == 1
     imported = repository.read_segment(result.segment_ids[0])
     assert imported is not None
-    assert imported.source_schema_version == 7
+    assert imported.source_schema_version == TRACE_SCHEMA_VERSION
     assert imported.pre_roll_frames == ()
 
 
-def test_exact_v7_import_accepts_every_rotated_mpc_session_atomically(
+def test_exact_current_import_accepts_every_rotated_mpc_session_atomically(
     ds,
     tmp_path,
     monkeypatch,
 ) -> None:
-    first = _exact_mpc_trace(7)
+    first = _exact_mpc_trace()
     second_session_id = "00000000-0000-4000-8000-000000000002"
     second = tuple(record.model_copy(update={"session_id": second_session_id}) for record in first)
     records = tuple(
@@ -905,7 +903,7 @@ def test_exact_v7_import_accepts_every_rotated_mpc_session_atomically(
     )
 
     assert first_result.outcome == "imported"
-    assert first_result.source_schema_version == 7
+    assert first_result.source_schema_version == TRACE_SCHEMA_VERSION
     assert len(first_result.segment_ids) == 2
     assert second_result.outcome == "idempotent"
     assert second_result.segment_ids == first_result.segment_ids
@@ -917,7 +915,7 @@ def test_exact_v7_import_accepts_every_rotated_mpc_session_atomically(
     }
 
 
-def test_v8_diagnostics_accept_delayed_segment_metadata_after_newer_rows(
+def test_current_diagnostics_accept_delayed_segment_metadata_after_newer_rows(
     ds,
     tmp_path,
     monkeypatch,
@@ -955,7 +953,7 @@ def test_v8_diagnostics_accept_delayed_segment_metadata_after_newer_rows(
     archive = _create_trace_archive(
         tmp_path / "history",
         monkeypatch,
-        (*_exact_mpc_trace(TRACE_SCHEMA_VERSION), delayed_trace_metadata),
+        (*_exact_mpc_trace(), delayed_trace_metadata),
     )
 
     payload, status = read_cookfile(archive)
@@ -970,10 +968,36 @@ def test_explicit_v6_import_is_audit_only_and_never_synthesizes_pre_roll(
     tmp_path,
     monkeypatch,
 ) -> None:
+    historical_session = ControlTraceRecord(
+        ts_ms=30_000,
+        session_id=_MPC_SESSION_ID,
+        cook_id=_COOK_ID,
+        controller=ControllerType.MPC,
+        event_kind=TraceEventKind.SESSION,
+        schema_version=6,
+        payload=SessionPayload(
+            controller=ControllerType.MPC,
+            controller_config=(TraceSetting(key="policy", value="mpc"),),
+            temperature_unit="F",
+            control_period_seconds=2.0,
+            model_revision=7,
+            model_provenance="learned",
+            pulse_slot_seconds=2.0,
+            pulse_frame_seconds=20.0,
+            fan_authority=True,
+            fan_pwm_capable=True,
+            fan_min_duty=0.0,
+            fan_max_duty=1.0,
+            setpoint=225.0,
+            ambient_temperature=70.0,
+            software_version="1.2.3",
+            build_version="task-7",
+        ),
+    )
     archive = _create_trace_archive(
         tmp_path / "history",
         monkeypatch,
-        _exact_mpc_trace(6),
+        (historical_session,),
     )
     repository = LearningTrajectoryRepository(str(tmp_path / "audit-only.db"))
     before = repository.status()
@@ -990,7 +1014,7 @@ def test_explicit_v6_import_is_audit_only_and_never_synthesizes_pre_roll(
     assert repository.status().scored_count == 0
 
 
-def test_corrupt_v7_model_provenance_digest_is_non_replayable_without_partial_import(
+def test_corrupt_current_model_provenance_digest_is_non_replayable_without_partial_import(
     ds,
     tmp_path,
     monkeypatch,
@@ -998,7 +1022,7 @@ def test_corrupt_v7_model_provenance_digest_is_non_replayable_without_partial_im
     archive = _create_trace_archive(
         tmp_path / "history",
         monkeypatch,
-        _exact_mpc_trace(7),
+        _exact_mpc_trace(),
     )
     payload, status = read_cookfile(archive)
     assert status == "OK"
@@ -1015,7 +1039,7 @@ def test_corrupt_v7_model_provenance_digest_is_non_replayable_without_partial_im
 
     assert isinstance(result, CookLearningImportResult)
     assert result.outcome == "non-replayable"
-    assert result.source_schema_version == 7
+    assert result.source_schema_version == TRACE_SCHEMA_VERSION
     assert result.segment_ids == ()
     assert repository.status() == before
     assert repository.status().segment_count == 0

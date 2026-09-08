@@ -132,6 +132,7 @@ class TraceSafetyContext:
     result_revision: int | None
     detail: str
     timestamp_ms: int
+    monotonic_ms: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,11 +149,13 @@ class TraceFrameContext:
     completion: FramedPulseCompletion
     pulse_slot_seconds: float
     frame_seconds: float
+    timestamp_ms: int
 
 
 @dataclass(frozen=True, slots=True)
 class TraceOutputContext:
     timestamp_ms: int
+    monotonic_ms: int
     pulse_frame_result_revision: int
     fan_duty: float | None
     controls_fan: bool = False
@@ -168,6 +171,7 @@ class TraceOutputContext:
 @dataclass(frozen=True, slots=True)
 class TraceAppliedIntervalContext:
     timestamp_ms: int
+    monotonic_ms: int
     sample_complete: bool
     realized_combustion_load: float | None
     controls_fan: bool
@@ -471,6 +475,7 @@ class ControlTraceSession:
                 inhibit_reason=context.inhibit_reason,
                 result_revision=revision if revision is not None and revision >= 0 else None,
                 detail=context.detail,
+                monotonic_ms=context.monotonic_ms,
             ),
             context.timestamp_ms,
         )
@@ -529,12 +534,8 @@ class ControlTraceSession:
         )
 
         wall_ms = int(result.completed_wall_time * 1_000)
-        monotonic_ms = int(result.solve_end_monotonic * 1_000)
-        result_age_ms = (
-            max(0, int(result.result_age_seconds * 1_000))
-            if isinstance(diagnostics, MpcTraceDiagnostics)
-            else max(0, context.timestamp_ms - wall_ms)
-        )
+        monotonic_ms = round(result.solve_end_monotonic * 1_000)
+        result_age_ms = max(0, int(result.result_age_seconds * 1_000))
         observed_dt_seconds = (
             diagnostics.observed_dt_seconds
             if isinstance(diagnostics, PidTraceDiagnostics)
@@ -693,8 +694,8 @@ class ControlTraceSession:
                 bounded_firing_load=diagnostics.bounded_firing_load,
                 policy_kind=diagnostics.policy_kind,
                 failure_state=diagnostics.failure_state,
-                solve_start_ms=max(0, int(diagnostics.solve_start_monotonic * 1_000)),
-                solve_end_ms=max(0, int(diagnostics.solve_end_monotonic * 1_000)),
+                solve_start_ms=max(0, round(diagnostics.solve_start_monotonic * 1_000)),
+                solve_end_ms=max(0, round(diagnostics.solve_end_monotonic * 1_000)),
                 deadline_miss_count=result.deadline_miss_count,
                 stale=result.stale_state is ResultStaleState.STALE,
                 recovered=result.recovered,
@@ -753,8 +754,10 @@ class ControlTraceSession:
                 result_revision=completion.result_revision,
                 pulse_slot_seconds=context.pulse_slot_seconds,
                 frame_seconds=context.frame_seconds,
-                frame_start_ms=int(frame.nominal_start_s * 1_000),
-                frame_end_ms=int(frame.ended_at_s * 1_000),
+                frame_start_ms=round(frame.nominal_start_s * 1_000),
+                frame_end_ms=round(frame.ended_at_s * 1_000),
+                wall_start_ms=completion.wall_start_ms,
+                wall_end_ms=completion.wall_end_ms,
                 requested_combustion_load=completion.requested_combustion_load,
                 requested_auger_duty=frame.latched_request,
                 credit_before_seconds=frame.credit_before_s,
@@ -771,7 +774,7 @@ class ControlTraceSession:
                 inhibit_reason=completion.inhibit,
                 reset_reason=frame.reset_reason.value if frame.reset_reason is not None else None,
             ),
-            int(frame.ended_at_s * 1_000),
+            context.timestamp_ms,
         )
 
     def prepare_applied_output(self, applied: AppliedOutput, context: TraceOutputContext) -> AppliedOutput:
@@ -799,6 +802,7 @@ class ControlTraceSession:
             self.record_applied_interval(
                 TraceAppliedIntervalContext(
                     timestamp_ms=context.timestamp_ms,
+                    monotonic_ms=context.monotonic_ms,
                     sample_complete=context.sample_complete,
                     realized_combustion_load=None,
                     controls_fan=context.controls_fan,
@@ -816,7 +820,7 @@ class ControlTraceSession:
         if coalesce_seed:
             return prepared
         self._applied_state = TraceAppliedState(
-            interval_start_ms=context.timestamp_ms,
+            interval_start_ms=context.monotonic_ms,
             result_revision=revision,
             requested_auger_duty=prepared.requested if prepared.requested is not None else prepared.ratio,
             realized_auger_duty=prepared.ratio,
@@ -846,19 +850,14 @@ class ControlTraceSession:
             state.result_revision == 0 and state.output_source is OutputSource.SEED
         )
         start_ms = state.interval_start_ms
-        if (
-            start_ms is None
-            or start_ms >= context.timestamp_ms
-            or state.output_source is None
-            or (state.result_revision == 0 and start_ms != 0)
-        ):
+        if start_ms is None or start_ms >= context.monotonic_ms or state.output_source is None:
             return False
         recorded = self.record(
             TraceEventKind.APPLIED_OUTPUT,
             AppliedOutputPayload(
                 result_revision=state.result_revision,
                 interval_start_ms=start_ms,
-                interval_end_ms=context.timestamp_ms,
+                interval_end_ms=context.monotonic_ms,
                 realized_auger_duty=state.realized_auger_duty,
                 realized_combustion_load=(
                     None
@@ -875,10 +874,12 @@ class ControlTraceSession:
             ),
             context.timestamp_ms,
         )
-        self._applied_state = replace(state, interval_start_ms=context.timestamp_ms)
+        self._applied_state = replace(state, interval_start_ms=context.monotonic_ms)
         return recorded
 
-    def record_terminal_framed_output(self, completion: FramedPulseCompletion, *, controls_fan: bool) -> bool:
+    def record_terminal_framed_output(
+        self, completion: FramedPulseCompletion, *, controls_fan: bool, timestamp_ms: int
+    ) -> bool:
         applied = completion.applied
         realized_load = completion.realized_combustion_load
         if applied is None or realized_load is None:
@@ -886,8 +887,8 @@ class ControlTraceSession:
         frame = completion.frame
         state = self._applied_state
         start_ms = state.interval_start_ms
-        trace_start_ms = start_ms if start_ms is not None else int(frame.nominal_start_s * 1_000)
-        trace_end_ms = int(frame.ended_at_s * 1_000)
+        trace_start_ms = start_ms if start_ms is not None else round(frame.nominal_start_s * 1_000)
+        trace_end_ms = round(frame.ended_at_s * 1_000)
         source = state.output_source or completion.source
         sample_complete = applied.feedback_disposition is FrameFeedbackDisposition.COMPLETE or completion.inhibit in (
             InhibitReason.SAFETY,
@@ -907,7 +908,7 @@ class ControlTraceSession:
                     sample_complete=sample_complete,
                     output_source=source,
                 ),
-                trace_end_ms,
+                timestamp_ms,
             )
         self._applied_state = TraceAppliedState(
             interval_start_ms=trace_end_ms,

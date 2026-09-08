@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Protocol
 
@@ -111,6 +113,8 @@ class FramedPulseCompletion:
     """Everything Hold must dispatch after commanding a completed frame edge."""
 
     frame: PulseFrameResult
+    wall_start_ms: int
+    wall_end_ms: int
     inhibit: InhibitReason
     result_revision: int
     source: OutputSource
@@ -170,7 +174,9 @@ class _LatchedFrame:
 class FramedPulseRuntime:
     """Own pulse scheduling and typed frame-local construction without I/O."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, wall_clock_ms: Callable[[], int] | None = None) -> None:
+        self._wall_clock_ms = (lambda: time.time_ns() // 1_000_000) if wall_clock_ms is None else wall_clock_ms
+        self._frame_wall_start_ms = 0
         self._scheduler: PulseScheduler | None = None
         self._controller: PulseControllerState | None = None
         self._frame: _LatchedFrame | None = None
@@ -209,6 +215,7 @@ class FramedPulseRuntime:
             raise ValueError("FramedPulseRuntime requires framed pulse actuation")
         self._controller = controller
         self._scheduler = PulseScheduler(timing)
+        self._frame_wall_start_ms = self._wall_clock_ms()
         self._last_observation_key = None
         self._observation_sequence = 0
         controller.pulse_result_revision = -1
@@ -283,6 +290,7 @@ class FramedPulseRuntime:
         )
         if decision.reason in (PulseReason.FRAME_STARTED, PulseReason.FRAME_SKIPPED, PulseReason.RESET):
             self._frame = self._latch_frame(sample.role_generation)
+            self._frame_wall_start_ms = self._wall_clock_ms()
         current = self._frame
         assert current is not None
 
@@ -340,6 +348,7 @@ class FramedPulseRuntime:
         ]
         if decision.reason in (PulseReason.FRAME_STARTED, PulseReason.FRAME_SKIPPED, PulseReason.RESET):
             self._frame = self._latch_frame(sample.role_generation)
+            self._frame_wall_start_ms = self._wall_clock_ms()
         self._stamp_calibration_cancellation(
             cancellation_reason or ("reset" if reason is PulseResetReason.MODE_CHANGE else reason.value),
             command_revision=cancellation_command_revision,
@@ -551,6 +560,10 @@ class FramedPulseRuntime:
         duration_s = frame.ended_at_s - frame.nominal_start_s
         frame_key = None if duration_s <= 0.0 else self._frame_key(frame)
         duplicate = frame_key is not None and frame_key == self._last_observation_key
+        wall_start_ms = self._frame_wall_start_ms
+        wall_end_ms = self._wall_clock_ms()
+        if not duplicate:
+            self._frame_wall_start_ms = wall_end_ms
         observation = None
         missing_reason = None
         sequence = None
@@ -570,6 +583,8 @@ class FramedPulseRuntime:
                     sample_at_s=sample_at_s,
                     inhibit=inhibit,
                     sequence=sequence,
+                    wall_start_ms=wall_start_ms,
+                    wall_end_ms=wall_end_ms,
                 )
 
         applied = None
@@ -598,6 +613,8 @@ class FramedPulseRuntime:
             )
         return FramedPulseCompletion(
             frame=frame,
+            wall_start_ms=wall_start_ms,
+            wall_end_ms=wall_end_ms,
             inhibit=inhibit,
             result_revision=latched.result_revision,
             source=feedback_source,
@@ -623,6 +640,8 @@ class FramedPulseRuntime:
         sample_at_s: float,
         inhibit: InhibitReason,
         sequence: int,
+        wall_start_ms: int,
+        wall_end_ms: int,
     ) -> FrameObservation:
         assert sample.temperature is not None
         duration_s = frame.ended_at_s - frame.nominal_start_s
@@ -676,6 +695,8 @@ class FramedPulseRuntime:
             reset=reset,
             continuous=continuous,
             role_generation=latched.role_generation,
+            wall_start_ms=wall_start_ms,
+            wall_end_ms=wall_end_ms,
             observation_sequence=sequence,
             probe_valid=True,
             probe_source="chamber",
@@ -716,7 +737,7 @@ class FramedPulseRuntime:
 
     @staticmethod
     def _frame_key(frame: PulseFrameResult) -> tuple[int, int]:
-        return int(frame.nominal_start_s * 1_000), int(frame.ended_at_s * 1_000)
+        return round(frame.nominal_start_s * 1_000), round(frame.ended_at_s * 1_000)
 
     @staticmethod
     def _observation_source(

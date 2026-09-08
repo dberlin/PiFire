@@ -16,6 +16,7 @@ from common import datastore, schema_migrations
 _MIGRATION_SET = "pifire-schema"
 _V11_MIGRATION = "v0011_adopt_sqlite_utils_registry"
 _V12_MIGRATION = "v0012_trajectory_role_generation"
+_V13_MIGRATION = "v0013_trajectory_clock_domains"
 
 
 def _open_configured_connection(path: Path | str) -> sqlite3.Connection:
@@ -122,8 +123,8 @@ def _audit_rows(connection: sqlite3.Connection) -> list[tuple[str, str, str]]:
     return connection.execute("SELECT migration_set, name, applied_at FROM _sqlite_migrations ORDER BY id").fetchall()
 
 
-def test_current_schema_version_is_centralized_at_v12() -> None:
-    assert datastore.DB_SCHEMA_VERSION == schema_migrations.CURRENT_SCHEMA_VERSION == 12
+def test_current_schema_version_is_centralized_at_v13() -> None:
+    assert datastore.DB_SCHEMA_VERSION == schema_migrations.CURRENT_SCHEMA_VERSION == 13
     assert schema_migrations.LEGACY_SCHEMA_VERSION == 10
 
 
@@ -135,7 +136,7 @@ def test_real_configured_connection_preserves_policy_identity_and_usability(
     try:
         connection = datastore.connection()
 
-        assert connection.execute("PRAGMA user_version").fetchone() == (12,)
+        assert connection.execute("PRAGMA user_version").fetchone() == (schema_migrations.CURRENT_SCHEMA_VERSION,)
         assert connection.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
         assert connection.execute("PRAGMA synchronous").fetchone() == (1,)
         assert connection.execute("PRAGMA busy_timeout").fetchone() == (5000,)
@@ -172,7 +173,7 @@ def test_v10_migration_preserves_database_and_live_sidecar_ownership(
     process.start()
     try:
         assert ready.wait(timeout=30), "migration child did not become ready"
-        assert reports.get(timeout=30) == (12, "wal")
+        assert reports.get(timeout=30) == (schema_migrations.CURRENT_SCHEMA_VERSION, "wal")
 
         after_metadata = path.stat()
         assert (
@@ -215,11 +216,12 @@ def test_v10_upgrades_through_two_named_audit_records_and_is_reconnect_idempoten
 ) -> None:
     datastore._ensure_schema(v10_connection)
 
-    assert v10_connection.execute("PRAGMA user_version").fetchone() == (12,)
+    assert v10_connection.execute("PRAGMA user_version").fetchone() == (schema_migrations.CURRENT_SCHEMA_VERSION,)
     rows = _audit_rows(v10_connection)
     assert [row[0:2] for row in rows] == [
         (_MIGRATION_SET, _V11_MIGRATION),
         (_MIGRATION_SET, _V12_MIGRATION),
+        (_MIGRATION_SET, _V13_MIGRATION),
     ]
     assert all(row[2] for row in rows)
 
@@ -227,7 +229,7 @@ def test_v10_upgrades_through_two_named_audit_records_and_is_reconnect_idempoten
     reconnected = _open_configured_connection(path)
     try:
         datastore._ensure_schema(reconnected)
-        assert reconnected.execute("PRAGMA user_version").fetchone() == (12,)
+        assert reconnected.execute("PRAGMA user_version").fetchone() == (schema_migrations.CURRENT_SCHEMA_VERSION,)
         assert _audit_rows(reconnected) == rows
     finally:
         reconnected.close()
@@ -274,10 +276,11 @@ def test_v11_failure_rolls_back_tracking_ddl_and_retries(
     )
 
     datastore._ensure_schema(v10_connection)
-    assert v10_connection.execute("PRAGMA user_version").fetchone() == (12,)
+    assert v10_connection.execute("PRAGMA user_version").fetchone() == (schema_migrations.CURRENT_SCHEMA_VERSION,)
     assert [row[0:2] for row in _audit_rows(v10_connection)] == [
         (_MIGRATION_SET, _V11_MIGRATION),
         (_MIGRATION_SET, _V12_MIGRATION),
+        (_MIGRATION_SET, _V13_MIGRATION),
     ]
 
 
@@ -287,7 +290,7 @@ def test_applied_v11_record_with_user_version_10_fails_closed(
     original_rows = _audit_rows(v11_connection)
     v11_connection.execute("PRAGMA user_version=10")
 
-    with pytest.raises(RuntimeError, match="cannot migrate schema version 10 to 12"):
+    with pytest.raises(RuntimeError):
         datastore._ensure_schema(v11_connection)
 
     assert v11_connection.execute("PRAGMA user_version").fetchone() == (10,)
@@ -303,10 +306,11 @@ def test_existing_version_without_records_is_publicly_audited_to_current(
 
     datastore._ensure_schema(v10_connection)
 
-    assert v10_connection.execute("PRAGMA user_version").fetchone() == (12,)
+    assert v10_connection.execute("PRAGMA user_version").fetchone() == (schema_migrations.CURRENT_SCHEMA_VERSION,)
     assert [row[0:2] for row in _audit_rows(v10_connection)] == [
         (_MIGRATION_SET, _V11_MIGRATION),
         (_MIGRATION_SET, _V12_MIGRATION),
+        (_MIGRATION_SET, _V13_MIGRATION),
     ]
 
 

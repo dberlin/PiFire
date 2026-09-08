@@ -211,6 +211,8 @@ def _simulated_frame(plant: MAKGrillSim, sequence: int) -> FrameObservation:
     return FrameObservation(
         frame_start_s=frame_start_s,
         frame_end_s=frame_end_s,
+        wall_start_ms=round((frame_start_s) * 1_000),
+        wall_end_ms=round((frame_end_s) * 1_000),
         temp_c=plant.measured(),
         setpoint_c=_SETPOINT_C,
         ambient_c=plant.T_amb,
@@ -295,6 +297,8 @@ def _exact_passive_observation(row: dict[str, Any]) -> FrameObservation:
     return FrameObservation(
         frame_start_s=row["frame_start_ms"] / 1_000.0,
         frame_end_s=row["frame_end_ms"] / 1_000.0,
+        wall_start_ms=round((row["frame_start_ms"] / 1_000.0) * 1_000),
+        wall_end_ms=round((row["frame_end_ms"] / 1_000.0) * 1_000),
         temp_c=row["temp_c"],
         setpoint_c=row["setpoint_c"],
         ambient_c=row["ambient_c"],

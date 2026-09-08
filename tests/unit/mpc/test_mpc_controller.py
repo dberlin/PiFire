@@ -328,6 +328,8 @@ def _frame(*, sequence=1, operator=False):
     return FrameObservation(
         frame_start_s=float(sequence * 20 - 20),
         frame_end_s=float(sequence * 20),
+        wall_start_ms=round((float(sequence * 20 - 20)) * 1_000),
+        wall_end_ms=round((float(sequence * 20)) * 1_000),
         temp_c=80.0,
         setpoint_c=110.0,
         ambient_c=20.0,

@@ -470,6 +470,8 @@ def _observation(index: int = 0, **changes) -> FrameObservation:
     observation = FrameObservation(
         frame_start_s=index * 20.0,
         frame_end_s=(index + 1) * 20.0,
+        wall_start_ms=round((index * 20.0) * 1_000),
+        wall_end_ms=round(((index + 1) * 20.0) * 1_000),
         temp_c=100.0,
         setpoint_c=120.0,
         ambient_c=20.0,
@@ -863,50 +865,30 @@ def test_sub_millisecond_frame_leaves_the_control_loop_running() -> None:
 
 
 class _ReplayTrajectory:
-    def __init__(self) -> None:
-        self.replays: list[tuple[FrameObservation, bool]] = []
-        self.anchor: tuple[int, float] | None = None
+    def __init__(self, *, accepted: bool = True) -> None:
+        self.accepted = accepted
 
     def observe_hold_frame(
         self,
         observation: FrameObservation,
         *,
         replay_only: bool = False,
-    ) -> None:
-        self.replays.append((observation, replay_only))
-        self.anchor = (
-            round(observation.frame_end_s * 1_000),
-            observation.temp_c,
-        )
-
-    def estimator_seed_anchor(self) -> tuple[int, float] | None:
-        return self.anchor
-
-    def barrier(self, timeout: float = 2.0) -> bool:
-        del timeout
-        return True
-
-
-class _ReplayWithoutAnchor:
-    def observe_hold_frame(
-        self,
-        observation: FrameObservation,
-        *,
-        replay_only: bool = False,
-    ) -> None:
+    ) -> bool:
         del observation, replay_only
+        return self.accepted
 
     def barrier(self, timeout: float = 2.0) -> bool:
         del timeout
         return True
 
 
-def test_seed_warmup_requires_the_complete_trajectory_observer() -> None:
-    runtime, *_ = _runtime(learning_trajectory=_ReplayWithoutAnchor())
+def test_seed_warmup_does_not_advance_when_capture_is_rejected() -> None:
+    runtime, *_ = _runtime(learning_trajectory=_ReplayTrajectory(accepted=False))
     runtime.set_seed_warmup_remaining(1)
 
-    with pytest.raises(AttributeError, match="estimator_seed_anchor"):
-        runtime.submit_completed_observation((0, 20_000), _observation())
+    runtime.submit_completed_observation((0, 20_000), _observation())
+
+    assert runtime.seed_warmup_remaining == 1
 
 
 @pytest.mark.parametrize(
@@ -930,11 +912,6 @@ def test_seed_warmup_replays_without_learning_and_delivers_terminal_feedback(
 
     runtime.submit_completed_observation((0, 20_000), observation, feedback)
 
-    assert trajectory.replays == [(observation, True)]
-    assert trajectory.estimator_seed_anchor() == (
-        round(observation.frame_end_s * 1_000),
-        observation.temp_c,
-    )
     assert runtime.seed_warmup_remaining == 0
     assert runner.outputs == [feedback]
     assert runner.completed == []
@@ -951,10 +928,11 @@ class _TrajectoryObserver:
         observation: FrameObservation,
         *,
         replay_only: bool = False,
-    ) -> None:
+    ) -> bool:
         del replay_only
         self.observations.append(observation)
         self.anchor = (round(observation.frame_end_s * 1_000), observation.temp_c)
+        return True
 
     def estimator_seed_anchor(self) -> tuple[int, float] | None:
         return self.anchor
@@ -1541,6 +1519,10 @@ def test_valid_and_invalid_calibration_frames_persist_without_invalid_learner_su
     )
     valid = _observation(
         0,
+        frame_start_s=100.0008,
+        frame_end_s=120.0008,
+        wall_start_ms=1_700_000_100_000,
+        wall_end_ms=1_700_000_120_000,
         baseline_q=0.25,
         probe_q=0.10,
         requested_q=0.35,
@@ -1555,15 +1537,17 @@ def test_valid_and_invalid_calibration_frames_persist_without_invalid_learner_su
     )
     invalid = replace(
         valid,
-        frame_start_s=20.0,
-        frame_end_s=40.0,
+        frame_start_s=120.0008,
+        frame_end_s=140.0008,
+        wall_start_ms=1_700_000_120_000,
+        wall_end_ms=1_700_000_140_000,
         observation_sequence=2,
         probe_valid=False,
     )
 
     runtime.submit_completed_observation((0, 1), invalid)
     runtime.submit_completed_observation((0, 0), valid)
-    runtime.reconcile_outcomes(42.0)
+    runtime.reconcile_outcomes(1_700_000_142.0)
 
     calibration_records = [
         batch[0] for batch in persistence.batches if batch[0].kind is EvidenceKind.CALIBRATION_SUMMARY
@@ -1572,6 +1556,10 @@ def test_valid_and_invalid_calibration_frames_persist_without_invalid_learner_su
     assert len(calibration_payloads) == 2
     assert [payload.command_revision for payload in calibration_payloads] == [7, 7]
     assert [payload.delivered_on_seconds for payload in calibration_payloads] == [5.0, 5.0]
+    assert [(payload.frame_start_ms, payload.frame_end_ms) for payload in calibration_payloads] == [
+        (120_001, 140_001),
+        (100_001, 120_001),
+    ]
     assert runner.submissions == [valid]
     invalid_payloads = [payload for payload in _observation_payloads(recorder) if payload.observation_sequence == 2]
     assert [payload.rejection_reasons for payload in invalid_payloads] == [("invalid-probe",)]

@@ -78,8 +78,9 @@ class ExactEstimatorSeedSource:
     def configuration_changed(self, boundary: TrajectoryBoundary) -> None:
         del boundary
 
-    def observe_hold_frame(self, observation: FrameObservation, *, replay_only: bool = False) -> None:
+    def observe_hold_frame(self, observation: FrameObservation, *, replay_only: bool = False) -> bool:
         del observation, replay_only
+        return True
 
     def barrier(self, timeout: float = 2.0) -> bool:
         del timeout

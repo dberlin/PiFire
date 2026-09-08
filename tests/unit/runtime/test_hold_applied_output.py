@@ -78,6 +78,7 @@ def test_manual_auger_on_reports_full_duty(hold_cycle):
     runner = FakeControllerRunner(period=999)
     hold = hold_cycle(runner)
     hold.setup()
+    hold.ctx.clock.advance(100.0 - hold.ctx.clock.monotonic())
     hold._last_now = 100.0
     runner.applied.clear()
 
@@ -126,7 +127,9 @@ def test_manual_takeover_resets_the_active_frame_before_manual_feedback(hold_cyc
     )
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
+    hold.ctx.clock.advance(2.5 - hold.ctx.clock.monotonic())
     hold._last_now = 2.5
     hold._last_ptemp = 200.0
     runner.applied.clear()
@@ -194,6 +197,7 @@ def test_manual_takeover_resets_the_active_frame_before_manual_feedback(hold_cyc
         observation.continuous,
     ) == (OutputSource.MANUAL_OVERRIDE.value, True, True, False)
 
+    hold.ctx.clock.advance(3.0 - hold.ctx.clock.monotonic())
     hold.on_tick(3.0, 200.0, hold.grill.get_output_status())
 
     scored = [record.payload for record in recorder.records if isinstance(record.payload, ModelObservationPayload)]
@@ -226,6 +230,7 @@ def test_manual_release_reseeds_before_fresh_controller_authority(hold_cycle, mo
     runner = FakeControllerRunner(period=1.0).script([_completed_output(0.9)])
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
+    hold.ctx.clock.advance(1.0 - hold.ctx.clock.monotonic())
     hold._last_now = 1.0
     hold._last_ptemp = 200.0
     hold._on_manual_output("auger", True)
@@ -251,6 +256,7 @@ def test_manual_release_reseeds_before_fresh_controller_authority(hold_cycle, mo
     monkeypatch.setattr(runner, "latest", record_latest)
     monkeypatch.setattr(hold.grill, "auger_on", record_auger_on)
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
 
     seed = ("feedback", OutputSource.SEED)
@@ -263,6 +269,7 @@ def test_manual_auger_off_reports_zero(hold_cycle):
     runner = FakeControllerRunner(period=999)
     hold = hold_cycle(runner)
     hold.setup()
+    hold.ctx.clock.advance(100.0 - hold.ctx.clock.monotonic())
     hold._last_now = 100.0
     runner.applied.clear()
 
@@ -281,6 +288,7 @@ def test_lid_open_reports_zero_with_the_pulse_request(hold_cycle):
     hold.state.controller.output = 0.5
     runner.applied.clear()
 
+    hold.ctx.clock.advance(100.0 - hold.ctx.clock.monotonic())
     hold.on_tick(now=100.0, ptemp=100.0, current_output_status=_off())
 
     (applied,) = [applied for applied in runner.applied if applied.source is OutputSource.LID_OPEN]
@@ -307,6 +315,7 @@ def test_manual_auger_off_commands_active_hardware_off(
     runner = FakeControllerRunner(period=999)
     hold = hold_cycle(runner)
     hold.setup()
+    hold.ctx.clock.advance(100.0 - hold.ctx.clock.monotonic())
     hold._last_now = 100.0
     hold.grill.auger_on()
     runner.applied.clear()
@@ -329,6 +338,7 @@ def test_lid_pause_expiry_restarts_fan_and_clears_status(
     hold.grill.fan_off()
     hold.ctx.clock.advance(6.0)
 
+    hold.ctx.clock.advance(6.0 - hold.ctx.clock.monotonic())
     hold.on_tick(6.0, 200.0, hold.grill.get_output_status())
 
     assert hold.status_fragment()["lid_open_detected"] is False
@@ -345,6 +355,7 @@ def test_operator_lid_toggle_clears_open_pause(
     hold.state.lid.expires = 100.0
     hold.control["lid_open_toggle"] = True
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
 
     assert hold.control["lid_open_toggle"] is False
@@ -360,6 +371,7 @@ def test_non_auger_manual_release_leaves_controller_feedback_unchanged(
     runner.applied.clear()
     hold.state.manual_override["fan"] = 50.0
 
+    hold.ctx.clock.advance(10.0 - hold.ctx.clock.monotonic())
     hold._on_manual_release("fan", 10.0)
 
     assert hold.state.manual_override["fan"] == 50.0
@@ -376,6 +388,7 @@ def test_manual_release_without_reseed_still_turns_auger_off(
     hold.state.manual_override["auger"] = 50.0
     hold.grill.auger_on()
 
+    hold.ctx.clock.advance(10.0 - hold.ctx.clock.monotonic())
     hold._on_manual_release("auger", 10.0, reseed=False)
 
     assert hold.state.manual_override["auger"] == 0
@@ -392,6 +405,7 @@ def test_manual_release_without_reseed_preserves_already_off_auger(
     runner.applied.clear()
     hold.state.manual_override["auger"] = 50.0
 
+    hold.ctx.clock.advance(10.0 - hold.ctx.clock.monotonic())
     hold._on_manual_release("auger", 10.0, reseed=False)
 
     assert hold.state.manual_override["auger"] == 0
@@ -408,6 +422,7 @@ def test_operator_lid_toggle_opens_pause_and_turns_fan_off(
     hold.control["lid_open_toggle"] = True
     runner.applied.clear()
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
 
     assert hold.control["lid_open_toggle"] is False

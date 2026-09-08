@@ -186,15 +186,15 @@ def _record_frame_gap(
     identity = trace.identity
     assert identity is not None
     monotonic_end_ms = _shifted_ms(gap.frame.end_s)
-    wall_start_ms = _wall_shifted_ms(gap.frame.start_s)
+    monotonic_start_ms = _shifted_ms(gap.frame.start_s)
     wall_end_ms = _wall_shifted_ms(gap.frame.end_s)
     payload = RecorderGapPayload(
         lost_record_count=1,
-        gap_start_ms=wall_start_ms,
-        gap_end_ms=wall_end_ms,
+        gap_start_ms=monotonic_start_ms,
+        gap_end_ms=monotonic_end_ms,
         reason=gap.reason,
-        frame_start_ms=wall_start_ms,
-        frame_end_ms=wall_end_ms,
+        frame_start_ms=monotonic_start_ms,
+        frame_end_ms=monotonic_end_ms,
         result_revision=gap.frame.result_revision,
         observation_sequence=gap.frame.result_revision,
     )
@@ -323,8 +323,10 @@ def _run_replay() -> _ReplayResult:
         )
         shifted = replace(
             observation,
-            frame_start_s=_wall_shifted_ms(observation.frame_start_s) / 1_000,
-            frame_end_s=_wall_shifted_ms(observation.frame_end_s) / 1_000,
+            frame_start_s=_shifted_ms(observation.frame_start_s) / 1_000,
+            frame_end_s=_shifted_ms(observation.frame_end_s) / 1_000,
+            wall_start_ms=_wall_shifted_ms(observation.frame_start_s),
+            wall_end_ms=_wall_shifted_ms(observation.frame_end_s),
         )
         frame_key = (
             round(shifted.frame_start_s * 1_000),
@@ -492,11 +494,19 @@ def test_august_28_raw_evidence_survives_pid_sp_stop_fit_and_cold_restart(
     )
     assert (
         tuple(
-            (payload.frame_start_ms, payload.frame_end_ms)
+            (payload.wall_start_ms, payload.wall_end_ms)
             for payload in observation_payloads
             if isinstance(payload, ModelObservationPayload)
         )
         == expected_observation_wall_bounds
+    )
+    assert tuple(
+        (payload.frame_start_ms, payload.frame_end_ms)
+        for payload in observation_payloads
+        if isinstance(payload, ModelObservationPayload)
+    ) == tuple(
+        (_shifted_ms(observation.frame_start_s), _shifted_ms(observation.frame_end_s))
+        for observation in result.replay.observations
     )
     assert tuple(record.ts_ms for record in observation_records) == tuple(
         _wall_shifted_ms(interval.end_s) for interval in result.replay.intervals[1:]
@@ -508,10 +518,10 @@ def test_august_28_raw_evidence_survives_pid_sp_stop_fit_and_cold_restart(
     assert "runner-no-observation-outcome" not in {
         payload.reason for payload in gap_payloads if isinstance(payload, RecorderGapPayload)
     }
-    expected_gap_wall_bounds = tuple(
+    expected_gap_monotonic_bounds = tuple(
         (
-            _WALL_OFFSET_MS + _shifted_ms(gap.frame.start_s),
-            _WALL_OFFSET_MS + _shifted_ms(gap.frame.end_s),
+            _shifted_ms(gap.frame.start_s),
+            _shifted_ms(gap.frame.end_s),
         )
         for gap in result.replay.gaps
     )
@@ -521,9 +531,11 @@ def test_august_28_raw_evidence_survives_pid_sp_stop_fit_and_cold_restart(
             for payload in gap_payloads
             if isinstance(payload, RecorderGapPayload)
         )
-        == expected_gap_wall_bounds
+        == expected_gap_monotonic_bounds
     )
-    assert tuple(record.ts_ms for record in gap_records) == tuple(end_ms for _, end_ms in expected_gap_wall_bounds)
+    assert tuple(record.ts_ms for record in gap_records) == tuple(
+        _WALL_OFFSET_MS + end_ms for _, end_ms in expected_gap_monotonic_bounds
+    )
 
     assert result.segments, "exact synchronized frames produced no finalized durable corpus"
     assert all(segment.state == "finalized" for segment in result.segments)

@@ -11,15 +11,17 @@ from sqlite_utils.migrations import Migrations
 
 LEGACY_SCHEMA_VERSION: Final[int] = 10
 REGISTRY_ADOPTION_SCHEMA_VERSION: Final[int] = 11
-CURRENT_SCHEMA_VERSION: Final[int] = 12
+CURRENT_SCHEMA_VERSION: Final[int] = 13
 MIGRATION_SET_NAME: Final[str] = "pifire-schema"
 V11_REGISTRY_ADOPTION: Final[str] = "v0011_adopt_sqlite_utils_registry"
 V12_TRAJECTORY_ROLE_GENERATION: Final[str] = "v0012_trajectory_role_generation"
+V13_TRAJECTORY_CLOCK_DOMAINS: Final[str] = "v0013_trajectory_clock_domains"
 
 _SCHEMA_MIGRATIONS = Migrations(MIGRATION_SET_NAME)
 _MIGRATION_TARGETS: Final[dict[str, int]] = {
     V11_REGISTRY_ADOPTION: REGISTRY_ADOPTION_SCHEMA_VERSION,
-    V12_TRAJECTORY_ROLE_GENERATION: CURRENT_SCHEMA_VERSION,
+    V12_TRAJECTORY_ROLE_GENERATION: 12,
+    V13_TRAJECTORY_CLOCK_DOMAINS: CURRENT_SCHEMA_VERSION,
 }
 
 
@@ -52,10 +54,10 @@ def _adopt_sqlite_utils_registry(database: Database) -> None:
 @_SCHEMA_MIGRATIONS(name=V12_TRAJECTORY_ROLE_GENERATION)
 def _migrate_trajectory_role_generation(database: Database) -> None:
     version = _user_version(database)
-    if version >= CURRENT_SCHEMA_VERSION:
+    if version >= 12:
         return
     if version != REGISTRY_ADOPTION_SCHEMA_VERSION:
-        raise RuntimeError(f"cannot migrate schema version {version} to {CURRENT_SCHEMA_VERSION}")
+        raise RuntimeError(f"cannot migrate schema version {version} to 12")
     database.execute("ALTER TABLE learning_trajectory_frame RENAME TO learning_trajectory_frame_v11")
     database.execute(
         """
@@ -93,6 +95,59 @@ def _migrate_trajectory_role_generation(database: Database) -> None:
         """
     )
     database.execute("DROP TABLE learning_trajectory_frame_v11")
+    database.execute(
+        "CREATE INDEX ix_learning_frame_revision "
+        "ON learning_trajectory_frame("
+        "segment_id, created_corpus_revision, ordinal)"
+    )
+    database.execute("PRAGMA user_version=12")
+
+
+@_SCHEMA_MIGRATIONS(name=V13_TRAJECTORY_CLOCK_DOMAINS)
+def _migrate_trajectory_clock_domains(database: Database) -> None:
+    version = _user_version(database)
+    if version >= CURRENT_SCHEMA_VERSION:
+        return
+    if version != 12:
+        raise RuntimeError(f"cannot migrate schema version {version} to {CURRENT_SCHEMA_VERSION}")
+    database.execute("ALTER TABLE learning_trajectory_frame RENAME TO learning_trajectory_frame_v12")
+    database.execute(
+        """
+        CREATE TABLE learning_trajectory_frame (
+            segment_id                 TEXT NOT NULL,
+            ordinal                    INTEGER NOT NULL,
+            kind                       TEXT NOT NULL
+                                       CHECK(kind IN ('pre-roll','scored')),
+            payload_schema_version     INTEGER NOT NULL
+                                       CHECK(payload_schema_version IN (2, 3, 4)),
+            interval_identity          TEXT NOT NULL,
+            canonical_json             TEXT NOT NULL
+                                       CHECK(json_valid(canonical_json)),
+            frame_digest               TEXT NOT NULL,
+            created_corpus_revision    INTEGER NOT NULL,
+            PRIMARY KEY(segment_id, ordinal),
+            FOREIGN KEY(segment_id)
+                REFERENCES learning_trajectory_segment(segment_id)
+                ON DELETE CASCADE
+        )
+        """
+    )
+    # Preserve historical payload contracts, canonical bytes, and durable identities.
+    database.execute(
+        """
+        INSERT INTO learning_trajectory_frame(
+            segment_id, ordinal, kind, payload_schema_version,
+            interval_identity, canonical_json, frame_digest,
+            created_corpus_revision
+        )
+        SELECT
+            segment_id, ordinal, kind, payload_schema_version,
+            interval_identity, canonical_json, frame_digest,
+            created_corpus_revision
+        FROM learning_trajectory_frame_v12
+        """
+    )
+    database.execute("DROP TABLE learning_trajectory_frame_v12")
     database.execute(
         "CREATE INDEX ix_learning_frame_revision "
         "ON learning_trajectory_frame("

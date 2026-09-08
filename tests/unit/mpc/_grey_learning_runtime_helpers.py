@@ -10,12 +10,12 @@ from typing import ClassVar
 from common.control_trace import AmbientSource
 from common.controller_model_state import CheckpointSaveOutcome
 from common.learning_trajectory import FitCorpusIdentity, ModelFitLineage
-from common.mpc_learning import MPC_FORECAST_HORIZONS, MPC_FORECAST_HORIZON_SECONDS
 from common.model_evidence import (
     ChallengerRoundEvidence,
     EvidenceKind,
     ModelEvidenceRecord,
 )
+from common.mpc_learning import MPC_FORECAST_HORIZON_SECONDS, MPC_FORECAST_HORIZONS
 from common.persistence.learning_trajectory import LearningTrajectoryRepository
 from common.persistence.model_challenger import (
     ModelChallengerState,
@@ -48,9 +48,9 @@ from controller.mpc_config import DEFAULT_MPC_CONFIG, MpcConfig
 from controller.mpc_factory import MpcPairFactory, OwnedMpcPair
 from controller.mpc_model import replay_delay_chain_arrays, simulate_grey_box_intervals
 from controller.runtime.model_fitting import (
+    FIT_CADENCE_S,
     CandidatePair,
     CandidatePreparation,
-    FIT_CADENCE_S,
     FitSubmission,
     GreyFitMetric,
     GreyFitMetrics,
@@ -77,9 +77,7 @@ from tests.unit.mpc._solver_fixtures import (
     inactive_calibration,
 )
 
-_DEFAULT_EFFECTIVE_FRAME_COUNT = ceil(
-    TriggerConfig().min_effective_duration_s / FIT_CADENCE_S
-)
+_DEFAULT_EFFECTIVE_FRAME_COUNT = ceil(TriggerConfig().min_effective_duration_s / FIT_CADENCE_S)
 
 _REQUIRED_HORIZONS = MPC_FORECAST_HORIZON_SECONDS
 _COMPLETE_SCORES = tuple(HorizonScore(horizon, 1.0, 0.5, 1) for horizon in _REQUIRED_HORIZONS)
@@ -590,12 +588,8 @@ def _seed_durable_challenger(
                 "sample_count": getattr(preparation.candidate, "sample_count", 120),
                 "temperature_band_c": list(getattr(preparation.candidate, "temperature_band_c", (75.0, 160.0))),
                 "nfev": getattr(preparation.candidate, "nfev", 4),
-                "effective_masks": [
-                    [bool(value) for value in mask] for mask in preparation.candidate.effective_masks
-                ],
-                "warmup_excluded_segment_ids": list(
-                    preparation.candidate.warmup_excluded_segment_ids
-                ),
+                "effective_masks": [[bool(value) for value in mask] for mask in preparation.candidate.effective_masks],
+                "warmup_excluded_segment_ids": list(preparation.candidate.warmup_excluded_segment_ids),
                 "result_digest": preparation.candidate.result_digest,
             },
         },
@@ -836,6 +830,8 @@ def _frame(sequence: int = 0) -> FrameObservation:
     return FrameObservation(
         frame_start_s=sequence * FIT_CADENCE_S,
         frame_end_s=(sequence + 1) * FIT_CADENCE_S,
+        wall_start_ms=round((sequence * FIT_CADENCE_S) * 1_000),
+        wall_end_ms=round(((sequence + 1) * FIT_CADENCE_S) * 1_000),
         temp_c=75.0 + sequence,
         setpoint_c=120.0,
         ambient_c=20.0,
@@ -942,8 +938,7 @@ def _reopened_replayable_passive_corpus(tmp_path):
         )
         pre_roll_loads = (0.2,)
         scored_loads = tuple(
-            (0.15, 0.50, 0.85)[(ordinal // 8) % 3]
-            for ordinal in range(len(source.scored_hold_frames))
+            (0.15, 0.50, 0.85)[(ordinal // 8) % 3] for ordinal in range(len(source.scored_hold_frames))
         )
         delay_states = replay_delay_chain_arrays(
             (FIT_CADENCE_S,),

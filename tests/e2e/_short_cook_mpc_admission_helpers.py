@@ -455,6 +455,8 @@ def _forecast_observation(
     return FrameObservation(
         frame_start_s=float(sequence * FRAME_SECONDS),
         frame_end_s=float((sequence + 1) * FRAME_SECONDS),
+        wall_start_ms=round((float(sequence * FRAME_SECONDS)) * 1_000),
+        wall_end_ms=round((float((sequence + 1) * FRAME_SECONDS)) * 1_000),
         temp_c=plant.measured(),
         setpoint_c=TARGET_C,
         ambient_c=plant.T_amb,

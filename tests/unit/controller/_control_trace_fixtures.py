@@ -186,6 +186,8 @@ def current_pid_sp_records(
                 frame_seconds=frame_seconds,
                 frame_start_ms=control_ms,
                 frame_end_ms=frame_end_ms,
+                wall_start_ms=control_ms,
+                wall_end_ms=frame_end_ms,
                 requested_combustion_load=allocation.normalized_combustion_load,
                 requested_auger_duty=allocation.auger_duty,
                 credit_before_seconds=0.0,

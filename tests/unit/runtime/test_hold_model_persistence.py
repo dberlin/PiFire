@@ -240,6 +240,7 @@ def test_persistence_failure_cannot_change_hold_actuator_outcome(hold_cycle) -> 
         hold.setup()
         runner.snapshot = {"revision": 1, "K": 700.0}
         try:
+            hold.ctx.clock.advance(100.0)
             hold.on_tick(
                 now=100.0,
                 ptemp=200.0,
@@ -405,6 +406,7 @@ def test_mpc_setup_uses_default_migration_config_when_selected_config_is_malform
 
     hold.setup()
     hold.control["cook_id"] = "malformed-mpc-config"
+    hold.ctx.clock.advance(2.0)
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
 
     assert migrated_defaults == [dict(MPC_DEFAULTS)]
@@ -450,6 +452,7 @@ def test_mpc_setup_keeps_control_live_when_authority_migration_fails(
 
     hold.setup()
     assert runner.applied == []
+    hold.ctx.clock.advance(2.0)
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
 
     learning = hold._hold_learning
@@ -672,6 +675,7 @@ def test_per_tick_saves_the_controller_snapshot(hold_cycle):
     hold.setup()
     try:
         runner.snapshot = {"revision": 1, "K": 700.0}
+        hold.ctx.clock.advance(100.0)
         hold.on_tick(now=100.0, ptemp=200.0, current_output_status=_off())
     finally:
         hold.ctx.clock.advance(400.0)
@@ -755,6 +759,7 @@ def test_checkpoint_writer_does_not_block_hold_or_teardown_and_finishes_latest_s
     _inject_process_persistence(hold, worker, object())
     hold.setup()
     runner.snapshot = {"revision": 1, "K": 700.0}
+    hold.ctx.clock.advance(100.0)
     tick_finished = threading.Event()
     tick_errors = []
 
@@ -782,6 +787,7 @@ def test_checkpoint_writer_does_not_block_hold_or_teardown_and_finishes_latest_s
         assert store.writer_threads and store.writer_threads[0] is not tick_thread
 
         runner.snapshot = {"revision": 2, "K": 701.0}
+        hold.ctx.clock.advance(1.0)
         hold.on_tick(now=101.0, ptemp=200.0, current_output_status=_off())
         teardown_finished = threading.Event()
         hold.ctx.clock.advance(400.0)
@@ -842,9 +848,12 @@ def test_framed_ticks_persist_only_advancing_model_revisions(hold_cycle):
 
     try:
         runner.snapshot = {"revision": 1, "params": {}}
+        hold.ctx.clock.advance(100.0)
         hold.on_tick(now=100.0, ptemp=200.0, current_output_status=_off())
+        hold.ctx.clock.advance(1.0)
         hold.on_tick(now=101.0, ptemp=200.0, current_output_status=_off())
         runner.snapshot = {"revision": 2, "params": {}}
+        hold.ctx.clock.advance(21.0)
         hold.on_tick(now=122.0, ptemp=200.0, current_output_status=_off())
     finally:
         hold.ctx.clock.advance(400.0)
@@ -865,6 +874,7 @@ def test_framed_ticks_leave_malformed_snapshots_to_the_model_store(hold_cycle):
 
     try:
         runner.snapshot = {"revision": 1, "params": {"non_finite": float("nan")}}
+        hold.ctx.clock.advance(100.0)
         hold.on_tick(now=100.0, ptemp=200.0, current_output_status=_off())
     finally:
         hold.ctx.clock.advance(400.0)
@@ -881,6 +891,7 @@ def test_save_does_not_fire_before_the_control_interval_elapses(hold_cycle):
     hold = hold_cycle(runner, model_store=store, controller="pid_sp")
     hold.setup()
     runner.snapshot = {"revision": 1, "K": 700.0}
+    hold.ctx.clock.advance(100.0)
     hold.on_tick(now=100.0, ptemp=200.0, current_output_status=_off())
     assert store.saves == []
 
@@ -891,6 +902,7 @@ def test_a_controller_with_no_snapshot_saves_nothing(hold_cycle):
     hold = hold_cycle(runner, model_store=store, controller="pid")
     hold.setup()
     runner.snapshot = None
+    hold.ctx.clock.advance(100.0)
     hold.on_tick(now=100.0, ptemp=200.0, current_output_status=_off())
     assert store.saves == []
 
@@ -906,6 +918,7 @@ def test_setup_wires_the_default_store_through_ctx_store(hold_cycle):
     hold.setup()
     try:
         runner.snapshot = {"revision": 1, "K": 700.0}
+        hold.ctx.clock.advance(100.0)
         hold.on_tick(now=100.0, ptemp=200.0, current_output_status=_off())
     finally:
         hold.ctx.clock.advance(400.0)
@@ -919,6 +932,7 @@ def test_reconfigure_terminalizes_old_frame_before_restore_and_reseed(hold_cycle
     store = _FakeModelStore({"pid_sp": {"revision": 3, "K": 700.0}})
     hold = hold_cycle(runner, model_store=store, controller="pid_sp")
     hold.setup()
+    hold.ctx.clock.advance(2.0)
     hold.on_tick(now=2.0, ptemp=200.0, current_output_status=hold.grill.get_output_status())
     runner.restored.clear()
     runner.applied.clear()
@@ -939,6 +953,7 @@ def test_reconfigure_terminalizes_old_frame_before_restore_and_reseed(hold_cycle
     monkeypatch.setattr(runner, "observe_frame", record_observation)
     hold.control["controller_update"] = True
 
+    hold.ctx.clock.advance(2.0)
     hold.on_tick(now=4.0, ptemp=200.0, current_output_status=hold.grill.get_output_status())
 
     events = [

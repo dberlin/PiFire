@@ -5,6 +5,7 @@ import pytest
 from common.control_trace import ControllerBranch
 from controller import pid, pid_sp
 from controller.base import PidSpTraceDiagnostics, PidTraceDiagnostics
+from controller.runtime.clock import ManualClock
 
 CYCLE_DATA = {"u_min": 0.1, "u_max": 0.9}
 
@@ -33,21 +34,23 @@ def test_pid_trace_diagnostics_reproduce_completed_update(monkeypatch):
     assert diagnostic.previous_update_time == pytest.approx(98.0)
 
 
-def test_pid_sp_trace_diagnostics_reproduce_completed_update(monkeypatch):
-    clock = iter((0.0, 0.0, 0.0, 0.0, 100.0))
-    monkeypatch.setattr(pid_sp.time, "time", lambda: next(clock))
+def test_pid_sp_trace_diagnostics_reproduce_completed_update():
+    clock = ManualClock(1_700_000_000.0)
     # tau/theta are no longer configuration: the identifier learns them, so a
     # controller built here carries no model at all.
     core = pid_sp.Controller(
         {"PB": 20.0, "Ti": 10.0, "Td": 5.0, "stable_window": 12.0},
         "F",
         dict(CYCLE_DATA),
+        monotonic_clock=clock.monotonic,
+        clock_ms=lambda: int(clock.now() * 1_000),
     )
     core.set_target(200.0)
     core.last = 190.0
     core.last_update = 98.0
     core.last_set_time = 0.0
     core.new_target = False
+    clock.advance(100.0)
 
     core.update(198.0)
 
@@ -80,15 +83,21 @@ def test_pid_sp_trace_diagnostics_reproduce_completed_update(monkeypatch):
         (230.0, False, 190.0, ControllerBranch.OVERSHOOT),
     ],
 )
-def test_pid_sp_trace_diagnostics_identify_each_control_branch(monkeypatch, current, new_target, last, expected):
-    clock = iter((0.0, 0.0, 0.0, 0.0, 100.0))
-    monkeypatch.setattr(pid_sp.time, "time", lambda: next(clock))
-    core = pid_sp.Controller({"PB": 20.0, "tau": 10.0, "theta": 5.0, "stable_window": 12.0}, "F", dict(CYCLE_DATA))
+def test_pid_sp_trace_diagnostics_identify_each_control_branch(current, new_target, last, expected):
+    clock = ManualClock(1_700_000_000.0)
+    core = pid_sp.Controller(
+        {"PB": 20.0, "tau": 10.0, "theta": 5.0, "stable_window": 12.0},
+        "F",
+        dict(CYCLE_DATA),
+        monotonic_clock=clock.monotonic,
+        clock_ms=lambda: int(clock.now() * 1_000),
+    )
     core.set_target(200.0)
     core.last = last
     core.last_update = 98.0
     core.last_set_time = 0.0
     core.new_target = new_target
+    clock.advance(100.0)
 
     core.update(current)
 

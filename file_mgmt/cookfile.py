@@ -264,7 +264,7 @@ def read_cookfile(filename):
     return (cook_file_struct, status)
 
 
-_EXACT_COOK_LEARNING_SCHEMA_VERSION = 7
+_EXACT_COOK_LEARNING_SCHEMA_VERSION = 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -367,16 +367,6 @@ def _mpc_sessions(
     sessions: list[tuple[ControlTraceRecord, ...]] = []
     for records_list in grouped.values():
         records = tuple(records_list)
-        causal_records = tuple(
-            record
-            for record in records
-            if not isinstance(
-                record.payload,
-                TrajectorySegmentTracePayload,
-            )
-        )
-        if any(right.ts_ms < left.ts_ms for left, right in itertools.pairwise(causal_records)):
-            raise _NonReplayableCookLearning("MPC control rows are not ordered within their session")
         if any(isinstance(record.payload, RecorderGapPayload) for record in records):
             raise _NonReplayableCookLearning("MPC trace contains a recorder gap")
         session_records = tuple(record for record in records if isinstance(record.payload, SessionPayload))
@@ -411,7 +401,7 @@ def _recorded_temperature_c(value: float, unit: str) -> float:
 
 def _source_digests(records: tuple[ControlTraceRecord, ...]) -> tuple[str, str]:
     session_id = records[0].session_id
-    trace_rolling = canonical_trajectory_digest({"schema": "cookfile-control-trace-v7", "session_id": session_id})
+    trace_rolling = canonical_trajectory_digest({"schema": "cookfile-control-trace-v10", "session_id": session_id})
     row_rolling = canonical_trajectory_digest({"schema": "cookfile-control-trace-rows-v1", "session_id": session_id})
     for ordinal, record in enumerate(records):
         record_digest = canonical_trajectory_digest(record.model_dump(mode="json"))
@@ -426,7 +416,7 @@ def _source_digests(records: tuple[ControlTraceRecord, ...]) -> tuple[str, str]:
         )
     source_trace_digest = canonical_trajectory_digest(
         {
-            "schema": "cookfile-control-trace-v7",
+            "schema": "cookfile-control-trace-v10",
             "record_count": len(records),
             "rolling_digest": trace_rolling,
         }
@@ -453,7 +443,7 @@ def _exact_import_segment(
             required_schema_version=_EXACT_COOK_LEARNING_SCHEMA_VERSION,
         )
     except (TypeError, ValueError, TraceSelectionError) as exc:
-        raise _NonReplayableCookLearning("MPC trace is not an exact schema-seven history") from exc
+        raise _NonReplayableCookLearning("MPC trace is not an exact current-clock history") from exc
 
     session_record = records[0]
     session = cast(SessionPayload, session_record.payload)
@@ -473,6 +463,7 @@ def _exact_import_segment(
     pulse_frames: dict[int, list[tuple[ControlTraceRecord, FramedPulseFramePayload]]] = {}
     applied_outputs: dict[int, list[tuple[ControlTraceRecord, AppliedOutputPayload]]] = {}
     model_events: list[tuple[ControlTraceRecord, ModelEventPayload]] = []
+    record_indices = {id(record): index for index, record in enumerate(records)}
     for record in records:
         payload = record.payload
         if isinstance(payload, AllocationPayload):
@@ -492,7 +483,6 @@ def _exact_import_segment(
     first_model_digest: str | None = None
     first_role_generation: int | None = None
     selected_model_event: tuple[ControlTraceRecord, ModelEventPayload] | None = None
-    clock_offset_ms: int | None = None
     trajectory_frames: list[LearningTrajectoryFrame] = []
     config_payload = session_record.model_dump(mode="json")["payload"]
     configuration_digest = canonical_trajectory_digest(
@@ -522,8 +512,6 @@ def _exact_import_segment(
             or observation.requested_fan_duty is None
         ):
             raise _NonReplayableCookLearning("model observation is not an exact scoreable Hold frame")
-        if observation_record.ts_ms != observation.frame_end_ms:
-            raise _NonReplayableCookLearning("model observation timestamp does not match its frame end")
 
         matching_allocations = allocations.get(revision, [])
         matching_updates = updates.get(revision, [])
@@ -542,15 +530,23 @@ def _exact_import_segment(
         applied_record, applied = matching_outputs[0]
 
         if (
-            update_record.ts_ms != update.monotonic_ms
+            update.monotonic_ms > observation.frame_start_ms
+            or update.solve_end_ms > observation.frame_start_ms
             or update.model_revision != session.model_revision
             or update.model_provenance != session.model_provenance
             or update.output_source is not OutputSource.CONTROLLER
             or update.stale
-            or allocation_record.ts_ms > observation.frame_start_ms
-            or update_record.ts_ms > observation.frame_start_ms
-            or pulse_record.ts_ms != observation.frame_end_ms
-            or applied_record.ts_ms != observation.frame_end_ms
+            or not (
+                record_indices[id(update_record)]
+                < record_indices[id(allocation_record)]
+                < min(
+                    record_indices[id(pulse_record)],
+                    record_indices[id(applied_record)],
+                    record_indices[id(observation_record)],
+                )
+            )
+            or pulse.wall_start_ms != observation.wall_start_ms
+            or pulse.wall_end_ms != observation.wall_end_ms
             or pulse.frame_start_ms != observation.frame_start_ms
             or pulse.frame_end_ms != observation.frame_end_ms
             or not _same_number(pulse.pulse_slot_seconds, session.pulse_slot_seconds)
@@ -581,7 +577,7 @@ def _exact_import_segment(
         matching_model_events = tuple(
             (event_record, event)
             for event_record, event in model_events
-            if event_record.ts_ms <= observation_record.ts_ms
+            if record_indices[id(event_record)] < record_indices[id(update_record)]
             and event.event in {ModelEventType.RESTORE, ModelEventType.ADOPT}
             and event.model_revision == session.model_revision
             and event.provenance == session.model_provenance
@@ -603,15 +599,10 @@ def _exact_import_segment(
         ):
             raise _NonReplayableCookLearning("one imported segment cannot cross model provenance")
 
-        current_clock_offset = update.wall_ms - update.monotonic_ms
-        if clock_offset_ms is None:
-            clock_offset_ms = current_clock_offset
-        elif current_clock_offset != clock_offset_ms:
-            raise _NonReplayableCookLearning("control trace wall-clock mapping is ambiguous")
-        wall_start_ms = observation.frame_start_ms + current_clock_offset
-        wall_end_ms = observation.frame_end_ms + current_clock_offset
-        if wall_start_ms < 0:
-            raise _NonReplayableCookLearning("control trace wall-clock mapping is invalid")
+        wall_start_ms = observation.wall_start_ms
+        wall_end_ms = observation.wall_end_ms
+        if wall_start_ms is None or wall_end_ms is None:
+            raise _NonReplayableCookLearning("control trace omits independent wall provenance")
         duration_seconds = (observation.frame_end_ms - observation.frame_start_ms) / 1_000.0
         fan_duty = cast(float, observation.actual_fan_duty)
         trajectory_frames.append(
@@ -622,9 +613,9 @@ def _exact_import_segment(
                 wall_start_ms=wall_start_ms,
                 wall_end_ms=wall_end_ms,
                 chamber_temperature_c=exact.temp_c,
-                temperature_sample_monotonic_ms=observation_record.ts_ms,
+                temperature_sample_monotonic_ms=observation.frame_end_ms,
                 temperature_sample_wall_ms=wall_end_ms,
-                temperature_sample_age_ms=observation.frame_end_ms - observation_record.ts_ms,
+                temperature_sample_age_ms=0,
                 temperature_sample_wall_age_ms=0,
                 temperature_sample_clock_skew_ms=0,
                 source_temperature_units="C",
@@ -674,9 +665,9 @@ def _exact_import_segment(
     return LearningTrajectorySegment(
         schema_version=1,
         observation_schema_version=TRAJECTORY_OBSERVATION_SCHEMA_VERSION,
-        segment_id=f"cookfile-v7-{segment_identity}",
+        segment_id=f"cookfile-v10-{segment_identity}",
         cook_id=cook_id,
-        trajectory_session_id=f"cookfile-v7-{source_trace_digest}",
+        trajectory_session_id=f"cookfile-v10-{source_trace_digest}",
         trace_session_ids=(records[0].session_id,),
         collection_provenance={
             "origin": "cookfile-import",
@@ -766,7 +757,7 @@ def _exact_import_segment(
         source_row_digest=source_row_digest,
         build_provenance={
             "builder": "cookfile-learning-importer",
-            "revision": 1,
+            "revision": 2,
             "software_version": session.software_version,
             "build_version": session.build_version,
         },
@@ -778,7 +769,7 @@ def import_cookfile_learning_trajectory(
     *,
     repository: LearningTrajectoryRepository,
 ) -> CookLearningImportResult:
-    """Explicitly import one exact schema-seven MPC session from a cookfile."""
+    """Explicitly import one exact monotonic-clock MPC session from a cookfile."""
 
     raw_diagnostics: object = None
     source_schema_version: int | None = None

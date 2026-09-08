@@ -41,7 +41,6 @@ from common.learning_trajectory import (
     canonical_trajectory_digest,
     trajectory_json_value,
 )
-from common.mpc_learning import MPC_FORECAST_HORIZON_SECONDS, forecast_horizon_spec
 from common.model_evidence import (
     MODEL_EVIDENCE_SCHEMA_VERSION,
     ActivationLifecycleEvidence,
@@ -52,6 +51,7 @@ from common.model_evidence import (
     ForecastOriginEvidence,
     ModelEvidenceRecord,
 )
+from common.mpc_learning import MPC_FORECAST_HORIZON_SECONDS, forecast_horizon_spec
 from common.persistence.control_trace import read_control_trace_session
 from common.persistence.history import append_metric, write_history
 from common.persistence.learning_trajectory import LearningTrajectoryRepository
@@ -1089,6 +1089,8 @@ def _evaluation_frame(
     return FrameObservation(
         frame_start_s=sequence * FIT_CADENCE_S,
         frame_end_s=(sequence + 1) * FIT_CADENCE_S,
+        wall_start_ms=round((sequence * FIT_CADENCE_S) * 1_000),
+        wall_end_ms=round(((sequence + 1) * FIT_CADENCE_S) * 1_000),
         temp_c=temperature_c,
         setpoint_c=120.0,
         ambient_c=_TRUTH.T_amb,

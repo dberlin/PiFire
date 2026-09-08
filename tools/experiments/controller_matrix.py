@@ -198,6 +198,8 @@ def _observe_frame(core, frame, *, sequence, temp_c, setpoint_c, fan_frac, lid_o
         FrameObservation(
             frame_start_s=frame.nominal_start_s,
             frame_end_s=frame.ended_at_s,
+            wall_start_ms=round((frame.nominal_start_s) * 1_000),
+            wall_end_ms=round((frame.ended_at_s) * 1_000),
             temp_c=temp_c,
             setpoint_c=setpoint_c,
             ambient_c=float(getattr(core, "cfg", {}).get("T_amb", 0.0)),
@@ -326,7 +328,8 @@ def run_scenario(
     time.time = clock
     try:
         mod = importlib.import_module(f"controller.{controller}")
-        core = mod.Controller(dict(core_config), "F", dict(cycle_data))
+        clock_options = {"monotonic_clock": clock} if controller == "pid_sp" else {}
+        core = mod.Controller(dict(core_config), "F", dict(cycle_data), **clock_options)
         if core_setup is not None:
             core_setup(core)
         runner = (

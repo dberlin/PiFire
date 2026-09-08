@@ -101,7 +101,7 @@ class CookControlTrace(BaseModel):
     model_config: ClassVar[ConfigDict] = _MODEL_CONFIG
 
     records: tuple[ControlTraceRecord, ...]
-    record_schema_versions: tuple[Literal[2, 3, 4, 5, 6, 7, 8, 9], ...]
+    record_schema_versions: tuple[Literal[2, 3, 4, 5, 6, 7, 8, 9, 10], ...]
 
 
 class CookModelEvidence(BaseModel):
@@ -110,7 +110,7 @@ class CookModelEvidence(BaseModel):
     model_config: ClassVar[ConfigDict] = _MODEL_CONFIG
 
     records: tuple[ModelEvidenceRecord, ...]
-    record_schema_versions: tuple[Literal[1, 2, 3, 4, 5], ...]
+    record_schema_versions: tuple[Literal[1, 2, 3, 4, 5, 6], ...]
 
 
 class CookTrajectorySegmentReference(BaseModel):

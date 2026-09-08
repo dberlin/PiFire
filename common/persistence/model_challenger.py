@@ -17,13 +17,13 @@ from common.learning_trajectory import (
     ModelFitLineage,
     trajectory_json_value,
 )
-from common.mpc_learning import MPC_FORECAST_HORIZON_SECONDS
 from common.model_evidence import (
     MODEL_EVIDENCE_SCHEMA_VERSION,
     ChallengerRoundEvidence,
     EvidenceKind,
     ModelEvidenceRecord,
 )
+from common.mpc_learning import MPC_FORECAST_HORIZON_SECONDS
 from common.persistence.model_evidence import (
     ModelActivationState,
     _activation_state_row,
@@ -212,8 +212,6 @@ class ModelChallengerState:
             raise ValueError("retirement fields are legal only for a retired challenger")
         _nonnegative_int(self.created_ms, "created_ms")
         _nonnegative_int(self.updated_ms, "updated_ms")
-        if self.updated_ms < self.created_ms:
-            raise ValueError("challenger updated_ms cannot precede created_ms")
 
 
 def _corpus_dict(value: FitCorpusIdentity) -> dict[str, object]:
@@ -877,11 +875,7 @@ def recover_model_challenger(
         if current.phase == "retired":
             return None
         preparation = trajectory_json_value(current.fit_preparation)
-        stored_horizon_seconds = (
-            preparation.get("required_horizon_seconds")
-            if isinstance(preparation, dict)
-            else None
-        )
+        stored_horizon_seconds = preparation.get("required_horizon_seconds") if isinstance(preparation, dict) else None
         if stored_horizon_seconds != list(MPC_FORECAST_HORIZON_SECONDS):
             retired = _retired_state(
                 current,
@@ -895,7 +889,6 @@ def recover_model_challenger(
                 expected_revision=current.revision,
             )
             return None
-
 
         activation_row = _activation_state_row(transaction)
         activation = None if activation_row is None else ModelActivationState(*activation_row)

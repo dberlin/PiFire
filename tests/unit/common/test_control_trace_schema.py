@@ -48,6 +48,7 @@ from common.control_trace import (
     TraceSetting,
     TrajectorySegmentTracePayload,
 )
+from common.learning_trajectory import TRAJECTORY_OBSERVATION_SCHEMA_VERSION
 from controller.applied_output import OutputSource
 
 
@@ -121,7 +122,7 @@ def _trajectory_segment_trace_payload() -> TrajectorySegmentTracePayload:
         trace_session_ids=("trace-session-1", "trace-session-2"),
         cook_id="cook-1",
         segment_schema_version=1,
-        observation_schema_version=3,
+        observation_schema_version=TRAJECTORY_OBSERVATION_SCHEMA_VERSION,
         state="finalized",
         source_trace_digest="b" * 64,
         content_digest="c" * 64,
@@ -341,6 +342,8 @@ def _payload_cases():
                 frame_seconds=20.0,
                 frame_start_ms=0,
                 frame_end_ms=20_000,
+                wall_start_ms=0,
+                wall_end_ms=20_000,
                 requested_combustion_load=0.6,
                 requested_auger_duty=0.55,
                 credit_before_seconds=0.5,
@@ -380,6 +383,7 @@ def _payload_cases():
                 inhibit_reason=InhibitReason.LID_OPEN,
                 result_revision=5,
                 detail="lid opened",
+                monotonic_ms=20,
             ),
         ),
         (
@@ -624,7 +628,7 @@ def _mpc_only_learning_trace_payload_cases():
 
 
 @pytest.mark.parametrize(("event_kind", "payload"), _segmented_learning_trace_payload_cases())
-def test_schema_v9_segmented_learning_payloads_round_trip_through_db(event_kind, payload) -> None:
+def test_current_segmented_learning_payloads_round_trip_through_db(event_kind, payload) -> None:
     record = ControlTraceRecord(
         ts_ms=25_000,
         session_id="trace-session-2",
@@ -637,23 +641,104 @@ def test_schema_v9_segmented_learning_payloads_round_trip_through_db(event_kind,
     row = record.to_db_row()
     restored = ControlTraceRecord.from_db_row(row)
 
-    assert row.schema_version == 9
+    assert row.schema_version == TRACE_SCHEMA_VERSION
     assert json.loads(row.payload)["payload_type"] == event_kind.value
     assert restored == record
     assert type(restored.payload) is type(payload)
 
 
-def test_schema_v8_model_evaluation_horizons_remain_historical_read_only() -> None:
-    payload = next(item[2] for item in _payload_cases() if isinstance(item[2], ModelEvaluationPayload))
-    current = ControlTraceRecord(
+def _historical_seconds_horizon_evaluation_row() -> ControlTraceDbRow:
+    """Literal schema-nine audit data; never inherits current-schema defaults."""
+    return ControlTraceDbRow(
         ts_ms=360_000,
         session_id="historical-session",
         cook_id="historical-cook",
-        controller=ControllerType.MPC,
-        event_kind=TraceEventKind.MODEL_EVALUATION,
-        payload=payload,
+        controller="mpc",
+        event_kind="model_evaluation",
+        schema_version=9,
+        payload=json.dumps(
+            {
+                "payload_type": "model_evaluation",
+                "decision_id": "generation-0-evaluation-1",
+                "evaluated_at_ms": 360_000,
+                "role_generation": 0,
+                "promoted": False,
+                "committed": False,
+                "consecutive_wins": 0,
+                "rejection_reasons": ["prediction"],
+                "incumbent_prediction_score": 1.0,
+                "challenger_prediction_score": 1.2,
+                "incumbent_braking_score": None,
+                "challenger_braking_score": None,
+                "sample_count": 2,
+                "prospective_digest": None,
+                "window_start_ms": 20_000,
+                "window_end_ms": 240_000,
+                "incumbent_digest": "b" * 64,
+                "challenger_digest": "c" * 64,
+                "completed_origins": [
+                    {
+                        "origin_time_ms": 20_000,
+                        "completion_time_ms": 120_000,
+                        "horizon_seconds": 100,
+                        "prediction_steps": 4,
+                        "observation_frames": 5,
+                        "generation": 0,
+                        "observed_temperature_c": 110.0,
+                        "incumbent_error_c": 2.0,
+                        "challenger_error_c": 1.0,
+                        "braking": True,
+                        "observation_sequence": 1,
+                        "incumbent_digest": "b" * 64,
+                        "challenger_digest": "c" * 64,
+                        "incumbent_prediction_c": 108.0,
+                        "challenger_prediction_c": 109.0,
+                        "temperature_band": "near-target",
+                        "ambient_source": "configured",
+                    },
+                    {
+                        "origin_time_ms": 40_000,
+                        "completion_time_ms": 240_000,
+                        "horizon_seconds": 200,
+                        "prediction_steps": 8,
+                        "observation_frames": 10,
+                        "generation": 0,
+                        "observed_temperature_c": 115.0,
+                        "incumbent_error_c": -3.0,
+                        "challenger_error_c": -4.0,
+                        "braking": False,
+                        "observation_sequence": 2,
+                        "incumbent_digest": "b" * 64,
+                        "challenger_digest": "c" * 64,
+                        "incumbent_prediction_c": 118.0,
+                        "challenger_prediction_c": 119.0,
+                        "temperature_band": "below-target",
+                        "ambient_source": "measured",
+                    },
+                ],
+                "horizon_scores": [
+                    {"horizon_seconds": 100, "incumbent_rmse_c": 2.0, "challenger_rmse_c": 1.0, "sample_count": 1},
+                    {"horizon_seconds": 200, "incumbent_rmse_c": 3.0, "challenger_rmse_c": 4.0, "sample_count": 1},
+                ],
+                "evaluation_duration_ms": 7.5,
+            }
+        ),
     )
-    raw_payload = json.loads(current.to_db_row().payload)
+
+
+def test_schema_v9_seconds_horizons_remain_readable_without_current_clock_provenance() -> None:
+    restored = ControlTraceRecord.from_db_row(_historical_seconds_horizon_evaluation_row())
+
+    assert restored.schema_version == 9
+    assert isinstance(restored.payload, ModelEvaluationPayload)
+    assert tuple(origin.horizon_seconds for origin in restored.payload.completed_origins) == (100, 200)
+    assert tuple(origin.prediction_steps for origin in restored.payload.completed_origins) == (4, 8)
+    assert tuple(origin.observation_frames for origin in restored.payload.completed_origins) == (5, 10)
+
+
+def test_schema_v8_model_evaluation_horizons_remain_historical_read_only() -> None:
+    historical_source = _historical_seconds_horizon_evaluation_row()
+    raw_payload = json.loads(historical_source.payload)
     for origin, legacy_steps in zip(raw_payload["completed_origins"], (3, 15), strict=True):
         origin["horizon_steps"] = legacy_steps
         for field in ("horizon_seconds", "prediction_steps", "observation_frames"):
@@ -662,7 +747,7 @@ def test_schema_v8_model_evaluation_horizons_remain_historical_read_only() -> No
         score["horizon_steps"] = legacy_steps
         score.pop("horizon_seconds")
     historical_row = replace(
-        current.to_db_row(),
+        historical_source,
         schema_version=8,
         payload=json.dumps(raw_payload),
     )
@@ -676,16 +761,8 @@ def test_schema_v8_model_evaluation_horizons_remain_historical_read_only() -> No
 
 
 def test_schema_v8_rejects_mixed_legacy_and_current_model_evaluation_horizons() -> None:
-    payload = next(item[2] for item in _payload_cases() if isinstance(item[2], ModelEvaluationPayload))
-    current = ControlTraceRecord(
-        ts_ms=360_000,
-        session_id="historical-session",
-        cook_id="historical-cook",
-        controller=ControllerType.MPC,
-        event_kind=TraceEventKind.MODEL_EVALUATION,
-        payload=payload,
-    )
-    raw_payload = json.loads(current.to_db_row().payload)
+    historical_source = _historical_seconds_horizon_evaluation_row()
+    raw_payload = json.loads(historical_source.payload)
     origin = raw_payload["completed_origins"][0]
     origin["horizon_steps"] = 3
     for field in ("horizon_seconds", "prediction_steps", "observation_frames"):
@@ -694,7 +771,7 @@ def test_schema_v8_rejects_mixed_legacy_and_current_model_evaluation_horizons() 
     score["horizon_steps"] = 3
     score.pop("horizon_seconds")
     historical_row = replace(
-        current.to_db_row(),
+        historical_source,
         schema_version=8,
         payload=json.dumps(raw_payload),
     )
@@ -704,16 +781,8 @@ def test_schema_v8_rejects_mixed_legacy_and_current_model_evaluation_horizons() 
 
 
 def test_schema_v8_rejects_unknown_legacy_model_evaluation_horizon() -> None:
-    payload = next(item[2] for item in _payload_cases() if isinstance(item[2], ModelEvaluationPayload))
-    current = ControlTraceRecord(
-        ts_ms=360_000,
-        session_id="historical-session",
-        cook_id="historical-cook",
-        controller=ControllerType.MPC,
-        event_kind=TraceEventKind.MODEL_EVALUATION,
-        payload=payload,
-    )
-    raw_payload = json.loads(current.to_db_row().payload)
+    historical_source = _historical_seconds_horizon_evaluation_row()
+    raw_payload = json.loads(historical_source.payload)
     for origin, legacy_steps in zip(raw_payload["completed_origins"], (3, 7), strict=True):
         origin["horizon_steps"] = legacy_steps
         for field in ("horizon_seconds", "prediction_steps", "observation_frames"):
@@ -722,7 +791,7 @@ def test_schema_v8_rejects_unknown_legacy_model_evaluation_horizon() -> None:
         score["horizon_steps"] = legacy_steps
         score.pop("horizon_seconds")
     historical_row = replace(
-        current.to_db_row(),
+        historical_source,
         schema_version=8,
         payload=json.dumps(raw_payload),
     )
@@ -1103,17 +1172,49 @@ def test_pid_update_without_learning_round_trips_as_none() -> None:
 
 @pytest.mark.parametrize("schema_version", [2, 3, 4, 5])
 def test_compatible_historical_control_updates_without_learning_remain_readable(schema_version) -> None:
-    record = ControlTraceRecord(
-        ts_ms=1_000,
-        session_id="historical-session",
-        cook_id=None,
-        controller=ControllerType.PID,
-        event_kind=TraceEventKind.CONTROL_UPDATE,
-        payload=_pid_update_payload(),
-    )
-    raw = record.model_dump(mode="json")
-    raw["schema_version"] = schema_version
-    raw["payload"].pop("learning", None)
+    raw = {
+        "ts_ms": 1_000,
+        "session_id": "historical-session",
+        "cook_id": None,
+        "controller": "pid",
+        "event_kind": "control_update",
+        "schema_version": schema_version,
+        "payload": {
+            "payload_type": "pid_update",
+            "monotonic_ms": 10,
+            "wall_ms": 20,
+            "result_revision": 0,
+            "result_age_ms": 0,
+            "control_period_seconds": 2.0,
+            "observed_dt_seconds": 2.0,
+            "setpoint": 225.0,
+            "measured_temperature": 220.0,
+            "raw_output": 0.45,
+            "requested_output": 0.45,
+            "actuation_mode": "framed_pulse",
+            "prior_requested_auger_duty": 0.4,
+            "prior_realized_auger_duty": 0.35,
+            "requested_fan_duty": None,
+            "applied_fan_duty": None,
+            "output_source": "controller",
+            "inhibit_reason": "none",
+            "error": 5.0,
+            "proportional_term": 0.3,
+            "integral_term": 0.1,
+            "derivative_term": 0.05,
+            "integral_accumulator": 2.0,
+            "integral_clamped": False,
+            "derivative_input": -0.5,
+            "derivative_state": -0.25,
+            "proportional_band": 30.0,
+            "kp": 1.0,
+            "ki": 0.1,
+            "kd": 0.01,
+            "center": 225.0,
+            "previous_temperature": 219.0,
+            "previous_update_ms": 8,
+        },
+    }
 
     restored = ControlTraceRecord.model_validate_json(json.dumps(raw))
 
@@ -1417,6 +1518,8 @@ def test_envelope_rejects_mismatched_event_or_controller(record, message):
                 frame_seconds=20.0,
                 frame_start_ms=0,
                 frame_end_ms=20_000,
+                wall_start_ms=0,
+                wall_end_ms=20_000,
                 requested_combustion_load=0.4,
                 requested_auger_duty=0.4,
                 credit_before_seconds=0.0,
@@ -1453,6 +1556,8 @@ def test_framed_reset_allows_partial_zero_transition_delivery(actual_start_activ
         frame_seconds=20.0,
         frame_start_ms=0,
         frame_end_ms=3_000,
+        wall_start_ms=0,
+        wall_end_ms=3_000,
         requested_combustion_load=0.4,
         requested_auger_duty=0.4,
         credit_before_seconds=0.0,
@@ -1484,6 +1589,8 @@ def test_framed_reset_delivery_survives_the_millisecond_bounds_it_is_compared_ag
         frame_seconds=20.0,
         frame_start_ms=0,
         frame_end_ms=7_333,
+        wall_start_ms=0,
+        wall_end_ms=7_333,
         requested_combustion_load=0.4,
         requested_auger_duty=0.4,
         credit_before_seconds=0.0,
@@ -1512,6 +1619,8 @@ def test_framed_delivery_beyond_the_millisecond_tolerance_is_still_refused():
             frame_seconds=20.0,
             frame_start_ms=0,
             frame_end_ms=7_333,
+            wall_start_ms=0,
+            wall_end_ms=7_333,
             requested_combustion_load=0.4,
             requested_auger_duty=0.4,
             credit_before_seconds=0.0,
@@ -1538,6 +1647,8 @@ def test_framed_zero_transition_rejects_delivery_that_disagrees_with_actual_dura
             frame_seconds=20.0,
             frame_start_ms=0,
             frame_end_ms=3_000,
+            wall_start_ms=0,
+            wall_end_ms=3_000,
             requested_combustion_load=0.4,
             requested_auger_duty=0.4,
             credit_before_seconds=0.0,
@@ -1663,11 +1774,7 @@ def test_strict_db_json_path_still_decodes_valid_enum_values():
     assert ControlTraceRecord.from_db_row(row) == record
 
 
-def test_schema_nine_has_one_canonical_model_evidence_contract():
-    assert TRACE_SCHEMA_VERSION == 9
-    assert {"u_min", "u_max", "hold_cycle_seconds"}.isdisjoint(SessionPayload.__annotations__)
-    assert {"pulse_slot_seconds", "pulse_frame_seconds"} <= SessionPayload.__annotations__.keys()
-    assert "FAN_ASSIST" not in OutputSource.__members__
+def test_session_requires_explicit_pulse_timing():
     session = _pid_session_payload()
     with pytest.raises(ValidationError):
         replace(session, pulse_slot_seconds=None)
@@ -1675,7 +1782,7 @@ def test_schema_nine_has_one_canonical_model_evidence_contract():
         replace(session, pulse_frame_seconds=None)
 
 
-def test_schema_eight_fit_lifecycle_requires_a_corpus_sha256():
+def test_current_fit_lifecycle_requires_a_corpus_sha256():
     with pytest.raises(ValidationError, match="current fit corpus digest"):
         ControlTraceRecord(
             ts_ms=10,
@@ -1740,7 +1847,7 @@ def test_schema_eight_fit_lifecycle_requires_a_corpus_sha256():
         ),
     ),
 )
-def test_schema_eight_round_trips_current_grey_lifecycle_vocabulary(kind, payload):
+def test_current_schema_round_trips_grey_lifecycle_vocabulary(kind, payload):
     record = ControlTraceRecord(
         ts_ms=10,
         session_id="session-grey",
@@ -1803,7 +1910,7 @@ _RETIRED_GREY_LIFECYCLE_PAYLOADS = (
 
 
 @pytest.mark.parametrize(("kind", "payload"), _RETIRED_GREY_LIFECYCLE_PAYLOADS)
-def test_schema_eight_rejects_retired_lifecycle_authority(kind, payload):
+def test_current_schema_rejects_retired_lifecycle_authority(kind, payload):
     with pytest.raises(ValidationError, match="retired"):
         ControlTraceRecord(
             ts_ms=10,
@@ -1815,7 +1922,7 @@ def test_schema_eight_rejects_retired_lifecycle_authority(kind, payload):
         )
 
 
-def test_schema_eight_writer_revalidates_copied_retired_lifecycle_payload():
+def test_current_writer_revalidates_copied_retired_lifecycle_payload():
     valid = ControlTraceRecord(
         ts_ms=10,
         session_id="session-grey",
@@ -1980,7 +2087,12 @@ def test_model_evaluation_requires_win_count_to_match_rejection_evidence():
 
 
 def test_v2_envelopes_accept_unchanged_payloads_but_reject_v3_learning_payloads():
-    lifecycle = next(item[2] for item in _payload_cases() if isinstance(item[2], ModelEventPayload))
+    lifecycle = ModelEventPayload(
+        event=ModelEventType.ADOPT,
+        model_revision=8,
+        provenance="fit-42",
+        detail="adopted a validated model",
+    )
     legacy = ControlTraceRecord(
         ts_ms=1,
         session_id="legacy",
@@ -2006,6 +2118,8 @@ def _canonical_observation_payload(*, calibration: bool) -> ModelObservationPayl
     return ModelObservationPayload(
         frame_start_ms=0,
         frame_end_ms=20_000,
+        wall_start_ms=0,
+        wall_end_ms=20_000,
         temp_c=110.0,
         setpoint_c=120.0,
         ambient_c=20.0,
@@ -2046,15 +2160,15 @@ def _canonical_observation_payload(*, calibration: bool) -> ModelObservationPayl
     )
 
 
-def test_v7_model_observation_round_trip_omits_legacy_v6_score_keys() -> None:
+def test_current_model_observation_round_trip_omits_legacy_v6_score_keys() -> None:
     obsolete_keys = {"incumbent_innovation_c", "challenger_innovation_c"}
     payload = _canonical_observation_payload(calibration=False)
     record = ControlTraceRecord(
         ts_ms=20_000,
-        session_id="session-v7",
+        session_id="session-current",
         controller=ControllerType.MPC,
         event_kind=TraceEventKind.MODEL_OBSERVATION,
-        schema_version=7,
+        schema_version=TRACE_SCHEMA_VERSION,
         payload=payload,
     )
 
@@ -2070,8 +2184,48 @@ def test_v6_model_observation_migration_drops_only_obsolete_score_keys() -> None
         "incumbent_innovation_c": 1.0,
         "challenger_innovation_c": 0.5,
     }
-    payload = _canonical_observation_payload(calibration=False)
-    current = ControlTraceRecord(
+    payload = ModelObservationPayload(
+        frame_start_ms=0,
+        frame_end_ms=20_000,
+        temp_c=110.0,
+        setpoint_c=120.0,
+        ambient_c=20.0,
+        baseline_combustion_load=0.40,
+        calibration_probe_load=0.0,
+        requested_combustion_load=0.40,
+        allocated_combustion_load=0.40,
+        realized_combustion_load=0.40,
+        requested_auger_duty=0.20,
+        scheduled_on_seconds=8.0,
+        delivered_on_seconds=8.0,
+        realized_auger_duty=0.20,
+        allocator_revision=9,
+        allocation_clamp_reasons=(),
+        observation_sequence=1,
+        probe_valid=True,
+        probe_source="chamber-probe-1",
+        ambient_source=AmbientSource.CONFIGURED,
+        ambient_uncertainty=AmbientUncertainty.UNMEASURED,
+        calibration_stage=None,
+        calibration_fit=False,
+        eligible=True,
+        rejection_reasons=(),
+        input_variance=0.01,
+        input_levels=3,
+        effective_updates=21,
+        role_generation=0,
+        model_digest="a" * 64,
+        result_revision=7,
+        output_source=OutputSource.CONTROLLER,
+        lid_open=False,
+        safety_inhibited=False,
+        manual_override=False,
+        stale=False,
+        skipped=False,
+        reset=False,
+        continuous=True,
+    )
+    historical = ControlTraceRecord(
         ts_ms=20_000,
         session_id="session-v6",
         controller=ControllerType.MPC,
@@ -2079,10 +2233,12 @@ def test_v6_model_observation_migration_drops_only_obsolete_score_keys() -> None
         schema_version=7,
         payload=payload,
     )
-    legacy_payload = json.loads(current.to_db_row().payload)
+    legacy_payload = json.loads(historical.to_db_row().payload)
+    legacy_payload.pop("wall_start_ms")
+    legacy_payload.pop("wall_end_ms")
     legacy_payload.update(obsolete_scores)
     legacy_row = replace(
-        current.to_db_row(),
+        historical.to_db_row(),
         schema_version=6,
         payload=json.dumps(legacy_payload),
     )
@@ -2090,6 +2246,8 @@ def test_v6_model_observation_migration_drops_only_obsolete_score_keys() -> None
     restored = ControlTraceRecord.from_db_row(legacy_row)
 
     assert restored.payload == payload
+    assert restored.payload.wall_start_ms is None
+    assert restored.payload.wall_end_ms is None
     assert obsolete_scores.keys().isdisjoint(json.loads(restored.to_db_row().payload))
 
     unrelated_extra = dict(legacy_payload, unexpected_legacy_key=True)
@@ -2099,7 +2257,7 @@ def test_v6_model_observation_migration_drops_only_obsolete_score_keys() -> None
         )
 
 
-def test_schema_four_round_trips_distinct_canonical_observation_evidence() -> None:
+def test_current_schema_round_trips_distinct_canonical_observation_evidence() -> None:
     ordinary = _canonical_observation_payload(calibration=False)
     calibration = _canonical_observation_payload(calibration=True)
     record = ControlTraceRecord(
@@ -2138,15 +2296,16 @@ def test_schema_four_round_trips_distinct_canonical_observation_evidence() -> No
         {"eligible": True, "rejection_reasons": ("stale",)},
     ),
 )
-def test_schema_four_rejects_incoherent_canonical_observation_evidence(replacement) -> None:
+def test_current_schema_rejects_incoherent_canonical_observation_evidence(replacement) -> None:
     with pytest.raises(ValidationError):
         replace(_canonical_observation_payload(calibration=True), **replacement)
 
 
-def test_schema_four_accepts_a_reset_shortened_observation_frame() -> None:
+def test_current_schema_accepts_a_reset_shortened_observation_frame() -> None:
     payload = replace(
         _canonical_observation_payload(calibration=False),
         frame_end_ms=7_333,
+        wall_end_ms=7_333,
         scheduled_on_seconds=20.0,
         delivered_on_seconds=7.3333331,
         realized_auger_duty=1.0,
@@ -2176,7 +2335,7 @@ def test_schema_four_accepts_a_reset_shortened_observation_frame() -> None:
         },
     ),
 )
-def test_schema_four_rejects_frame_durations_no_reset_explains(replacement) -> None:
+def test_current_schema_rejects_frame_durations_no_reset_explains(replacement) -> None:
     with pytest.raises(ValidationError):
         replace(_canonical_observation_payload(calibration=False), **replacement)
 

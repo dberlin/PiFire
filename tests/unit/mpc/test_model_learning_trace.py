@@ -123,6 +123,8 @@ def _frame(revision: int = 1) -> ControlTraceRecord:
             frame_seconds=20.0,
             frame_start_ms=0,
             frame_end_ms=20_000,
+            wall_start_ms=0,
+            wall_end_ms=20_000,
             requested_combustion_load=0.4,
             requested_auger_duty=0.4,
             credit_before_seconds=0.0,
@@ -152,6 +154,8 @@ def _observation(*, temp_c: float = 100.0, ambient_c: float = 20.0) -> ControlTr
         payload=ModelObservationPayload(
             frame_start_ms=0,
             frame_end_ms=20_000,
+            wall_start_ms=0,
+            wall_end_ms=20_000,
             temp_c=temp_c,
             setpoint_c=120.0,
             ambient_c=ambient_c,
@@ -238,13 +242,13 @@ def test_calibration_replay_requires_one_same_result_allocation() -> None:
     observation = _observation()
     allocation = _allocation_record(observation)
 
-    samples = calibration_samples((_session(), observation, allocation))
+    samples = calibration_samples((_session(), allocation, observation))
 
     assert samples[0].combustion_load == pytest.approx(0.35)
     with pytest.raises(TraceSelectionError, match="missing-allocation"):
         calibration_samples((_session(), observation))
     with pytest.raises(TraceSelectionError, match="ambiguous-allocation"):
-        calibration_samples((_session(), observation, allocation, allocation))
+        calibration_samples((_session(), allocation, allocation, observation))
 
 
 def test_exact_observation_is_canonical_over_fallback_records() -> None:
@@ -424,6 +428,8 @@ def test_fallback_replays_measured_delivery_for_zero_requested_frame_after_scale
                 _frame(2).payload,
                 frame_start_ms=20_000,
                 frame_end_ms=40_000,
+                wall_start_ms=20_000,
+                wall_end_ms=40_000,
                 requested_combustion_load=0.0,
                 requested_auger_duty=0.0,
                 scheduled_on_seconds=0.0,
@@ -463,6 +469,8 @@ def test_fallback_replays_measured_delivery_for_zero_requested_frame_after_scale
                 _observation().payload,
                 frame_start_ms=20_000,
                 frame_end_ms=40_000,
+                wall_start_ms=20_000,
+                wall_end_ms=40_000,
                 baseline_combustion_load=0.0,
                 requested_combustion_load=0.0,
                 allocated_combustion_load=0.0,
@@ -481,10 +489,10 @@ def test_fallback_replays_measured_delivery_for_zero_requested_frame_after_scale
     canonical = learning_observations(
         (
             _session("F"),
-            canonical_first,
             _allocation_record(canonical_first),
-            canonical_second,
+            canonical_first,
             _allocation_record(canonical_second),
+            canonical_second,
         )
     )
 
@@ -633,7 +641,14 @@ def test_fallback_preserves_zero_requested_and_delivered_input() -> None:
             _frame().model_copy(
                 update={
                     "ts_ms": 60_000,
-                    "payload": replace(_frame().payload, result_revision=2, frame_start_ms=40_000, frame_end_ms=60_000),
+                    "payload": replace(
+                        _frame().payload,
+                        result_revision=2,
+                        frame_start_ms=40_000,
+                        frame_end_ms=60_000,
+                        wall_start_ms=40_000,
+                        wall_end_ms=60_000,
+                    ),
                 }
             ),
             _update(2).model_copy(
@@ -677,12 +692,14 @@ def test_exact_observation_sequences_reject_overlap_and_gaps(start_ms: int) -> N
                 _observation().payload,
                 frame_start_ms=start_ms,
                 frame_end_ms=start_ms + 20_000,
+                wall_start_ms=start_ms,
+                wall_end_ms=start_ms + 20_000,
                 result_revision=2,
             ),
         }
     )
     with pytest.raises(TraceSelectionError, match="not contiguous"):
-        learning_observations((_session(), first, _allocation_record(first), second, _allocation_record(second)))
+        learning_observations((_session(), _allocation_record(first), first, _allocation_record(second), second))
 
 
 @pytest.mark.parametrize(
@@ -723,6 +740,8 @@ def test_exact_observation_rejects_out_of_order_observation_sequence() -> None:
                 _observation().payload,
                 frame_start_ms=20_000,
                 frame_end_ms=40_000,
+                wall_start_ms=20_000,
+                wall_end_ms=40_000,
                 result_revision=2,
                 observation_sequence=0,
             ),
@@ -730,4 +749,4 @@ def test_exact_observation_rejects_out_of_order_observation_sequence() -> None:
     )
 
     with pytest.raises(TraceSelectionError, match="sequence"):
-        learning_observations((_session(), first, _allocation_record(first), second, _allocation_record(second)))
+        learning_observations((_session(), _allocation_record(first), first, _allocation_record(second), second))

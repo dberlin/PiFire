@@ -164,6 +164,8 @@ def validate_records(records: Sequence[ControlTraceRecord]) -> ReplayReport:
     if session_index != 0:
         add(ReplayIssueCode.SESSION_NOT_FIRST, "SESSION must be first in insertion order", session_index)
     for index, record in enumerate(ordered):
+        if (record.schema_version >= 10) != (session_record.schema_version >= 10):
+            add(ReplayIssueCode.UNSUPPORTED_SCHEMA, "session mixes incompatible physical clock domains", index)
         if record.session_id != session_record.session_id:
             add(ReplayIssueCode.SESSION_ID_MISMATCH, "record belongs to another session", index)
         if record.cook_id != session_record.cook_id:
@@ -187,7 +189,7 @@ def validate_records(records: Sequence[ControlTraceRecord]) -> ReplayReport:
         if isinstance(payload, RecorderGapPayload):
             add(ReplayIssueCode.RECORDER_GAP, "recorder explicitly dropped trace records", index)
         if isinstance(payload, SafetyEventPayload):
-            safety_events.append((record.ts_ms, payload))
+            safety_events.append((index, payload))
             if payload.event is SafetyEventType.SCHEDULER_RESET and payload.result_revision is not None:
                 scheduler_resets[payload.result_revision] = scheduler_resets.get(payload.result_revision, 0) + 1
             lid_active, manual_active, safety_active = _advance_safety(
@@ -500,7 +502,7 @@ def _validate_applied_outputs(
             payload.result_revision == 0 and payload.output_source is OutputSource.SEED
         ):
             add(ReplayIssueCode.MISSING_UPDATE, "applied output cannot join its producing result revision", index)
-        _validate_applied_source(payload, safety_events, add, index)
+        _validate_applied_source(payload, safety_events, ordered, add, index)
         if not payload.sample_complete:
             if payload.realized_combustion_load is not None:
                 add(ReplayIssueCode.INVALID_PARTIAL_OUTPUT, "partial output must omit realized combustion load", index)
@@ -523,30 +525,31 @@ def _validate_applied_outputs(
 
 
 def _replacement_partial(index: int, payload: AppliedOutputPayload, ordered: tuple[ControlTraceRecord, ...]) -> bool:
-    if payload.interval_end_ms != ordered[index].ts_ms:
+    current_clock = ordered[index].schema_version >= 10
+    if not current_clock and payload.interval_end_ms != ordered[index].ts_ms:
         return False
     manual_replacement = False
     if payload.output_source in (OutputSource.CONTROLLER, OutputSource.MANUAL_OVERRIDE) and index + 1 < len(ordered):
         event = ordered[index + 1]
         manual_replacement = (
-            event.ts_ms == payload.interval_end_ms
-            and isinstance(event.payload, SafetyEventPayload)
+            isinstance(event.payload, SafetyEventPayload)
+            and (event.payload.monotonic_ms if current_clock else event.ts_ms) == payload.interval_end_ms
             and event.payload.event is SafetyEventType.MANUAL_TAKEOVER
         )
     manual_release = False
     if payload.output_source is OutputSource.MANUAL_OVERRIDE and index:
         event = ordered[index - 1]
         manual_release = (
-            event.ts_ms == payload.interval_end_ms
-            and isinstance(event.payload, SafetyEventPayload)
+            isinstance(event.payload, SafetyEventPayload)
+            and (event.payload.monotonic_ms if current_clock else event.ts_ms) == payload.interval_end_ms
             and event.payload.event is SafetyEventType.MANUAL_RELEASE
         )
     lid_replacement = False
     if payload.output_source in (OutputSource.CONTROLLER, OutputSource.LID_OPEN) and index:
         event = ordered[index - 1]
         lid_replacement = (
-            event.ts_ms == payload.interval_end_ms
-            and isinstance(event.payload, SafetyEventPayload)
+            isinstance(event.payload, SafetyEventPayload)
+            and (event.payload.monotonic_ms if current_clock else event.ts_ms) == payload.interval_end_ms
             and event.payload.event is SafetyEventType.LID_DETECTED
         )
     return manual_replacement or manual_release or lid_replacement
@@ -555,12 +558,16 @@ def _replacement_partial(index: int, payload: AppliedOutputPayload, ordered: tup
 def _validate_applied_source(
     payload: AppliedOutputPayload,
     safety_events: list[tuple[int, SafetyEventPayload]],
+    ordered: tuple[ControlTraceRecord, ...],
     add: IssueAdder,
     index: int,
 ) -> None:
     lid = manual = False
-    for ts_ms, event in sorted(safety_events, key=lambda item: item[0]):
-        if ts_ms > payload.interval_start_ms:
+    current_clock = ordered[index].schema_version >= 10
+    events = safety_events if current_clock else sorted(safety_events, key=lambda item: ordered[item[0]].ts_ms)
+    for event_index, event in events:
+        boundary_ms = event.monotonic_ms if current_clock else ordered[event_index].ts_ms
+        if (current_clock and event_index >= index) or boundary_ms is None or boundary_ms > payload.interval_start_ms:
             continue
         if event.event is SafetyEventType.LID_DETECTED:
             lid = True

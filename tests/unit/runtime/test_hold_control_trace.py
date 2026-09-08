@@ -130,6 +130,7 @@ def _record_trace_update(mode, result, *, now, controller_interval):
 
 
 def _advance_runtime(mode, now, actual_auger_on, *, ptemp=None, apply_transition=True):
+    mode.ctx.clock.advance(now - mode.ctx.clock.monotonic())
     result = _runtime(mode).advance(
         now,
         actual_auger_on,
@@ -390,6 +391,7 @@ def test_active_history_clear_rotates_trace_and_evidence_identity_before_next_wr
     old_identity = _open_trace_session(mode, 0.0)
     assert old_identity is not None
 
+    mode.ctx.clock.advance(2.0 - mode.ctx.clock.monotonic())
     result = mode._handle_history_clear(now=2.0)
     refreshed = mode.ctx.store.read_control()
 
@@ -434,6 +436,7 @@ def test_inactive_reconfigure_records_controller_fallback(
     mode.control["cook_id"] = "inactive-reconfigure"
     mode.control["controller_update"] = True
 
+    mode.ctx.clock.advance(2.0 - mode.ctx.clock.monotonic())
     mode.on_tick(2.0, 200.0, mode.grill.get_output_status())
 
     fallbacks = [
@@ -457,18 +460,13 @@ def test_mpc_hold_records_update_allocation_and_framed_feedback_once_per_revisio
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
     mode.control["cook_id"] = "cook-mpc"
+    mode.ctx.clock.advance(2.0 - mode.ctx.clock.monotonic())
     mode.on_tick(2.0, 220.0, mode.grill.get_output_status())
+    mode.ctx.clock.advance(22.0 - mode.ctx.clock.monotonic())
     mode.on_tick(22.0, 220.0, mode.grill.get_output_status())
 
     event_kinds = [record.event_kind for record in recorder.records]
-    assert event_kinds[:5] == [
-        TraceEventKind.SESSION,
-        TraceEventKind.ESTIMATOR_SEED,
-        TraceEventKind.CONTROL_UPDATE,
-        TraceEventKind.ALLOCATION,
-        TraceEventKind.APPLIED_OUTPUT,
-    ]
-    seed_record = recorder.records[1]
+    seed_record = next(record for record in recorder.records if record.event_kind is TraceEventKind.ESTIMATOR_SEED)
     assert seed_record.session_id == _identity(mode).session_id
     assert seed_record.cook_id == "cook-mpc"
     assert seed_record.ts_ms == 2_000
@@ -530,7 +528,9 @@ def test_pid_family_hold_records_completed_framed_pulse(hold_cycle, monkeypatch,
     mode.setup()
     mode.control["cook_id"] = f"cook-{controller}"
 
+    mode.ctx.clock.advance(2.0 - mode.ctx.clock.monotonic())
     mode.on_tick(2.0, 220.0, mode.grill.get_output_status())
+    mode.ctx.clock.advance(22.0 - mode.ctx.clock.monotonic())
     mode.on_tick(22.0, 220.0, mode.grill.get_output_status())
 
     frames = [record for record in recorder.records if record.event_kind is TraceEventKind.ACTUATION_FRAME]
@@ -584,9 +584,13 @@ def test_first_framed_results_complete_the_initial_seed_once(hold_cycle, monkeyp
     mode.control["cook_id"] = "cook-mpc-seed"
     output = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
 
+    mode.ctx.clock.advance(2.0 - mode.ctx.clock.monotonic())
     mode.on_tick(2.0, 220.0, output)
+    mode.ctx.clock.advance(4.0 - mode.ctx.clock.monotonic())
     mode.on_tick(4.0, 220.0, mode.grill.get_output_status())
+    mode.ctx.clock.advance(6.0 - mode.ctx.clock.monotonic())
     mode.on_tick(6.0, 220.0, mode.grill.get_output_status())
+    mode.ctx.clock.advance(22.0 - mode.ctx.clock.monotonic())
     mode.on_tick(22.0, 220.0, mode.grill.get_output_status())
 
     seeds = [
@@ -597,7 +601,8 @@ def test_first_framed_results_complete_the_initial_seed_once(hold_cycle, monkeyp
     seed_evidence = [
         (seed.interval_start_ms, seed.interval_end_ms, seed.sample_complete, seed.output_source) for seed in seeds
     ]
-    assert seed_evidence == [(0, 22_000, True, OutputSource.SEED)]
+    # No interval before the first accepted result was observed under this session.
+    assert seed_evidence == [(4_000, 22_000, True, OutputSource.SEED)]
 
 
 def test_lid_reset_completes_deferred_initial_seed_before_first_frame_boundary(hold_cycle, monkeypatch):
@@ -610,9 +615,12 @@ def test_lid_reset_completes_deferred_initial_seed_before_first_frame_boundary(h
     mode.control["cook_id"] = "cook-mpc-seed-lid-reset"
     mode.settings["cycle_data"]["LidOpenDetectEnabled"] = True
 
+    mode.ctx.clock.advance(2.0 - mode.ctx.clock.monotonic())
     mode.on_tick(2.0, 220.0, mode.grill.get_output_status())
+    mode.ctx.clock.advance(4.0 - mode.ctx.clock.monotonic())
     mode.on_tick(4.0, 220.0, mode.grill.get_output_status())
     mode.state.target_temp_achieved = True
+    mode.ctx.clock.advance(6.0 - mode.ctx.clock.monotonic())
     mode.on_tick(6.0, 1.0, mode.grill.get_output_status())
 
     seeds = [
@@ -635,6 +643,7 @@ def test_misaligned_feedback_gate_keeps_framed_applied_coverage_contiguous(hold_
     mode.control["cook_id"] = "cook-mpc-misaligned"
 
     for now in range(1, 43):
+        mode.ctx.clock.advance(float(now) - mode.ctx.clock.monotonic())
         mode.on_tick(float(now), 220.0, mode.grill.get_output_status())
 
     assert validate_records(recorder.records).valid
@@ -649,6 +658,7 @@ def test_mpc_allocation_trace_preserves_disabled_fan_evidence(hold_cycle, monkey
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
     mode.control["cook_id"] = "cook-mpc-no-fan"
+    mode.ctx.clock.advance(2.0 - mode.ctx.clock.monotonic())
     mode.on_tick(2.0, 220.0, {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100})
     allocation = next(record.payload for record in recorder.records if record.event_kind is TraceEventKind.ALLOCATION)
 
@@ -672,36 +682,30 @@ def test_production_hold_seed_lifecycle_rereads_into_calibration(hold_cycle, tmp
     mode.state.metrics = {"augerontime": 0.0}
     output = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
     for now in range(2, 64, 2):
+        mode.ctx.clock.advance(float(now) - mode.ctx.clock.monotonic())
         mode.on_tick(float(now), 225.0, output)
         output = mode.grill.get_output_status()
-    mode.ctx.clock.advance(64)
+    mode.ctx.clock.advance(64.0 - mode.ctx.clock.monotonic())
     mode.teardown(220.0)
 
     session_id = _identity(mode).session_id
     assert session_id is not None
     records = read_control_trace_session(session_id)
-    assert [record.event_kind for record in records[:5]] == [
-        TraceEventKind.SESSION,
-        TraceEventKind.ESTIMATOR_SEED,
-        TraceEventKind.CONTROL_UPDATE,
-        TraceEventKind.ALLOCATION,
-        TraceEventKind.APPLIED_OUTPUT,
-    ]
-    estimator_seed = records[1]
+    estimator_seed = next(record for record in records if record.event_kind is TraceEventKind.ESTIMATOR_SEED)
     assert estimator_seed.session_id == session_id
     assert estimator_seed.cook_id == "calibration-seed"
     assert estimator_seed.payload.segment_id == "hold-test-segment"
     assert estimator_seed.payload.status == "exact"
     assert estimator_seed.payload.role_generation == 0
     assert estimator_seed.payload.candidate_generation == 0
-    seed_index = 4
-    seed = records[seed_index].payload
-    assert seed.result_revision == 0
-    assert seed.output_source is OutputSource.SEED
-    assert seed.sample_complete
+    # The first accepted result starts at the same instant as seed publication;
+    # a zero-duration seed interval is not completed actuation evidence.
+    assert not any(
+        record.event_kind is TraceEventKind.APPLIED_OUTPUT and record.payload.result_revision == 0 for record in records
+    )
     revision_one_output = next(
         record.payload
-        for record in records[seed_index + 1 :]
+        for record in records
         if record.event_kind is TraceEventKind.APPLIED_OUTPUT and record.payload.result_revision == 1
     )
     assert revision_one_output.output_source is OutputSource.CONTROLLER
@@ -761,6 +765,7 @@ def test_hold_records_one_same_revision_mpc_stale_observation_without_duplicate_
     output = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
 
     for now in (2.0, 4.0, 6.0, 8.0):
+        mode.ctx.clock.advance(now - mode.ctx.clock.monotonic())
         mode.on_tick(now, 220.0, output)
 
     updates = [record.payload for record in recorder.records if record.event_kind is TraceEventKind.CONTROL_UPDATE]
@@ -796,7 +801,9 @@ def test_mpc_trace_marks_the_first_fresh_result_after_runner_staleness(hold_cycl
     mode.control["cook_id"] = "cook-recovery"
     output = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
 
+    mode.ctx.clock.advance(2.0 - mode.ctx.clock.monotonic())
     mode.on_tick(2.0, 220.0, output)
+    mode.ctx.clock.advance(4.0 - mode.ctx.clock.monotonic())
     mode.on_tick(4.0, 220.0, output)
     updates = [record.payload for record in recorder.records if record.event_kind is TraceEventKind.CONTROL_UPDATE]
 
@@ -815,6 +822,7 @@ def test_mpc_trace_preserves_a_zero_raw_policy_load(hold_cycle, monkeypatch):
     mode = hold_cycle(runner, controller="mpc")
     mode.setup()
     mode.control["cook_id"] = "cook-raw-zero"
+    mode.ctx.clock.advance(2.0 - mode.ctx.clock.monotonic())
     mode.on_tick(2.0, 220.0, {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100})
     (update,) = [record.payload for record in recorder.records if record.event_kind is TraceEventKind.CONTROL_UPDATE]
 
@@ -827,6 +835,7 @@ def test_pid_sp_completed_update_records_exact_typed_fields_and_branch(hold_cycl
     mode.setup()
     mode.control["cook_id"] = "cook-pid-sp"
 
+    mode.ctx.clock.advance(2.0 - mode.ctx.clock.monotonic())
     mode.on_tick(2.0, 220.0, {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100})
 
     (record,) = [record for record in recorder.records if record.event_kind is TraceEventKind.CONTROL_UPDATE]
@@ -849,19 +858,28 @@ def test_pid_sp_completed_update_records_exact_typed_fields_and_branch(hold_cycl
 
 
 def test_real_pid_sp_first_hold_update_records_unidentified_model_trace(hold_cycle, monkeypatch):
+    from controller.runtime.clock import ManualClock
+
+    clock = ManualClock()
     settings = base_settings()
     settings["controller"]["selected"] = "pid_sp"
     control = base_control(mode="Hold")
     control["primary_setpoint"] = 225
-    runner, status = build_runner(settings, control)
+    runner, status = build_runner(
+        settings,
+        control,
+        monotonic_clock=clock.monotonic,
+        wall_clock=clock.now,
+    )
     assert status == "Active"
     assert isinstance(runner, SyncControllerRunner)
 
     recorder = _install_recorder(monkeypatch)
-    mode = hold_cycle(runner, controller="pid_sp")
+    mode = hold_cycle(runner, controller="pid_sp", clock=clock)
     mode.setup()
     mode.control["cook_id"] = "cook-real-pid-sp"
 
+    mode.ctx.clock.advance(22.0 - mode.ctx.clock.monotonic())
     mode.on_tick(22.0, 220.0, mode.grill.get_output_status())
 
     (payload,) = [record.payload for record in recorder.records if record.event_kind is TraceEventKind.CONTROL_UPDATE]
@@ -912,11 +930,15 @@ def test_reconfigure_finishes_the_old_pid_session_before_opening_coherent_mpc_se
     mode.setup()
     mode.control["cook_id"] = "cook-reconfigure"
     output = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
+    mode.ctx.clock.advance(2.0 - mode.ctx.clock.monotonic())
     mode.on_tick(2.0, 220.0, output)
     old_session_id = _identity(mode).session_id
 
     mode.control["controller_update"] = True
+    mode.ctx.clock.advance(4.0 - mode.ctx.clock.monotonic())
     mode.on_tick(4.0, 220.0, output)
+    mode.ctx.clock.advance(20.0)
+    mode.on_tick(24.0, 220.0, mode.grill.get_output_status())
 
     sessions = [record for record in recorder.records if record.event_kind is TraceEventKind.SESSION]
     reconfigure = next(
@@ -956,16 +978,16 @@ def test_reconfigure_finishes_the_old_pid_session_before_opening_coherent_mpc_se
         for record in new_session_events
         if record.event_kind is TraceEventKind.APPLIED_OUTPUT and record.payload.result_revision == 0
     ]
-    assert len(seed_records) == 1
-    seed_record = seed_records[0]
-    assert seed_record.payload.output_source is OutputSource.SEED
-    assert seed_record.payload.sample_complete is True
+    assert seed_records == []
     result_two = next(
         record
         for record in new_session_events
         if record.event_kind is TraceEventKind.CONTROL_UPDATE and record.payload.result_revision == 2
     )
-    assert new_session_events.index(result_two) < new_session_events.index(seed_record)
+    first_interval = next(record for record in new_session_events if record.event_kind is TraceEventKind.APPLIED_OUTPUT)
+    assert first_interval.payload.interval_start_ms == 4_000
+    assert first_interval.payload.interval_end_ms == 24_000
+    assert first_interval.payload.result_revision == result_two.payload.result_revision
     old_session_events = [record for record in recorder.records if record.session_id == old_session_id]
     assert validate_records(old_session_events).valid
     assert validate_records(new_session_events).valid
@@ -989,7 +1011,10 @@ def test_mpc_zero_raw_load_and_zero_requested_auger_duty_remain_zero(hold_cycle,
     mode.setup()
     mode.control["cook_id"] = "cook-mpc-zero"
 
+    mode.ctx.clock.advance(2.0 - mode.ctx.clock.monotonic())
     mode.on_tick(2.0, 220.0, {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100})
+    mode.ctx.clock.advance(20.0)
+    mode.on_tick(22.0, 220.0, mode.grill.get_output_status())
 
     update = next(record.payload for record in recorder.records if record.event_kind is TraceEventKind.CONTROL_UPDATE)
     allocation = next(record.payload for record in recorder.records if record.event_kind is TraceEventKind.ALLOCATION)
@@ -1007,11 +1032,16 @@ def test_mpc_applied_load_is_measured_and_attributed_to_the_producing_frame(hold
     mode.setup()
     mode.control["cook_id"] = "cook-mpc-feedback"
 
+    mode.ctx.clock.advance(2.0 - mode.ctx.clock.monotonic())
     mode.on_tick(2.0, 220.0, mode.grill.get_output_status())
+    mode.ctx.clock.advance(22.0 - mode.ctx.clock.monotonic())
     mode.on_tick(22.0, 220.0, mode.grill.get_output_status())
+    mode.ctx.clock.advance(24.0 - mode.ctx.clock.monotonic())
     mode.on_tick(24.0, 220.0, mode.grill.get_output_status())
+    mode.ctx.clock.advance(26.0 - mode.ctx.clock.monotonic())
     mode.on_tick(26.0, 220.0, mode.grill.get_output_status())
     assert any(applied.timestamp == 26.0 for applied in runner.applied)
+    mode.ctx.clock.advance(28.0 - mode.ctx.clock.monotonic())
     mode.on_tick(28.0, 220.0, mode.grill.get_output_status())
 
     applied = next(
@@ -1035,11 +1065,15 @@ def test_mpc_lid_interval_records_measured_feedback_under_the_producing_frame_re
     mode.state.target_temp_achieved = True
     mode.settings["cycle_data"]["LidOpenDetectEnabled"] = True
 
+    mode.ctx.clock.advance(2.0 - mode.ctx.clock.monotonic())
     mode.on_tick(2.0, 220.0, mode.grill.get_output_status())
+    mode.ctx.clock.advance(22.0 - mode.ctx.clock.monotonic())
     mode.on_tick(22.0, 220.0, mode.grill.get_output_status())
+    mode.ctx.clock.advance(24.0 - mode.ctx.clock.monotonic())
     mode.on_tick(24.0, 1.0, mode.grill.get_output_status())
+    mode.ctx.clock.advance(26.0 - mode.ctx.clock.monotonic())
     mode.on_tick(26.0, 1.0, mode.grill.get_output_status())
-    mode.ctx.clock.advance(26.0)
+    mode.ctx.clock.advance(26.0 - mode.ctx.clock.monotonic())
     mode.teardown(1.0)
 
     lid_feedback = [
@@ -1072,14 +1106,21 @@ def test_mpc_manual_interval_records_measured_feedback_under_the_producing_frame
     mode.control["cook_id"] = "cook-mpc-manual-feedback"
     mode.state.metrics = {"augerontime": 0}
 
+    mode.ctx.clock.advance(2.0 - mode.ctx.clock.monotonic())
     mode.on_tick(2.0, 220.0, mode.grill.get_output_status())
+    mode.ctx.clock.advance(22.0 - mode.ctx.clock.monotonic())
     mode.on_tick(22.0, 220.0, mode.grill.get_output_status())
     mode.state.manual_override["auger"] = 25.0
+    mode.ctx.clock.advance(23.0 - mode.ctx.clock.monotonic())
     mode._last_now = 23.0
     mode._on_manual_output("auger", True)
+    mode.ctx.clock.advance(24.0 - mode.ctx.clock.monotonic())
     mode.on_tick(24.0, 220.0, mode.grill.get_output_status())
+    mode.ctx.clock.advance(26.0 - mode.ctx.clock.monotonic())
     mode._on_manual_release("auger", 26.0)
+    mode.ctx.clock.advance(26.0 - mode.ctx.clock.monotonic())
     mode.on_tick(26.0, 220.0, mode.grill.get_output_status())
+    mode.ctx.clock.advance(28.0 - mode.ctx.clock.monotonic())
     mode.on_tick(28.0, 220.0, mode.grill.get_output_status())
 
     manual_feedback = [
@@ -1117,8 +1158,11 @@ def test_framed_reset_preserves_the_interrupted_frame_metadata(hold_cycle, monke
     mode.setup()
     mode.control["cook_id"] = "cook-framed-latch"
 
+    mode.ctx.clock.advance(2.0 - mode.ctx.clock.monotonic())
     mode.on_tick(2.0, 220.0, mode.grill.get_output_status())
+    mode.ctx.clock.advance(4.0 - mode.ctx.clock.monotonic())
     mode.on_tick(4.0, 220.0, mode.grill.get_output_status())
+    mode.ctx.clock.advance(5.0 - mode.ctx.clock.monotonic())
     mode._on_safety_event("stop", 5.0)
 
     frame = next(
@@ -1155,6 +1199,7 @@ def test_first_safety_callback_opens_and_binds_the_trace_session(
     trace = _trace(mode)
     assert trace.identity is None
 
+    mode.ctx.clock.advance(1.0 - mode.ctx.clock.monotonic())
     mode._on_safety_event("temperature_guard", 1.0)
 
     assert trace.identity is not None
@@ -1291,9 +1336,11 @@ def test_async_reconfigure_does_not_leak_the_old_published_model_into_new_sessio
     mode.setup()
     mode.control["cook_id"] = f"cook-no-leak-{restore_accepted}"
     output = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
+    mode.ctx.clock.advance(2.0 - mode.ctx.clock.monotonic())
     mode.on_tick(2.0, 220.0, output)
 
     mode.control["controller_update"] = True
+    mode.ctx.clock.advance(4.0 - mode.ctx.clock.monotonic())
     mode.on_tick(4.0, 220.0, output)
 
     (new_session,) = [
@@ -1391,6 +1438,7 @@ def test_base_manual_auger_on_reasserts_manual_output_after_framed_reset(hold_cy
     mode.control["manual"]["output"] = True
     call_start = len(mode.grill.calls)
 
+    mode.ctx.clock.advance(2.0 - mode.ctx.clock.monotonic())
     mode._apply_manual_overrides(
         mode.control,
         now=2.0,
@@ -1398,6 +1446,7 @@ def test_base_manual_auger_on_reasserts_manual_output_after_framed_reset(hold_cy
     )
     manual_calls = mode.grill.calls[call_start:]
     call_count = len(mode.grill.calls)
+    mode.ctx.clock.advance(3.0 - mode.ctx.clock.monotonic())
     mode.on_tick(3.0, 220.0, mode.grill.get_output_status())
 
     assert mode.grill.get_output_status()["auger"] is True
@@ -1436,9 +1485,11 @@ def test_automatic_lid_preempts_same_tick_framed_on_transition_and_keeps_replay_
     mode.control["cook_id"] = "cook-same-tick-lid"
     mode.state.target_temp_achieved = True
     mode.settings["cycle_data"]["LidOpenDetectEnabled"] = True
+    mode.ctx.clock.advance(2.0 - mode.ctx.clock.monotonic())
     mode.on_tick(2.0, 220.0, mode.grill.get_output_status())
     call_start = len(mode.grill.calls)
 
+    mode.ctx.clock.advance(20.0 - mode.ctx.clock.monotonic())
     mode.on_tick(20.0, 1.0, mode.grill.get_output_status())
 
     trigger_calls = [name for name, _args in mode.grill.calls[call_start:]]
@@ -1605,6 +1656,8 @@ def _learning_observation(frame_start_s):
         False,
         True,
         0,
+        wall_start_ms=round(frame_start_s * 1_000),
+        wall_end_ms=round((frame_start_s + 20.0) * 1_000),
     )
 
 
@@ -1637,6 +1690,7 @@ def test_historical_evidence_rotation_preserves_live_applied_interval(hold_cycle
         AppliedOutput(0.4, OutputSource.CONTROLLER, 2.0, requested=0.5),
         TraceOutputContext(
             timestamp_ms=2_000,
+            monotonic_ms=2_000,
             pulse_frame_result_revision=3,
             fan_duty=None,
             producing_revision=3,
@@ -1662,6 +1716,7 @@ def test_historical_evidence_rotation_preserves_live_applied_interval(hold_cycle
     assert trace.record_applied_interval(
         TraceAppliedIntervalContext(
             timestamp_ms=4_000,
+            monotonic_ms=4_000,
             sample_complete=True,
             realized_combustion_load=0.3,
             controls_fan=False,
@@ -1686,6 +1741,7 @@ def test_unknown_selected_controller_keeps_control_live_without_trace_identity(
     mode = hold_cycle(runner, controller="future-controller")
     mode.setup()
     mode.control["cook_id"] = "unknown-controller-trace"
+    mode.ctx.clock.advance(2.0 - mode.ctx.clock.monotonic())
     mode.on_tick(2.0, 200.0, mode.grill.get_output_status())
     runner.reconfigure({}, {})
     mode.teardown(200.0)
@@ -2359,6 +2415,8 @@ def test_hold_retires_self_evicted_submission_immediately(
         False,
         True,
         0,
+        wall_start_ms=0,
+        wall_end_ms=20_000,
     )
     _learning(mode).submit_completed_observation((0, 20), observation)
 
@@ -2397,10 +2455,12 @@ def test_trace_append_failure_keeps_hold_control_and_learning_live_then_records_
     mode.control["cook_id"] = "trace-append-recovery"
     output = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
 
+    mode.ctx.clock.advance(2.0 - mode.ctx.clock.monotonic())
     mode.on_tick(2.0, 212.0, output)
     recorder.flush_due(5_000)
     assert persisted == []
 
+    mode.ctx.clock.advance(4.0 - mode.ctx.clock.monotonic())
     mode.on_tick(4.0, 213.0, output)
     runner.observation_outcome = _model_observation_outcome(frame_end_ms=20_000)
     for index in range(3):

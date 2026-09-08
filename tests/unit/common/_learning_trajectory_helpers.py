@@ -5,6 +5,7 @@ from __future__ import annotations
 from hashlib import sha256
 
 from common.learning_trajectory import (
+    TRAJECTORY_OBSERVATION_SCHEMA_VERSION,
     FrameDeliveryCertainty,
     HoldEntrySample,
     LearningTrajectoryFrame,
@@ -101,7 +102,7 @@ def _segment(
     hold_entry = _hold_entry(scored[0]) if scored else None
     return LearningTrajectorySegment(
         schema_version=1,
-        observation_schema_version=3,
+        observation_schema_version=TRAJECTORY_OBSERVATION_SCHEMA_VERSION,
         segment_id=segment_id,
         cook_id=f"cook-{segment_id}",
         trajectory_session_id=f"trajectory-{segment_id}",

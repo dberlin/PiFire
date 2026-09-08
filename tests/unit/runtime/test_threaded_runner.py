@@ -66,6 +66,8 @@ def _frame(index: int) -> FrameObservation:
     return FrameObservation(
         frame_start_s=index * 20.0,
         frame_end_s=(index + 1) * 20.0,
+        wall_start_ms=round((index * 20.0) * 1_000),
+        wall_end_ms=round(((index + 1) * 20.0) * 1_000),
         temp_c=100.0,
         setpoint_c=120.0,
         ambient_c=20.0,
@@ -2323,6 +2325,8 @@ def test_threaded_public_reconfigure_transfers_queued_calibration_without_replay
         trajectory_repository=None,
         fit_partition_digest=None,
         grey_learning_process=None,
+        monotonic_clock=None,
+        wall_clock=None,
     ):
         del settings, control
         assert logger is None
@@ -2378,6 +2382,8 @@ def test_threaded_reconfigure_closes_replaced_core_only_after_atomic_install(mon
         trajectory_repository=None,
         fit_partition_digest=None,
         grey_learning_process=None,
+        monotonic_clock=None,
+        wall_clock=None,
     ):
         del settings, control
         assert logger is None
@@ -2418,6 +2424,8 @@ def test_threaded_reconfigure_closes_superseded_uninstalled_core(monkeypatch):
         trajectory_repository=None,
         fit_partition_digest=None,
         grey_learning_process=None,
+        monotonic_clock=None,
+        wall_clock=None,
     ):
         del settings, control
         assert logger is None
@@ -2615,7 +2623,7 @@ def _append_complete_calibration_trigger(repository) -> None:
                 kind=EvidenceKind.CALIBRATION_SUMMARY,
                 session_id=segment.trajectory_session_id,
                 cook_id=segment.cook_id,
-                timestamp_ms=frame.monotonic_start_ms + index,
+                timestamp_ms=frame.wall_start_ms + index,
                 role_generation=4,
                 model_digest="a" * 64,
                 provenance_digest="b" * 64,
@@ -2623,6 +2631,8 @@ def _append_complete_calibration_trigger(repository) -> None:
                     accepted=True,
                     probe_count=0 if stage == "coast" else 1,
                     result_revision=index + 1,
+                    frame_start_ms=frame.monotonic_start_ms,
+                    frame_end_ms=frame.monotonic_end_ms,
                     command_revision=17,
                     command_action="start",
                     baseline_q=0.3,

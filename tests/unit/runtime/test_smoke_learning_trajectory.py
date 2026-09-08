@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import FrozenInstanceError, dataclass, replace
 from hashlib import sha256
 from math import inf, nan
@@ -30,6 +31,7 @@ from controller.runtime.model_persistence import (
     TrajectoryAppendBatch,
     TrajectoryPersistenceGap,
 )
+from controller.runtime.modes.hold_learning import HoldLearningRuntime
 
 _FRAME_MS = 20_000
 # ControlMode sleeps for 50 ms between normal samples; timestamps are persisted at
@@ -376,6 +378,8 @@ def _hold_frame(
     return FrameObservation(
         frame_start_s=start_ms / 1_000,
         frame_end_s=end_ms / 1_000,
+        wall_start_ms=_WALL_OFFSET_MS + start_ms,
+        wall_end_ms=_WALL_OFFSET_MS + end_ms,
         temp_c=temp_c,
         setpoint_c=120.0,
         ambient_c=25.0,
@@ -810,32 +814,6 @@ def test_compatible_smoke_to_hold_keeps_one_segment_with_partial_tail_and_exact_
     assert scored_batches[0].scored[0].sequence == 3
 
 
-def test_hold_frame_normalizes_live_wall_epoch_bounds_to_mode_monotonic_clock() -> None:
-    runtime, _journal, persistence = _runtime()
-    start_ms = 55_000
-    end_ms = start_ms + _FRAME_MS
-    runtime.mode_entered(_entered("Hold", at_ms=start_ms))
-    runtime.observe_temperature(_sample(start_ms + 25, 109.5))
-    runtime.observe_temperature(_sample(end_ms - 25, 111.0))
-    observation = replace(
-        _hold_frame(1, start_ms=start_ms, temp_c=111.25),
-        frame_start_s=(_WALL_OFFSET_MS + start_ms) / 1_000,
-        frame_end_s=(_WALL_OFFSET_MS + end_ms) / 1_000,
-    )
-
-    runtime.observe_hold_frame(observation)
-
-    (frame,) = _scored_frames(persistence)
-    assert (frame.monotonic_start_ms, frame.monotonic_end_ms) == (start_ms, end_ms)
-    assert (frame.wall_start_ms, frame.wall_end_ms) == (
-        _WALL_OFFSET_MS + start_ms,
-        _WALL_OFFSET_MS + end_ms,
-    )
-    assert frame.chamber_temperature_c == pytest.approx(111.25)
-    assert frame.temperature_sample_monotonic_ms == end_ms - 25
-    assert frame.temperature_sample_wall_ms == _WALL_OFFSET_MS + end_ms - 25
-
-
 def test_pure_hold_begins_without_pre_roll_and_anchors_first_valid_measurement() -> None:
     runtime, _journal, persistence = _runtime()
     runtime.mode_entered(_entered("Hold"))
@@ -1180,6 +1158,56 @@ def test_replayed_hold_warmup_is_persisted_as_pre_roll_before_scoring() -> None:
     assert len(_scored_frames(persistence)) == 1
     assert runtime.status().pre_roll_count == 1
     assert runtime.status().scored_count == 1
+
+
+@pytest.mark.parametrize("wall_jump_ms", (-3_600_000, 0, 3_600_000), ids=("backward", "steady", "forward"))
+def test_hold_seed_warmup_admits_eight_distinct_frames_across_clock_domains(wall_jump_ms: int) -> None:
+    trajectory, _journal, persistence = _runtime()
+    trajectory.mode_entered(_entered("Hold"))
+    trajectory.observe_temperature(_sample(10, 109.0))
+    learning = HoldLearningRuntime(
+        runner=None,
+        model_store=None,
+        persistence=None,
+        trace=None,
+        controller_name="mpc",
+        logger=logging.getLogger(__name__),
+        initial_generation=0,
+        learning_trajectory=trajectory,
+    )
+    learning.set_seed_warmup_remaining(8)
+    for index in range(8):
+        start_ms = index * _FRAME_MS
+        wall_shift = wall_jump_ms if index >= 3 else 0
+        previous_shift = wall_jump_ms if index > 3 else 0
+        sample = _sample(start_ms + _FRAME_MS, 110.0)
+        trajectory.observe_temperature(replace(sample, wall_ms=sample.wall_ms + wall_shift))
+        frame = _hold_frame(index + 1, start_ms=start_ms)
+        frame = replace(
+            frame,
+            wall_start_ms=frame.wall_start_ms + previous_shift,
+            wall_end_ms=frame.wall_end_ms + wall_shift,
+        )
+        learning.submit_completed_observation((start_ms, start_ms + _FRAME_MS), frame)
+        assert learning.seed_warmup_remaining == 7 - index
+        if index < 7:
+            learning.submit_completed_observation((start_ms, start_ms + _FRAME_MS), frame)
+            assert learning.seed_warmup_remaining == 7 - index
+    assert trajectory.barrier()
+    assert len(_pre_roll_frames(persistence)) == 8
+    sample = _sample(9 * _FRAME_MS, 111.0)
+    trajectory.observe_temperature(replace(sample, wall_ms=sample.wall_ms + wall_jump_ms))
+    frame = _hold_frame(9, start_ms=8 * _FRAME_MS)
+    trajectory.observe_hold_frame(
+        replace(
+            frame,
+            wall_start_ms=frame.wall_start_ms + wall_jump_ms,
+            wall_end_ms=frame.wall_end_ms + wall_jump_ms,
+        )
+    )
+    assert trajectory.barrier()
+    assert trajectory.status().scored_count == 1
+    assert _scored_frames(persistence)[0].monotonic_start_ms == 160_000
 
 
 @pytest.mark.parametrize(
@@ -1536,12 +1564,13 @@ def test_temperature_persists_independent_wall_age_and_clock_skew() -> None:
             wall_skew_ms=2,
         )
     )
-    runtime.observe_temperature(_sample(_FRAME_MS + 1, 124.0, wall_skew_ms=2))
+    runtime.observe_temperature(_sample(_FRAME_MS + 1, 124.0, wall_skew_ms=10))
 
     (frame,) = _pre_roll_frames(persistence)
     assert frame.temperature_sample_age_ms == 51
-    assert frame.temperature_sample_wall_age_ms == 49
-    assert frame.temperature_sample_clock_skew_ms == -2
+    assert frame.wall_end_ms == _WALL_OFFSET_MS + _FRAME_MS + 11
+    assert frame.temperature_sample_wall_age_ms == 60
+    assert frame.temperature_sample_clock_skew_ms == 9
 
 
 def test_boundary_stages_until_delayed_begin_receipt_owns_cursor() -> None:

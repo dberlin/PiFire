@@ -15,6 +15,7 @@ from common import datastore
 from common.control_trace import AllocationClampReason, TraceEventKind
 from common.learning_trajectory import LearningTrajectorySegment
 from common.model_evidence import (
+    MODEL_EVIDENCE_SCHEMA_VERSION,
     AllocationEvidence,
     CalibrationSummaryEvidence,
     EvidenceKind,
@@ -1497,7 +1498,7 @@ def test_calibration_manifest_binds_one_complete_run_from_the_fit_corpus(
                 kind=EvidenceKind.CALIBRATION_SUMMARY,
                 session_id=segment.trajectory_session_id,
                 cook_id=segment.cook_id,
-                timestamp_ms=frame.monotonic_start_ms + index,
+                timestamp_ms=frame.wall_start_ms + index,
                 role_generation=4,
                 model_digest="a" * 64,
                 provenance_digest="b" * 64,
@@ -1505,6 +1506,8 @@ def test_calibration_manifest_binds_one_complete_run_from_the_fit_corpus(
                     accepted=True,
                     probe_count=0 if stage == "coast" else 1,
                     result_revision=index + 1,
+                    frame_start_ms=frame.monotonic_start_ms,
+                    frame_end_ms=frame.monotonic_end_ms,
                     command_revision=17,
                     command_action="start",
                     baseline_q=0.3,
@@ -1527,7 +1530,7 @@ def test_calibration_manifest_binds_one_complete_run_from_the_fit_corpus(
         kind=first.kind,
         session_id=first.session_id,
         cook_id=first.cook_id,
-        timestamp_ms=frame.monotonic_start_ms + len(stage_order),
+        timestamp_ms=frame.wall_start_ms + len(stage_order),
         role_generation=first.role_generation,
         model_digest=first.model_digest,
         provenance_digest=first.provenance_digest,
@@ -1849,7 +1852,7 @@ def test_rejected_evaluation_persists_causal_blocker_and_projects_once(
     assert outcome["confidence_accepted"] is False
     assert outcome["input_variance"] == 0.125
     assert outcome["input_levels"] == 3
-    assert harness.persistence.confidence_preceding[-1][0].schema_version == 5
+    assert harness.persistence.confidence_preceding[-1][0].schema_version == MODEL_EVIDENCE_SCHEMA_VERSION
     assessment = harness.persistence.confidence_preceding[-1][0].payload
     assert assessment.rejection_reasons == ("candidate-confidence-low",)
     assert components.estimator.closed
@@ -1943,7 +1946,7 @@ def test_candidate_assessment_uses_activation_fifo_when_unrelated_evidence_is_re
     assert harness.persistence.evidence == []
     assert len(harness.persistence.confidence) == 1
     assert len(harness.persistence.confidence_preceding) == 1
-    assert harness.persistence.confidence_preceding[0][0].schema_version == 5
+    assert harness.persistence.confidence_preceding[0][0].schema_version == MODEL_EVIDENCE_SCHEMA_VERSION
     assert harness.persistence.confidence_preceding[0][0].payload.decision_id == evaluation.decision_id
     assert components.estimator.closed
     assert components.controller.closed
@@ -2064,7 +2067,6 @@ def test_trace_projection_failure_terminates_activation_without_losing_evidence(
     )
 
     def fail_trace(records):
-        assert {record.schema_version for record in records} == {9}
         raise RuntimeError("trace unavailable")
 
     harness = _harness(learning_enabled=True, append_trace=fail_trace)

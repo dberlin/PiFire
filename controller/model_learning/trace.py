@@ -51,11 +51,11 @@ def learning_observations(
     *,
     required_schema_version: int = TRACE_SCHEMA_VERSION,
 ) -> tuple[FrameObservation, ...]:
-    """Return exact learning events, or a strictly reconstructable legacy history.
+    """Return observations with explicit same-session monotonic and wall coordinates.
 
-    Live callers require the current trace schema by default.  Explicit archive
-    importers may select an older exact schema deliberately; accepting a schema
-    there is never inferred from the records themselves.
+    Historical traces remain readable for audit, but cannot supply current
+    precision by extrapolating an old wall/monotonic offset. Archive importers
+    must select the explicit current clock contract.
 
     The fallback deliberately accepts only complete framed-pulse frames paired with
     one controller-owned, same-revision update at the frame endpoint.  Anything
@@ -66,6 +66,8 @@ def learning_observations(
         trace,
         required_schema_version=required_schema_version,
     )
+    if required_schema_version < 10:
+        raise TraceSelectionError("historical trace cannot establish current monotonic frame and wall provenance")
     exact = tuple(record.payload for record in trace if isinstance(record.payload, ModelObservationPayload))
     if exact:
         return _exact_observations(exact, _allocation_payloads(trace))
@@ -77,6 +79,8 @@ def _allocation_payloads(trace: tuple[ControlTraceRecord, ...]) -> dict[int, lis
     for record in trace:
         if isinstance(payload := record.payload, AllocationPayload):
             allocations.setdefault(payload.result_revision, []).append(payload)
+        elif isinstance(payload, ModelObservationPayload) and payload.result_revision not in allocations:
+            raise TraceSelectionError("missing-allocation before model observation")
     return allocations
 
 
@@ -112,11 +116,15 @@ def _validate_session(
         raise TraceSelectionError("selected control trace contains a recorder gap")
     if len({record.session_id for record in records}) != 1:
         raise TraceSelectionError("selected records contain more than one control session")
-    if any(right.ts_ms < left.ts_ms for left, right in itertools.pairwise(records)):
-        raise TraceSelectionError("selected control trace timestamps are not ordered")
+    if required_schema_version < 10 and any(right.ts_ms < left.ts_ms for left, right in itertools.pairwise(records)):
+        raise TraceSelectionError("selected historical control trace timestamps are not ordered")
     sessions = tuple(record.payload for record in records if isinstance(record.payload, SessionPayload))
     if len(sessions) != 1 or sessions[0].controller is not ControllerType.MPC:
         raise TraceSelectionError("selected records do not describe exactly one MPC trace session")
+    if not isinstance(records[0].payload, SessionPayload):
+        raise TraceSelectionError("selected trace session must be first in insertion order")
+    if any(record.cook_id != records[0].cook_id for record in records):
+        raise TraceSelectionError("selected control trace mixes cook identities")
     _to_c(sessions[0].ambient_temperature, sessions[0].temperature_unit)
     _to_c(sessions[0].setpoint, sessions[0].temperature_unit)
     return sessions[0]
@@ -163,6 +171,8 @@ def _exact_observations(
             payload.skipped,
             payload.reset,
             payload.continuous,
+            payload.wall_start_ms,
+            payload.wall_end_ms,
         )
         if any(value is None for value in required):
             raise TraceSelectionError("model observation omits required gate or actuation evidence")
@@ -188,6 +198,8 @@ def _exact_observations(
                 skipped=cast(bool, payload.skipped),
                 reset=cast(bool, payload.reset),
                 role_generation=payload.role_generation,
+                wall_start_ms=cast(int, payload.wall_start_ms),
+                wall_end_ms=cast(int, payload.wall_end_ms),
                 continuous=cast(bool, payload.continuous),
                 observation_sequence=payload.observation_sequence,
                 probe_valid=payload.probe_valid,
@@ -243,7 +255,13 @@ def _terminal_safety_tail_output_index(records: tuple[ControlTraceRecord, ...]) 
         and frame.frame_start_ms == output.interval_start_ms
         and frame.frame_end_ms == output.interval_end_ms
         and frame.frame_end_ms - frame.frame_start_ms < frame.frame_seconds * 1_000
-        and output_record.ts_ms == safety_record.ts_ms == frame_record.ts_ms == output.interval_end_ms
+        and (
+            (output_record.schema_version >= 10 and safety.monotonic_ms == output.interval_end_ms)
+            or (
+                output_record.schema_version < 10
+                and output_record.ts_ms == safety_record.ts_ms == frame_record.ts_ms == output.interval_end_ms
+            )
+        )
     ):
         return None
     if any(
@@ -342,7 +360,7 @@ def calibration_samples(records: Iterable[ControlTraceRecord]) -> tuple[Calibrat
     partial_outputs: list[tuple[int, AppliedOutputPayload]] = []
     actuated_revisions: set[int] = set()
     previous_revision = -1
-    previous_wall_ms = -1
+    previous_monotonic_ms = -1
     seed_allowed = False
     for index, record in enumerate(trace):
         payload = record.payload
@@ -364,8 +382,8 @@ def calibration_samples(records: Iterable[ControlTraceRecord]) -> tuple[Calibrat
             revision = payload.result_revision
             if revision <= previous_revision:
                 raise TraceSelectionError("MPC control-update revisions are not strictly ordered")
-            if payload.wall_ms < previous_wall_ms:
-                raise TraceSelectionError("MPC control-update timestamps are not ordered")
+            if payload.monotonic_ms < previous_monotonic_ms:
+                raise TraceSelectionError("MPC control-update monotonic timestamps are not ordered")
             if payload.failure_state is not MpcFailureState.SUCCESS:
                 raise TraceSelectionError(f"MPC revision {revision} did not complete successfully")
             if payload.stale:
@@ -376,7 +394,7 @@ def calibration_samples(records: Iterable[ControlTraceRecord]) -> tuple[Calibrat
                 raise TraceSelectionError(f"MPC revision {revision} has a non-controller output source")
             updates.append((index, payload))
             previous_revision = revision
-            previous_wall_ms = payload.wall_ms
+            previous_monotonic_ms = payload.monotonic_ms
         elif isinstance(payload, AllocationPayload):
             if payload.result_revision in allocations:
                 raise TraceSelectionError(f"MPC revision {payload.result_revision} has duplicate allocations")
@@ -565,11 +583,11 @@ def calibration_samples(records: Iterable[ControlTraceRecord]) -> tuple[Calibrat
     ]
     if len(paired_updates) < 2:
         raise TraceSelectionError("selected control trace requires at least two complete framed MPC control updates")
-    start_ms = paired_updates[0][1].wall_ms
+    start_ms = paired_updates[0][1].monotonic_ms
     ambient_c = _to_c(session.ambient_temperature, session.temperature_unit)
     return tuple(
         CalibrationSample(
-            (update.wall_ms - start_ms) / 1000.0,
+            (update.monotonic_ms - start_ms) / 1000.0,
             _to_c(update.measured_temperature, session.temperature_unit),
             realized_load(complete_outputs[update.result_revision]),
             ambient_c,
@@ -638,8 +656,10 @@ def _fallback_observations(
         if len(candidates) != 1 or frame.result_revision in used_revisions:
             raise TraceSelectionError(f"MPC revision {frame.result_revision} is ambiguous")
         update = candidates[0]
-        if update.wall_ms != frame.frame_end_ms:
+        if update.monotonic_ms != frame.frame_end_ms:
             raise TraceSelectionError(f"MPC revision {frame.result_revision} lacks a frame-end temperature")
+        if frame.wall_start_ms is None or frame.wall_end_ms is None or update.wall_ms != frame.wall_end_ms:
+            raise TraceSelectionError(f"MPC revision {frame.result_revision} lacks independent frame wall provenance")
         if (
             update.failure_state is not MpcFailureState.SUCCESS
             or update.stale
@@ -676,6 +696,8 @@ def _fallback_observations(
                 reset=frame.reset_reason is not None,
                 continuous=not frame.stale_command,
                 role_generation=0,
+                wall_start_ms=frame.wall_start_ms,
+                wall_end_ms=frame.wall_end_ms,
                 observation_sequence=len(observations) + 1,
             )
         )

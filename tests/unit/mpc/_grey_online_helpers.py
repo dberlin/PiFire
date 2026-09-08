@@ -45,6 +45,8 @@ def _frame(sequence: int, **changes) -> FrameObservation:
     values: Any = {
         "frame_start_s": sequence * FIT_CADENCE_S,
         "frame_end_s": (sequence + 1) * FIT_CADENCE_S,
+        "wall_start_ms": round(sequence * FIT_CADENCE_S * 1_000),
+        "wall_end_ms": round((sequence + 1) * FIT_CADENCE_S * 1_000),
         "temp_c": 75.0 + sequence,
         "setpoint_c": 120.0,
         "ambient_c": 20.0,
@@ -229,9 +231,7 @@ class _ImmediateFitWorker:
                 sample_count=len(temperatures),
                 temperature_band_c=(min(temperatures), max(temperatures)),
                 nfev=4,
-                effective_masks=tuple(
-                    (True,) * len(segment.scored_load) for segment in self.job.segments
-                ),
+                effective_masks=tuple((True,) * len(segment.scored_load) for segment in self.job.segments),
                 warmup_excluded_segment_ids=(),
             )
         )

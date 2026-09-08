@@ -273,10 +273,16 @@ def _observation(
     delivered_on_s = min(frame.delivered_on_s, duration_s)
     scheduled_on_s = min(frame.scheduled_on_s, duration_s)
     realized_duty = delivered_on_s / duration_s
+    # The sanitized fixture has relative time, including a negative first
+    # interval. This replay supplies its own simulated wall origin; it does not
+    # claim to recover historical epoch provenance.
+    replay_wall_origin_ms = 1_700_000_000_000
     requested_duty = frame.requested_auger_duty
     return FrameObservation(
         frame_start_s=frame.start_s,
         frame_end_s=frame.end_s,
+        wall_start_ms=replay_wall_origin_ms + round(frame.start_s * 1_000),
+        wall_end_ms=replay_wall_origin_ms + round(frame.end_s * 1_000),
         temp_c=_to_celsius(interval.temperature_f),
         setpoint_c=_to_celsius(float(row["setpoint_f"])),
         ambient_c=_to_celsius(ambient_temperature_f),
@@ -859,6 +865,8 @@ def _decode_exact_frame(value: object, *, metadata: CookMetadata, sessions: set[
     observation = FrameObservation(
         frame_start_s=start_ms / 1_000,
         frame_end_s=end_ms / 1_000,
+        wall_start_ms=round((start_ms / 1_000) * 1_000),
+        wall_end_ms=round((end_ms / 1_000) * 1_000),
         temp_c=float(row["chamber_temperature_c"]),
         setpoint_c=float(row["setpoint_c"]),
         ambient_c=float(row["ambient_c"]),

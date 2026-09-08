@@ -99,7 +99,6 @@ class ActuationDeliveryJournal:
         }
         self._evicted_before: dict[ActuatorChannel, int | None] = dict.fromkeys(ActuatorChannel)
         self._last_monotonic_ms: int | None = None
-        self._last_wall_ms: int | None = None
 
     @property
     def edges(self) -> tuple[DeliveredActuationEdge, ...]:
@@ -211,10 +210,7 @@ class ActuationDeliveryJournal:
         with self._lock:
             if self._last_monotonic_ms is not None and monotonic_ms < self._last_monotonic_ms:
                 raise ValueError("monotonic clock regressed")
-            if self._last_wall_ms is not None and wall_ms < self._last_wall_ms:
-                raise ValueError("wall clock regressed")
             self._last_monotonic_ms = monotonic_ms
-            self._last_wall_ms = wall_ms
         return monotonic_ms, wall_ms
 
     def _record_success(

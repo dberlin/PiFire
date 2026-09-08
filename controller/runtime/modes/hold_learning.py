@@ -158,9 +158,7 @@ class _LearningTrajectoryObserver(Protocol):
         observation: FrameObservation,
         *,
         replay_only: bool = False,
-    ) -> None: ...
-
-    def estimator_seed_anchor(self) -> tuple[int, float] | None: ...
+    ) -> bool: ...
 
     def barrier(self, timeout: float = 2.0) -> bool: ...
 
@@ -874,9 +872,7 @@ class HoldLearningRuntime:
             trajectory = self._learning_trajectory
             replayed_exactly = False
             if trajectory is not None:
-                trajectory.observe_hold_frame(observation, replay_only=True)
-                anchor = trajectory.estimator_seed_anchor()
-                replayed_exactly = isinstance(anchor, tuple) and anchor[0] == round(observation.frame_end_s * 1_000)
+                replayed_exactly = trajectory.observe_hold_frame(observation, replay_only=True) is True
             if replayed_exactly and observation.probe_valid and observation.continuous:
                 self._seed_warmup_remaining -= 1
             self._deliver_feedback_without_observation(feedback)
@@ -1054,17 +1050,17 @@ class HoldLearningRuntime:
     def record_gap(self, observation: FrameObservation, reason: str) -> None:
         # This is where every refused observation lands, so a frame the gap models
         # cannot describe either costs the gap and nothing more.
-        publication_ms = int(observation.frame_end_s * 1_000)
+        publication_ms = observation.wall_end_ms
         trace = self._trace
         if trace is not None:
             try:
                 gap_payload = RecorderGapPayload(
                     lost_record_count=1,
-                    gap_start_ms=int(observation.frame_start_s * 1_000),
-                    gap_end_ms=publication_ms,
+                    gap_start_ms=round(observation.frame_start_s * 1_000),
+                    gap_end_ms=round(observation.frame_end_s * 1_000),
                     reason=reason,
-                    frame_start_ms=int(observation.frame_start_s * 1_000),
-                    frame_end_ms=publication_ms,
+                    frame_start_ms=round(observation.frame_start_s * 1_000),
+                    frame_end_ms=round(observation.frame_end_s * 1_000),
                     result_revision=observation.result_revision,
                     observation_sequence=observation.observation_sequence,
                 )
@@ -1306,6 +1302,8 @@ class HoldLearningRuntime:
             probe_count=int(observation.calibration_status == "active" and observation.probe_q != 0.0),
             reason=observation.calibration_cancellation_reason,
             result_revision=observation.result_revision,
+            frame_start_ms=round(observation.frame_start_s * 1_000),
+            frame_end_ms=round(observation.frame_end_s * 1_000),
             command_revision=observation.calibration_command_revision,
             command_action=cast(
                 _CalibrationCommandAction,
@@ -1336,12 +1334,12 @@ class HoldLearningRuntime:
         )
         return ModelEvidenceRecord(
             evidence_id=(
-                f"{session_id}:calibration-frame:{observation.result_revision}:{int(observation.frame_start_s * 1_000)}"
+                f"{session_id}:calibration-frame:{observation.result_revision}:{round(observation.frame_start_s * 1_000)}"
             ),
             kind=EvidenceKind.CALIBRATION_SUMMARY,
             session_id=session_id,
             cook_id=cook_id,
-            timestamp_ms=int(observation.frame_end_s * 1_000),
+            timestamp_ms=observation.wall_end_ms,
             role_generation=observation.role_generation,
             model_digest=None,
             provenance_digest=None,
@@ -1399,8 +1397,10 @@ class HoldLearningRuntime:
     ) -> ModelObservationPayload:
         output_source = OutputSource(observation.output_source) if observation.output_source != "unknown" else None
         return ModelObservationPayload(
-            frame_start_ms=int(observation.frame_start_s * 1_000),
-            frame_end_ms=int(observation.frame_end_s * 1_000),
+            frame_start_ms=round(observation.frame_start_s * 1_000),
+            frame_end_ms=round(observation.frame_end_s * 1_000),
+            wall_start_ms=observation.wall_start_ms,
+            wall_end_ms=observation.wall_end_ms,
             cancellation_command_revision=observation.cancellation_command_revision,
             cancellation_command_action=cast(
                 _CancellationCommandAction,

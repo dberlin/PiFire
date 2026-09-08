@@ -62,6 +62,7 @@ def _scheduler(mode):
 
 
 def _advance_runtime(mode, now, actual_auger_on, *, ptemp=None, apply_transition=True):
+    mode.ctx.clock.advance(now - mode.ctx.clock.monotonic())
     result = _runtime(mode).advance(
         now,
         actual_auger_on,
@@ -79,6 +80,7 @@ def _advance_runtime(mode, now, actual_auger_on, *, ptemp=None, apply_transition
 
 
 def _reset_runtime(mode, reason, now, inhibit, *, ptemp=None, terminal_feedback=False):
+    mode.ctx.clock.advance(now - mode.ctx.clock.monotonic())
     result = _runtime(mode).reset(
         reason,
         now,
@@ -151,6 +153,7 @@ def test_normal_tick_decides_then_commands_hardware_before_feedback(hold_cycle, 
 
     monkeypatch.setattr(hold.grill, "auger_on", record_auger_on)
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, _status(hold))
 
     first_feedback = next(index for index, event in enumerate(events) if isinstance(event, tuple))
@@ -182,10 +185,12 @@ def test_low_duty_accumulates_to_one_quantum(hold_cycle):
     hold = hold_cycle(runner, controller="mpc", cycle_data_extra={"u_min": 0.9})
 
     hold.setup()
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, _status(hold))
 
     assert hold.state.controller.pulse_requested_duty == 0.05
     assert hold.grill.get_output_status()["auger"] is False
+    hold.ctx.clock.advance(22.0 - hold.ctx.clock.monotonic())
     hold.on_tick(22.0, 200.0, _status(hold))
     assert hold.grill.get_output_status()["auger"] is True
 
@@ -197,8 +202,11 @@ def test_result_is_adopted_once_and_latched_at_next_frame(hold_cycle):
     hold = hold_cycle(runner, controller="mpc")
 
     hold.setup()
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, _status(hold))
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold.on_tick(4.0, 200.0, _status(hold))
+    hold.ctx.clock.advance(22.0 - hold.ctx.clock.monotonic())
     hold.on_tick(22.0, 200.0, _status(hold))
 
     assert hold.state.controller.pulse_result_revision == 2
@@ -211,7 +219,9 @@ def test_lid_opening_turns_auger_off_before_dispatching_frame_progress(hold_cycl
     runner = _OrderedTickRunner(events, [_output(1, 0.1), _output(1, 0.1), _output(1, 0.1)])
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, _status(hold))
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold.on_tick(4.0, 200.0, _status(hold))
     hold.state.target_temp_achieved = True
     hold.settings["cycle_data"]["LidOpenDetectEnabled"] = True
@@ -225,6 +235,7 @@ def test_lid_opening_turns_auger_off_before_dispatching_frame_progress(hold_cycl
 
     monkeypatch.setattr(hold.grill, "auger_off", record_auger_off)
 
+    hold.ctx.clock.advance(22.0 - hold.ctx.clock.monotonic())
     hold.on_tick(22.0, 0.0, _status(hold))
     feedback_index = next(
         index for index, event in enumerate(events) if isinstance(event, tuple) and event[0] == "feedback"
@@ -239,9 +250,13 @@ def test_stale_result_continues_last_command_and_measured_feedback(hold_cycle):
 
     hold.setup()
     runner.applied.clear()
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, _status(hold))
+    hold.ctx.clock.advance(22.0 - hold.ctx.clock.monotonic())
     hold.on_tick(22.0, 200.0, _status(hold))
+    hold.ctx.clock.advance(24.0 - hold.ctx.clock.monotonic())
     hold.on_tick(24.0, 200.0, _status(hold))
+    hold.ctx.clock.advance(26.0 - hold.ctx.clock.monotonic())
     hold.on_tick(26.0, 200.0, _status(hold))
 
     assert hold.state.controller.pulse_result_revision == 1
@@ -260,18 +275,24 @@ def test_stale_command_inhibits_non_solve_ticks_until_a_fresh_result_arrives(hol
     hold.control["cook_id"] = "stale-recovery-no-catchup"
     hold.state.metrics = {"augerontime": 0.0}
     hold.setup()
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, _status(hold))
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold.on_tick(4.0, 200.0, _status(hold))
     delivery_at_reset = hold.state.controller.pulse_feedback_delivered_on_s
 
+    hold.ctx.clock.advance(4.5 - hold.ctx.clock.monotonic())
     hold.on_tick(4.5, 200.0, _status(hold))
 
     assert hold.grill.get_output_status()["auger"] is False
     assert hold.state.controller.pulse_feedback_delivered_on_s == delivery_at_reset
+    hold.ctx.clock.advance(6.0 - hold.ctx.clock.monotonic())
     hold.on_tick(6.0, 200.0, _status(hold))
     assert hold.state.controller.pulse_stale_command is False
     assert hold.grill.get_output_status()["auger"] is True
+    hold.ctx.clock.advance(8.0 - hold.ctx.clock.monotonic())
     hold.on_tick(8.0, 200.0, _status(hold))
+    hold.ctx.clock.advance(26.0 - hold.ctx.clock.monotonic())
     hold.on_tick(26.0, 200.0, _status(hold))
 
     assert hold.state.metrics["augerontime"] == 18.0
@@ -281,11 +302,14 @@ def test_reconfiguration_replaces_scheduler_and_discards_prior_credit(hold_cycle
     runner = FakeControllerRunner(period=1.0).script([_output(1, 0.1)])
     hold = hold_cycle(runner, controller="pid")
     hold.setup()
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, _status(hold))
+    hold.ctx.clock.advance(22.0 - hold.ctx.clock.monotonic())
     hold.on_tick(22.0, 200.0, _status(hold))
     original_scheduler = _runtime(hold).scheduler
     hold.control["controller_update"] = True
 
+    hold.ctx.clock.advance(24.0 - hold.ctx.clock.monotonic())
     hold.on_tick(24.0, 200.0, _status(hold))
 
     assert _runtime(hold).scheduler is not original_scheduler
@@ -298,12 +322,14 @@ def test_reconfiguration_uses_post_reset_auger_state_for_the_replacement_schedul
     hold.setup()
     hold.control["cook_id"] = "reconfigure-observed-state"
     hold.state.metrics = {"augerontime": 0.0}
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, _status(hold))
     original_scheduler = _runtime(hold).scheduler
     captured_before_reset = _status(hold)
     hold.control["controller_update"] = True
     runner.applied.clear()
 
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold.on_tick(4.0, 200.0, captured_before_reset)
 
     assert _runtime(hold).scheduler is not original_scheduler
@@ -317,15 +343,19 @@ def test_safety_manual_lid_and_teardown_reset_credit(hold_cycle):
     runner = FakeControllerRunner(period=1.0).script([_output(1, 0.9)])
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, _status(hold))
+    hold.ctx.clock.advance(22.0 - hold.ctx.clock.monotonic())
     hold.on_tick(22.0, 200.0, _status(hold))
+    hold.ctx.clock.advance(23.0 - hold.ctx.clock.monotonic())
     hold._last_now = 23.0
 
     hold._on_manual_output("auger", True)
+    hold.ctx.clock.advance(24.0 - hold.ctx.clock.monotonic())
     hold._on_safety_event("stop", 24.0)
     assert hold.grill.get_output_status()["auger"] is False
 
-    hold.ctx.clock.advance(24.0)
+    hold.ctx.clock.advance(24.0 - hold.ctx.clock.monotonic())
     hold.teardown(200.0)
     assert runner.stops == 1
 
@@ -335,9 +365,12 @@ def test_guard_events_reset_without_restoring_credit(hold_cycle, event):
     runner = FakeControllerRunner(period=1.0).script([_output(1, 0.9)])
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, _status(hold))
+    hold.ctx.clock.advance(22.0 - hold.ctx.clock.monotonic())
     hold.on_tick(22.0, 200.0, _status(hold))
 
+    hold.ctx.clock.advance(23.0 - hold.ctx.clock.monotonic())
     hold._on_safety_event(event, 23.0)
     decision = _scheduler(hold).advance(0.9, 24.0, False)
 
@@ -353,6 +386,7 @@ def test_lid_inhibit_discards_credit_and_preempts_auger(hold_cycle):
     hold.state.target_temp_achieved = True
     hold.settings["cycle_data"]["LidOpenDetectEnabled"] = True
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 100.0, _status(hold))
 
     assert hold.state.lid.open_detected is True
@@ -360,7 +394,7 @@ def test_lid_inhibit_discards_credit_and_preempts_auger(hold_cycle):
     assert _scheduler(hold).advance(0.9, 3.0, False).reset_reason is not None
 
 
-def test_deferred_mpc_to_pid_swap_accounts_old_delivery_and_seeds_post_reset_output(hold_cycle, monkeypatch):
+def test_deferred_mpc_to_pid_swap_accounts_old_delivery_and_seeds_post_reset_output(hold_cycle):
     class DeferredRunner(FakeControllerRunner):
         def reconfigure(self, settings, control, logger=None):
             self.pending = True
@@ -371,7 +405,9 @@ def test_deferred_mpc_to_pid_swap_accounts_old_delivery_and_seeds_post_reset_out
             self._commands_fan = False
             self._configuration_revision += 1
 
-    runner = DeferredRunner(period=1.0, commands_fan=True, controller_type=ControllerType.MPC).script([_output(1, 0.5)])
+    runner = DeferredRunner(period=1.0, commands_fan=True, controller_type=ControllerType.MPC).script(
+        [_output(1, 0.5), _output(2, 0.5)]
+    )
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
     hold.ctx.store._settings["controller"]["selected"] = "pid"
@@ -379,21 +415,15 @@ def test_deferred_mpc_to_pid_swap_accounts_old_delivery_and_seeds_post_reset_out
     hold.state.metrics = {"augerontime": 0.0}
     hold.control["controller_update"] = True
     status = {"auger": False, "fan": False, "igniter": False, "power": True, "pwm": 100}
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, status)
     _advance_runtime(hold, 2.0, True)
 
     assert hold.grill.get_output_status()["auger"] is True
-    runtime = _runtime(hold)
-    configure_scheduler = runtime.configure
-
-    def configure_with_live_ratio(*args, **kwargs):
-        configure_scheduler(*args, **kwargs)
-        hold.state.cycle.ratio = 0.5
-
-    monkeypatch.setattr(runtime, "configure", configure_with_live_ratio)
     runner.applied.clear()
 
     runner.complete_swap()
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold.on_tick(4.0, 200.0, _status(hold))
 
     assert _runtime(hold).scheduler is not None
@@ -412,7 +442,9 @@ def test_missed_frames_are_recorded_as_skipped_without_catchup(hold_cycle, monke
     frames = []
     hold.setup()
     _trace(hold).record = lambda kind, payload, ts: frames.append((kind, payload)) or True
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, _status(hold))
+    hold.ctx.clock.advance(62.0 - hold.ctx.clock.monotonic())
     hold.on_tick(62.0, 200.0, _status(hold))
 
     skipped = [payload for kind, payload in frames if kind is TraceEventKind.ACTUATION_FRAME and payload.skipped]
@@ -432,7 +464,9 @@ def test_auger_and_fan_adopt_together_from_one_result_revision(hold_cycle):
     hold.control["pwm_control"] = True
     hold.setup()
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, _status(hold))
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold.on_tick(4.0, 200.0, _status(hold))
 
     assert hold.state.controller.pulse_requested_duty == 0.9
@@ -450,8 +484,11 @@ def test_reset_accounts_observed_output_before_safety_or_manual_preemption(hold_
     if actual_on:
         hold.grill.auger_on()
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, _status(hold))
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold._on_safety_event("stop", 4.0)
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold._last_now = 4.0
     hold._on_manual_output("auger", actual_on)
 
@@ -500,8 +537,10 @@ def test_stale_result_preempts_hardware_and_discards_scheduler_credit(hold_cycle
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, _status(hold))
     assert hold.grill.get_output_status()["auger"] is True
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold.on_tick(4.0, 200.0, _status(hold))
 
     assert hold.grill.get_output_status()["auger"] is False
@@ -516,6 +555,7 @@ def test_completed_frame_feedback_uses_the_completed_frame_request_bound_and_rev
     controller.pulse_result_revision = 1
     controller.pulse_requested_duty = 0.1
     controller.pulse_maximum_duty = 0.5
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, _status(hold))
     _advance_runtime(hold, 2.0, False)
     _advance_runtime(hold, 2.0, True)
@@ -544,8 +584,8 @@ def test_teardown_reports_final_observed_pulse_delivery_before_reset(hold_cycle)
     controller.pulse_requested_duty = 0.1
     _advance_runtime(hold, 0.0, False)
     runner.applied.clear()
-    hold.ctx.clock.advance(2.0)
     _advance_runtime(hold, 0.0, True)
+    hold.ctx.clock.advance(2.0)
 
     hold.teardown(200.0)
 
@@ -858,8 +898,10 @@ def test_running_controller_receives_changed_setpoint_without_rebuild(
     hold = hold_cycle(runner, controller="mpc")
     hold.setup()
 
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     hold.control["primary_setpoint"] = 250.0
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold.on_tick(4.0, 200.0, hold.grill.get_output_status())
 
     assert runner.target == 250.0

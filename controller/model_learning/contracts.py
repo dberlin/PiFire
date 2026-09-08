@@ -157,7 +157,7 @@ def _require_digest(value: object, name: str) -> str:
 
 @dataclass(frozen=True, slots=True)
 class FrameObservation:
-    """One complete actuator frame and its synchronized thermal measurement."""
+    """One monotonic actuator interval with independent wall-clock provenance."""
 
     frame_start_s: float
     frame_end_s: float
@@ -180,6 +180,8 @@ class FrameObservation:
     reset: bool
     continuous: bool
     role_generation: int
+    wall_start_ms: int
+    wall_end_ms: int
     observation_sequence: int = 0
     probe_valid: bool = True
     probe_source: str | None = None
@@ -213,6 +215,8 @@ class FrameObservation:
             raise ValueError("frame_end_s must be greater than frame_start_s")
         duration = end - start
         object.__setattr__(self, "frame_start_s", start)
+        _nonnegative_int(self.wall_start_ms, "wall_start_ms")
+        _nonnegative_int(self.wall_end_ms, "wall_end_ms")
         object.__setattr__(self, "frame_end_s", end)
         for name in ("temp_c", "setpoint_c", "ambient_c"):
             object.__setattr__(self, name, _finite_float(getattr(self, name), name))

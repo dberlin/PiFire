@@ -770,21 +770,22 @@ def test_secondary_recovery_clears_current_report_without_notification_or_log():
     ]
 
 
-def test_control_mode_hook_order_one_bounded_tick():
+def _elapse_during_preloop_checks(monkeypatch, ctx):
+    """Spend elapsed time on pre-loop work, never as a side effect of reading time."""
+    evaluate_phase = base_mode.evaluate_phase
+
+    def evaluate_with_elapsed_time(mode, context, phase, now, ptemp):
+        result = evaluate_phase(mode, context, phase, now, ptemp)
+        if phase == "pre_loop":
+            ctx.clock.advance(0.6)
+        return result
+
+    monkeypatch.setattr(base_mode, "evaluate_phase", evaluate_with_elapsed_time)
+
+
+def test_control_mode_hook_order_one_bounded_tick(monkeypatch):
     ctx = _make_ctx()
-    # Preflight and post-setup probe reads each receive their own monotonic
-    # timestamp before the existing start-time read. Advance only for the
-    # loop timestamp so the status publish gate fires in this bounded tick.
-    real_now = ctx.clock.now
-    calls = {"n": 0}
-
-    def _now():
-        calls["n"] += 1
-        if calls["n"] <= 3:
-            return real_now()
-        return real_now() + 0.6
-
-    ctx.clock.now = _now
+    _elapse_during_preloop_checks(monkeypatch, ctx)
 
     mode = _RecordingMode(ctx, WorkCycleState())
     mode.run()
@@ -802,23 +803,15 @@ def test_control_mode_hook_order_one_bounded_tick():
     ]
 
 
-def test_preloop_identity_refresh_does_not_shift_mode_timer_origin():
+def test_preloop_identity_refresh_does_not_shift_mode_timer_origin(monkeypatch):
     ctx = _make_ctx()
-    real_now = ctx.clock.now
-    clock_reads = 0
-
-    def _now():
-        nonlocal clock_reads
-        clock_reads += 1
-        return real_now() if clock_reads <= 3 else real_now() + 0.6
-
-    ctx.clock.now = _now
+    _elapse_during_preloop_checks(monkeypatch, ctx)
     mode = _RecordingMode(ctx, WorkCycleState())
-    clock_reads_at_on_tick = []
+    tick_times = []
     on_tick = mode.on_tick
 
     def record_on_tick(now, ptemp, current_output_status):
-        clock_reads_at_on_tick.append(clock_reads)
+        tick_times.append((now, ctx.clock.monotonic()))
         return on_tick(now, ptemp, current_output_status)
 
     mode.on_tick = record_on_tick
@@ -827,7 +820,7 @@ def test_preloop_identity_refresh_does_not_shift_mode_timer_origin():
 
     assert mode.state.timers.start_time == 0.0
     assert "status_fragment" in mode.calls
-    assert clock_reads_at_on_tick == [5]
+    assert tick_times == [(0.6, 0.6)]
 
 
 def test_loop_identity_refresh_rotates_with_supplied_loop_time():
@@ -842,16 +835,9 @@ def test_loop_identity_refresh_rotates_with_supplied_loop_time():
     assert rotations == [("old-session", "new-session", 12.5)]
 
 
-def test_status_publishes_duty_fields():
+def test_status_publishes_duty_fields(monkeypatch):
     ctx = _make_ctx()
-    real_now = ctx.clock.now
-    calls = {"n": 0}
-
-    def _now():
-        calls["n"] += 1
-        return real_now() if calls["n"] <= 3 else real_now() + 0.6
-
-    ctx.clock.now = _now
+    _elapse_during_preloop_checks(monkeypatch, ctx)
     mode = _RecordingMode(ctx, WorkCycleState())
     mode.run()
     status = ctx.store.read_status()
@@ -1013,7 +999,7 @@ def test_apply_manual_overrides_refreshes_last_now_unconditionally():
     assert mode._last_now == 123.0
 
 
-def _status_with_dc_fan(*, fan_on: bool, duty: int):
+def _status_with_dc_fan(monkeypatch, *, fan_on: bool, duty: int):
     settings = base_settings()
     settings["platform"]["dc_fan"] = True
     control_data = base_control(mode="Recording")
@@ -1028,24 +1014,17 @@ def _status_with_dc_fan(*, fan_on: bool, duty: int):
         notifications=FakeNotifier(),
         clock=ManualClock(),
     )
-    real_now = ctx.clock.now
-    calls = {"n": 0}
-
-    def _now():
-        calls["n"] += 1
-        return real_now() if calls["n"] <= 3 else real_now() + 0.6
-
-    ctx.clock.now = _now
+    _elapse_during_preloop_checks(monkeypatch, ctx)
     _RecordingMode(ctx, WorkCycleState()).run()
     return ctx.store.read_status()
 
 
-def test_a_dc_fan_that_is_not_running_reports_no_duty():
+def test_a_dc_fan_that_is_not_running_reports_no_duty(monkeypatch):
     """control['duty_cycle'] is the duty the fan WOULD be given. Reporting it
     while the fan is off puts "FAN IDLE" next to "FAN DUTY 100%" on the
     dashboard. The AC branch and the Manual branch both gate on the output."""
-    assert _status_with_dc_fan(fan_on=False, duty=100)["fan_duty"] == 0
+    assert _status_with_dc_fan(monkeypatch, fan_on=False, duty=100)["fan_duty"] == 0
 
 
-def test_a_running_dc_fan_still_reports_its_commanded_duty():
-    assert _status_with_dc_fan(fan_on=True, duty=100)["fan_duty"] == 100
+def test_a_running_dc_fan_still_reports_its_commanded_duty(monkeypatch):
+    assert _status_with_dc_fan(monkeypatch, fan_on=True, duty=100)["fan_duty"] == 100

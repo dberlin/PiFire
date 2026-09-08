@@ -366,6 +366,7 @@ def test_metrics_current_schema_migration_idempotent(tmp_path):
         assert [row[0:2] for row in audit_rows] == [
             ("pifire-schema", "v0011_adopt_sqlite_utils_registry"),
             ("pifire-schema", "v0012_trajectory_role_generation"),
+            ("pifire-schema", "v0013_trajectory_clock_domains"),
         ]
         assert all(row[2] for row in audit_rows)
         datastore.execute_write("INSERT INTO metrics(id, mode) VALUES ('abc', 'Hold')")
@@ -542,6 +543,7 @@ def test_history_current_schema_migration_idempotent(tmp_path):
         assert [row[0:2] for row in audit_rows] == [
             ("pifire-schema", "v0011_adopt_sqlite_utils_registry"),
             ("pifire-schema", "v0012_trajectory_role_generation"),
+            ("pifire-schema", "v0013_trajectory_clock_domains"),
         ]
         assert all(row[2] for row in audit_rows)
         conn.execute(
@@ -675,6 +677,7 @@ def test_current_schema_migration_is_idempotent_on_an_already_migrated_db(tmp_pa
         assert [row[0:2] for row in audit_rows] == [
             ("pifire-schema", "v0011_adopt_sqlite_utils_registry"),
             ("pifire-schema", "v0012_trajectory_role_generation"),
+            ("pifire-schema", "v0013_trajectory_clock_domains"),
         ]
         assert all(row[2] for row in audit_rows)
     finally:

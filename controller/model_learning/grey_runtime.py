@@ -39,6 +39,7 @@ from common.learning_trajectory import (
     trajectory_json_value,
 )
 from common.model_evidence import (
+    MODEL_EVIDENCE_SCHEMA_VERSION,
     ActivationLifecycleEvidence,
     CalibrationSummaryEvidence,
     CandidateAssessmentEvidence,
@@ -101,10 +102,10 @@ from controller.mpc_factory import MpcPairFactory, OwnedMpcPair
 from controller.mpc_model import MODEL_SCHEMA
 from controller.runtime.context import EVENT_LOG_NAME
 from controller.runtime.model_fitting import (
+    FIT_CADENCE_S,
     CandidateOwnershipTransferredError,
     CandidatePair,
     CandidatePreparation,
-    FIT_CADENCE_S,
     FitSubmission,
     GreyFitError,
     GreyFitSuccess,
@@ -171,15 +172,13 @@ class _FitRetryWatermark:
 
 def _corpus_observed_duration_s(identity: FitCorpusIdentity) -> float:
     return sum(item.scored_count for item in identity.slices) * FIT_CADENCE_S
+
+
 def _uses_current_evaluation_contract(state: ModelChallengerState) -> bool:
     preparation = trajectory_json_value(state.fit_preparation)
-    return (
-        isinstance(preparation, dict)
-        and preparation.get("required_horizon_seconds")
-        == list(EvaluationConfig().required_horizon_seconds)
+    return isinstance(preparation, dict) and preparation.get("required_horizon_seconds") == list(
+        EvaluationConfig().required_horizon_seconds
     )
-
-
 
 
 class GreyLearningProcessOwner:
@@ -1076,8 +1075,7 @@ class GreyLearningRuntime:
         with self._learning_lock:
             retry_watermark = self._fit_retry_watermark
             if retry_watermark is not None and (
-                retry_watermark.fit_partition_digest
-                != snapshot.identity.fit_partition_digest
+                retry_watermark.fit_partition_digest != snapshot.identity.fit_partition_digest
                 or retry_watermark.incumbent_digest != identity.incumbent_digest
                 or retry_watermark.incumbent_generation != identity.role_generation
             ):
@@ -1087,10 +1085,8 @@ class GreyLearningRuntime:
                 retry_watermark is not None
                 and origin is CandidateOrigin.PASSIVE_ONLINE
                 and not intent.replace_owned_prepared
-                and snapshot.identity.corpus_revision
-                >= retry_watermark.through_corpus_revision
-                and observed_duration_s
-                < retry_watermark.required_observed_duration_s
+                and snapshot.identity.corpus_revision >= retry_watermark.through_corpus_revision
+                and observed_duration_s < retry_watermark.required_observed_duration_s
             )
         if retry_is_premature:
             self._terminalize_not_ready_corpus_fit(
@@ -1173,11 +1169,7 @@ class GreyLearningRuntime:
                 )
             if submission is not FitSubmission.ACCEPTED:
                 raise RuntimeError("fitting worker was busy")
-            if (
-                retry_watermark is not None
-                and observed_duration_s
-                >= retry_watermark.required_observed_duration_s
-            ):
+            if retry_watermark is not None and observed_duration_s >= retry_watermark.required_observed_duration_s:
                 with self._learning_lock:
                     if self._fit_retry_watermark is retry_watermark:
                         self._fit_retry_watermark = None
@@ -1259,7 +1251,7 @@ class GreyLearningRuntime:
         if repository is None:
             raise RuntimeError("calibration-manifest-unavailable")
 
-        windows: list[tuple[frozenset[str], str | None, int, int]] = []
+        intervals: set[tuple[str, str | None, int, int, int | None]] = set()
         for corpus_slice in fit_corpus.slices:
             segment = repository.read_segment(corpus_slice.segment_id)
             if segment is None:
@@ -1275,15 +1267,17 @@ class GreyLearningRuntime:
             )
             for frame in frames[: corpus_slice.through_ordinal + 1]:
                 if frame.calibration_origin:
-                    windows.append(
+                    intervals.update(
                         (
-                            session_ids,
+                            session_id,
                             segment.cook_id,
                             frame.monotonic_start_ms,
                             frame.monotonic_end_ms,
+                            frame.role_generation,
                         )
+                        for session_id in session_ids
                     )
-        if not windows:
+        if not intervals:
             return None
 
         database_path = getattr(repository, "_database_path", None)
@@ -1296,10 +1290,12 @@ class GreyLearningRuntime:
             dict[str, ModelEvidenceRecord],
         ] = {}
         stage_order = ("low", "middle", "high", "coast")
+        append_positions = {record.evidence_id: index for index, record in enumerate(records)}
         for record in records:
             payload = record.payload
             if (
                 not isinstance(payload, CalibrationSummaryEvidence)
+                or record.schema_version != MODEL_EVIDENCE_SCHEMA_VERSION
                 or not payload.accepted
                 or not payload.continuous
                 or not isinstance(payload.command_revision, int)
@@ -1309,12 +1305,13 @@ class GreyLearningRuntime:
                 or payload.stage not in stage_order
             ):
                 continue
-            belongs_to_corpus = any(
-                record.session_id in session_ids
-                and record.cook_id == cook_id
-                and start_ms <= record.timestamp_ms <= end_ms
-                for session_ids, cook_id, start_ms, end_ms in windows
-            )
+            belongs_to_corpus = (
+                record.session_id,
+                record.cook_id,
+                payload.frame_start_ms,
+                payload.frame_end_ms,
+                record.role_generation,
+            ) in intervals
             if not belongs_to_corpus:
                 continue
             stage_index = stage_order.index(payload.stage)
@@ -1322,32 +1319,22 @@ class GreyLearningRuntime:
                 continue
             key = (record.session_id, record.cook_id, payload.command_revision)
             by_stage = grouped.setdefault(key, {})
-            existing = by_stage.get(payload.stage)
-            if existing is None or (record.timestamp_ms, record.evidence_id) > (
-                existing.timestamp_ms,
-                existing.evidence_id,
-            ):
-                by_stage[payload.stage] = record
+            by_stage[payload.stage] = record
 
         complete_runs: list[tuple[tuple[str, str | None, int], tuple[ModelEvidenceRecord, ...]]] = []
         for key, by_stage in grouped.items():
             if set(by_stage) != set(stage_order):
                 continue
             selected = tuple(by_stage[stage] for stage in stage_order)
-            if len({record.evidence_id for record in selected}) == len(stage_order):
+            positions = tuple(append_positions[record.evidence_id] for record in selected)
+            if len(set(positions)) == len(stage_order) and tuple(sorted(positions)) == positions:
                 complete_runs.append((key, selected))
         if not complete_runs:
             return None
 
         key, selected = max(
             complete_runs,
-            key=lambda item: (
-                item[0][2],
-                item[1][-1].timestamp_ms,
-                item[0][0],
-                item[0][1] or "",
-                tuple(record.evidence_id for record in item[1]),
-            ),
+            key=lambda item: append_positions[item[1][-1].evidence_id],
         )
         return {
             "command_revision": key[2],
@@ -1623,9 +1610,7 @@ class GreyLearningRuntime:
         current_required = EvaluationConfig().required_horizon_seconds
         fit_preparation = trajectory_json_value(state.fit_preparation)
         stored_required_horizons = (
-            fit_preparation.get("required_horizon_seconds")
-            if isinstance(fit_preparation, dict)
-            else None
+            fit_preparation.get("required_horizon_seconds") if isinstance(fit_preparation, dict) else None
         )
         if (
             stored_required_horizons is None
@@ -1633,9 +1618,8 @@ class GreyLearningRuntime:
             and state.retirement_reason == "evaluation-contract-changed"
         ):
             return (), current_required
-        if (
-            not isinstance(stored_required_horizons, list)
-            or any(type(horizon) is not int or horizon <= 0 for horizon in stored_required_horizons)
+        if not isinstance(stored_required_horizons, list) or any(
+            type(horizon) is not int or horizon <= 0 for horizon in stored_required_horizons
         ):
             raise RuntimeError("durable challenger required horizon seconds are invalid")
         required_horizons = tuple(stored_required_horizons)
@@ -1854,13 +1838,7 @@ class GreyLearningRuntime:
             state = read_model_challenger()
         if state is None or preparation is None:
             raise RuntimeError("durable challenger authority is absent")
-        timestamp_ms = max(
-            state.updated_ms,
-            max(
-                (int(origin.completion_time_s * 1_000) for origin in evaluation.completed_origins),
-                default=self._clock_ms(),
-            ),
-        )
+        timestamp_ms = self._clock_ms()
         evaluation_config = getattr(self._learning, "evaluation_config", None)
         required_horizons = tuple(
             getattr(
@@ -1998,13 +1976,7 @@ class GreyLearningRuntime:
             confidence_accepted=confidence_accepted,
             rejection_reasons=tuple(dict.fromkeys(reasons)),
         )
-        timestamp_ms = max(
-            (
-                int(origin_record.completion_time_s * 1_000)
-                for origin_record in tuple(getattr(evaluation, "completed_origins", ()))
-            ),
-            default=self._clock_ms(),
-        )
+        timestamp_ms = self._clock_ms()
         assessment_trace = GreyCandidateAssessmentPayload(
             decision_id=assessment.decision_id,
             origin=assessment.origin,
@@ -2251,10 +2223,7 @@ class GreyLearningRuntime:
         ):
             owned_candidate.close()
             raise RuntimeError("activation-confidence-changed")
-        evaluated_at_ms = max(
-            (int(origin.completion_time_s * 1_000) for origin in tuple(getattr(evaluation, "completed_origins", ()))),
-            default=self._clock_ms(),
-        )
+        evaluated_at_ms = self._clock_ms()
         # Evaluation completion persists confidence for normal handoff. Direct
         # preparation tests and recovery callers still close the same durability gap.
         if not self._activation_runtime.confidence_persisted(decision_id):
@@ -2468,32 +2437,18 @@ class GreyLearningRuntime:
             and delivery_blockers == ("minimum-effective-duration",)
         ):
             effective_duration_s = outcome.sample_count * FIT_CADENCE_S
-            deficit_s = (
-                learning.trigger_config.min_effective_duration_s
-                - effective_duration_s
-            )
-            current_observed_duration_s = _corpus_observed_duration_s(
-                terminal_request.fit_corpus
-            )
+            deficit_s = learning.trigger_config.min_effective_duration_s - effective_duration_s
+            current_observed_duration_s = _corpus_observed_duration_s(terminal_request.fit_corpus)
             required_observed_duration_s = (
-                current_observed_duration_s
-                + math.ceil(deficit_s / FIT_CADENCE_S) * FIT_CADENCE_S
+                current_observed_duration_s + math.ceil(deficit_s / FIT_CADENCE_S) * FIT_CADENCE_S
             )
             with self._learning_lock:
                 self._fit_retry_watermark = _FitRetryWatermark(
-                    fit_partition_digest=(
-                        terminal_request.fit_corpus.fit_partition_digest
-                    ),
+                    fit_partition_digest=(terminal_request.fit_corpus.fit_partition_digest),
                     incumbent_digest=terminal_request.parent_incumbent_digest,
-                    incumbent_generation=(
-                        terminal_request.parent_incumbent_generation
-                    ),
-                    through_corpus_revision=(
-                        terminal_request.fit_corpus.corpus_revision
-                    ),
-                    required_observed_duration_s=(
-                        required_observed_duration_s
-                    ),
+                    incumbent_generation=(terminal_request.parent_incumbent_generation),
+                    through_corpus_revision=(terminal_request.fit_corpus.corpus_revision),
+                    required_observed_duration_s=(required_observed_duration_s),
                 )
 
         if delivery is not None and delivered_preparation is not None and delivered_preparation.accepted:
@@ -2915,12 +2870,8 @@ class GreyLearningRuntime:
             "sample_count": candidate.sample_count,
             "temperature_band_c": list(candidate.temperature_band_c),
             "nfev": candidate.nfev,
-            "effective_masks": [
-                [bool(value) for value in mask] for mask in candidate.effective_masks
-            ],
-            "warmup_excluded_segment_ids": list(
-                candidate.warmup_excluded_segment_ids
-            ),
+            "effective_masks": [[bool(value) for value in mask] for mask in candidate.effective_masks],
+            "warmup_excluded_segment_ids": list(candidate.warmup_excluded_segment_ids),
             "result_digest": candidate.result_digest,
         }
 
@@ -3019,12 +2970,8 @@ class GreyLearningRuntime:
                 sample_count=fit_result["sample_count"],
                 temperature_band_c=tuple(fit_result["temperature_band_c"]),
                 nfev=fit_result["nfev"],
-                effective_masks=tuple(
-                    tuple(mask) for mask in fit_result["effective_masks"]
-                ),
-                warmup_excluded_segment_ids=tuple(
-                    fit_result["warmup_excluded_segment_ids"]
-                ),
+                effective_masks=tuple(tuple(mask) for mask in fit_result["effective_masks"]),
+                warmup_excluded_segment_ids=tuple(fit_result["warmup_excluded_segment_ids"]),
                 result_digest=fit_result["result_digest"],
             )
         except BaseException:
@@ -3066,11 +3013,9 @@ class GreyLearningRuntime:
                 incumbent_pair.controller.config,
             )
         )
-        if not isinstance(replayed, GreyFitSuccess):
-            raise ValueError(
-                "durable challenger fit replay failed "
-                f"({replayed.code.value}: {replayed.detail})"
-            )
+        match replayed:
+            case GreyFitError():
+                raise ValueError(f"durable challenger fit replay failed ({replayed.code.value}: {replayed.detail})")
         replayed_descriptor = self._pair_factory.descriptor(
             self._pair_factory.native(
                 replayed.config,
@@ -3173,8 +3118,7 @@ class GreyLearningRuntime:
             and state.origin is CandidateOrigin.PASSIVE_ONLINE
             and state.policy is ActivationPolicy.CAUSAL_AUTO
             and state.calibration_manifest is None
-            and state.fit_preparation.get("fit_corpus_digest")
-            == state.fit_corpus.corpus_digest
+            and state.fit_preparation.get("fit_corpus_digest") == state.fit_corpus.corpus_digest
         )
 
     def _restore_model_for_revalidation(
@@ -3587,9 +3531,7 @@ class GreyLearningRuntime:
             and authority["revision"] == durable.revision
         )
         self_contained_revalidation = (
-            authority_matches
-            and durable is not None
-            and self._is_self_contained_restore_revalidation(durable)
+            authority_matches and durable is not None and self._is_self_contained_restore_revalidation(durable)
         )
         if durable is not None and durable.phase != "retired" and not authority_matches:
             with self._learning_lock:
@@ -3601,10 +3543,7 @@ class GreyLearningRuntime:
             and restored_components is not None
             and restored_identity is not None
             and self._learning is not None
-            and (
-                self._trajectory_repository is not None
-                or self_contained_revalidation
-            )
+            and (self._trajectory_repository is not None or self_contained_revalidation)
         ):
             preparation = None
             try:
@@ -3617,12 +3556,8 @@ class GreyLearningRuntime:
                 else:
                     repository = self._trajectory_repository
                     if repository is None:
-                        raise RuntimeError(
-                            "challenger trajectory repository is unavailable"
-                        )
-                    fit_snapshot = repository.replay_fit(
-                        durable.fit_lineage.request_id
-                    )
+                        raise RuntimeError("challenger trajectory repository is unavailable")
+                    fit_snapshot = repository.replay_fit(durable.fit_lineage.request_id)
                     live_corpus = fit_snapshot.identity
                     preparation = self._restore_challenger_preparation(
                         durable,
@@ -3663,9 +3598,7 @@ class GreyLearningRuntime:
                     self._adopt_prepared_checkpoint_lineage(preparation)
             except Exception as error:
                 learning_owned_preparation = (
-                    preparation is not None
-                    and self._learning is not None
-                    and self._learning.prepared is preparation
+                    preparation is not None and self._learning is not None and self._learning.prepared is preparation
                 )
                 if self._learning is not None:
                     self._learning._release_prepared()

@@ -8,6 +8,8 @@ def _frame(index: int) -> FrameObservation:
     return FrameObservation(
         frame_start_s=index * 20.0,
         frame_end_s=(index + 1) * 20.0,
+        wall_start_ms=round((index * 20.0) * 1_000),
+        wall_end_ms=round(((index + 1) * 20.0) * 1_000),
         temp_c=100.0,
         setpoint_c=120.0,
         ambient_c=20.0,

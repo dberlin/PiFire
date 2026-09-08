@@ -408,8 +408,8 @@ class ActivationRuntime:
                         expected_phase=ActivationPhase.PREPARED,
                     )
                 except Exception:
-                    continue
-                if not receipt.accepted:
+                    receipt = None
+                if receipt is None or not receipt.accepted:
                     continue
                 self._pending_aborts[pending_id] = _PendingAbort(
                     pending_abort.record,
@@ -835,10 +835,10 @@ class ActivationRuntime:
                     recovery.record.candidate.model_digest,
                     recovery.source_candidate_digest,
                 }
-                lifecycle = max(
+                lifecycle = next(
                     (
                         record
-                        for record in owned_records
+                        for record in reversed(owned_records)
                         if (
                             isinstance(record.payload, RollbackEvidence)
                             and record.payload.decision_id == recovery.record.decision_id
@@ -850,8 +850,7 @@ class ActivationRuntime:
                             and record.payload.failed_generation == recovery.record.candidate.role_generation
                         )
                     ),
-                    key=lambda record: (record.timestamp_ms, record.evidence_id),
-                    default=None,
+                    None,
                 )
                 restore_descriptor = recovery.rollback if lifecycle is not None else recovery.restore
                 restored = self._pair_factory.restore(restore_descriptor)

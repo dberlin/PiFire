@@ -17,7 +17,7 @@ from pydantic import ConfigDict, Field, StringConstraints, field_validator, mode
 from pydantic.dataclasses import dataclass
 
 _FRAME_MILLISECONDS = 20_000
-TRAJECTORY_OBSERVATION_SCHEMA_VERSION = 3
+TRAJECTORY_OBSERVATION_SCHEMA_VERSION = 4
 _MAX_METADATA_BYTES = 65_536
 _MAX_CORPUS_SLICES = 256
 _DATACLASS_CONFIG = ConfigDict(
@@ -270,7 +270,11 @@ def _owned_json_object_tuple(value: object, *, context: str) -> tuple[FrozenJson
 
 @dataclass(frozen=True, slots=True, config=_DATACLASS_CONFIG)
 class LearningTrajectoryFrame:
-    """One delivered cross-mode interval in canonical Celsius units."""
+    """Monotonic delivered interval with independently captured wall provenance.
+
+    Physical duration and sample freshness use monotonic coordinates only.
+    Historical schema-2/3 wall mapping is checked by segment/decoder admission.
+    """
 
     sequence: NonNegativeInt
     monotonic_start_ms: NonNegativeInt
@@ -310,11 +314,8 @@ class LearningTrajectoryFrame:
     @model_validator(mode="after")
     def validate_frame(self) -> LearningTrajectoryFrame:
         monotonic_duration_ms = self.monotonic_end_ms - self.monotonic_start_ms
-        wall_duration_ms = self.wall_end_ms - self.wall_start_ms
         if monotonic_duration_ms <= 0:
             raise ValueError("trajectory frame interval must be positive")
-        if wall_duration_ms != monotonic_duration_ms:
-            raise ValueError("wall and monotonic frame durations must agree")
         if self.temperature_sample_monotonic_ms > self.monotonic_end_ms:
             raise ValueError("temperature sample must not follow its frame end")
         monotonic_sample_age_ms = self.monotonic_end_ms - self.temperature_sample_monotonic_ms
@@ -355,6 +356,12 @@ class LearningTrajectoryFrame:
         if self.probe_valid != (self.probe_source is not None):
             raise ValueError("probe validity must agree with probe source provenance")
         return self
+
+
+def validate_historical_frame_wall_mapping(frame: LearningTrajectoryFrame) -> None:
+    """Preserve the schema-2/3 interval mapping at historical admission boundaries."""
+    if frame.wall_end_ms - frame.wall_start_ms != frame.monotonic_end_ms - frame.monotonic_start_ms:
+        raise ValueError("wall and monotonic frame durations must agree")
 
 
 def canonical_generation_audit_ranges(
@@ -455,6 +462,7 @@ def _validate_frame_tuple_chronology(
     *,
     label: str,
     allow_boundary_gap: bool,
+    historical_wall_mapping: bool,
 ) -> None:
     for previous, current in pairwise(frames):
         if current.sequence <= previous.sequence:
@@ -463,10 +471,10 @@ def _validate_frame_tuple_chronology(
             raise ValueError(f"{label} frames must be contiguous")
         if current.monotonic_start_ms < previous.monotonic_end_ms:
             raise ValueError(f"{label} frames overlap")
-        if current.wall_start_ms < previous.wall_end_ms:
+        if historical_wall_mapping and current.wall_start_ms < previous.wall_end_ms:
             raise ValueError(f"{label} wall intervals overlap")
         monotonic_gap = current.monotonic_start_ms != previous.monotonic_end_ms
-        wall_gap = current.wall_start_ms != previous.wall_end_ms
+        wall_gap = historical_wall_mapping and current.wall_start_ms != previous.wall_end_ms
         represented_boundary = previous.partial and previous.boundary_reason is not None
         if (monotonic_gap or wall_gap) and not (allow_boundary_gap and represented_boundary):
             raise ValueError(f"{label} frames must be contiguous")
@@ -525,6 +533,7 @@ class LearningTrajectorySegment:
     def validate_segment(self) -> LearningTrajectorySegment:
         if self.observation_schema_version not in {
             2,
+            3,
             TRAJECTORY_OBSERVATION_SCHEMA_VERSION,
         }:
             raise ValueError("unsupported trajectory observation schema")
@@ -532,15 +541,21 @@ class LearningTrajectorySegment:
             raise ValueError("trajectory segment requires at least one frame")
         if not self.trace_session_ids or len(set(self.trace_session_ids)) != len(self.trace_session_ids):
             raise ValueError("trace session identities must be non-empty and unique")
+        historical_wall_mapping = self.observation_schema_version < 4
+        if historical_wall_mapping:
+            for frame in (*self.pre_roll_frames, *self.scored_hold_frames):
+                validate_historical_frame_wall_mapping(frame)
         _validate_frame_tuple_chronology(
             self.pre_roll_frames,
             label="pre-roll",
             allow_boundary_gap=False,
+            historical_wall_mapping=historical_wall_mapping,
         )
         _validate_frame_tuple_chronology(
             self.scored_hold_frames,
             label="scored",
             allow_boundary_gap=False,
+            historical_wall_mapping=historical_wall_mapping,
         )
         for frame in self.pre_roll_frames:
             if not frame.continuous:
@@ -569,15 +584,15 @@ class LearningTrajectorySegment:
                 raise ValueError("pre-roll and scored frames must be contiguous")
             if current.monotonic_start_ms < previous.monotonic_end_ms:
                 raise ValueError("pre-roll and scored frames overlap")
-            if current.wall_start_ms < previous.wall_end_ms:
+            if historical_wall_mapping and current.wall_start_ms < previous.wall_end_ms:
                 raise ValueError("pre-roll and scored wall intervals overlap")
-            has_gap = (
-                current.monotonic_start_ms != previous.monotonic_end_ms or current.wall_start_ms != previous.wall_end_ms
+            has_gap = current.monotonic_start_ms != previous.monotonic_end_ms or (
+                historical_wall_mapping and current.wall_start_ms != previous.wall_end_ms
             )
-            if has_gap and not (previous.partial and previous.boundary_reason is not None):
+            if has_gap and not (historical_wall_mapping and previous.partial and previous.boundary_reason is not None):
                 raise ValueError("pre-roll and scored frames must be contiguous")
         all_frames = (*self.pre_roll_frames, *self.scored_hold_frames)
-        if self.observation_schema_version == TRAJECTORY_OBSERVATION_SCHEMA_VERSION:
+        if self.observation_schema_version >= 3:
             if any(frame.role_generation is None for frame in self.scored_hold_frames):
                 raise ValueError("current scored trajectory frames require role generation")
             expected_generation_audit = canonical_generation_audit_ranges(all_frames)
@@ -599,19 +614,17 @@ class LearningTrajectorySegment:
             if self.hold_entry is None:
                 raise ValueError("scored observations require a Hold-entry anchor")
             first_scored = self.scored_hold_frames[0]
-            if (
-                self.hold_entry.monotonic_ms < first_scored.monotonic_start_ms
-                or self.hold_entry.wall_ms < first_scored.wall_start_ms
+            if self.hold_entry.monotonic_ms < first_scored.monotonic_start_ms or (
+                historical_wall_mapping and self.hold_entry.wall_ms < first_scored.wall_start_ms
             ):
                 raise ValueError("Hold-entry anchor must fall inside the first scored interval")
-            if (
+            if historical_wall_mapping and (
                 self.hold_entry.monotonic_ms - first_scored.monotonic_start_ms
                 != self.hold_entry.wall_ms - first_scored.wall_start_ms
             ):
                 raise ValueError("Hold-entry wall and monotonic offsets must agree inside the first scored interval")
-            if (
-                self.hold_entry.monotonic_ms > first_scored.temperature_sample_monotonic_ms
-                or self.hold_entry.wall_ms > first_scored.temperature_sample_wall_ms
+            if self.hold_entry.monotonic_ms > first_scored.temperature_sample_monotonic_ms or (
+                historical_wall_mapping and self.hold_entry.wall_ms > first_scored.temperature_sample_wall_ms
             ):
                 raise ValueError("Hold-entry sample must not follow the first scored temperature sample")
             if not self.hold_entry.probe_valid:
@@ -620,7 +633,7 @@ class LearningTrajectorySegment:
             pre_roll_end = self.pre_roll_frames[-1]
             if self.hold_entry.monotonic_ms != pre_roll_end.monotonic_end_ms:
                 raise ValueError("Hold-entry monotonic boundary must match pre-roll end")
-            if self.hold_entry.wall_ms != pre_roll_end.wall_end_ms:
+            if historical_wall_mapping and self.hold_entry.wall_ms != pre_roll_end.wall_end_ms:
                 raise ValueError("Hold-entry wall boundary must match pre-roll end")
             if not self.hold_entry.probe_valid:
                 raise ValueError("Hold-entry anchor must be probe-valid")

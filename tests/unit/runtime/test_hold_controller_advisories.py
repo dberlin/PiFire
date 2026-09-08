@@ -63,7 +63,9 @@ def test_hold_warns_once_for_an_unreachable_target_while_continuing_at_maximum_s
     assert hold._control_trace is not None
     hold._control_trace.record = lambda kind, payload, timestamp: records.append(payload) or True
     before_settings = copy.deepcopy(hold.settings)
+    hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 100.0, hold.grill.get_output_status())
+    hold.ctx.clock.advance(4.0 - hold.ctx.clock.monotonic())
     hold.on_tick(4.0, 100.0, hold.grill.get_output_status())
 
     assert len(warnings) == 1
@@ -101,6 +103,7 @@ def test_hold_advisory_rearms_only_after_target_model_or_reachability_changes(ho
     hold.setup()
     monkeypatch.setattr(hold.ctx.event_log, "warning", warnings.append)
     for now in range(2, 20, 2):
+        hold.ctx.clock.advance(float(now) - hold.ctx.clock.monotonic())
         hold.on_tick(float(now), 100.0, hold.grill.get_output_status())
 
     assert unknown.state is model_promotion.ReachabilityState.UNKNOWN_MODEL

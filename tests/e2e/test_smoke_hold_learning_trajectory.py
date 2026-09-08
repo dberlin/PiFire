@@ -117,8 +117,15 @@ class _FixedTimeline:
     def advance_frame(self) -> None:
         self.monotonic_ms += _FRAME_MS
 
-    def pair(self) -> tuple[int, int]:
-        return self.monotonic_ms, _WALL_OFFSET_MS + self.monotonic_ms
+    def now(self) -> float:
+        return self.wall_ms() / 1_000
+
+    def monotonic(self) -> float:
+        return self.monotonic_ms / 1_000
+
+    def sleep(self, seconds: float) -> None:
+        # Probe reads drive this frame-stepped scenario.
+        assert seconds >= 0.0
 
     def wall_ms(self) -> int:
         return _WALL_OFFSET_MS + self.monotonic_ms
@@ -326,7 +333,7 @@ def test_smoke_to_hold_warms_real_mpc_before_first_solve_and_fences_pre_active_c
     ctx.trajectory_repository = repository
     ctx.model_persistence = persistence
     ctx.learning_trajectory = trajectory
-    monkeypatch.setattr(ControlMode, "_trajectory_clock_pair", staticmethod(timeline.pair))
+    ctx.clock = timeline
 
     build_requests: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
 
@@ -481,6 +488,8 @@ def _observation(row: dict[str, Any], index: int) -> FrameObservation:
     return FrameObservation(
         frame_start_s=start_s,
         frame_end_s=end_s,
+        wall_start_ms=round((start_s) * 1_000),
+        wall_end_ms=round((end_s) * 1_000),
         temp_c=float(row["temp_c"]),
         setpoint_c=_SETPOINT_C,
         ambient_c=float(row["ambient_c"]),
@@ -882,6 +891,9 @@ class _RealCookClock:
     def now(self) -> float:
         return self.timestamp_ms / 1_000
 
+    def monotonic(self) -> float:
+        return self.timestamp_ms / 1_000
+
     def bind_period_gate(self, gate: _DeterministicRunnerPeriodGate) -> None:
         self._period_gate = gate
 
@@ -902,9 +914,6 @@ class _RealCookClock:
             self._sample_index += 1
         if self._period_gate is not None:
             self._period_gate.advance_to(self.now())
-
-    def pair_ms(self) -> tuple[int, int]:
-        return self.timestamp_ms, self.timestamp_ms
 
 
 class _RealCookProbes:
@@ -1169,7 +1178,6 @@ def _assert_real_cook_hold_smoke(
         return built
 
     monkeypatch.setattr(runner_module, "build_runner", capture_production_runner)
-    monkeypatch.setattr(ControlMode, "_trajectory_clock_pair", staticmethod(clock.pair_ms))
     real_recorder = _REAL_CONTROL_TRACE_RECORDER
     monkeypatch.setattr(
         hold_module,

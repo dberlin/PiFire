@@ -75,7 +75,14 @@ def clock(monkeypatch):
 
 def _controller(name, clock, units="F", *, installation_identity=INSTALLATION_IDENTITY):
     mod = importlib.import_module(f"controller.{name}")
-    kwargs = {"installation_identity_provider": lambda: installation_identity} if name == "pid_sp" else {}
+    kwargs = (
+        {
+            "installation_identity_provider": lambda: installation_identity,
+            "monotonic_clock": clock,
+        }
+        if name == "pid_sp"
+        else {}
+    )
     return mod.Controller(dict(CONFIG), units, dict(CYCLE_DATA), **kwargs)
 
 
@@ -91,6 +98,8 @@ def _observe_completed_frame(
     values = {
         "frame_start_s": start_s,
         "frame_end_s": end_s,
+        "wall_start_ms": round(start_s * 1_000),
+        "wall_end_ms": round(end_s * 1_000),
         "temp_c": temperature_c,
         "setpoint_c": 120.0,
         "ambient_c": 20.0,
@@ -389,6 +398,7 @@ def test_corpus_fit_confirms_once_offpath_and_never_trusts_in_ending_cook(
         dict(CONFIG),
         "F",
         {},
+        monotonic_clock=_Clock(),
         model_persistence=persistence,
         trajectory_repository=repository,
         fit_partition_digest=lambda: "c" * 64,
@@ -554,6 +564,7 @@ def _lifecycle_controller(
         dict(CONFIG if config is None else config),
         "F",
         {},
+        monotonic_clock=_Clock(),
         model_persistence=persistence,
         trajectory_repository=repository,
         fit_partition_digest=lambda: "c" * 64,
@@ -962,7 +973,7 @@ def test_fit_manifest_completion_failure_never_queues_activatable_checkpoint(
     assert persistence.evidence[0].payload.reason == "fit-run-persistence-failed"
     assert persistence.evidence[0].payload.selected_form == "fopdt"
     assert persistence.evidence[0].payload.confirmation_candidate_digest is not None
-    fresh = PidSpController(dict(CONFIG), "F", {})
+    fresh = PidSpController(dict(CONFIG), "F", {}, monotonic_clock=_Clock())
     assert fresh.predictor.active is False
 
 
@@ -1145,6 +1156,7 @@ def test_twentieth_offpath_decision_checkpoints_for_cold_next_cook_without_live_
         dict(CONFIG),
         "F",
         {},
+        monotonic_clock=_Clock(),
         installation_identity_provider=lambda: INSTALLATION_IDENTITY,
     )
     assert fresh.restore_model(checkpoint)
@@ -1266,6 +1278,7 @@ def test_prepared_checkpoint_cold_recovery_at_every_durable_boundary(
         dict(CONFIG),
         "F",
         {},
+        monotonic_clock=_Clock(),
         model_persistence=recovery_persistence,
         installation_identity_provider=lambda: INSTALLATION_IDENTITY,
     )
@@ -1347,6 +1360,7 @@ def test_prepared_checkpoint_aborts_when_terminal_commitment_is_not_exact(
         dict(CONFIG),
         "F",
         {},
+        monotonic_clock=_Clock(),
         model_persistence=recovery_persistence,
         installation_identity_provider=lambda: INSTALLATION_IDENTITY,
     )
@@ -1748,6 +1762,8 @@ def test_pid_sp_completed_frame_returns_observation_outcome(clock):
     observation = FrameObservation(
         frame_start_s=0.0,
         frame_end_s=20.0,
+        wall_start_ms=round((0.0) * 1_000),
+        wall_end_ms=round((20.0) * 1_000),
         temp_c=100.0,
         setpoint_c=120.0,
         ambient_c=20.0,
@@ -2175,7 +2191,7 @@ def test_the_identified_hold_duty_becomes_the_loops_zero_error_output(clock, bia
     config = {**CONFIG, "bias_from_model": bias_from_model}
     import controller.pid_sp as mod
 
-    sp = mod.Controller(config, "F", dict(CYCLE_DATA))
+    sp = mod.Controller(config, "F", dict(CYCLE_DATA), monotonic_clock=clock)
     sp.set_target(225.0)
     held = 0.07
     sp.identifier.hold_duty = lambda u_max=1.0, target_f=None: held
@@ -2196,7 +2212,7 @@ def test_the_integral_seed_is_a_seed_and_not_a_control_law(clock):
     config = {**CONFIG, "bias_from_model": False}
     import controller.pid_sp as mod
 
-    sp = mod.Controller(config, "F", dict(CYCLE_DATA))
+    sp = mod.Controller(config, "F", dict(CYCLE_DATA), monotonic_clock=clock)
     sp.set_target(225.0)
     held = 0.07
     sp.identifier.hold_duty = lambda u_max=1.0, target_f=None: held
@@ -2214,7 +2230,7 @@ def test_the_integral_seed_is_a_seed_and_not_a_control_law(clock):
 def test_new_target_reseeds_the_identified_hold_duty(clock):
     import controller.pid_sp as mod
 
-    sp = mod.Controller({**CONFIG, "bias_from_model": False}, "F", dict(CYCLE_DATA))
+    sp = mod.Controller({**CONFIG, "bias_from_model": False}, "F", dict(CYCLE_DATA), monotonic_clock=clock)
     sp.set_target(225.0)
     sp.identifier.hold_duty = lambda u_max=1.0, target_f=None: 0.07
     clock.t += 20.0

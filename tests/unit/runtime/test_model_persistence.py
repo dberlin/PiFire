@@ -13,6 +13,7 @@ from common.controller_model_state import (
     ControllerModelStore,
 )
 from common.learning_trajectory import (
+    TRAJECTORY_OBSERVATION_SCHEMA_VERSION,
     FrameDeliveryCertainty,
     HoldEntrySample,
     LearningTrajectoryFrame,
@@ -240,7 +241,7 @@ def _stored_segment(
     frame = _stored_frame(0, epoch_ms=epoch_ms, effective_mode="Smoke")
     return LearningTrajectorySegment(
         schema_version=1,
-        observation_schema_version=3,
+        observation_schema_version=TRAJECTORY_OBSERVATION_SCHEMA_VERSION,
         segment_id=segment_id,
         cook_id=f"cook-{segment_id}",
         trajectory_session_id=f"trajectory-{segment_id}",

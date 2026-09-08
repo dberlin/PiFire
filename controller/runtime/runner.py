@@ -365,6 +365,7 @@ def _freeze_evidence(
     eligible = outcome.get("eligible")
     rejection_reasons = outcome.get("rejection_reasons", ())
     values = outcome.get("forecast_origin_evidence", ())
+    timestamp_ms = observation.wall_end_ms
     if (
         not isinstance(eligible, bool)
         or not isinstance(rejection_reasons, tuple)
@@ -373,7 +374,6 @@ def _freeze_evidence(
         or not all(isinstance(value, ForecastOriginEvidence) for value in values)
     ):
         return ()
-    timestamp_ms = int(observation.frame_end_s * 1_000)
     summary = ModelEvidenceRecord(
         evidence_id=(
             f"{session_id}:session-summary:{timestamp_ms}:"
@@ -401,7 +401,7 @@ def _freeze_evidence(
             kind=EvidenceKind.FORECAST_ORIGIN,
             session_id=session_id,
             cook_id=cook_id,
-            timestamp_ms=value.completion_time_ms,
+            timestamp_ms=timestamp_ms,
             role_generation=observation.role_generation,
             model_digest=value.challenger_digest,
             provenance_digest=value.incumbent_digest,
@@ -439,7 +439,7 @@ def _freeze_evidence(
                 kind=EvidenceKind.CONFIDENCE_DECISION,
                 session_id=session_id,
                 cook_id=cook_id,
-                timestamp_ms=evaluated_at_ms,
+                timestamp_ms=timestamp_ms,
                 role_generation=role_generation,
                 model_digest=challenger_digest,
                 provenance_digest=incumbent_digest,
@@ -457,7 +457,7 @@ def _freeze_evidence(
                 kind=EvidenceKind.REFRESH_DIAGNOSTICS,
                 session_id=session_id,
                 cook_id=cook_id,
-                timestamp_ms=evaluated_at_ms,
+                timestamp_ms=timestamp_ms,
                 role_generation=role_generation,
                 model_digest=challenger_digest,
                 provenance_digest=incumbent_digest,
@@ -971,6 +971,8 @@ class SyncControllerRunner(ControllerRunner):
             trajectory_repository=self._trajectory_repository,
             fit_partition_digest=self._fit_partition_digest,
             grey_learning_process=self._grey_learning_process,
+            monotonic_clock=self._monotonic_clock,
+            wall_clock=self._wall_clock,
         )
         if status == "Active":
             retired = self._core
@@ -1875,6 +1877,8 @@ class ThreadedControllerRunner(ControllerRunner):
             trajectory_repository=self._trajectory_repository,
             fit_partition_digest=self._fit_partition_digest,
             grey_learning_process=self._grey_learning_process,
+            monotonic_clock=self._monotonic_clock,
+            wall_clock=self._wall_clock,
         )
         retired_pending = None
         if status == "Active":
@@ -2372,6 +2376,8 @@ def _build_core(
     trajectory_repository: LearningTrajectoryRepository | None = None,
     fit_partition_digest: Callable[[], str | None] | None = None,
     grey_learning_process: GreyLearningProcessOwner | None = None,
+    monotonic_clock: Callable[[], float] = time.monotonic,
+    wall_clock: Callable[[], float] = time.time,
 ):
     """Construct the selected controller core without leaking import or startup failures.
 
@@ -2396,6 +2402,8 @@ def _build_core(
             controller_kwargs["grey_learning_process"] = grey_learning_process
         elif controller_type == "pid_sp":
             controller_kwargs["model_persistence"] = model_persistence
+            controller_kwargs["monotonic_clock"] = monotonic_clock
+            controller_kwargs["clock_ms"] = lambda: int(wall_clock() * 1_000)
         core = module.Controller(
             settings["controller"]["config"][controller_type],
             settings["globals"]["units"],
@@ -2436,6 +2444,8 @@ def _wrap(
     trajectory_repository: LearningTrajectoryRepository | None = None,
     fit_partition_digest: Callable[[], str | None] | None = None,
     grey_learning_process: GreyLearningProcessOwner | None = None,
+    monotonic_clock: Callable[[], float] = time.monotonic,
+    wall_clock: Callable[[], float] = time.time,
 ):
     if core is None:
         return None, status
@@ -2449,6 +2459,8 @@ def _wrap(
                 trajectory_repository=trajectory_repository,
                 fit_partition_digest=fit_partition_digest,
                 grey_learning_process=grey_learning_process,
+                monotonic_clock=monotonic_clock,
+                wall_clock=wall_clock,
             ),
             status,
         )
@@ -2460,6 +2472,8 @@ def _wrap(
             trajectory_repository=trajectory_repository,
             fit_partition_digest=fit_partition_digest,
             grey_learning_process=grey_learning_process,
+            monotonic_clock=monotonic_clock,
+            wall_clock=wall_clock,
         ),
         status,
     )
@@ -2474,6 +2488,8 @@ def build_runner(
     trajectory_repository: LearningTrajectoryRepository | None = None,
     fit_partition_digest: Callable[[], str | None] | None = None,
     grey_learning_process: GreyLearningProcessOwner | None = None,
+    monotonic_clock: Callable[[], float] = time.monotonic,
+    wall_clock: Callable[[], float] = time.time,
 ):
     """Build the runner for a work cycle, substituting the default controller if
     the selected one will not build.
@@ -2499,6 +2515,8 @@ def build_runner(
         trajectory_repository=trajectory_repository,
         fit_partition_digest=fit_partition_digest,
         grey_learning_process=grey_learning_process,
+        monotonic_clock=monotonic_clock,
+        wall_clock=wall_clock,
     )
     if core is not None:
         return _wrap(
@@ -2509,6 +2527,8 @@ def build_runner(
             trajectory_repository=trajectory_repository,
             fit_partition_digest=fit_partition_digest,
             grey_learning_process=grey_learning_process,
+            monotonic_clock=monotonic_clock,
+            wall_clock=wall_clock,
         )
 
     selected = _selected_controller(settings)
@@ -2531,6 +2551,8 @@ def build_runner(
         trajectory_repository=trajectory_repository,
         fit_partition_digest=fit_partition_digest,
         grey_learning_process=grey_learning_process,
+        monotonic_clock=monotonic_clock,
+        wall_clock=wall_clock,
     )
     if core is None:
         _raise_banner(
@@ -2555,6 +2577,8 @@ def build_runner(
         trajectory_repository=trajectory_repository,
         fit_partition_digest=fit_partition_digest,
         grey_learning_process=grey_learning_process,
+        monotonic_clock=monotonic_clock,
+        wall_clock=wall_clock,
     )
 
 

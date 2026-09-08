@@ -252,10 +252,9 @@ def test_legacy_v1_challenger_round_trips_and_appends_evidence_after_restart(
     assert read_model_evidence(database_path=database_path) == [evidence]
 
 
-def test_complete_round_appends_schema_v5_evidence_and_progress_atomically(
+def test_complete_round_appends_current_evidence_and_progress_atomically(
     database_path: Path,
 ) -> None:
-    assert MODEL_EVIDENCE_SCHEMA_VERSION == 5
     evaluating = _state(phase="evaluating")
     create_model_challenger(evaluating, database_path=database_path)
     evidence = _round_evidence(evaluating, round_number=1)
@@ -537,7 +536,6 @@ def test_schema_v10_migration_is_additive_and_preserves_every_v9_authority_row(
     try:
         connection = datastore.connection()
 
-        assert datastore.DB_SCHEMA_VERSION == 12
         assert connection.execute("PRAGMA user_version").fetchone()[0] == datastore.DB_SCHEMA_VERSION
         assert connection.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='model_challenger_state'"
@@ -547,6 +545,7 @@ def test_schema_v10_migration_is_additive_and_preserves_every_v9_authority_row(
         assert connection.execute("SELECT migration_set, name FROM _sqlite_migrations ORDER BY name").fetchall() == [
             ("pifire-schema", "v0011_adopt_sqlite_utils_registry"),
             ("pifire-schema", "v0012_trajectory_role_generation"),
+            ("pifire-schema", "v0013_trajectory_clock_domains"),
         ]
     finally:
         datastore._reset_for_tests(None)
@@ -606,6 +605,7 @@ def test_schema_v10_migration_rolls_back_ddl_and_version_bump_together(
         assert connection.execute("SELECT migration_set, name FROM _sqlite_migrations ORDER BY name").fetchall() == [
             ("pifire-schema", "v0011_adopt_sqlite_utils_registry"),
             ("pifire-schema", "v0012_trajectory_role_generation"),
+            ("pifire-schema", "v0013_trajectory_clock_domains"),
         ]
     finally:
         datastore._reset_for_tests(None)

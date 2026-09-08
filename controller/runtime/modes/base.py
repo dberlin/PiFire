@@ -15,7 +15,6 @@ and history publication.
 import json
 import logging
 import math
-import time
 from functools import partial
 from hashlib import sha256
 
@@ -247,9 +246,8 @@ class ControlMode:
         ).encode("utf-8")
         return sha256(encoded).hexdigest()
 
-    @staticmethod
-    def _trajectory_clock_pair():
-        return time.monotonic_ns() // 1_000_000, time.time_ns() // 1_000_000
+    def _trajectory_clock_pair(self):
+        return round(self.ctx.clock.monotonic() * 1_000), int(self.ctx.clock.now() * 1_000)
 
     @staticmethod
     def _mode_value(mode):

@@ -238,8 +238,8 @@ def read_model_evidence(
     database_path: str | os.PathLike[str] | None = None,
 ) -> list[ModelEvidenceRecord]:
     """Return compatible compact evidence in deterministic append order."""
-    clauses = ["schema_version IN (?, ?, ?, ?, ?)"]
-    params: list[object] = [1, 2, 3, 4, MODEL_EVIDENCE_SCHEMA_VERSION]
+    clauses = ["schema_version IN (?, ?, ?, ?, ?, ?)"]
+    params: list[object] = [1, 2, 3, 4, 5, MODEL_EVIDENCE_SCHEMA_VERSION]
     if session_id is not None:
         clauses.append("session_id=?")
         params.append(_require_model_identifier(session_id, "session_id"))
@@ -280,7 +280,7 @@ def commit_model_activation(
                        model_digest, provenance_digest, schema_version, payload
                 FROM model_evidence
                 WHERE kind=? AND schema_version=?
-                ORDER BY timestamp_ms DESC, evidence_id DESC
+                ORDER BY id DESC
                 LIMIT 1
                 """,
             (EvidenceKind.CONFIDENCE_DECISION.value, MODEL_EVIDENCE_SCHEMA_VERSION),
@@ -402,7 +402,7 @@ def commit_model_activation_phase(
                            model_digest, provenance_digest, schema_version, payload
                     FROM model_evidence
                     WHERE kind=? AND schema_version=?
-                    ORDER BY timestamp_ms DESC, evidence_id DESC
+                    ORDER BY id DESC
                     LIMIT 1
                     """,
                 (EvidenceKind.CONFIDENCE_DECISION.value, MODEL_EVIDENCE_SCHEMA_VERSION),
@@ -465,7 +465,7 @@ def commit_model_activation_phase(
                                schema_version, payload
                         FROM model_evidence
                         WHERE kind=? AND schema_version=?
-                        ORDER BY timestamp_ms DESC, evidence_id DESC
+                        ORDER BY id DESC
                         LIMIT 1
                         """,
                     (EvidenceKind.CONFIDENCE_DECISION.value, MODEL_EVIDENCE_SCHEMA_VERSION),
@@ -552,10 +552,10 @@ def commit_model_rollback(
         ):
             active_digest = expected_activation.candidate_pair.model_digest
         else:
-            activation = max(
+            activation = next(
                 (
                     record
-                    for record in records
+                    for record in reversed(records)
                     if isinstance(record.payload, ActivationEvidence)
                     and record.payload.decision_id == expected_activation.evidence_decision_id
                     and record.payload.active_snapshot_json == expected_activation.active_snapshot_json
@@ -565,16 +565,15 @@ def commit_model_rollback(
                     and record.role_generation == expected_activation.role_generation
                     and record.model_digest is not None
                 ),
-                key=lambda record: (record.timestamp_ms, record.evidence_id),
-                default=None,
+                None,
             )
             if activation is None or activation.model_digest is None:
                 raise ValueError("activation-lineage-missing")
             active_digest = activation.model_digest
-        existing = max(
+        existing = next(
             (
                 record
-                for record in records
+                for record in reversed(records)
                 if (
                     isinstance(record.payload, RollbackEvidence)
                     and record.payload.decision_id == expected_activation.evidence_decision_id
@@ -589,8 +588,7 @@ def commit_model_rollback(
                     and record.model_digest == active_digest
                 )
             ),
-            key=lambda record: (record.timestamp_ms, record.evidence_id),
-            default=None,
+            None,
         )
         if existing is not None:
             return ModelRollbackCommitOutcome(existing, False)

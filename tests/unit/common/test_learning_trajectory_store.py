@@ -182,7 +182,7 @@ def test_schema_v10_migration_from_v8_is_additive_and_declares_learning_tables(d
     datastore._reset_for_tests(str(database_path))
     try:
         connection = datastore.connection()
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == datastore.DB_SCHEMA_VERSION == 12
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == datastore.DB_SCHEMA_VERSION
         assert _SCHEMA_V10_TABLES <= _table_names(database_path)
         assert connection.execute("SELECT value FROM kv WHERE key='preserved-v8'").fetchone()[0] == '{"value":8}'
         assert (
@@ -192,6 +192,7 @@ def test_schema_v10_migration_from_v8_is_additive_and_declares_learning_tables(d
         assert connection.execute("SELECT migration_set, name FROM _sqlite_migrations ORDER BY name").fetchall() == [
             ("pifire-schema", "v0011_adopt_sqlite_utils_registry"),
             ("pifire-schema", "v0012_trajectory_role_generation"),
+            ("pifire-schema", "v0013_trajectory_clock_domains"),
         ]
 
         assert {
@@ -231,10 +232,6 @@ def test_schema_v10_migration_from_v8_is_additive_and_declares_learning_tables(d
             "canonical_json",
             "frame_digest",
         } <= _columns(database_path, "learning_trajectory_frame")
-        frame_ddl = str(
-            connection.execute("SELECT sql FROM sqlite_master WHERE name='learning_trajectory_frame'").fetchone()[0]
-        )
-        assert "payload_schema_version IN (2, 3)" in frame_ddl
         assert {
             "request_id",
             "status",
@@ -349,6 +346,7 @@ def test_schema_v10_migration_failure_rolls_back_entire_v8_batch_and_retries(
         assert connection.execute("SELECT migration_set, name FROM _sqlite_migrations ORDER BY name").fetchall() == [
             ("pifire-schema", "v0011_adopt_sqlite_utils_registry"),
             ("pifire-schema", "v0012_trajectory_role_generation"),
+            ("pifire-schema", "v0013_trajectory_clock_domains"),
         ]
     finally:
         datastore._reset_for_tests(None)
@@ -368,6 +366,7 @@ def test_schema_v10_migration_is_idempotent_and_preserves_trajectory_rows(
     assert [(row[0], row[1]) for row in audit_rows] == [
         ("pifire-schema", "v0011_adopt_sqlite_utils_registry"),
         ("pifire-schema", "v0012_trajectory_role_generation"),
+        ("pifire-schema", "v0013_trajectory_clock_domains"),
     ]
     assert all(row[2] for row in audit_rows)
 

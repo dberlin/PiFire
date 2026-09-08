@@ -13,6 +13,7 @@ from common.control_trace import (
 from common.controller_model_state import ControllerModelStore
 from common.learning_trajectory import ModelFitLineage
 from common.model_evidence import (
+    MODEL_EVIDENCE_SCHEMA_VERSION,
     ActivationLifecycleEvidence,
     CandidateAssessmentEvidence,
     EvidenceKind,
@@ -175,7 +176,7 @@ def _evidence(evidence_id: str = "gap-1") -> ModelEvidenceRecord:
         role_generation=4,
         model_digest=_CANDIDATE,
         provenance_digest=_INCUMBENT,
-        schema_version=5,
+        schema_version=MODEL_EVIDENCE_SCHEMA_VERSION,
         payload=RecorderGapEvidence(lost_record_count=1, reason="recorder-gap"),
     )
 
@@ -504,7 +505,7 @@ def test_current_lifecycle_matches_production_activation_decision_key() -> None:
         role_generation=4,
         model_digest=_CANDIDATE,
         provenance_digest=_INCUMBENT,
-        schema_version=5,
+        schema_version=MODEL_EVIDENCE_SCHEMA_VERSION,
         payload=ActivationLifecycleEvidence(
             decision_id="decision-9",
             phase="active",
@@ -1007,6 +1008,8 @@ def test_real_fit_submission_persists_queued_lifecycle_for_restart_report(ds) ->
         FrameObservation(
             frame_start_s=25.0,
             frame_end_s=50.0,
+            wall_start_ms=round((25.0) * 1_000),
+            wall_end_ms=round((50.0) * 1_000),
             temp_c=90.0,
             setpoint_c=120.0,
             ambient_c=20.0,

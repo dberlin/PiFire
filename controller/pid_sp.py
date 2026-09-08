@@ -166,6 +166,7 @@ class Controller(PIDControllerBase):
         trajectory_repository=None,
         fit_partition_digest=None,
         clock_ms=None,
+        monotonic_clock=None,
         installation_identity_provider: InstallationIdentityProvider = os_installation_identity,
     ):
         super().__init__(config, units, cycle_data)
@@ -181,8 +182,9 @@ class Controller(PIDControllerBase):
 
         self.units = units
 
-        self.last_update = time.time()
-        self.last_set_time = time.time()
+        self._monotonic_clock = time.monotonic if monotonic_clock is None else monotonic_clock
+        self.last_update = self._monotonic_clock()
+        self.last_set_time = self._monotonic_clock()
         self.error = 0.0
         self.set_point = 0
 
@@ -1626,7 +1628,7 @@ class Controller(PIDControllerBase):
 
     # ------------------------------------------------------------------ control
     def update(self, current):
-        current_time = time.time()
+        current_time = self._monotonic_clock()
         previous_update_time = self.last_update
         previous_temperature = self.last
         dt = self._elapsed_since_last_update(current_time)
@@ -1805,7 +1807,7 @@ class Controller(PIDControllerBase):
         self.inter = 0.0
         self._integral_seeded = False
         self.derv = 0.0
-        self.last_update = time.time()
+        self.last_update = self._monotonic_clock()
         self.last_set_time = self.last_update
         self.start_change_temp = self.last
         self.new_target = True

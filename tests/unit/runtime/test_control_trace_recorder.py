@@ -72,6 +72,7 @@ def _record(timestamp: int, *, session_id: str = "session-a", cook_id: str = "co
             inhibit_reason=InhibitReason.NONE,
             result_revision=None,
             detail=f"event-{timestamp}",
+            monotonic_ms=timestamp,
         ),
     )
 
@@ -115,6 +116,7 @@ def test_record_revalidates_and_buffers_without_persisting():
             inhibit_reason=InhibitReason.NONE,
             result_revision=None,
             detail="invalid",
+            monotonic_ms=11,
         ),
         schema_version=99,
     )

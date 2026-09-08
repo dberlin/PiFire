@@ -91,13 +91,8 @@ def _canonical_bytes(value: object) -> bytes:
     ).encode("utf-8")
 
 
-def _ledger_order(record: ModelEvidenceRecord) -> tuple[int, str]:
-    return (record.timestamp_ms, record.evidence_id)
-
-
 def _latest(records: Sequence[ModelEvidenceRecord], payload_type: type):
-    matches = [record for record in records if isinstance(record.payload, payload_type)]
-    return max(matches, key=_ledger_order) if matches else None
+    return next((record for record in reversed(records) if isinstance(record.payload, payload_type)), None)
 
 
 def _superseded_invalidation(
@@ -106,11 +101,13 @@ def _superseded_invalidation(
 ) -> bool:
     """Report whether the ledger recorded any later evidence of the current schema."""
 
-    return any(
-        not isinstance(record.payload, SchemaInvalidationEvidence)
-        and _ledger_order(record) > _ledger_order(invalidation)
-        for record in records
-    )
+    seen_invalidation = False
+    for record in records:
+        if record.evidence_id == invalidation.evidence_id:
+            seen_invalidation = True
+        elif seen_invalidation and record.schema_version == MODEL_EVIDENCE_SCHEMA_VERSION:
+            return True
+    return False
 
 
 def _latest_payload[PayloadT](
@@ -256,7 +253,7 @@ def build_learning_report(
     checkpoint: object = None,
     challenger_state: object = None,
 ) -> LearningReport:
-    """Project ledger, durable authorities, live phases, and calibration once."""
+    """Project append-ordered ledger, durable authorities, live phases, and calibration once."""
 
     records = tuple(evidence)
     if not all(isinstance(record, ModelEvidenceRecord) for record in records):
@@ -621,9 +618,7 @@ def build_learning_report(
         "evidence": {
             "count": len(current_records),
             "audit_count": len(records),
-            "high_water": (
-                list(max((record.timestamp_ms, record.evidence_id) for record in records)) if records else None
-            ),
+            "high_water": ([records[-1].timestamp_ms, records[-1].evidence_id] if records else None),
             "retired_excluded": len(records) - len(current_records),
         },
         "fit": {

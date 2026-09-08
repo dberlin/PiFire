@@ -303,6 +303,8 @@ Before the first MPC solve:
 
 If no valid pre-roll exists, the incumbent controls with an explicitly diagnosed conservative cold start. Learning and candidate activation remain fail-closed until candidate-specific warm-up is available.
 
+The leading-Hold warm-up countdown advances only when the trajectory runtime accepts a distinct, valid, continuous frame into replay capture. Admission is reported directly; it must not be inferred by comparing a monotonic replay anchor with a wall-clock observation timestamp. Duplicate or rejected frames do not advance the countdown. Capture acceptance is not durability: persistence barriers and all downstream fitting and activation gates remain required.
+
 ### 8.4 Candidate fitting and activation
 
 For each optimizer trial/candidate:
