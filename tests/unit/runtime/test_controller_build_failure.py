@@ -10,6 +10,7 @@ import controller.runtime.runner as runner_module
 from common import controller_deps
 from controller.base import ControllerBase, ControllerLearningDiagnostics
 from controller.model_learning.contracts import CandidateOrigin, FrameObservation
+from controller.runtime.clock import ManualClock
 from controller.runtime.runner import SyncControllerRunner, _build_core, build_runner
 from tests.characterization import harness  # noqa: F401
 from tests.characterization.fixtures import base_settings
@@ -289,15 +290,22 @@ def test_build_core_contains_every_native_construction_failure(native_failure, d
 def test_native_failure_falls_back_to_safe_pid_with_exact_rebuild_guidance(native_failure, ds):
     settings = _settings()
     logger = _Logger()
+    clock = ManualClock(start=1_700_000_000.0, monotonic_start=100.0)
 
-    runner, status = build_runner(settings, _control(), logger=logger)
+    runner, status = build_runner(settings, _control(), logger=logger, clock=clock)
     try:
         assert status == "Active"
         assert isinstance(runner, SyncControllerRunner)
+        clock.jump_wall(-3600.0)
+        clock.advance(20.0)
         runner.submit(200.0)
         result = runner.latest()
         assert math.isfinite(result.cycle_ratio)
         assert runner.controller_type() == "pid"
+        assert result.diagnostics.observed_dt_seconds == 20.0
+        assert result.solve_start_monotonic == clock.monotonic()
+        assert result.solve_end_monotonic == clock.monotonic()
+        assert result.completed_wall_time == clock.now()
         banner = " ".join(logger.errors)
         assert native_failure in banner
         assert _REBUILD in banner

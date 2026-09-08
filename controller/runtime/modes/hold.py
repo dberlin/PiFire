@@ -923,8 +923,7 @@ class HoldMode(ControlMode):
             trajectory_repository=trajectory_repository,
             fit_partition_digest=self._resolve_fit_partition_digest,
             grey_learning_process=grey_learning_process,
-            monotonic_clock=self.ctx.clock.monotonic,
-            wall_clock=self.ctx.clock.now,
+            clock=self.ctx.clock,
         )
         actual_type = getattr(self._runner, "controller_type", lambda: None)() if self._runner is not None else None
         if isinstance(actual_type, ControllerType):

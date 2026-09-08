@@ -2325,8 +2325,7 @@ def test_threaded_public_reconfigure_transfers_queued_calibration_without_replay
         trajectory_repository=None,
         fit_partition_digest=None,
         grey_learning_process=None,
-        monotonic_clock=None,
-        wall_clock=None,
+        clock=None,
     ):
         del settings, control
         assert logger is None
@@ -2382,8 +2381,7 @@ def test_threaded_reconfigure_closes_replaced_core_only_after_atomic_install(mon
         trajectory_repository=None,
         fit_partition_digest=None,
         grey_learning_process=None,
-        monotonic_clock=None,
-        wall_clock=None,
+        clock=None,
     ):
         del settings, control
         assert logger is None
@@ -2424,8 +2422,7 @@ def test_threaded_reconfigure_closes_superseded_uninstalled_core(monkeypatch):
         trajectory_repository=None,
         fit_partition_digest=None,
         grey_learning_process=None,
-        monotonic_clock=None,
-        wall_clock=None,
+        clock=None,
     ):
         del settings, control
         assert logger is None

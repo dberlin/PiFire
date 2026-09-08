@@ -11,8 +11,6 @@
 *****************************************
 """
 
-import time
-
 from controller.base import ControllerBase
 
 # Floor for the elapsed-time denominator PID variants divide by. Real control
@@ -34,12 +32,9 @@ class PIDControllerBase(ControllerBase):
         self.kd = self.kp * td
 
     def _elapsed_since_last_update(self, current_time):
-        """Time since last_update, floored so a divisor never hits zero.
+        """Monotonic elapsed seconds, floored to protect duplicate-reading divisors.
 
-        Back-to-back time.time() calls commonly return the identical float
-        (float64's ULP at the current epoch is far below a control loop's
-        cadence), and derivative terms divide by this value directly with no
-        cancellation to protect them.
+        This effective numerical interval is not evidence of delivered heat.
         """
         return max(current_time - self.last_update, MIN_ELAPSED_SECONDS)
 
@@ -48,4 +43,4 @@ class PIDControllerBase(ControllerBase):
         self.error = 0.0
         self.inter = 0.0
         self.derv = 0.0
-        self.last_update = time.time()
+        self.last_update = self._clock.monotonic()

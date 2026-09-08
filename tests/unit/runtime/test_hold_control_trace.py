@@ -22,6 +22,7 @@ from common.control_trace import (
     ModelEvaluationPayload,
     ModelObservationPayload,
     PidSpUpdatePayload,
+    PidUpdatePayload,
     RecorderGapPayload,
     ResultStaleState,
     SafetyEventType,
@@ -43,6 +44,7 @@ from controller.control_trace_replay import ReplayIssueCode, validate_records
 from controller.model_learning.contracts import CandidateOrigin, FrameObservation
 from controller.mpc import Controller
 from controller.mpc_allocator import allocate
+from controller.runtime.clock import ManualClock
 from controller.runtime.control_trace_recorder import ControlTraceRecorder
 from controller.runtime.control_trace_session import (
     TraceAppliedIntervalContext,
@@ -536,6 +538,58 @@ def test_pid_family_hold_records_completed_framed_pulse(hold_cycle, monkeypatch,
     frames = [record for record in recorder.records if record.event_kind is TraceEventKind.ACTUATION_FRAME]
     assert frames and all(record.controller.value == controller for record in frames)
     assert (replay := validate_records(recorder.records)).valid, [(issue.code, issue.detail) for issue in replay.issues]
+
+
+def test_real_pid_trace_keeps_delayed_publication_separate_from_elapsed_time(hold_cycle, monkeypatch, request):
+    import controller.runtime.runner as runner_module
+
+    clock = ManualClock(1_700_000_000.0, monotonic_start=100.0)
+    recorder = _install_recorder(monkeypatch)
+    mode = hold_cycle(None, controller="pid", clock=clock)
+    monkeypatch.setattr(runner_module, "build_runner", build_runner)
+    mode.setup()
+    request.addfinalizer(lambda: mode.teardown(220.0))
+    mode.on_tick(clock.now(), 220.0, mode.grill.get_output_status())
+    runner = mode._runner
+    assert isinstance(runner, SyncControllerRunner)
+    core = runner._core._core
+    update = core.update
+
+    def delayed_update(temperature):
+        raw = update(temperature)
+        clock.advance(0.125)
+        return raw
+
+    monkeypatch.setattr(core, "update", delayed_update)
+    captured = []
+    latest = runner.latest
+
+    def delayed_publication():
+        result = latest()
+        captured.append(result)
+        clock.advance(0.25)
+        clock.jump_wall(-3600.0)
+        return result
+
+    monkeypatch.setattr(runner, "latest", delayed_publication)
+    clock.advance(20.1)
+    mode.on_tick(clock.now(), 220.0, mode.grill.get_output_status())
+    updates = [record for record in recorder.records if isinstance(record.payload, PidUpdatePayload)]
+    assert len(updates) == len(captured) == 1
+    record = updates[0]
+    payload = record.payload
+    result = captured[0]
+    assert payload.previous_update_ms == 100_000
+    assert payload.observed_dt_seconds == pytest.approx(20.1)
+    assert result.solve_duration_seconds == 0.125
+    assert record.ts_ms > 1_000_000_000_000
+    assert payload.monotonic_ms == round(result.solve_end_monotonic * 1000)
+    assert payload.wall_ms == int(result.completed_wall_time * 1000)
+    assert payload.raw_output == pytest.approx(
+        payload.proportional_term + payload.integral_term + payload.derivative_term
+    )
+    assert payload.raw_output == result.diagnostics.raw_output
+    assert (report := validate_records(recorder.records)).valid, report.issues
 
 
 def test_fahrenheit_hold_keeps_model_observation_ambient_celsius_while_session_displays_fahrenheit(

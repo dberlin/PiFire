@@ -9,9 +9,10 @@ move into PIDControllerBase or when the dead dispatch surface is deleted.
 """
 
 import importlib
-import time
 
 import pytest
+
+from controller.runtime.clock import ManualClock
 
 PID_CONFIGS = {
     "pid": {"PB": 60.0, "Ti": 180.0, "Td": 45.0, "center": 0.5},
@@ -31,24 +32,14 @@ STEP = 20.0
 T0 = 1000.0
 
 
-class _Clock:
-    def __init__(self):
-        self.t = T0
-
-    def __call__(self):
-        return self.t
-
-
-def _run_variant(module_name, monkeypatch):
-    clock = _Clock()
-    monkeypatch.setattr(time, "time", clock)
+def _run_variant(module_name):
+    clock = ManualClock(start=T0, monotonic_start=T0)
     mod = importlib.import_module(f"controller.{module_name}")
-    kwargs = {"monotonic_clock": clock} if module_name == "pid_sp" else {}
-    c = mod.Controller(dict(PID_CONFIGS[module_name]), "F", dict(CYCLE_DATA), **kwargs)
+    c = mod.Controller(dict(PID_CONFIGS[module_name]), "F", dict(CYCLE_DATA), clock=clock)
     c.set_target(SETPOINT)
     out = []
-    for i, current in enumerate(SERIES, 1):
-        clock.t = T0 + i * STEP
+    for current in SERIES:
+        clock.advance(STEP)
         out.append(round(float(c.update(current)), 6))
     return out
 
@@ -67,5 +58,5 @@ GOLDEN = {
 
 
 @pytest.mark.parametrize("module_name", list(PID_CONFIGS))
-def test_pid_variant_update_series_is_stable(module_name, monkeypatch):
-    assert _run_variant(module_name, monkeypatch) == GOLDEN[module_name]
+def test_pid_variant_update_series_is_stable(module_name):
+    assert _run_variant(module_name) == GOLDEN[module_name]

@@ -10,10 +10,18 @@ from controller.runtime.clock import ManualClock
 CYCLE_DATA = {"u_min": 0.1, "u_max": 0.9}
 
 
-def test_pid_trace_diagnostics_reproduce_completed_update(monkeypatch):
-    clock = iter((0.0, 0.0, 0.0, 100.0, 102.0))
-    monkeypatch.setattr(pid.time, "time", lambda: next(clock))
-    core = pid.Controller({"PB": 20.0, "Ti": 10.0, "Td": 5.0, "center": 0.5}, "F", dict(CYCLE_DATA))
+def test_pid_trace_diagnostics_reproduce_completed_update():
+    class _ReadTimeline(ManualClock):
+        def __init__(self):
+            super().__init__(1_700_000_000.0)
+            self.readings = iter((0.0, 0.0, 0.0, 100.0, 102.0))
+
+        def monotonic(self):
+            return next(self.readings)
+
+    core = pid.Controller(
+        {"PB": 20.0, "Ti": 10.0, "Td": 5.0, "center": 0.5}, "F", dict(CYCLE_DATA), clock=_ReadTimeline()
+    )
     core.set_target(200.0)
     core.last = 190.0
     core.last_update = 98.0

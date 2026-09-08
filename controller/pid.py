@@ -31,8 +31,6 @@
 """
 Imported Libraries
 """
-import time
-
 from controller.base import PidTraceDiagnostics
 from controller.pid_base import PIDControllerBase
 
@@ -42,8 +40,8 @@ Class Definition
 
 
 class Controller(PIDControllerBase):
-    def __init__(self, config, units, cycle_data, *, logger=None):
-        super().__init__(config, units, cycle_data)
+    def __init__(self, config, units, cycle_data, *, logger=None, clock=None):
+        super().__init__(config, units, cycle_data, logger=logger, clock=clock)
 
         self._calculate_gains(config.get("PB", 60.0), config.get("Ti", 180.0), config.get("Td", 45.0))
 
@@ -52,7 +50,7 @@ class Controller(PIDControllerBase):
         self.d = 0.0
         self.u = 0
 
-        self.last_update = time.time()
+        self.last_update = self._clock.monotonic()
         self.error = 0.0
         self.set_point = 0
 
@@ -77,7 +75,7 @@ class Controller(PIDControllerBase):
         self.p = self.kp * error + self.center
 
         # I
-        dt = self._elapsed_since_last_update(time.time())
+        dt = self._elapsed_since_last_update(self._clock.monotonic())
         # if self.p > 0 and self.p < 1: # Ensure we are in the pb, otherwise do not calculate i to avoid windup
         unclamped_integral = self.inter + error * dt
         self.inter = unclamped_integral
@@ -93,7 +91,7 @@ class Controller(PIDControllerBase):
 
         self.error = error
         self.last = current
-        self.last_update = time.time()
+        self.last_update = self._clock.monotonic()
         self._trace_diagnostics = PidTraceDiagnostics(
             observed_dt_seconds=dt,
             error=error,

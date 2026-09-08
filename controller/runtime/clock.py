@@ -2,6 +2,7 @@
 
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 
 
 class Clock(ABC):
@@ -23,6 +24,28 @@ class RealClock(Clock):
 
     def monotonic(self):
         return time.monotonic()
+
+    def sleep(self, seconds):
+        time.sleep(seconds)
+
+
+class CallableClock(Clock):
+    """Adapt existing callable timing seams without changing either domain."""
+
+    def __init__(
+        self,
+        *,
+        monotonic_clock: Callable[[], float],
+        wall_clock: Callable[[], float],
+    ):
+        self._monotonic_clock = monotonic_clock
+        self._wall_clock = wall_clock
+
+    def now(self):
+        return self._wall_clock()
+
+    def monotonic(self):
+        return self._monotonic_clock()
 
     def sleep(self, seconds):
         time.sleep(seconds)

@@ -3,6 +3,8 @@ import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from queue import Queue
+from threading import Semaphore
 from types import SimpleNamespace
 
 import pytest
@@ -15,14 +17,17 @@ from controller.base import ControllerLearningDiagnostics, PidTraceDiagnostics
 from controller.model_learning.contracts import CandidateOrigin, FrameObservation
 from controller.mpc_allocator import AllocationResult
 from controller.pid_sp import Controller as PidSpController
+from controller.runtime.clock import ManualClock
 from controller.runtime.runner import (
     ControllerUpdateResult,
     ModelRestoreOutcome,
     SyncControllerRunner,
+    ThreadedControllerRunner,
     _build_core,
     _capture_completed_result,
     build_runner,
 )
+from tests.characterization.fixtures import base_settings
 from tests.fakes.runner import FakeControllerRunner
 
 
@@ -408,6 +413,90 @@ def test_sync_pid_sp_completed_frame_drains_one_observation_outcome():
     assert [(envelope.submission_sequence, envelope.observation) for envelope in drain.envelopes] == [
         (submission.submission_sequence, observation)
     ]
+
+
+@pytest.mark.parametrize("jump", [-3600.0, 3600.0])
+@pytest.mark.parametrize("source", ["clock", "callables", "overrides"])
+def test_clock_survives_pid_reconfigure(jump, source):
+    clock = ManualClock(start=1_700_000_000.0, monotonic_start=100.0)
+    settings = base_settings()
+    settings["controller"]["selected"] = "pid"
+    control = {"primary_setpoint": 225.0}
+    timing = {"clock": clock}
+    if source != "clock":
+        timing = {"monotonic_clock": clock.monotonic, "wall_clock": clock.now}
+        if source == "overrides":
+            timing["clock"] = ManualClock(start=2_000_000_000.0, monotonic_start=5.0)
+    runner, status = build_runner(settings, control, **timing)
+    assert status == "Active"
+    try:
+        clock.advance(20.0)
+        first = runner.latest_from(200.0)
+        assert first.diagnostics.observed_dt_seconds == 20.0
+        assert first.completed_wall_time == clock.now()
+        for selected in ("pid_sp", "pid"):
+            settings["controller"]["selected"] = selected
+            assert runner.reconfigure(settings, control) == "Active"
+            clock.jump_wall(jump)
+            clock.advance(20.0)
+            result = runner.latest_from(200.0)
+            assert runner.controller_type() == selected
+            assert result.diagnostics.observed_dt_seconds == 20.0
+            assert result.solve_start_monotonic == clock.monotonic()
+            assert result.solve_end_monotonic == clock.monotonic()
+            assert result.completed_wall_time == clock.now()
+            assert result.stale_state is ResultStaleState.FRESH
+    finally:
+        runner.stop()
+
+
+def test_threaded_reconfigure_preserves_callable_clock_source():
+    class SolveBarrier:
+        def __init__(self):
+            self.waiting = Queue()
+            self.resume = Semaphore(0)
+
+        def __call__(self, _period):
+            self.waiting.put(None)
+            self.resume.acquire()
+
+        def close(self):
+            self.resume.release()
+
+    clock = ManualClock(start=1_700_000_000.0, monotonic_start=100.0)
+    settings = base_settings()
+    settings["controller"]["selected"] = "pid"
+    control = {"primary_setpoint": 225.0}
+    core, status = _build_core(settings, control, clock=clock)
+    assert status == "Active"
+    barrier = SolveBarrier()
+    runner = ThreadedControllerRunner(
+        core,
+        monotonic_clock=clock.monotonic,
+        wall_clock=clock.now,
+        wait_for_period=barrier,
+    )
+    try:
+        barrier.waiting.get(timeout=2.0)
+        clock.advance(20.0)
+        runner.submit(200.0)
+        barrier.resume.release()
+        barrier.waiting.get(timeout=2.0)
+        assert runner.latest().diagnostics.observed_dt_seconds == 20.0
+        for selected in ("pid_sp", "pid"):
+            settings["controller"]["selected"] = selected
+            assert runner.reconfigure(settings, control) == "Active"
+            clock.jump_wall(-3600.0)
+            clock.advance(20.0)
+            barrier.resume.release()
+            barrier.waiting.get(timeout=2.0)
+            result = runner.latest()
+            assert runner.controller_type() == selected
+            assert result.diagnostics.observed_dt_seconds == 20.0
+            assert result.solve_start_monotonic == clock.monotonic()
+            assert result.completed_wall_time == clock.now()
+    finally:
+        runner.stop()
 
 
 def test_build_core_injects_controller_owned_learning_dependencies_into_pid_sp():
@@ -1176,6 +1265,7 @@ def test_sync_reconfigure_installs_complete_core_before_closing_replaced_core(mo
         grey_learning_process=None,
         monotonic_clock=None,
         wall_clock=None,
+        clock=None,
     ):
         del settings, control
         assert logger is None

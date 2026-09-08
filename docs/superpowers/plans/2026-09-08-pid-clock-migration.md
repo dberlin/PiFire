@@ -12,6 +12,17 @@
 
 **Integrated baseline:** The coupled learning implementation is now in the working tree: trace 10, observation 4, evidence 6, database 13, required independent wall endpoints, and callable clocks through Hold/runner factories and reconfiguration. References below to Main's “in-flight” work describe the drafting baseline, not remaining implementation. Reconcile those steps against the shared spec before executing; the destination shared `Clock` API and remaining timers are still proposals.
 
+## Execution record
+
+The user subsequently authorized sequential execution of all six migration plans. The local `massive-reworks-and-new-ui` bookmark was moved to the completed coupled-learning revision `66e814cb`; remaining migrations are developed in its child revision, without pushing.
+
+- Classical PID constructor, target reset, elapsed read and completion stamp now consume the injected monotonic clock. Equations, the existing denominator floor, two-read update ordering and both golden arrays remain unchanged.
+- Shared runner injection was brought forward as a prerequisite: one `CallableClock` adapter preserves existing callable inputs through initial/fallback construction and synchronous/threaded reconfiguration. Hold supplies its context clock. PID-SP accepts the shared clock while retaining its explicit callbacks until the coordinated cleanup.
+- The simulation and golden harnesses use explicit `ManualClock` injection, not a global wall-clock patch. `now()` still means wall time; its complete removal and explicit constructor-axis naming remain the shared-mode cutover.
+- Before the fix, a backward one-hour correction changed a 20-second PID interval to 0.001 seconds and raw demand from 1.1875 to -1248.75. The real-core smoke now reports `[20.0, 20.0, 20.0]` and maximum raw-output difference `0.0` for both correction signs.
+- Focused integration: **322 passed**; evidence in `.artifacts/pid-clock-focused.log` and `.artifacts/pid-clock-smoke.log`. The real Hold trace regression validates the completed-update prefix with nonzero solve/publication delay; it does not claim that classical PID supplies learning outcomes during terminal frame closure.
+- Shared-mode, probe/peripheral identity and separately reviewed suspend policy remain deployment prerequisites. Focused checks are not exact-revision release or push authorization; the final gate runs only on the complete coordinated revision.
+
 ## Global Constraints
 
 - This document is a proposal, not authorization to implement remaining PID work. No tests, build, lint or format commands were run while drafting.

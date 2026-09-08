@@ -51,6 +51,7 @@ from controller.base import (
 )
 from controller.model_learning.contracts import CandidateOrigin
 from controller.mpc_allocator import AllocationResult
+from controller.runtime.clock import CallableClock, Clock, RealClock
 from controller.runtime.model_lifecycle import ModelLifecycleRunner
 from controller.runtime.model_persistence import (
     DurableActivationReceipt,
@@ -844,6 +845,21 @@ class ControllerRunner(ABC, ModelLifecycleRunner):
     def stop(self): ...
 
 
+def _resolve_clock(
+    clock: Clock | None,
+    monotonic_clock: Callable[[], float] | None,
+    wall_clock: Callable[[], float] | None,
+) -> Clock:
+    """Resolve legacy overrides once, keeping core and completion clocks aligned."""
+    source = RealClock() if clock is None else clock
+    if monotonic_clock is None and wall_clock is None:
+        return source
+    return CallableClock(
+        monotonic_clock=source.monotonic if monotonic_clock is None else monotonic_clock,
+        wall_clock=source.now if wall_clock is None else wall_clock,
+    )
+
+
 class SyncControllerRunner(ControllerRunner):
     def __init__(
         self,
@@ -854,8 +870,9 @@ class SyncControllerRunner(ControllerRunner):
         trajectory_repository: LearningTrajectoryRepository | None = None,
         fit_partition_digest: Callable[[], str | None] | None = None,
         grey_learning_process: GreyLearningProcessOwner | None = None,
-        monotonic_clock: Callable[[], float] = time.monotonic,
-        wall_clock: Callable[[], float] = time.time,
+        monotonic_clock: Callable[[], float] | None = None,
+        wall_clock: Callable[[], float] | None = None,
+        clock: Clock | None = None,
         warning_callback: Callable[[ResultStaleState], None] | None = None,
     ):
         from controller.runtime.observation_buffer import ObservationOutcomeBuffer
@@ -869,8 +886,9 @@ class SyncControllerRunner(ControllerRunner):
         self._revision = 0
         self._latest_result = None
         self._observation_buffer = ObservationOutcomeBuffer(_MAX_PENDING_OBSERVATIONS)
-        self._monotonic_clock = monotonic_clock
-        self._wall_clock = wall_clock
+        self._clock = _resolve_clock(clock, monotonic_clock, wall_clock)
+        self._monotonic_clock = self._clock.monotonic
+        self._wall_clock = self._clock.now
         self._warning_callback = warning_callback
         self._controller_type = controller_type
         self._model_persistence = model_persistence
@@ -971,8 +989,7 @@ class SyncControllerRunner(ControllerRunner):
             trajectory_repository=self._trajectory_repository,
             fit_partition_digest=self._fit_partition_digest,
             grey_learning_process=self._grey_learning_process,
-            monotonic_clock=self._monotonic_clock,
-            wall_clock=self._wall_clock,
+            clock=self._clock,
         )
         if status == "Active":
             retired = self._core
@@ -1202,8 +1219,9 @@ class ThreadedControllerRunner(ControllerRunner):
         trajectory_repository: LearningTrajectoryRepository | None = None,
         fit_partition_digest: Callable[[], str | None] | None = None,
         grey_learning_process: GreyLearningProcessOwner | None = None,
-        monotonic_clock: Callable[[], float] = time.monotonic,
-        wall_clock: Callable[[], float] = time.time,
+        monotonic_clock: Callable[[], float] | None = None,
+        wall_clock: Callable[[], float] | None = None,
+        clock: Clock | None = None,
         warning_callback: Callable[[ResultStaleState], None] | None = None,
         wait_for_period: Callable[[float], None] | None = None,
     ):
@@ -1269,8 +1287,9 @@ class ThreadedControllerRunner(ControllerRunner):
         self._fit_partition_digest = fit_partition_digest
         self._grey_learning_process = grey_learning_process
         self._quality = _ResultQualityTracker(_control_period_seconds(self._control_period))
-        self._monotonic_clock = monotonic_clock
-        self._wall_clock = wall_clock
+        self._clock = _resolve_clock(clock, monotonic_clock, wall_clock)
+        self._monotonic_clock = self._clock.monotonic
+        self._wall_clock = self._clock.now
         self._warning_callback = warning_callback
         self._stop_event = threading.Event()
         self._learning_stop_event = threading.Event()
@@ -1877,8 +1896,7 @@ class ThreadedControllerRunner(ControllerRunner):
             trajectory_repository=self._trajectory_repository,
             fit_partition_digest=self._fit_partition_digest,
             grey_learning_process=self._grey_learning_process,
-            monotonic_clock=self._monotonic_clock,
-            wall_clock=self._wall_clock,
+            clock=self._clock,
         )
         retired_pending = None
         if status == "Active":
@@ -2376,8 +2394,10 @@ def _build_core(
     trajectory_repository: LearningTrajectoryRepository | None = None,
     fit_partition_digest: Callable[[], str | None] | None = None,
     grey_learning_process: GreyLearningProcessOwner | None = None,
-    monotonic_clock: Callable[[], float] = time.monotonic,
-    wall_clock: Callable[[], float] = time.time,
+    monotonic_clock: Callable[[], float] | None = None,
+    wall_clock: Callable[[], float] | None = None,
+    *,
+    clock: Clock | None = None,
 ):
     """Construct the selected controller core without leaking import or startup failures.
 
@@ -2385,6 +2405,7 @@ def _build_core(
     missing or ABI-incompatible release is reported through the normal inactive
     controller path rather than escaping into the live control process.
     """
+    clock = _resolve_clock(clock, monotonic_clock, wall_clock)
     controller_type = controller_type or settings["controller"]["selected"]
     try:
         module = importlib.import_module(f"controller.{controller_type}")
@@ -2394,6 +2415,8 @@ def _build_core(
         return None, "Inactive"
     try:
         controller_kwargs = {"logger": event_logger}
+        if controller_type in {"pid", "pid_sp"}:
+            controller_kwargs["clock"] = clock
         if controller_type in {"mpc", "pid_sp"}:
             controller_kwargs["trajectory_repository"] = trajectory_repository
             controller_kwargs["fit_partition_digest"] = fit_partition_digest
@@ -2402,8 +2425,6 @@ def _build_core(
             controller_kwargs["grey_learning_process"] = grey_learning_process
         elif controller_type == "pid_sp":
             controller_kwargs["model_persistence"] = model_persistence
-            controller_kwargs["monotonic_clock"] = monotonic_clock
-            controller_kwargs["clock_ms"] = lambda: int(wall_clock() * 1_000)
         core = module.Controller(
             settings["controller"]["config"][controller_type],
             settings["globals"]["units"],
@@ -2444,11 +2465,14 @@ def _wrap(
     trajectory_repository: LearningTrajectoryRepository | None = None,
     fit_partition_digest: Callable[[], str | None] | None = None,
     grey_learning_process: GreyLearningProcessOwner | None = None,
-    monotonic_clock: Callable[[], float] = time.monotonic,
-    wall_clock: Callable[[], float] = time.time,
+    monotonic_clock: Callable[[], float] | None = None,
+    wall_clock: Callable[[], float] | None = None,
+    *,
+    clock: Clock | None = None,
 ):
     if core is None:
         return None, status
+    clock = _resolve_clock(clock, monotonic_clock, wall_clock)
     actual_type = _controller_type_for(controller_type)
     if core.wants_async():
         return (
@@ -2459,8 +2483,7 @@ def _wrap(
                 trajectory_repository=trajectory_repository,
                 fit_partition_digest=fit_partition_digest,
                 grey_learning_process=grey_learning_process,
-                monotonic_clock=monotonic_clock,
-                wall_clock=wall_clock,
+                clock=clock,
             ),
             status,
         )
@@ -2472,8 +2495,7 @@ def _wrap(
             trajectory_repository=trajectory_repository,
             fit_partition_digest=fit_partition_digest,
             grey_learning_process=grey_learning_process,
-            monotonic_clock=monotonic_clock,
-            wall_clock=wall_clock,
+            clock=clock,
         ),
         status,
     )
@@ -2488,8 +2510,10 @@ def build_runner(
     trajectory_repository: LearningTrajectoryRepository | None = None,
     fit_partition_digest: Callable[[], str | None] | None = None,
     grey_learning_process: GreyLearningProcessOwner | None = None,
-    monotonic_clock: Callable[[], float] = time.monotonic,
-    wall_clock: Callable[[], float] = time.time,
+    monotonic_clock: Callable[[], float] | None = None,
+    wall_clock: Callable[[], float] | None = None,
+    *,
+    clock: Clock | None = None,
 ):
     """Build the runner for a work cycle, substituting the default controller if
     the selected one will not build.
@@ -2506,6 +2530,7 @@ def build_runner(
     Nothing is written back to settings: the user's choice is preserved so that
     re-saving it (once the missing package is installed) just works.
     """
+    clock = _resolve_clock(clock, monotonic_clock, wall_clock)
     core, status = _build_core(
         settings,
         control,
@@ -2515,8 +2540,7 @@ def build_runner(
         trajectory_repository=trajectory_repository,
         fit_partition_digest=fit_partition_digest,
         grey_learning_process=grey_learning_process,
-        monotonic_clock=monotonic_clock,
-        wall_clock=wall_clock,
+        clock=clock,
     )
     if core is not None:
         return _wrap(
@@ -2527,8 +2551,7 @@ def build_runner(
             trajectory_repository=trajectory_repository,
             fit_partition_digest=fit_partition_digest,
             grey_learning_process=grey_learning_process,
-            monotonic_clock=monotonic_clock,
-            wall_clock=wall_clock,
+            clock=clock,
         )
 
     selected = _selected_controller(settings)
@@ -2551,8 +2574,7 @@ def build_runner(
         trajectory_repository=trajectory_repository,
         fit_partition_digest=fit_partition_digest,
         grey_learning_process=grey_learning_process,
-        monotonic_clock=monotonic_clock,
-        wall_clock=wall_clock,
+        clock=clock,
     )
     if core is None:
         _raise_banner(
@@ -2577,8 +2599,7 @@ def build_runner(
         trajectory_repository=trajectory_repository,
         fit_partition_digest=fit_partition_digest,
         grey_learning_process=grey_learning_process,
-        monotonic_clock=monotonic_clock,
-        wall_clock=wall_clock,
+        clock=clock,
     )
 
 

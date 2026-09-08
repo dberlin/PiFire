@@ -19,7 +19,6 @@ producing control boundaries.
 import argparse
 import importlib
 import json
-import time
 from dataclasses import dataclass, field
 from enum import StrEnum
 from multiprocessing import Pool
@@ -27,6 +26,7 @@ from multiprocessing import Pool
 import numpy as np
 
 from controller.grill_sim import GrillSim, MAKGrillSim  # noqa: E402
+from controller.runtime.clock import ManualClock  # noqa: E402
 from controller.runtime.logic.pulse import PulseResetReason, PulseScheduler  # noqa: E402
 from controller.runtime.runner import ControllerType, SyncControllerRunner  # noqa: E402
 from grillplat.actuator_capabilities import AUGER_TIMING  # noqa: E402
@@ -178,7 +178,9 @@ def _role_generation(core) -> int:
     return generation if isinstance(generation, int) and not isinstance(generation, bool) and generation >= 0 else 0
 
 
-def _observe_frame(core, frame, *, sequence, temp_c, setpoint_c, fan_frac, lid_open, manual_override, revision):
+def _observe_frame(
+    core, frame, *, sequence, wall_start_ms, wall_end_ms, temp_c, setpoint_c, fan_frac, lid_open, manual_override, revision
+):
     """Hand a completed pulse frame to the controller's corpus repository.
 
     This mirrors Hold's framed observation boundary. Eligibility and
@@ -198,8 +200,8 @@ def _observe_frame(core, frame, *, sequence, temp_c, setpoint_c, fan_frac, lid_o
         FrameObservation(
             frame_start_s=frame.nominal_start_s,
             frame_end_s=frame.ended_at_s,
-            wall_start_ms=round((frame.nominal_start_s) * 1_000),
-            wall_end_ms=round((frame.ended_at_s) * 1_000),
+            wall_start_ms=wall_start_ms,
+            wall_end_ms=wall_end_ms,
             temp_c=temp_c,
             setpoint_c=setpoint_c,
             ambient_c=float(getattr(core, "cfg", {}).get("T_amb", 0.0)),
@@ -226,17 +228,6 @@ def _observe_frame(core, frame, *, sequence, temp_c, setpoint_c, fan_frac, lid_o
     )
 
 
-class _SimClock:
-    """Callable replacement for `time.time`, advanced once per simulated
-    second so a controller reading the wall clock for its own `dt` observes
-    the step size this harness actually models, not the wall-clock time
-    between tight-loop calls."""
-
-    def __init__(self, t0):
-        self.t = t0
-
-    def __call__(self):
-        return self.t
 
 
 def _authority(core, cycle_data):
@@ -319,302 +310,314 @@ def run_scenario(
     restore order. Rows retain independent
     JSON-safe snapshots so subsequent settings/manifest changes cannot alter
     recorded evidence.
+
+    PID-family controllers and the scheduler share explicit simulated monotonic
+    time. Frame wall provenance is sampled independently from the same clock;
+    no process-global time source is replaced.
     """
     core_config, cycle_data, controller_override, cycle_override = _effective_configuration(
         controller, config, cycle_config
     )
-    clock = _SimClock(-float(AUGER_TIMING.frame_s))
-    real_time_time = time.time
-    time.time = clock
-    try:
-        mod = importlib.import_module(f"controller.{controller}")
-        clock_options = {"monotonic_clock": clock} if controller == "pid_sp" else {}
-        core = mod.Controller(dict(core_config), "F", dict(cycle_data), **clock_options)
-        if core_setup is not None:
-            core_setup(core)
-        runner = (
-            SyncControllerRunner(core, controller_type=ControllerType(controller)) if trace_sink is not None else None
-        )
-        plant_name = plant
-        plant_instance = globals()[plant_name](seed=seed)
-        scheduler = PulseScheduler()
-        # Repository observations require consecutive sequence numbers on
-        # abutting completed frames.
-        observation_sequence = 0
-        cycle_max, controller_max, effective_max, _ = _authority(core, cycle_data)
-        del cycle_max, controller_max
-        effective_run = _snapshot(
-            {
-                "controller_config": core_config,
-                "cycle_config": cycle_data,
-                "actuation_mode": "framed_pulse",
-                "scheduler": {
-                    "kind": "framed_pulse",
-                    "frame_seconds": float(scheduler.timing.frame_s),
-                    "pulse_seconds": float(scheduler.timing.pulse_s),
-                },
-                "pulse_timing": {
-                    "frame_seconds": float(scheduler.timing.frame_s),
-                    "pulse_seconds": float(scheduler.timing.pulse_s),
-                },
-                "plant": plant_name,
-                "seed": seed,
-                "scenario": scenario.name,
-                "overrides": {"controller": controller_override, "cycle": cycle_override},
-            }
-        )
+    clock = ManualClock(start=1_700_000_000.0, monotonic_start=-float(AUGER_TIMING.frame_s))
+    mod = importlib.import_module(f"controller.{controller}")
+    clock_options = {"clock": clock} if controller in {"pid", "pid_sp"} else {}
+    core = mod.Controller(dict(core_config), "F", dict(cycle_data), **clock_options)
+    if core_setup is not None:
+        core_setup(core)
+    runner = (
+        SyncControllerRunner(core, controller_type=ControllerType(controller), clock=clock)
+        if trace_sink is not None
+        else None
+    )
+    plant_name = plant
+    plant_instance = globals()[plant_name](seed=seed)
+    scheduler = PulseScheduler()
+    # Repository observations require consecutive sequence numbers on
+    # abutting completed frames.
+    observation_sequence = 0
+    frame_wall_start_ms = None
+    cycle_max, controller_max, effective_max, _ = _authority(core, cycle_data)
+    del cycle_max, controller_max
+    effective_run = _snapshot(
+        {
+            "controller_config": core_config,
+            "cycle_config": cycle_data,
+            "actuation_mode": "framed_pulse",
+            "scheduler": {
+                "kind": "framed_pulse",
+                "frame_seconds": float(scheduler.timing.frame_s),
+                "pulse_seconds": float(scheduler.timing.pulse_s),
+            },
+            "pulse_timing": {
+                "frame_seconds": float(scheduler.timing.frame_s),
+                "pulse_seconds": float(scheduler.timing.pulse_s),
+            },
+            "plant": plant_name,
+            "seed": seed,
+            "scenario": scenario.name,
+            "overrides": {"controller": controller_override, "cycle": cycle_override},
+        }
+    )
 
-        setpoint = _setpoint_at(scenario, 0)
-        if runner is None:
-            core.set_target(setpoint)
-        else:
-            runner.set_target(setpoint)
-        if post_target_setup is not None:
-            post_target_setup(core)
-        period = float(
-            (core.get_control_period() if runner is None else runner.control_period()) or scheduler.timing.frame_s
+    setpoint = _setpoint_at(scenario, 0)
+    if runner is None:
+        core.set_target(setpoint)
+    else:
+        runner.set_target(setpoint)
+    if post_target_setup is not None:
+        post_target_setup(core)
+    period = float(
+        (core.get_control_period() if runner is None else runner.control_period()) or scheduler.timing.frame_s
+    )
+    if trace_sink is not None:
+        trace_sink.start(
+            core=core,
+            effective_run=effective_run,
+            control_period_s=period,
+            setpoint=setpoint,
         )
-        if trace_sink is not None:
-            trace_sink.start(
-                core=core,
-                effective_run=effective_run,
-                control_period_s=period,
-                setpoint=setpoint,
-            )
-        requested, fan_frac = 0.0, 1.0
-        next_solve = 0.0
-        actual_auger_on = False
-        feedback_start, feedback_delivered, feedback_requested = 0.0, 0.0, 0.0
-        latest_result = None
-        temps, duties = [], []
-        delivered_request_s = delivered_actual_s = delivered_window_s = 0.0
-        solve_durations, deadline_misses, stale_episodes, settle_from = [], [], 0, None
-        for t in range(scenario.duration_s):
-            clock.t = float(t)
-            new_sp = _setpoint_at(scenario, t)
-            if new_sp != setpoint:
-                setpoint = new_sp
-                if runner is None:
-                    core.set_target(setpoint)
-                else:
-                    runner.set_target(setpoint)
-                next_solve = t + period
-                settle_from = None
+    requested, fan_frac = 0.0, 1.0
+    next_solve = 0.0
+    actual_auger_on = False
+    feedback_start, feedback_delivered, feedback_requested = 0.0, 0.0, 0.0
+    latest_result = None
+    temps, duties = [], []
+    delivered_request_s = delivered_actual_s = delivered_window_s = 0.0
+    solve_durations, deadline_misses, stale_episodes, settle_from = [], [], 0, None
+    for t in range(scenario.duration_s):
+        clock.advance(float(t) - clock.monotonic())
+        now = clock.monotonic()
+        new_sp = _setpoint_at(scenario, t)
+        if new_sp != setpoint:
+            setpoint = new_sp
+            if runner is None:
+                core.set_target(setpoint)
+            else:
+                runner.set_target(setpoint)
+            next_solve = t + period
+            settle_from = None
 
-            lid_open = _lid_open_at(scenario, t)
-            lid_paused = _lid_paused_at(scenario, t, cycle_data)
-            lid_pause_start = _lid_pause_start_at(scenario, t)
-            manual_inhibit = _manual_inhibited_at(scenario, t)
-            manual_start = _manual_inhibit_start_at(scenario, t)
-            temp_f = _c_to_f(plant_instance.measured())
-            solved = t >= next_solve
-            if solved:
-                next_solve = t + period
-                if runner is None:
-                    raw = core.update(temp_f)
-                    if isinstance(raw, dict):
-                        requested = float(raw.get("cycle_ratio", 0.0))
-                        fan = raw.get("fan") or {}
-                        if fan.get("duty") is not None:
-                            fan_frac = float(fan["duty"]) / 100.0
-                    else:
-                        requested = float(raw)
-                    diagnostics = getattr(core, "trace_diagnostics", lambda: None)()
-                    duration = getattr(diagnostics, "solve_duration_seconds", None)
-                    if duration is not None:
-                        solve_durations.append(float(duration))
-                        deadline_misses.append(int(diagnostics.deadline_miss_count))
-                        stale_episodes += int(diagnostics.stale_state.value == "stale")
-                else:
-                    latest_result = runner.latest_from(temp_f)
-                    requested = float(latest_result.cycle_ratio)
-                    fan = latest_result.fan or {}
+        lid_open = _lid_open_at(scenario, t)
+        lid_paused = _lid_paused_at(scenario, t, cycle_data)
+        lid_pause_start = _lid_pause_start_at(scenario, t)
+        manual_inhibit = _manual_inhibited_at(scenario, t)
+        manual_start = _manual_inhibit_start_at(scenario, t)
+        temp_f = _c_to_f(plant_instance.measured())
+        solved = t >= next_solve
+        if solved:
+            next_solve = t + period
+            if runner is None:
+                raw = core.update(temp_f)
+                if isinstance(raw, dict):
+                    requested = float(raw.get("cycle_ratio", 0.0))
+                    fan = raw.get("fan") or {}
                     if fan.get("duty") is not None:
                         fan_frac = float(fan["duty"]) / 100.0
-                    diagnostics = latest_result.diagnostics
-                    if diagnostics is not None:
-                        solve_durations.append(float(latest_result.solve_duration_seconds))
-                        deadline_misses.append(int(latest_result.deadline_miss_count))
-                        stale_episodes += int(latest_result.stale_state.value == "stale")
-                if output_transform is not None:
-                    requested = float(output_transform(requested))
-                requested = min(max(requested, 0.0), effective_max)
-                if trace_sink is not None:
-                    assert latest_result is not None
-                    trace_sink.solved(t=float(t), result=latest_result, requested=requested)
+                else:
+                    requested = float(raw)
+                diagnostics = getattr(core, "trace_diagnostics", lambda: None)()
+                duration = getattr(diagnostics, "solve_duration_seconds", None)
+                if duration is not None:
+                    solve_durations.append(float(duration))
+                    deadline_misses.append(int(diagnostics.deadline_miss_count))
+                    stale_episodes += int(diagnostics.stale_state.value == "stale")
+            else:
+                latest_result = runner.latest_from(temp_f)
+                requested = float(latest_result.cycle_ratio)
+                fan = latest_result.fan or {}
+                if fan.get("duty") is not None:
+                    fan_frac = float(fan["duty"]) / 100.0
+                diagnostics = latest_result.diagnostics
+                if diagnostics is not None:
+                    solve_durations.append(float(latest_result.solve_duration_seconds))
+                    deadline_misses.append(int(latest_result.deadline_miss_count))
+                    stale_episodes += int(latest_result.stale_state.value == "stale")
+            if output_transform is not None:
+                requested = float(output_transform(requested))
+            requested = min(max(requested, 0.0), effective_max)
+            if trace_sink is not None:
+                assert latest_result is not None
+                trace_sink.solved(t=float(t), result=latest_result, requested=requested)
 
-            inhibited = lid_paused or manual_inhibit
-            reset_reason = PulseResetReason.MANUAL if manual_start else PulseResetReason.LID
-            if lid_pause_start or manual_start:
-                # Account the observed interval first, then discard the
-                # interrupted credit exactly as Hold does before preemption.
-                decision = scheduler.advance(requested, float(t), actual_auger_on)
+        inhibited = lid_paused or manual_inhibit
+        reset_reason = PulseResetReason.MANUAL if manual_start else PulseResetReason.LID
+        if lid_pause_start or manual_start:
+            # Account the observed interval first, then discard the
+            # interrupted credit exactly as Hold does before preemption.
+            decision = scheduler.advance(requested, now, actual_auger_on)
+            if trace_sink is not None and latest_result is not None:
+                trace_sink.frames(
+                    t=float(t),
+                    revision=latest_result.revision,
+                    frames=decision.completed_frames,
+                )
+            for frame in decision.completed_frames:
+                if frame.complete:
+                    window_s = frame.nominal_end_s - frame.nominal_start_s
+                    delivered_request_s += frame.latched_request * window_s
+                    delivered_actual_s += frame.delivered_on_s
+                    delivered_window_s += window_s
+            if trace_sink is not None and latest_result is not None and t > feedback_start:
+                delivered = decision.delivered_on_s - feedback_delivered
+                trace_sink.applied(
+                    interval_start_s=feedback_start,
+                    interval_end_s=float(t),
+                    result=latest_result,
+                    requested=feedback_requested,
+                    realized=delivered / (t - feedback_start),
+                    sample_complete=False,
+                )
+            scheduler.reset(reset_reason)
+            frame_wall_start_ms = None
+            actual_auger_on = False
+            # PulseScheduler retains its monotone total across reset;
+            # baseline this new feedback interval at that total so an
+            # interrupted frame cannot be charged again after release.
+            feedback_start = float(t)
+            feedback_delivered = decision.delivered_on_s
+        elif inhibited:
+            actual_auger_on = False
+        else:
+            wall_now_ms = round(clock.now() * 1_000)
+            if frame_wall_start_ms is None:
+                frame_wall_start_ms = wall_now_ms
+            decision = scheduler.advance(requested, now, actual_auger_on)
+            if trace_sink is not None and latest_result is not None:
+                trace_sink.frames(
+                    t=float(t),
+                    revision=latest_result.revision,
+                    frames=decision.completed_frames,
+                )
+            for frame in decision.completed_frames:
+                if frame.complete:
+                    window_s = frame.nominal_end_s - frame.nominal_start_s
+                    delivered_request_s += frame.latched_request * window_s
+                    delivered_actual_s += frame.delivered_on_s
+                    delivered_window_s += window_s
+                observation_sequence += 1
+                _observe_frame(
+                    core,
+                    frame,
+                    sequence=observation_sequence,
+                    wall_start_ms=frame_wall_start_ms,
+                    wall_end_ms=wall_now_ms,
+                    temp_c=plant_instance.measured(),
+                    setpoint_c=(setpoint - 32.0) * 5.0 / 9.0,
+                    fan_frac=fan_frac,
+                    lid_open=lid_open,
+                    manual_override=manual_inhibit,
+                    revision=0 if latest_result is None else latest_result.revision,
+                )
+            if decision.completed_frames:
+                frame_wall_start_ms = wall_now_ms
+            actual_auger_on = decision.command_on
+            if solved and t > feedback_start:
+                delivered = decision.delivered_on_s - feedback_delivered
+                realized = delivered / (t - feedback_start)
+                _report(
+                    core,
+                    realized,
+                    "controller",
+                    t,
+                    requested=feedback_requested,
+                )
                 if trace_sink is not None and latest_result is not None:
-                    trace_sink.frames(
-                        t=float(t),
-                        revision=latest_result.revision,
-                        frames=decision.completed_frames,
-                    )
-                for frame in decision.completed_frames:
-                    if frame.complete:
-                        window_s = frame.nominal_end_s - frame.nominal_start_s
-                        delivered_request_s += frame.latched_request * window_s
-                        delivered_actual_s += frame.delivered_on_s
-                        delivered_window_s += window_s
-                if trace_sink is not None and latest_result is not None and t > feedback_start:
-                    delivered = decision.delivered_on_s - feedback_delivered
                     trace_sink.applied(
                         interval_start_s=feedback_start,
                         interval_end_s=float(t),
                         result=latest_result,
                         requested=feedback_requested,
-                        realized=delivered / (t - feedback_start),
-                        sample_complete=False,
+                        realized=realized,
                     )
-                scheduler.reset(reset_reason)
-                actual_auger_on = False
-                # PulseScheduler retains its monotone total across reset;
-                # baseline this new feedback interval at that total so an
-                # interrupted frame cannot be charged again after release.
                 feedback_start = float(t)
                 feedback_delivered = decision.delivered_on_s
-            elif inhibited:
-                actual_auger_on = False
-            else:
-                decision = scheduler.advance(requested, float(t), actual_auger_on)
-                if trace_sink is not None and latest_result is not None:
-                    trace_sink.frames(
-                        t=float(t),
-                        revision=latest_result.revision,
-                        frames=decision.completed_frames,
-                    )
-                for frame in decision.completed_frames:
-                    if frame.complete:
-                        window_s = frame.nominal_end_s - frame.nominal_start_s
-                        delivered_request_s += frame.latched_request * window_s
-                        delivered_actual_s += frame.delivered_on_s
-                        delivered_window_s += window_s
-                    observation_sequence += 1
-                    _observe_frame(
-                        core,
-                        frame,
-                        sequence=observation_sequence,
-                        temp_c=plant_instance.measured(),
-                        setpoint_c=(setpoint - 32.0) * 5.0 / 9.0,
-                        fan_frac=fan_frac,
-                        lid_open=lid_open,
-                        manual_override=manual_inhibit,
-                        revision=0 if latest_result is None else latest_result.revision,
-                    )
-                actual_auger_on = decision.command_on
-                if solved and t > feedback_start:
-                    delivered = decision.delivered_on_s - feedback_delivered
-                    realized = delivered / (t - feedback_start)
-                    _report(
-                        core,
-                        realized,
-                        "controller",
-                        t,
-                        requested=feedback_requested,
-                    )
-                    if trace_sink is not None and latest_result is not None:
-                        trace_sink.applied(
-                            interval_start_s=feedback_start,
-                            interval_end_s=float(t),
-                            result=latest_result,
-                            requested=feedback_requested,
-                            realized=realized,
-                        )
-                    feedback_start = float(t)
-                    feedback_delivered = decision.delivered_on_s
-            auger_frac = float(actual_auger_on)
-            if solved:
-                feedback_requested = requested
+        auger_frac = float(actual_auger_on)
+        if solved:
+            feedback_requested = requested
 
-            plant_instance.step(
-                auger_on=auger_frac,
-                fan_frac=0.0 if lid_paused else fan_frac,
-                lid_open=lid_open,
-            )
-            temps.append(temp_f)
-            duties.append(auger_frac)
-            if abs(temp_f - setpoint) <= 5.0:
-                if settle_from is None:
-                    settle_from = t
-            else:
-                settle_from = None
+        plant_instance.step(
+            auger_on=auger_frac,
+            fan_frac=0.0 if lid_paused else fan_frac,
+            lid_open=lid_open,
+        )
+        temps.append(temp_f)
+        duties.append(auger_frac)
+        if abs(temp_f - setpoint) <= 5.0:
+            if settle_from is None:
+                settle_from = t
+        else:
+            settle_from = None
 
-        final_decision = scheduler.advance(requested, float(scenario.duration_s), actual_auger_on)
-        for frame in final_decision.completed_frames:
-            if frame.complete:
-                window_s = frame.nominal_end_s - frame.nominal_start_s
-                delivered_request_s += frame.latched_request * window_s
-                delivered_actual_s += frame.delivered_on_s
-                delivered_window_s += window_s
+    clock.advance(float(scenario.duration_s) - clock.monotonic())
+    final_decision = scheduler.advance(requested, clock.monotonic(), actual_auger_on)
+    for frame in final_decision.completed_frames:
+        if frame.complete:
+            window_s = frame.nominal_end_s - frame.nominal_start_s
+            delivered_request_s += frame.latched_request * window_s
+            delivered_actual_s += frame.delivered_on_s
+            delivered_window_s += window_s
 
-        temps = np.asarray(temps)
-        duties = np.asarray(duties)
-        sp_series = np.asarray([_setpoint_at(scenario, t) for t in range(scenario.duration_s)])
-        err = temps - sp_series
-        if trace_sink is not None and latest_result is not None and float(scenario.duration_s) > feedback_start:
-            trace_sink.frames(
-                t=float(scenario.duration_s),
-                revision=latest_result.revision,
-                frames=final_decision.completed_frames,
-            )
-            delivered = final_decision.delivered_on_s - feedback_delivered
-            realized = delivered / (float(scenario.duration_s) - feedback_start)
-            trace_sink.applied(
-                interval_start_s=feedback_start,
-                interval_end_s=float(scenario.duration_s),
-                result=latest_result,
-                requested=feedback_requested,
-                realized=realized,
-            )
+    temps = np.asarray(temps)
+    duties = np.asarray(duties)
+    sp_series = np.asarray([_setpoint_at(scenario, t) for t in range(scenario.duration_s)])
+    err = temps - sp_series
+    if trace_sink is not None and latest_result is not None and float(scenario.duration_s) > feedback_start:
+        trace_sink.frames(
+            t=float(scenario.duration_s),
+            revision=latest_result.revision,
+            frames=final_decision.completed_frames,
+        )
+        delivered = final_decision.delivered_on_s - feedback_delivered
+        realized = delivered / (float(scenario.duration_s) - feedback_start)
+        trace_sink.applied(
+            interval_start_s=feedback_start,
+            interval_end_s=float(scenario.duration_s),
+            result=latest_result,
+            requested=feedback_requested,
+            realized=realized,
+        )
 
-        lid_start = min((start for start, _ in scenario.lid_open), default=None)
-        reachability, max_authority = _feasibility(core, cycle_data, plant_instance, scenario)
-        result = {
-            "controller": controller,
-            "scenario": scenario.name,
-            "plant": plant_name,
-            "seed": seed,
-            "effective_run": effective_run,
-            "reachability": reachability.value,
-            "max_authority": _snapshot(max_authority),
-            "iae": float(np.abs(err).sum()),
-            "pct_within_5f": float((np.abs(err) <= 5.0).mean() * 100.0),
-            "overshoot_f": float(err.max()),
-            "undershoot_f": float(err.min()),
-            "settle_s": None if settle_from is None else int(settle_from),
-            "mean_duty": float(duties.mean()),
-            "std_duty": float(duties.std()),
-            "final_temp_f": float(temps[-1]),
-            "lid_min_temp_f": None if lid_start is None else float(temps[lid_start:].min()),
-            "rmse_f": float(np.sqrt(np.mean(err**2))),
-            "steady_peak_to_peak_f": float(np.ptp(temps[-min(len(temps), STEADY_TAIL_S) :])),
-            "auger_on_time_s": float(duties.sum()),
-            "pellet_proxy": float(duties.sum()),
-            "requested_realized_load_error": (
-                abs(delivered_request_s - delivered_actual_s) / delivered_window_s if delivered_window_s else 0.0
-            ),
-            "solver_duration_seconds": tuple(solve_durations),
-            "deadline_misses": max(deadline_misses, default=0),
-            "stale_result_episodes": stale_episodes,
-            "transitions_per_hour": float(np.count_nonzero(np.diff(duties)) * 3600.0 / len(duties)),
-            "lid_recovery_s": None if lid_start is None else _recovery_s(err[lid_start:]),
-        }
-        status = getattr(core, "get_status", lambda: None)()
-        if status is not None:
-            result["status"] = _snapshot(status)
-        cfg = getattr(core, "cfg", None)
-        if cfg is not None and "n_horizon" in cfg:
-            result["configured_n_horizon"] = int(cfg["n_horizon"])
-        if trace_sink is not None:
-            result["trace_session"] = trace_sink.close()
-        return result
-    finally:
-        time.time = real_time_time
+    lid_start = min((start for start, _ in scenario.lid_open), default=None)
+    reachability, max_authority = _feasibility(core, cycle_data, plant_instance, scenario)
+    result = {
+        "controller": controller,
+        "scenario": scenario.name,
+        "plant": plant_name,
+        "seed": seed,
+        "effective_run": effective_run,
+        "reachability": reachability.value,
+        "max_authority": _snapshot(max_authority),
+        "iae": float(np.abs(err).sum()),
+        "pct_within_5f": float((np.abs(err) <= 5.0).mean() * 100.0),
+        "overshoot_f": float(err.max()),
+        "undershoot_f": float(err.min()),
+        "settle_s": None if settle_from is None else int(settle_from),
+        "mean_duty": float(duties.mean()),
+        "std_duty": float(duties.std()),
+        "final_temp_f": float(temps[-1]),
+        "lid_min_temp_f": None if lid_start is None else float(temps[lid_start:].min()),
+        "rmse_f": float(np.sqrt(np.mean(err**2))),
+        "steady_peak_to_peak_f": float(np.ptp(temps[-min(len(temps), STEADY_TAIL_S) :])),
+        "auger_on_time_s": float(duties.sum()),
+        "pellet_proxy": float(duties.sum()),
+        "requested_realized_load_error": (
+            abs(delivered_request_s - delivered_actual_s) / delivered_window_s if delivered_window_s else 0.0
+        ),
+        "solver_duration_seconds": tuple(solve_durations),
+        "deadline_misses": max(deadline_misses, default=0),
+        "stale_result_episodes": stale_episodes,
+        "transitions_per_hour": float(np.count_nonzero(np.diff(duties)) * 3600.0 / len(duties)),
+        "lid_recovery_s": None if lid_start is None else _recovery_s(err[lid_start:]),
+    }
+    status = getattr(core, "get_status", lambda: None)()
+    if status is not None:
+        result["status"] = _snapshot(status)
+    cfg = getattr(core, "cfg", None)
+    if cfg is not None and "n_horizon" in cfg:
+        result["configured_n_horizon"] = int(cfg["n_horizon"])
+    if trace_sink is not None:
+        result["trace_session"] = trace_sink.close()
+    return result
 
 
 def _job(arg):

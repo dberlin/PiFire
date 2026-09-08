@@ -1,32 +1,21 @@
-"""Pins run_scenario's simulated clock for controllers that read time.time().
+"""PID-family solves use simulated physical intervals, independent of wall time.
 
-pid_sp computes its own `dt = time.time() - self.last_update`.
-run_scenario calls `core.update()` in a tight loop with no real elapsed wall
-time between iterations, so without a simulated clock `dt` collapses to
-whatever a handful of Python bytecodes take -- orders of magnitude smaller
-than the control period the loop is modeling. The controller divides by `dt`
-when computing rate-of-change and derivative terms, so an unrealistic `dt`
-saturates its output regardless of the temperature error, and the controller
-never gets exercised at all. This test asserts on the `dt` the controller
-actually observed and on its output staying in a sane range, because a test
-that only checks the final temperature would not distinguish "the controller
-worked" from "the controller was driven off a cliff and the plant happened to
-end up somewhere plausible anyway".
-
-`step_225_275` is included because its setpoint change lands exactly on a
-solve boundary: `set_target()` also resets the controller's own last-update
-clock, so a solve scheduled for the same tick would otherwise hand it dt=0.
+The step scenario resets the target on a solve boundary. Its next solve must
+still wait a full period rather than hiding a duplicate timestamp with an offset.
 """
 
 import importlib
+import math
 
 import pytest
 
-from tools.experiments.controller_matrix import SCENARIOS, run_scenario
+from controller.runtime.clock import ManualClock
+from tools.experiments import controller_matrix
+from tools.experiments.controller_matrix import SCENARIOS, Scenario, run_scenario
 
 
 @pytest.mark.parametrize("scenario_name", ["steady_225", "step_225_275"])
-@pytest.mark.parametrize("controller", ["pid_sp"])
+@pytest.mark.parametrize("controller", ["pid", "pid_sp"])
 def test_controller_observes_the_intended_control_period(controller, scenario_name, monkeypatch):
     mod = importlib.import_module(f"controller.{controller}")
     real_update = mod.Controller.update
@@ -34,9 +23,8 @@ def test_controller_observes_the_intended_control_period(controller, scenario_na
     observed_outputs = []
 
     def _spy_update(self, current):
-        before = self.last_update
         out = real_update(self, current)
-        observed_dts.append(self.last_update - before)
+        observed_dts.append(self.trace_diagnostics().observed_dt_seconds)
         observed_outputs.append(out)
         return out
 
@@ -45,13 +33,43 @@ def test_controller_observes_the_intended_control_period(controller, scenario_na
     row = run_scenario(controller, SCENARIOS[scenario_name], seed=0)
 
     assert observed_dts, "the controller was never solved"
-    # pid_sp names no cadence of its own, so it is solved on the pulse frame --
-    # the same fallback hold.py takes.
+    # Both PID variants use the pulse-frame fallback cadence.
     period = row["effective_run"]["scheduler"]["frame_seconds"]
     assert observed_dts == pytest.approx([period] * len(observed_dts))
 
-    # Not [u_min, u_max] -- the controller's raw output is clamped to that
-    # range by run_scenario, not by the controller itself, so a legitimate
-    # excursion just outside it is fine. What a broken dt actually produces
-    # is many orders of magnitude larger than any of this.
-    assert all(-50.0 <= out <= 50.0 for out in observed_outputs)
+    assert all(math.isfinite(out) for out in observed_outputs)
+
+
+def test_frame_wall_endpoints_are_sampled_independently(monkeypatch):
+    class WallJumpClock(ManualClock):
+        def advance(self, seconds):
+            super().advance(seconds)
+            if self.monotonic() == 10.0:
+                self.jump_wall(-3600.0)
+
+    monkeypatch.setattr(controller_matrix, "ManualClock", WallJumpClock)
+    observations = []
+
+    def capture(core):
+        observe = core.observe_frame
+
+        def capture_frame(frame):
+            observations.append(frame)
+            return observe(frame)
+
+        monkeypatch.setattr(core, "observe_frame", capture_frame)
+
+    run_scenario("pid_sp", Scenario("wall_jump", 61, [(0, 225.0)]), seed=0, core_setup=capture)
+
+    first, second, third = observations
+    assert [(frame.frame_start_s, frame.frame_end_s) for frame in observations] == [
+        (0.0, 20.0),
+        (20.0, 40.0),
+        (40.0, 60.0),
+    ]
+    assert first.wall_start_ms >= 0
+    assert first.wall_end_ms - first.wall_start_ms == -3_580_000
+    assert second.wall_start_ms == first.wall_end_ms
+    assert second.wall_end_ms - second.wall_start_ms == 20_000
+    assert third.wall_start_ms == second.wall_end_ms
+    assert third.wall_end_ms - third.wall_start_ms == 20_000

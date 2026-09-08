@@ -14,7 +14,6 @@ Imported Libraries
 """
 import logging
 import math
-import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -23,6 +22,7 @@ from typing import TYPE_CHECKING, cast
 from common.control_trace import ActuationMode, ControllerBranch, MpcFailureState, ResultStaleState
 from common.persistence.protocols import JsonValue
 from controller.mpc_allocator import AllocationResult
+from controller.runtime.clock import Clock, RealClock
 from controller.runtime.context import EVENT_LOG_NAME
 
 if TYPE_CHECKING:
@@ -156,7 +156,7 @@ Class Definition
 
 
 class ControllerBase:
-    def __init__(self, config, units, cycle_data, *, logger=None):
+    def __init__(self, config, units, cycle_data, *, logger=None, clock: Clock | None = None):
         self.config = config
         self.units = units
         self.cycle_data = cycle_data
@@ -164,6 +164,7 @@ class ControllerBase:
         #: context reaches a controller core, so this parameter is how it
         #: arrives; the default is the name the context itself defaults to.
         self._logger = logging.getLogger(EVENT_LOG_NAME) if logger is None else logger
+        self._clock = RealClock() if clock is None else clock
 
     def update(self, current):
         """
@@ -180,7 +181,7 @@ class ControllerBase:
         set_point :: Temperature Target
         """
         self.set_point = set_point
-        self.last_update = time.time()
+        self.last_update = self._clock.monotonic()
 
     def set_safety_ceiling_c(self, ceiling_c):
         """The grill's configured maximum temperature, in Celsius.
