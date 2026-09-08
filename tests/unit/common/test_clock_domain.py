@@ -61,10 +61,10 @@ def test_unknown_foreign_or_future_stamps_cannot_claim_live_age(stamp, kwargs):
 
 
 def test_rotation_invalidates_previous_generation_without_rewriting_provenance():
-    clock = ManualClock(1_800_000_000.0, monotonic_start=100.0)
+    clock = ManualClock(wall_start=1_800_000_000.0, monotonic_start=100.0)
     domain = RuntimeClockDomain(
         monotonic=clock.monotonic,
-        wall_time=clock.now,
+        wall_time=clock.wall_time,
         boot_id=_BOOT,
         boottime=lambda: clock.monotonic() + 3.0,
     )

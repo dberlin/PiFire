@@ -77,6 +77,8 @@ type Cooktime = string;
 type EstusageI = string;
 type EstusageM = string;
 type AugerontimeC = string | 0;
+type DeliveryComplete = boolean | null;
+type ElapsedSeconds = number | null;
 type EndtimeC = string | 0;
 type EstusageI1 = string;
 type EstusageM1 = string;
@@ -132,6 +134,8 @@ type Ingredients = string[];
 type Step = number;
 type Text4 = string;
 type AugerontimeC1 = string;
+type DeliveryComplete1 = boolean | null;
+type ElapsedSeconds1 = number | null;
 type EndtimeC1 = string | 0;
 type EstusageI2 = string;
 type EstusageM2 = string;
@@ -462,6 +466,8 @@ export interface EmptyCookFileTotals {}
  */
 export interface CookFileEvent {
   augerontime_c: AugerontimeC;
+  delivery_complete?: DeliveryComplete;
+  elapsed_seconds?: ElapsedSeconds;
   endtime_c: EndtimeC;
   estusage_i: EstusageI1;
   estusage_m: EstusageM1;
@@ -668,6 +674,8 @@ export interface MetricRecord {
   auger_cycle_time: FiniteNumber;
   augerontime: FiniteNumber;
   augerontime_c: AugerontimeC1;
+  delivery_complete?: DeliveryComplete1;
+  elapsed_seconds?: ElapsedSeconds1;
   endtime: FiniteNumber;
   endtime_c: EndtimeC1;
   estusage_i: EstusageI2;

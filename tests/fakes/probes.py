@@ -77,6 +77,10 @@ class FakeProbes:
         self.update_probe_map_calls.append(probe_map)
         return []
 
+    def invalidate_control_history(self) -> None:
+        self._health.clear()
+        self._health_transitions.clear()
+
     def set_thermocouple_inference_policy(self, policy, *, now=None):
         self.inference_policy_calls.append(policy)
         self.inference_policy_now_calls.append(now)

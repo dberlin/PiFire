@@ -7,9 +7,11 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from common.clock_domain import ClockStamp, RuntimeClockDomain
 from common.persistence.learning_trajectory import LearningTrajectoryRepository
 from common.persistence.protocols import ControllerStore
 from controller.runtime.actuation_delivery import DeliveredGrillPlatform
+from controller.runtime.clock import Clock
 from controller.runtime.learning_trajectory import LearningTrajectoryRuntime
 from controller.runtime.model_persistence import ModelPersistenceWorker
 
@@ -36,7 +38,7 @@ class ControllerContext:
     devices: object  # Devices
     store: ControllerStore
     notifications: object  # Notifier
-    clock: object  # Clock
+    clock: Clock
     #  Defaulted to the named loggers rather than None so every context carries
     #  a usable logger: no call site needs a None check or a try/except around a
     #  log call, and an un-injected context still reaches the operator's log
@@ -48,3 +50,15 @@ class ControllerContext:
     grey_learning_process: GreyLearningProcessOwner | None = None
     learning_trajectory: LearningTrajectoryRuntime | None = None
     trajectory_next_effective_mode: str | None = None
+    clock_domain: RuntimeClockDomain | None = None
+    last_clock_stamp: ClockStamp | None = None
+    cook_id: str | None = None
+    cook_elapsed_seconds: float | None = None
+
+    def get_clock_domain(self) -> RuntimeClockDomain:
+        if self.clock_domain is None:
+            self.clock_domain = RuntimeClockDomain.for_system(
+                monotonic=lambda: self.clock.monotonic(),
+                wall_time=lambda: self.clock.wall_time(),
+            )
+        return self.clock_domain

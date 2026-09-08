@@ -95,10 +95,10 @@ class PrimeState:
 
 @dataclass
 class Timers:
-    """Loop-wide toggle timestamps, all set from the same start_time at
-    pre-loop setup and advanced independently per tick."""
+    """Monotonic loop deadlines with separately captured wall provenance."""
 
     start_time: float = 0.0
+    start_wall_time: float = 0.0
     auger_toggle: float = 0.0
     display_toggle: float = 0.0
     hopper_toggle: float = 0.0

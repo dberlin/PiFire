@@ -18,6 +18,7 @@ import math
 from functools import partial
 from hashlib import sha256
 
+from common.clock_domain import ClockStamp, continuity_lost
 from common.learning_trajectory import TrajectoryBreakReason
 from common.modes import Mode, StatusState
 from common.process_mon import Process_Monitor
@@ -173,6 +174,15 @@ class ControlMode:
         self.control = None
         self._excitation_last_read_at = None
         self._trajectory_active_event = None
+        self._last_clock_stamp: ClockStamp | None = None
+        self._terminal_monotonic_s: float | None = None
+        self._clock_discontinuous: bool = False
+        self._mode_setup_started: bool = False
+        self._metrics_stamped: bool = False
+        self._cycle_finished: bool = False
+        self._last_valid_ptemp: float | None = None
+        self._auger_observed_at: float | None = None
+        self._auger_observed_on: bool = False
 
     # ---- hooks (safe defaults) ----
     def setup(self):
@@ -234,6 +244,80 @@ class ControlMode:
     def _on_auger_off(self, now):
         pass
 
+    def _on_control_discontinuity(self, last_observed_monotonic: float, reason: str) -> None:
+        self.grill.auger_off()
+        self.grill.igniter_off()
+        self.grill.fan_off()
+        self.grill.power_off()
+        self._emit_trajectory_boundary(
+            TrajectoryBreakReason.CLOCK_DISCONTINUITY,
+            self.ctx.clock.wall_time(),
+            reason,
+            monotonic_ms=round(last_observed_monotonic * 1000),
+        )
+
+    def _retire_control_clock(self, cutoff: float) -> None:
+        if self._clock_discontinuous:
+            return
+        self._clock_discontinuous = True
+        self._terminal_monotonic_s = cutoff
+        try:
+            if self._mode_setup_started:
+                self._on_control_discontinuity(cutoff, "control-clock-discontinuity")
+            else:
+                ControlMode._on_control_discontinuity(self, cutoff, "control-clock-discontinuity")
+        finally:
+            self._excitation_last_read_at = None
+            self.probe_complex.invalidate_control_history()
+            # Consume pre-gap intents while outputs are fenced, then replace their
+            # actuation request with Error. They must not replay on the next tick.
+            self.ctx.store.execute_control_writes()
+            self.control = self.ctx.store.read_control()
+            self.control["manual"]["change"] = False
+            self.control["manual"]["output"] = False
+            self.state.manual_override = {name: 0.0 for name in self.state.manual_override}
+            request_transition(
+                self.ctx,
+                self.control,
+                Mode.ERROR,
+                kind=TransitionKind.SAFETY,
+                display=("text", "ERROR"),
+            )
+
+    def _admit_clock(self) -> ClockStamp | None:
+        if self._clock_discontinuous:
+            return None
+        previous = self._last_clock_stamp or self.ctx.last_clock_stamp
+        try:
+            stamp = self.ctx.get_clock_domain().capture()
+        except (OSError, ValueError) as error:
+            self.ctx.event_log.error(f"Control clock capture failed: {error}")
+            self._retire_control_clock(
+                self.state.timers.start_time if previous is None else previous.observed_monotonic_s
+            )
+            return None
+        if continuity_lost(stamp if previous is None else previous, stamp):
+            self._retire_control_clock(
+                stamp.observed_monotonic_s if previous is None else previous.observed_monotonic_s
+            )
+            return None
+        self._last_clock_stamp = stamp
+        self.ctx.last_clock_stamp = stamp
+        return stamp
+
+    def _account_auger_delivery(self, now: float, actual_auger_on: bool) -> None:
+        """Integrate observed non-Hold delivery; framed Hold owns its own metric."""
+        if self.name == Mode.HOLD or self._clock_discontinuous:
+            return
+        previous = self._auger_observed_at
+        if previous is not None:
+            if now < previous:
+                raise ValueError("auger observation time must be monotone")
+            if self._auger_observed_on:
+                self.state.metrics["augerontime"] = self.state.metrics.get("augerontime", 0.0) + now - previous
+        self._auger_observed_at = now
+        self._auger_observed_on = actual_auger_on
+
     # ---- shared helpers ----
     @staticmethod
     def _trajectory_digest(value) -> str:
@@ -247,7 +331,7 @@ class ControlMode:
         return sha256(encoded).hexdigest()
 
     def _trajectory_clock_pair(self):
-        return round(self.ctx.clock.monotonic() * 1_000), int(self.ctx.clock.now() * 1_000)
+        return round(self.ctx.clock.monotonic() * 1_000), int(self.ctx.clock.wall_time() * 1_000)
 
     @staticmethod
     def _mode_value(mode):
@@ -480,11 +564,15 @@ class ControlMode:
         if not self._valid_cook_id(cook_id):
             cook_id = self.ctx.store.ensure_cook_id(preferred=preferred)
             control["cook_id"] = cook_id
+        if cook_id != self.ctx.cook_id:
+            if self.ctx.cook_id is not None or not self._valid_cook_id(previous_cook_id):
+                self.ctx.cook_elapsed_seconds = 0.0
+            self.ctx.cook_id = cook_id
         self.control = control
         if now is not None and self._valid_cook_id(previous_cook_id) and previous_cook_id != cook_id:
             self._emit_trajectory_boundary(
                 TrajectoryBreakReason.COOK_ROTATED,
-                now,
+                self.ctx.clock.wall_time(),
                 f"cook rotated from {previous_cook_id} to {cook_id}",
                 replacement=True,
             )
@@ -494,6 +582,10 @@ class ControlMode:
     def _stamp_mode_metric(self, control, pelletdb) -> None:
         self.ctx.store.append_metric()
         self.state.metrics = self.ctx.store.read_metrics()
+        self.state.metrics["starttime"] = self.state.timers.start_wall_time * 1000
+        self.state.metrics["elapsed_seconds"] = 0.0
+        self.state.metrics["delivery_complete"] = True
+        self._metrics_stamped = True
         self.state.metrics["mode"] = self.name
         self.state.metrics["smokeplus"] = control["s_plus"]
         self.state.metrics["primary_setpoint"] = control["primary_setpoint"]
@@ -512,12 +604,17 @@ class ControlMode:
         control = self.ctx.store.read_control()
         control["cook_id"] = cook_id
         self.control = control
+        self.ctx.cook_id = cook_id
+        self.ctx.cook_elapsed_seconds = 0.0
+        self.state.timers.start_time = now
+        self.state.timers.start_wall_time = self.ctx.clock.wall_time()
+        self._auger_observed_at = now
         self._stamp_mode_metric(control, self.ctx.store.read_pellet_db())
         self.state.timers.auger_toggle = now
         if self._valid_cook_id(previous_cook_id) and previous_cook_id != cook_id:
             self._emit_trajectory_boundary(
                 TrajectoryBreakReason.HISTORY_CLEARED,
-                now,
+                self.ctx.clock.wall_time(),
                 f"history cleared from {previous_cook_id} to {cook_id}",
                 replacement=True,
             )
@@ -534,6 +631,7 @@ class ControlMode:
         accumulating augerontime metrics on auger-off. Hold overrides
         `_on_auger_on` to also recompute OnTime/OffTime/CycleTime and publish
         MQTT PID info -- that part is NOT reproduced here."""
+        self._account_auger_delivery(now, bool(current_output_status["auger"]))
         if self.state.manual_override["auger"] < now:
             had_manual_override = self.state.manual_override["auger"] != 0
             self.state.manual_override["auger"] = 0
@@ -553,12 +651,11 @@ class ControlMode:
             ):
                 self.grill.auger_off()
                 self._on_auger_off(now)
-                # Add auger ON time to the metrics
-                self.state.metrics["augerontime"] += now - self.state.timers.auger_toggle
                 self.ctx.store.update_metrics(self.state.metrics)
                 # Set current last toggle time to now
                 self.state.timers.auger_toggle = now
                 self.ctx.event_log.debug("Cycle Event: Auger Off")
+        self._account_auger_delivery(now, bool(self.grill.get_output_status()["auger"]))
 
     def _smoke_plus_fan_tick(self, now, ptemp, current_output_status):
         """Smoke Plus fan cycling + the elif restore chain. Gated to Smoke
@@ -745,7 +842,7 @@ class ControlMode:
                 for index, item in enumerate(control["notify_data"]):
                     if item["type"] == "timer":
                         control["notify_data"][index]["req"] = True
-                        timer_start = ctx.clock.now()
+                        timer_start = ctx.clock.wall_time()
                         control["timer"]["start"] = timer_start
                         control["timer"]["paused"] = 0
                         control["timer"]["end"] = timer_start + (control["recipe"]["step_data"]["timer"] * 60)
@@ -914,6 +1011,7 @@ class ControlMode:
                 self._on_manual_output("fan", control["manual"]["output"])
 
             if control["manual"]["change"] == "auger":
+                self._account_auger_delivery(now, bool(current_output_status["auger"]))
                 if control["manual"]["output"] and not current_output_status["auger"]:
                     grill_platform.auger_on()
                     self.ctx.event_log.debug("Auger ON")
@@ -922,6 +1020,7 @@ class ControlMode:
                     self.ctx.event_log.debug("Auger OFF")
                 manual_override["auger"] = override_time
                 self._on_manual_output("auger", control["manual"]["output"])
+                self._account_auger_delivery(now, bool(grill_platform.get_output_status()["auger"]))
 
             if control["manual"]["change"] == "igniter":
                 if control["manual"]["output"] and not current_output_status["igniter"]:
@@ -1020,7 +1119,25 @@ class ControlMode:
         status_data["units"] = self.settings["globals"]["units"]
         status_data["mode"] = mode
         status_data["recipe"] = control["mode"] == Mode.RECIPE
-        status_data["start_time"] = start_time
+        status_data["start_time"] = self.state.timers.start_wall_time
+        stamp = self._last_clock_stamp
+        now = stamp.observed_monotonic_s if stamp is not None else self.ctx.clock.monotonic()
+        elapsed = max(0.0, now - start_time)
+        status_data["elapsed_seconds"] = elapsed
+        duration: float | None = None
+        if mode in (Mode.STARTUP, Mode.REIGNITE):
+            duration = self.state.startup.timer
+        elif mode == Mode.SHUTDOWN:
+            duration = self.settings["shutdown"]["shutdown_duration"]
+        elif mode == Mode.PRIME:
+            duration = self.state.prime.duration
+        status_data["remaining_seconds"] = None if duration is None else max(0.0, duration - elapsed)
+        status_data["lid_open_remaining_seconds"] = 0.0
+        status_data["cook_elapsed_seconds"] = (
+            None if self.ctx.cook_elapsed_seconds is None else self.ctx.cook_elapsed_seconds + elapsed
+        )
+        status_data["clock_stamp"] = None if stamp is None else stamp.as_dict()
+        status_data["running"] = not self._cycle_finished and not self._clock_discontinuous
         status_data["start_duration"] = self.state.startup.timer
         status_data["shutdown_duration"] = self.settings["shutdown"]["shutdown_duration"]
         status_data["prime_duration"] = 0
@@ -1075,9 +1192,11 @@ class ControlMode:
         if settings is None or control is None:
             raise RuntimeError("thermocouple excitation requires loaded control settings")
         if now is None:
-            now = self.ctx.clock.now()
+            now = self.ctx.clock.monotonic()
         output_status = self.grill.get_output_status()
-        elapsed = 0.0 if self._excitation_last_read_at is None else max(0.0, now - self._excitation_last_read_at)
+        elapsed = 0.0 if self._excitation_last_read_at is None else now - self._excitation_last_read_at
+        if elapsed < 0:
+            raise ValueError("excitation observation time must be monotone")
         delivered_heat_on_s = (
             elapsed if output_status.get("auger", False) or output_status.get("igniter", False) else 0.0
         )
@@ -1129,14 +1248,24 @@ class ControlMode:
 
     # ---- shared skeleton ----
     def run(self):
+        monitor = Process_Monitor("control", restart_control, timeout=30)
+        monitor.start_monitor()
+        completed = False
+        try:
+            result = self._run_cycle(monitor)
+            completed = True
+            return result
+        finally:
+            try:
+                self._finish_cycle(failed=not completed)
+            finally:
+                monitor.stop_monitor()
+
+    def _run_cycle(self, monitor):
         ctx = self.ctx
         mode = self.name
         grill_platform = self.grill
         probe_complex = self.probe_complex
-
-        # Setup Process Monitor and Start
-        monitor = Process_Monitor("control", restart_control, timeout=30)
-        monitor.start_monitor()
 
         # Precondition for entering into main control loop
         status = "Active"
@@ -1150,6 +1279,12 @@ class ControlMode:
         ctx.store.write_control_snapshot(control, origin="control")
 
         self.ctx.event_log.info(f"{mode} Mode started.")
+        stamp = self._admit_clock()
+        if stamp is None:
+            return ()
+        start_time = stamp.observed_monotonic_s
+        self.state.timers.start_time = start_time
+        self.state.timers.start_wall_time = stamp.observed_wall_s
 
         # Pre-Loop Setup Recipe Triggers
         self._setup_recipe_triggers(control)
@@ -1173,7 +1308,11 @@ class ControlMode:
             trajectory_entry_monotonic_ms,
             trajectory_entry_wall_ms,
         )
+        if self._admit_clock() is None:
+            return ()
         preflight_data, _ = self._read_probes_with_excitation()
+        if self._admit_clock() is None:
+            return ()
         preflight_ptemp = next(iter(preflight_data["primary"].values()), None)
         preflight_monotonic_ms, preflight_wall_ms = self._trajectory_clock_pair()
         self._emit_trajectory_temperature(
@@ -1182,14 +1321,14 @@ class ControlMode:
             preflight_monotonic_ms,
             preflight_wall_ms,
         )
-        last_valid_ptemp = preflight_ptemp if isinstance(preflight_ptemp, (int, float)) else None
+        self._last_valid_ptemp = preflight_ptemp if isinstance(preflight_ptemp, (int, float)) else None
         if self._process_thermocouple_health(preflight_data):
             grill_platform.fan_off()
             grill_platform.power_off()
             fault_monotonic_ms, fault_wall_ms = self._trajectory_clock_pair()
             self._emit_trajectory_boundary(
                 TrajectoryBreakReason.SAFETY,
-                ctx.clock.now(),
+                ctx.clock.wall_time(),
                 "preflight-thermocouple-fault",
             )
             self._emit_trajectory_mode_exited(
@@ -1199,12 +1338,20 @@ class ControlMode:
                 next_effective_mode=Mode.ERROR,
                 exit_reason=TrajectoryBreakReason.ERROR,
             )
-            monitor.stop_monitor()
             self.ctx.event_log.error("Primary thermocouple fault blocked mode setup.")
             return ()
 
+        if self._admit_clock() is None:
+            return ()
+
         # ---- mode-specific pre-loop setup ----
+        self._mode_setup_started = True
         self.setup()
+        stamp = self._admit_clock()
+        if stamp is None:
+            return ()
+        self._account_auger_delivery(stamp.observed_monotonic_s, bool(grill_platform.get_output_status()["auger"]))
+        self._excitation_last_read_at = stamp.observed_monotonic_s
         retained_metrics = ctx.store.read_all_metrics()
         retained_id = (
             retained_metrics[0].get("id")
@@ -1216,7 +1363,11 @@ class ControlMode:
         self._stamp_mode_metric(control, pelletdb)
 
         # Get initial probe sensor data, temperatures
+        if self._admit_clock() is None:
+            return ()
         sensor_data, _ = self._read_probes_with_excitation()
+        if self._admit_clock() is None:
+            return ()
         ptemp = next(iter(sensor_data["primary"].values()))  # Primary Temperature or the Pit Temperature
         sample_monotonic_ms, sample_wall_ms = self._trajectory_clock_pair()
         self._emit_trajectory_temperature(
@@ -1230,23 +1381,19 @@ class ControlMode:
         if self._process_thermocouple_health(sensor_data):
             self._emit_trajectory_boundary(
                 TrajectoryBreakReason.SAFETY,
-                ctx.clock.now(),
+                ctx.clock.wall_time(),
                 "thermocouple-fault",
             )
-            self._on_safety_event("thermocouple_fault", ctx.clock.now())
+            self._on_safety_event("thermocouple_fault", ctx.clock.monotonic())
             status = "Inactive"
         else:
             if isinstance(ptemp, (int, float)):
-                last_valid_ptemp = ptemp
+                self._last_valid_ptemp = ptemp
             status = self.setup_safety(ptemp)
 
         # Apply Smart Start Settings if Enabled (default; Startup/Reignite/Smoke
         # override self.state.startup.timer from their own setup())
         self.state.startup.timer = self.settings["startup"]["duration"]
-
-        # Set the start time
-        start_time = ctx.clock.now()
-        self.state.timers.start_time = start_time
 
         # ---- declarative pre_loop guards: the flameout edges live here instead
         # of in setup_safety. A fired guard aborts the loop exactly as
@@ -1280,7 +1427,10 @@ class ControlMode:
 
         # ============ Main Work Cycle ============
         while status == "Active":
-            now = ctx.clock.now()
+            stamp = self._admit_clock()
+            if stamp is None:
+                break
+            now = stamp.observed_monotonic_s
 
             stamp_control_heartbeat(ctx)
 
@@ -1314,7 +1464,16 @@ class ControlMode:
                 probe_complex.update_probe_profiles(self.settings["probe_settings"]["probe_map"]["probe_info"])
 
             # ---- SENSE: single fresh probe read for the whole tick ----
+            stamp = self._admit_clock()
+            if stamp is None:
+                break
+            now = stamp.observed_monotonic_s
             sensor_data, current_output_status = self._read_probes_with_excitation(now)
+            stamp = self._admit_clock()
+            if stamp is None:
+                break
+            now = stamp.observed_monotonic_s
+            self._account_auger_delivery(now, bool(current_output_status["auger"]))
             ptemp = next(iter(sensor_data["primary"].values()))  # Primary Temperature or the Pit Temperature
             sample_monotonic_ms, sample_wall_ms = self._trajectory_clock_pair()
             self._emit_trajectory_temperature(
@@ -1339,13 +1498,13 @@ class ControlMode:
             if self._process_thermocouple_health(sensor_data):
                 self._emit_trajectory_boundary(
                     TrajectoryBreakReason.SAFETY,
-                    now,
+                    ctx.clock.wall_time(),
                     "thermocouple-fault",
                 )
                 self._on_safety_event("thermocouple_fault", now)
                 break
             if isinstance(ptemp, (int, float)):
-                last_valid_ptemp = ptemp
+                self._last_valid_ptemp = ptemp
             # Manual outputs are fenced behind the fresh primary health check.
             self._apply_manual_overrides(control, now, current_output_status)
 
@@ -1358,7 +1517,7 @@ class ControlMode:
             if evaluate_phase(self, ctx, "pre_act", now, ptemp):
                 self._emit_trajectory_boundary(
                     TrajectoryBreakReason.SAFETY,
-                    now,
+                    ctx.clock.wall_time(),
                     "temperature-guard",
                 )
                 self._on_safety_event("temperature_guard", now)
@@ -1370,13 +1529,15 @@ class ControlMode:
             if self.check_safety(now, ptemp):
                 self._emit_trajectory_boundary(
                     TrajectoryBreakReason.SAFETY,
-                    now,
+                    ctx.clock.wall_time(),
                     "mode-safety",
                 )
                 break
 
             # ---- ACT: merged mode-specific per-tick control/auger/fan logic ----
             self.on_tick(now, ptemp, current_output_status)
+            observed_outputs = grill_platform.get_output_status()
+            self._account_auger_delivery(now, bool(observed_outputs["auger"]))
 
             # The duty that drove this tick, captured AFTER on_tick: on_tick is
             # what sets the cycle ratio and moves the outputs, so reading it any
@@ -1388,7 +1549,7 @@ class ControlMode:
             # ---- PUBLISH ----
             # Every 20 seconds, update ETA for any pending notifications
             if (now - self.state.timers.eta_toggle) > 20:
-                self.state.timers.eta_toggle = ctx.clock.now()
+                self.state.timers.eta_toggle = now
                 update_eta = True
             else:
                 update_eta = False
@@ -1405,13 +1566,13 @@ class ControlMode:
 
             # Send Current Status / Temperature Data to Display Device every 0.5 second
             if (now - self.state.timers.display_toggle) > 0.5:
-                status_data = self._build_status_data(control, pelletdb, start_time)
+                status_data = self._build_status_data(control, pelletdb, self.state.timers.start_time)
                 ctx.store.write_status(status_data)
-                self.state.timers.display_toggle = ctx.clock.now()
+                self.state.timers.display_toggle = now
 
             # Write History & Issue Heartbeat after 3 seconds has passed
             if (now - self.state.timers.temp_toggle) > 3:
-                self.state.timers.temp_toggle = ctx.clock.now()
+                self.state.timers.temp_toggle = now
                 ext_data = bool(self.settings["globals"]["ext_data"])
                 ctx.store.write_history(in_data, ext_data=ext_data)
                 monitor.heartbeat()
@@ -1426,43 +1587,54 @@ class ControlMode:
 
             ctx.clock.sleep(0.05)
 
-        # *********
-        # END Mode Loop
-        # *********
-
-        trajectory_exit_monotonic_ms, trajectory_exit_wall_ms = self._trajectory_clock_pair()
-
-        # Clean-up and Exit
-        grill_platform.auger_off()
-        grill_platform.igniter_off()
-
-        self.ctx.event_log.debug("Auger OFF, Igniter OFF")
-
-        # ---- mode-specific teardown ----
-        self.teardown(last_valid_ptemp)
-        if mode == Mode.HOLD:
-            trajectory_exit_monotonic_ms, trajectory_exit_wall_ms = self._trajectory_clock_pair()
-        self._emit_trajectory_mode_exited(
-            control,
-            trajectory_exit_monotonic_ms,
-            trajectory_exit_wall_ms,
-        )
-
-        self.ctx.event_log.info(f"{mode} mode ended.")
-
-        # Save Pellets Used
-        pelletdb = ctx.store.read_pellet_db()
-        pelletdb["current"]["est_usage"] += self.state.metrics["augerontime"] * self.settings["globals"]["augerrate"]
-        ctx.store.write_pellet_db(pelletdb)
-
-        # Log the end time
-        self.state.metrics["endtime"] = ctx.clock.now() * 1000
-        self.state.metrics["pellet_level_end"] = pelletdb["current"]["hopper_level"]
-        ctx.store.update_metrics(self.state.metrics)
-
-        monitor.stop_monitor()
-
-        if status_data != {}:
-            status_data["mode"] = control["mode"]
-
         return ()
+
+    def _finish_cycle(self, *, failed: bool) -> None:
+        if self._cycle_finished:
+            return
+        ctx = self.ctx
+        try:
+            if self._terminal_monotonic_s is None:
+                stamp = self._admit_clock()
+                if stamp is not None:
+                    self._terminal_monotonic_s = stamp.observed_monotonic_s
+            cutoff = self._terminal_monotonic_s
+            if cutoff is not None:
+                self._account_auger_delivery(cutoff, bool(self.grill.get_output_status()["auger"]))
+        finally:
+            if self._mode_setup_started:
+                self.grill.auger_off()
+                self.grill.igniter_off()
+                if failed:
+                    self.grill.fan_off()
+                    self.grill.power_off()
+        try:
+            if self._mode_setup_started:
+                self.teardown(self._last_valid_ptemp)
+        finally:
+            self._cycle_finished = True
+            cutoff = self._terminal_monotonic_s
+            if cutoff is not None and self._mode_setup_started:
+                self._emit_trajectory_mode_exited(
+                    self.control,
+                    round(cutoff * 1000),
+                    int(ctx.clock.wall_time() * 1000),
+                )
+            if self._metrics_stamped and cutoff is not None:
+                elapsed = max(0.0, cutoff - self.state.timers.start_time)
+                self.state.metrics["elapsed_seconds"] = elapsed
+                self.state.metrics["delivery_complete"] = not self._clock_discontinuous
+                self.state.metrics["endtime"] = ctx.clock.wall_time() * 1000
+                pelletdb = ctx.store.read_pellet_db()
+                pelletdb["current"]["est_usage"] += (
+                    self.state.metrics["augerontime"] * self.settings["globals"]["augerrate"]
+                )
+                ctx.store.write_pellet_db(pelletdb)
+                self.state.metrics["pellet_level_end"] = pelletdb["current"]["hopper_level"]
+                ctx.store.update_metrics(self.state.metrics)
+                if ctx.cook_elapsed_seconds is not None:
+                    ctx.cook_elapsed_seconds += elapsed
+            if self._clock_discontinuous:
+                ctx.get_clock_domain().rotate_runtime()
+                ctx.last_clock_stamp = None
+            self.ctx.event_log.info(f"{self.name} mode ended.")

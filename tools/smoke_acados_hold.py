@@ -69,7 +69,7 @@ def main() -> int:
         return outcome
 
     core.observe_frame = observe_and_count
-    runner = SyncControllerRunner(core)
+    runner = SyncControllerRunner(core, clock=context.clock)
     original_build_runner = runner_module.build_runner
     mode: HoldMode | None = None
     torn_down = False
@@ -91,14 +91,9 @@ def main() -> int:
             raise RuntimeError("restored MPC owner lost the live Hold target")
         mode.state.metrics = {"id": "smoke-acados-hold"}
 
-        clock_now = getattr(context.clock, "now", None)
-        clock_advance = getattr(context.clock, "advance", None)
-        if not callable(clock_now) or not callable(clock_advance):
-            raise RuntimeError("smoke context requires a controllable clock")  # noqa: TRY004  invariant on already-normalized input, not caller type validation
-
         for _ in range(45):
-            mode.on_tick(clock_now(), 180.0, grill.get_output_status())
-            clock_advance(1.0)
+            mode.on_tick(context.clock.monotonic(), 180.0, grill.get_output_status())
+            context.clock.sleep(1.0)
 
         if completed_frames < 1:
             raise RuntimeError("Hold did not deliver a completed framed observation")

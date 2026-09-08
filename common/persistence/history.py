@@ -21,6 +21,8 @@ CLEAR_HISTORY_COMMAND = "clear_history"
 def _metrics_row_to_dict(row):
     metrics = dict(zip(METRIC_COLUMNS, row))
     metrics["smokeplus"] = bool(metrics["smokeplus"])
+    if metrics["delivery_complete"] is not None:
+        metrics["delivery_complete"] = bool(metrics["delivery_complete"])
     return metrics
 
 

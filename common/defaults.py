@@ -666,6 +666,8 @@ metrics_items = [
     ("pellet_level_start", 0),  # Pellet Level at the begining of this mode
     ("pellet_level_end", 0),  # Pellet Level at the end of this mode
     ("pellet_brand_type", ""),  # Pellet Brand and Wood Type
+    ("elapsed_seconds", None),  # Known monotonic active duration; legacy rows remain unknown
+    ("delivery_complete", None),  # Unknown for legacy rows; false across unobserved gaps
 ]
 
 # The columnar `metrics` table's columns, in order -- built generically from

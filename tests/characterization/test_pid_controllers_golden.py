@@ -33,7 +33,7 @@ T0 = 1000.0
 
 
 def _run_variant(module_name):
-    clock = ManualClock(start=T0, monotonic_start=T0)
+    clock = ManualClock(wall_start=T0, monotonic_start=T0)
     mod = importlib.import_module(f"controller.{module_name}")
     c = mod.Controller(dict(PID_CONFIGS[module_name]), "F", dict(CYCLE_DATA), clock=clock)
     c.set_target(SETPOINT)

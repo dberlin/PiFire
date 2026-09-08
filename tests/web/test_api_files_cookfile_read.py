@@ -125,6 +125,28 @@ def test_detail_includes_event_totals(client, folders):
     }
 
 
+def test_historical_detail_does_not_reconstruct_physical_duration(client, folders):
+    from file_mgmt.common import read_json_file_data, update_json_file_data
+
+    history_dir, _ = folders
+    name = write_cookfile(history_dir, "Historical-Duration")
+    events, status = read_json_file_data(history_dir + name, "events")
+    assert status == "OK"
+    for event in events:
+        event.pop("elapsed_seconds", None)
+        event.pop("delivery_complete", None)
+    events[0]["timeinmode"] = "manufactured wall duration"
+    assert update_json_file_data(events, history_dir + name, "events") == "OK"
+
+    response = client.get(f"/api/files/cookfiles/detail?file={name}")
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["event_totals"]["cooktime"] == "Unknown"
+    assert body["events"][0]["timeinmode"] == "Unknown"
+    assert body["events"][0]["elapsed_seconds"] is None
+    assert body["events"][0]["delivery_complete"] is None
+
+
 def test_detail_of_a_cook_with_one_event_reports_no_totals(client, folders):
     """prepare_event_totals indexes events[-2] unconditionally
     (common/app.py:168), so a one-event file raises IndexError and the Flask

@@ -242,18 +242,8 @@ def test_sync_runner_forwards_safety_cancellation_without_an_operator_command():
 
 
 def test_sync_runner_preserves_actuation_mode_and_reports_solve_quality():
-    class Clock:
-        def __init__(self):
-            self.value = 0.0
-
-        def __call__(self):
-            return self.value
-
-        def advance(self, seconds):
-            self.value += seconds
-
     class TimedCore(_Core):
-        def __init__(self, clock):
+        def __init__(self, clock: ManualClock):
             super().__init__()
             self.clock = clock
             self.duration = 6.0
@@ -265,9 +255,9 @@ def test_sync_runner_preserves_actuation_mode_and_reports_solve_quality():
             self.clock.advance(self.duration)
             return 0.25
 
-    clock = Clock()
+    clock = ManualClock(wall_start=1_700_000_000.0, monotonic_start=0.0)
     core = TimedCore(clock)
-    runner = SyncControllerRunner(core, monotonic_clock=clock, wall_clock=clock)
+    runner = SyncControllerRunner(core, clock=clock)
 
     first = runner.latest_from(190.0)
     assert runner.actuation_mode() is ActuationMode.FRAMED_PULSE
@@ -418,22 +408,24 @@ def test_sync_pid_sp_completed_frame_drains_one_observation_outcome():
 @pytest.mark.parametrize("jump", [-3600.0, 3600.0])
 @pytest.mark.parametrize("source", ["clock", "callables", "overrides"])
 def test_clock_survives_pid_reconfigure(jump, source):
-    clock = ManualClock(start=1_700_000_000.0, monotonic_start=100.0)
+    clock = ManualClock(wall_start=1_700_000_000.0, monotonic_start=100.0)
     settings = base_settings()
     settings["controller"]["selected"] = "pid"
     control = {"primary_setpoint": 225.0}
-    timing = {"clock": clock}
-    if source != "clock":
-        timing = {"monotonic_clock": clock.monotonic, "wall_clock": clock.now}
-        if source == "overrides":
-            timing["clock"] = ManualClock(start=2_000_000_000.0, monotonic_start=5.0)
-    runner, status = build_runner(settings, control, **timing)
+    injected_clock = ManualClock(wall_start=2_000_000_000.0, monotonic_start=5.0) if source == "overrides" else clock
+    runner, status = build_runner(
+        settings,
+        control,
+        clock=None if source == "callables" else injected_clock,
+        monotonic_clock=None if source == "clock" else clock.monotonic,
+        wall_clock=None if source == "clock" else clock.wall_time,
+    )
     assert status == "Active"
     try:
         clock.advance(20.0)
         first = runner.latest_from(200.0)
         assert first.diagnostics.observed_dt_seconds == 20.0
-        assert first.completed_wall_time == clock.now()
+        assert first.completed_wall_time == clock.wall_time()
         for selected in ("pid_sp", "pid"):
             settings["controller"]["selected"] = selected
             assert runner.reconfigure(settings, control) == "Active"
@@ -444,7 +436,7 @@ def test_clock_survives_pid_reconfigure(jump, source):
             assert result.diagnostics.observed_dt_seconds == 20.0
             assert result.solve_start_monotonic == clock.monotonic()
             assert result.solve_end_monotonic == clock.monotonic()
-            assert result.completed_wall_time == clock.now()
+            assert result.completed_wall_time == clock.wall_time()
             assert result.stale_state is ResultStaleState.FRESH
     finally:
         runner.stop()
@@ -463,7 +455,7 @@ def test_threaded_reconfigure_preserves_callable_clock_source():
         def close(self):
             self.resume.release()
 
-    clock = ManualClock(start=1_700_000_000.0, monotonic_start=100.0)
+    clock = ManualClock(wall_start=1_700_000_000.0, monotonic_start=100.0)
     settings = base_settings()
     settings["controller"]["selected"] = "pid"
     control = {"primary_setpoint": 225.0}
@@ -473,7 +465,7 @@ def test_threaded_reconfigure_preserves_callable_clock_source():
     runner = ThreadedControllerRunner(
         core,
         monotonic_clock=clock.monotonic,
-        wall_clock=clock.now,
+        wall_clock=clock.wall_time,
         wait_for_period=barrier,
     )
     try:
@@ -494,7 +486,7 @@ def test_threaded_reconfigure_preserves_callable_clock_source():
             assert runner.controller_type() == selected
             assert result.diagnostics.observed_dt_seconds == 20.0
             assert result.solve_start_monotonic == clock.monotonic()
-            assert result.completed_wall_time == clock.now()
+            assert result.completed_wall_time == clock.wall_time()
     finally:
         runner.stop()
 

@@ -26,6 +26,7 @@ from common.common import (
     create_logger,
     generate_uuid,
     log_path,
+    metric_duration_display,
     process_metrics,
     semantic_ver_is_lower,
     semantic_ver_to_list,
@@ -256,6 +257,12 @@ def read_cookfile(filename):
             break  # Exit loop and function, error string in status
 
     if status == "OK":
+        for event in cook_file_struct["events"]:
+            elapsed_seconds = event.setdefault("elapsed_seconds", None)
+            delivery_complete = event.setdefault("delivery_complete", None)
+            event["timeinmode"] = metric_duration_display(
+                event["mode"], event.get("endtime"), elapsed_seconds, delivery_complete
+            )
         cook_file_struct["learning_diagnostics"], status = read_optional_json_file_data(
             filename,
             "learning_diagnostics",

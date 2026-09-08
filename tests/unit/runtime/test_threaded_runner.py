@@ -5,6 +5,7 @@ import time
 from collections.abc import Callable
 from dataclasses import replace
 from types import SimpleNamespace
+from typing import override
 
 import pytest
 
@@ -33,6 +34,7 @@ from common.model_evidence import (
 from common.mpc_learning import MPC_FORECAST_HORIZONS
 from common.persistence.model_evidence import ModelActivationState, append_model_evidence
 from controller.applied_output import AppliedOutput, OutputSource
+from controller.runtime.clock import ManualClock
 from controller.base import ControllerLearningDiagnostics
 from controller.model_learning.activation import (
     ActivationPhase,
@@ -722,16 +724,6 @@ def test_threaded_runner_latest_does_not_block_during_solve():
 
 
 def test_threaded_runner_publishes_one_atomic_quality_snapshot_without_blocking():
-    class Clock:
-        def __init__(self):
-            self.value = 0.0
-
-        def __call__(self):
-            return self.value
-
-        def advance(self, seconds):
-            self.value += seconds
-
     class PeriodBarrier:
         def __init__(self):
             self.release = threading.Event()
@@ -755,7 +747,7 @@ def test_threaded_runner_publishes_one_atomic_quality_snapshot_without_blocking(
             self.release.clear()
 
     class BarrierCore(FakeCore):
-        def __init__(self, clock):
+        def __init__(self, clock: ManualClock):
             super().__init__(period=5.0)
             self.clock = clock
             self.entered = threading.Event()
@@ -769,14 +761,13 @@ def test_threaded_runner_publishes_one_atomic_quality_snapshot_without_blocking(
             self.clock.advance(self.solve_duration)
             return super().update(temp)
 
-    clock = Clock()
+    clock = ManualClock(wall_start=1_700_000_000.0, monotonic_start=0.0)
     warnings = []
     barrier = PeriodBarrier()
     core = BarrierCore(clock)
     runner = ThreadedControllerRunner(
         core,
-        monotonic_clock=clock,
-        wall_clock=clock,
+        clock=clock,
         warning_callback=warnings.append,
         wait_for_period=barrier,
     )
@@ -828,16 +819,6 @@ def test_threaded_runner_publishes_one_atomic_quality_snapshot_without_blocking(
 def test_threaded_reconfigure_atomically_refreshes_capabilities_and_stale_budget(monkeypatch):
     import controller.runtime.runner as runner_module
 
-    class Clock:
-        def __init__(self):
-            self.value = 0.0
-
-        def __call__(self):
-            return self.value
-
-        def advance(self, seconds):
-            self.value += seconds
-
     class PeriodBarrier:
         def __init__(self):
             self.release = threading.Event()
@@ -862,14 +843,13 @@ def test_threaded_reconfigure_atomically_refreshes_capabilities_and_stale_budget
         def actuation_mode(self):
             return self._mode
 
-    clock = Clock()
+    clock = ManualClock(wall_start=1_700_000_000.0, monotonic_start=0.0)
     barrier = PeriodBarrier()
     replacement = Core(period=2.0, commands_fan=True, mode=ActuationMode.FRAMED_PULSE)
     monkeypatch.setattr(runner_module, "_build_core", lambda *args, **kwargs: (replacement, "Active"))
     runner = ThreadedControllerRunner(
         Core(period=5.0, commands_fan=False, mode=ActuationMode.FRAMED_PULSE),
-        monotonic_clock=clock,
-        wall_clock=clock,
+        clock=clock,
         wait_for_period=barrier,
     )
     try:
@@ -1455,21 +1435,33 @@ def test_role_transition_and_completed_frame_share_one_causal_fifo(operation, tr
 
 
 def test_deadline_fallback_waits_behind_frame_queued_during_the_solve():
-    class _Clock:
-        def __init__(self):
-            self.value = 0.0
+    class _Clock(ManualClock):
+        def __init__(self) -> None:
+            super().__init__(wall_start=1_700_000_000.0, monotonic_start=0.0)
             self.lock = threading.Lock()
 
-        def __call__(self):
+        @override
+        def monotonic(self) -> float:
             with self.lock:
-                return self.value
+                return super().monotonic()
 
-        def advance(self, seconds):
+        @override
+        def wall_time(self) -> float:
             with self.lock:
-                self.value += seconds
+                return super().wall_time()
+
+        @override
+        def advance(self, seconds: float) -> None:
+            with self.lock:
+                super().advance(seconds)
+
+        @override
+        def jump_wall(self, seconds: float) -> None:
+            with self.lock:
+                super().jump_wall(seconds)
 
     class _DeadlineCore(_OrderRecordingCore, FakeMpcLearningCore):
-        def __init__(self, clock):
+        def __init__(self, clock: ManualClock):
             super().__init__()
             self.clock = clock
             self.solve_count = 0
@@ -1500,8 +1492,7 @@ def test_deadline_fallback_waits_behind_frame_queued_during_the_solve():
     core = _DeadlineCore(clock)
     runner = ThreadedControllerRunner(
         core,
-        monotonic_clock=clock,
-        wall_clock=clock,
+        clock=clock,
     )
     try:
         runner.submit(212.0)

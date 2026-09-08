@@ -6,6 +6,7 @@ from common.defaults import default_control, default_metrics
 from common.persistence.control import write_control_snapshot
 from common.persistence.history import append_metric, read_all_metrics, read_history, write_history
 from control import _initialize_runtime_state
+from controller.runtime.clock import ManualClock
 from controller.runtime.context import ControllerContext, Devices
 from controller.runtime.controller import Controller
 from controller.runtime.store import SqliteStore
@@ -62,7 +63,7 @@ def test_process_shutdown_closes_shared_trajectory_and_persistence_exactly_once(
         ),
         store=SimpleNamespace(read_settings=dict),
         notifications=object(),
-        clock=SimpleNamespace(now=lambda: 0.0),
+        clock=ManualClock(),
         event_log=SimpleNamespace(info=lambda _message: None),
         control_log=SimpleNamespace(info=lambda _message: None),
         trajectory_repository=repository,

@@ -118,7 +118,7 @@ if __name__ == "__main__":
         trajectory_repository=trajectory_repository,
         read_evidence=read_model_evidence,
     )
-    trajectory_repository.recover_open_segments(int(RealClock().now() * 1_000))
+    trajectory_repository.recover_open_segments(int(RealClock().wall_time() * 1_000))
     learning_trajectory = LearningTrajectoryRuntime(
         journal=devices.grill_platform.journal,
         persistence=model_persistence,

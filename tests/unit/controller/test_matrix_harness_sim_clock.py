@@ -6,6 +6,7 @@ still wait a full period rather than hiding a duplicate timestamp with an offset
 
 import importlib
 import math
+from typing import override
 
 import pytest
 
@@ -42,7 +43,8 @@ def test_controller_observes_the_intended_control_period(controller, scenario_na
 
 def test_frame_wall_endpoints_are_sampled_independently(monkeypatch):
     class WallJumpClock(ManualClock):
-        def advance(self, seconds):
+        @override
+        def advance(self, seconds: float) -> None:
             super().advance(seconds)
             if self.monotonic() == 10.0:
                 self.jump_wall(-3600.0)

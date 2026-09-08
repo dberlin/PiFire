@@ -11,17 +11,19 @@ from sqlite_utils.migrations import Migrations
 
 LEGACY_SCHEMA_VERSION: Final[int] = 10
 REGISTRY_ADOPTION_SCHEMA_VERSION: Final[int] = 11
-CURRENT_SCHEMA_VERSION: Final[int] = 13
+CURRENT_SCHEMA_VERSION: Final[int] = 14
 MIGRATION_SET_NAME: Final[str] = "pifire-schema"
 V11_REGISTRY_ADOPTION: Final[str] = "v0011_adopt_sqlite_utils_registry"
 V12_TRAJECTORY_ROLE_GENERATION: Final[str] = "v0012_trajectory_role_generation"
 V13_TRAJECTORY_CLOCK_DOMAINS: Final[str] = "v0013_trajectory_clock_domains"
+V14_METRIC_MONOTONIC_DURATION: Final[str] = "v0014_metric_monotonic_duration"
 
 _SCHEMA_MIGRATIONS = Migrations(MIGRATION_SET_NAME)
 _MIGRATION_TARGETS: Final[dict[str, int]] = {
     V11_REGISTRY_ADOPTION: REGISTRY_ADOPTION_SCHEMA_VERSION,
     V12_TRAJECTORY_ROLE_GENERATION: 12,
-    V13_TRAJECTORY_CLOCK_DOMAINS: CURRENT_SCHEMA_VERSION,
+    V13_TRAJECTORY_CLOCK_DOMAINS: 13,
+    V14_METRIC_MONOTONIC_DURATION: CURRENT_SCHEMA_VERSION,
 }
 
 
@@ -106,10 +108,10 @@ def _migrate_trajectory_role_generation(database: Database) -> None:
 @_SCHEMA_MIGRATIONS(name=V13_TRAJECTORY_CLOCK_DOMAINS)
 def _migrate_trajectory_clock_domains(database: Database) -> None:
     version = _user_version(database)
-    if version >= CURRENT_SCHEMA_VERSION:
+    if version >= 13:
         return
     if version != 12:
-        raise RuntimeError(f"cannot migrate schema version {version} to {CURRENT_SCHEMA_VERSION}")
+        raise RuntimeError(f"cannot migrate schema version {version} to 13")
     database.execute("ALTER TABLE learning_trajectory_frame RENAME TO learning_trajectory_frame_v12")
     database.execute(
         """
@@ -153,7 +155,19 @@ def _migrate_trajectory_clock_domains(database: Database) -> None:
         "ON learning_trajectory_frame("
         "segment_id, created_corpus_revision, ordinal)"
     )
-    database.execute(f"PRAGMA user_version={CURRENT_SCHEMA_VERSION}")
+    database.execute("PRAGMA user_version=13")
+
+
+@_SCHEMA_MIGRATIONS(name=V14_METRIC_MONOTONIC_DURATION)
+def _migrate_metric_monotonic_duration(database: Database) -> None:
+    version = _user_version(database)
+    if version >= 14:
+        return
+    if version != 13:
+        raise RuntimeError(f"cannot migrate schema version {version} to 14")
+    database.execute("ALTER TABLE metrics ADD COLUMN elapsed_seconds REAL")
+    database.execute("ALTER TABLE metrics ADD COLUMN delivery_complete INTEGER")
+    database.execute("PRAGMA user_version=14")
 
 
 def apply_registered_migrations(database: Database) -> None:

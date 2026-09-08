@@ -193,6 +193,7 @@ def test_schema_v10_migration_from_v8_is_additive_and_declares_learning_tables(d
             ("pifire-schema", "v0011_adopt_sqlite_utils_registry"),
             ("pifire-schema", "v0012_trajectory_role_generation"),
             ("pifire-schema", "v0013_trajectory_clock_domains"),
+            ("pifire-schema", "v0014_metric_monotonic_duration"),
         ]
 
         assert {
@@ -347,6 +348,7 @@ def test_schema_v10_migration_failure_rolls_back_entire_v8_batch_and_retries(
             ("pifire-schema", "v0011_adopt_sqlite_utils_registry"),
             ("pifire-schema", "v0012_trajectory_role_generation"),
             ("pifire-schema", "v0013_trajectory_clock_domains"),
+            ("pifire-schema", "v0014_metric_monotonic_duration"),
         ]
     finally:
         datastore._reset_for_tests(None)
@@ -367,6 +369,7 @@ def test_schema_v10_migration_is_idempotent_and_preserves_trajectory_rows(
         ("pifire-schema", "v0011_adopt_sqlite_utils_registry"),
         ("pifire-schema", "v0012_trajectory_role_generation"),
         ("pifire-schema", "v0013_trajectory_clock_domains"),
+        ("pifire-schema", "v0014_metric_monotonic_duration"),
     ]
     assert all(row[2] for row in audit_rows)
 

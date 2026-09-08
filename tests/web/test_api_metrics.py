@@ -65,6 +65,8 @@ def seed(mode="Smoke", augerontime=100, duration_ms=60_000):
     row["mode"] = mode
     row["augerontime"] = augerontime
     row["primary_setpoint"] = 225
+    row["elapsed_seconds"] = duration_ms / 1000
+    row["delivery_complete"] = True
     append_metric(row)
     update_metrics({"starttime": START, "endtime": 0 if duration_ms == 0 else START + duration_ms})
 
@@ -105,6 +107,37 @@ def test_listing_returns_the_processed_record(ds, client):
     #  bool, not 0/1: _metrics_row_to_dict coerces it, and the TypeScript type
     #  in web-react/src/helpers/metrics/metricsTypes.ts is written from this.
     assert record["smokeplus"] is True
+
+
+def test_listing_duration_survives_wall_rollback_without_changing_delivery(ds, client):
+    from common.persistence.history import flush_metrics, update_metrics
+
+    flush_metrics()
+    seed()
+    update_metrics({"endtime": START - 3_600_000, "elapsed_seconds": 12.5, "delivery_complete": False})
+
+    (record,) = client.get("/api/metrics").get_json()["data"]["metrics"]
+
+    assert record["timeinmode"] == "12 s (incomplete)"
+    assert record["elapsed_seconds"] == 12.5
+    assert record["delivery_complete"] is False
+    assert record["endtime"] < record["starttime"]
+    assert record["augerontime_c"] == "100 s"
+    assert record["estusage_m"] == "30 grams"
+
+
+def test_listing_historical_duration_is_unknown(ds, client):
+    from common.persistence.history import flush_metrics, update_metrics
+
+    flush_metrics()
+    seed()
+    update_metrics({"elapsed_seconds": None, "delivery_complete": None})
+
+    (record,) = client.get("/api/metrics").get_json()["data"]["metrics"]
+
+    assert record["timeinmode"] == "Unknown"
+    assert record["elapsed_seconds"] is None
+    assert record["delivery_complete"] is None
 
 
 def test_a_running_mode_reports_endtime_c_as_zero(ds, client):

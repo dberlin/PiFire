@@ -42,13 +42,13 @@ def stamp_control_heartbeat(ctx):
     returns to the idle tick, so stamping in only one of the two would read as
     "control is down" for the whole cook.
 
-    The stamped value is `ctx.clock.now()`, which RealClock defines as
+    The stamped value is `ctx.clock.wall_time()`, which RealClock defines as
     `time.time()` -- the reader is a different PROCESS comparing this against
     its own `time.time()`, so the stamp has to be wall-clock epoch seconds and
     not a monotonic or otherwise process-local reading.
     """
     global _last_write
-    now = ctx.clock.now()
+    now = ctx.clock.wall_time()
     if _last_write is not None and now - _last_write < HEARTBEAT_WRITE_INTERVAL:
         return
     _last_write = now

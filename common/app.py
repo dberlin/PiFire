@@ -17,6 +17,7 @@ from common.common import (
     # the other (used by blueprints/mobile/socket_io.py) broken.
     get_system_command_output,
     guard_none_metric_field,
+    metric_duration_display,
     seconds_to_string,
 )
 from common.control_delta import control_delta
@@ -191,9 +192,17 @@ def prepare_event_totals(events):
     event_totals["estusage_m"] = f"{grams} grams"
     event_totals["estusage_i"] = f"{pounds} pounds ({ounces} ounces)"
 
-    seconds = int((events[-1]["starttime"] / 1000) - (events[0]["starttime"] / 1000))
-
-    event_totals["cooktime"] = seconds_to_string(seconds)
+    elapsed = 0.0
+    for event in events:
+        if event["mode"] == Mode.STOP:
+            continue
+        duration = event.get("elapsed_seconds")
+        if duration is None or event.get("delivery_complete") is not True:
+            event_totals["cooktime"] = "Unknown"
+            break
+        elapsed += duration
+    else:
+        event_totals["cooktime"] = seconds_to_string(int(elapsed))
 
     event_totals["pellet_level_start"] = events[0]["pellet_level_start"]
     event_totals["pellet_level_end"] = events[-2]["pellet_level_end"]
@@ -234,7 +243,19 @@ def prepare_metrics_csv(metrics_data, filename):
             for index in range(list_length):
                 writeline = ""
                 for item in range(len(metrics_items)):
-                    writeline += f"{metrics_data[index][metrics_items[item][0]]}, "
+                    key = metrics_items[item][0]
+                    if key == "timeinmode":
+                        value = metric_duration_display(
+                            metrics_data[index]["mode"],
+                            metrics_data[index]["endtime"],
+                            metrics_data[index].get("elapsed_seconds"),
+                            metrics_data[index].get("delivery_complete"),
+                        )
+                    elif key in {"elapsed_seconds", "delivery_complete"}:
+                        value = metrics_data[index].get(key)
+                    else:
+                        value = metrics_data[index][key]
+                    writeline += f"{value}, "
                 writeline += "\n"
                 csvfile.write(writeline)
         else:

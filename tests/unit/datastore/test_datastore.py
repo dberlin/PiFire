@@ -367,6 +367,7 @@ def test_metrics_current_schema_migration_idempotent(tmp_path):
             ("pifire-schema", "v0011_adopt_sqlite_utils_registry"),
             ("pifire-schema", "v0012_trajectory_role_generation"),
             ("pifire-schema", "v0013_trajectory_clock_domains"),
+            ("pifire-schema", "v0014_metric_monotonic_duration"),
         ]
         assert all(row[2] for row in audit_rows)
         datastore.execute_write("INSERT INTO metrics(id, mode) VALUES ('abc', 'Hold')")
@@ -544,6 +545,7 @@ def test_history_current_schema_migration_idempotent(tmp_path):
             ("pifire-schema", "v0011_adopt_sqlite_utils_registry"),
             ("pifire-schema", "v0012_trajectory_role_generation"),
             ("pifire-schema", "v0013_trajectory_clock_domains"),
+            ("pifire-schema", "v0014_metric_monotonic_duration"),
         ]
         assert all(row[2] for row in audit_rows)
         conn.execute(
@@ -607,11 +609,12 @@ def test_v7_history_gains_duty_columns_without_losing_rows(tmp_path):
     try:
         conn = datastore.connection()
         assert conn.execute("PRAGMA user_version").fetchone()[0] == datastore.DB_SCHEMA_VERSION
-        # Drop back to a genuine v7 shape: no duty columns, no v10 challenger
-        # singleton, and no v11 migration registry left over from creating the
-        # fixture through the current bootstrap.
+        # Restore the v7 history/metrics shape and remove later authority tables
+        # introduced while creating the fixture through the current bootstrap.
         conn.execute("DROP TABLE _sqlite_migrations")
         conn.execute("DROP TABLE model_challenger_state")
+        conn.execute("ALTER TABLE metrics DROP COLUMN elapsed_seconds")
+        conn.execute("ALTER TABLE metrics DROP COLUMN delivery_complete")
         conn.execute("DROP TABLE history")
         conn.execute("""
             CREATE TABLE history (
@@ -678,6 +681,7 @@ def test_current_schema_migration_is_idempotent_on_an_already_migrated_db(tmp_pa
             ("pifire-schema", "v0011_adopt_sqlite_utils_registry"),
             ("pifire-schema", "v0012_trajectory_role_generation"),
             ("pifire-schema", "v0013_trajectory_clock_domains"),
+            ("pifire-schema", "v0014_metric_monotonic_duration"),
         ]
         assert all(row[2] for row in audit_rows)
     finally:

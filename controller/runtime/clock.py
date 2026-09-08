@@ -1,5 +1,6 @@
 """Injectable time source so the control loop is deterministically testable."""
 
+import math
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -8,7 +9,7 @@ from typing import override
 
 class Clock(ABC):
     @abstractmethod
-    def now(self) -> float: ...
+    def wall_time(self) -> float: ...
 
     @abstractmethod
     def monotonic(self) -> float:
@@ -21,7 +22,7 @@ class Clock(ABC):
 
 class RealClock(Clock):
     @override
-    def now(self) -> float:
+    def wall_time(self) -> float:
         return time.time()
 
     @override
@@ -46,7 +47,7 @@ class CallableClock(Clock):
         self._wall_clock: Callable[[], float] = wall_clock
 
     @override
-    def now(self) -> float:
+    def wall_time(self) -> float:
         return self._wall_clock()
 
     @override
@@ -59,13 +60,13 @@ class CallableClock(Clock):
 
 
 class ManualClock(Clock):
-    def __init__(self, start: float = 0.0, *, monotonic_start: float = 0.0) -> None:
-        self._t: float = float(start)
+    def __init__(self, *, wall_start: float = 0.0, monotonic_start: float = 0.0) -> None:
+        self._wall: float = float(wall_start)
         self._monotonic: float = float(monotonic_start)
 
     @override
-    def now(self) -> float:
-        return self._t
+    def wall_time(self) -> float:
+        return self._wall
 
     @override
     def monotonic(self) -> float:
@@ -76,9 +77,11 @@ class ManualClock(Clock):
         self.advance(seconds)
 
     def advance(self, seconds: float) -> None:
-        self._t += seconds
+        if not math.isfinite(seconds) or seconds < 0:
+            raise ValueError("clock advance must be finite and nonnegative")
+        self._wall += seconds
         self._monotonic += seconds
 
     def jump_wall(self, seconds: float) -> None:
         """Adjust epoch provenance without advancing physical time."""
-        self._t += seconds
+        self._wall += seconds

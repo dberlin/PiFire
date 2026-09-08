@@ -109,7 +109,7 @@ export function metricRows(record: MetricRecord, units: string): MetricRow[] {
     }),
     "Time in Mode": () => ({
       label: "Time in Mode",
-      value: running ? NONE : String(record.endtime - record.starttime),
+      value: record.elapsed_seconds == null ? NONE : String(record.elapsed_seconds * 1000),
       converted: record.timeinmode,
     }),
     "Auger On Time": () => ({

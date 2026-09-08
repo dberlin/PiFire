@@ -406,6 +406,31 @@
           ],
           "title": "Augerontime C"
         },
+        "delivery_complete": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Delivery Complete"
+        },
+        "elapsed_seconds": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Elapsed Seconds"
+        },
         "endtime_c": {
           "anyOf": [
             {
@@ -1341,6 +1366,31 @@
         "augerontime_c": {
           "title": "Augerontime C",
           "type": "string"
+        },
+        "delivery_complete": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Delivery Complete"
+        },
+        "elapsed_seconds": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Elapsed Seconds"
         },
         "endtime": {
           "$ref": "#/$defs/FiniteNumber"

@@ -180,6 +180,29 @@ def test_update_metrics_partial_dict_parity(store):
         assert len(st.read_all_metrics()) == 1  # amended, never appended
 
 
+def test_metric_monotonic_duration_and_delivery_unknown_state_parity(store):
+    from controller.runtime.store import InMemoryStore
+
+    for st in (store, InMemoryStore()):
+        assert st.read_metrics()["elapsed_seconds"] is None
+        assert st.read_metrics()["delivery_complete"] is None
+        st.append_metric()
+        st.update_metrics({"starttime": 10000, "endtime": 7000, "elapsed_seconds": 3.0, "delivery_complete": False})
+        row = st.read_metrics()
+        assert (row["starttime"], row["endtime"], row["elapsed_seconds"]) == (10000, 7000, 3.0)
+        assert row["delivery_complete"] is False
+        st.update_metrics({"mode": "Hold"})
+        assert st.read_metrics()["elapsed_seconds"] == 3.0
+        assert st.read_metrics()["delivery_complete"] is False
+        st.update_metrics({"elapsed_seconds": None, "delivery_complete": None})
+        assert st.read_metrics()["elapsed_seconds"] is None
+        assert st.read_all_metrics()[-1]["delivery_complete"] is None
+        st.flush_metrics()
+        st.update_metrics({"elapsed_seconds": 0.0, "delivery_complete": True})
+        assert st.read_metrics()["elapsed_seconds"] == 0.0
+        assert st.read_all_metrics()[-1]["delivery_complete"] is True
+
+
 def test_delta_envelope_parity_between_sqlite_and_in_memory(store):
     """The web process queues, the control process drains. Pin both ends.
 

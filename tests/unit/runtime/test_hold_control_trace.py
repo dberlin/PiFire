@@ -546,13 +546,13 @@ def test_real_pid_family_trace_keeps_delayed_publication_separate_from_elapsed_t
 ):
     import controller.runtime.runner as runner_module
 
-    clock = ManualClock(1_700_000_000.0, monotonic_start=100.0)
+    clock = ManualClock(wall_start=1_700_000_000.0, monotonic_start=100.0)
     recorder = _install_recorder(monkeypatch)
     mode = hold_cycle(None, controller=controller, clock=clock)
     monkeypatch.setattr(runner_module, "build_runner", build_runner)
     mode.setup()
     request.addfinalizer(lambda: mode.teardown(220.0))
-    mode.on_tick(clock.now(), 220.0, mode.grill.get_output_status())
+    mode.on_tick(clock.monotonic(), 220.0, mode.grill.get_output_status())
     runner = mode._runner
     assert isinstance(runner, SyncControllerRunner)
     core = runner._core._core
@@ -576,7 +576,7 @@ def test_real_pid_family_trace_keeps_delayed_publication_separate_from_elapsed_t
 
     monkeypatch.setattr(runner, "latest", delayed_publication)
     clock.advance(20.1)
-    mode.on_tick(clock.now(), 220.0, mode.grill.get_output_status())
+    mode.on_tick(clock.monotonic(), 220.0, mode.grill.get_output_status())
     updates = [record for record in recorder.records if isinstance(record.payload, payload_type)]
     assert len(updates) == len(captured) == 1
     record = updates[0]
@@ -586,6 +586,7 @@ def test_real_pid_family_trace_keeps_delayed_publication_separate_from_elapsed_t
     assert payload.observed_dt_seconds == pytest.approx(20.1)
     assert result.solve_duration_seconds == 0.125
     assert record.ts_ms > 1_000_000_000_000
+    assert record.ts_ms == int(clock.wall_time() * 1000)
     assert payload.monotonic_ms == round(result.solve_end_monotonic * 1000)
     assert payload.wall_ms == int(result.completed_wall_time * 1000)
     if controller == "pid":
@@ -926,8 +927,7 @@ def test_real_pid_sp_first_hold_update_records_unidentified_model_trace(hold_cyc
     runner, status = build_runner(
         settings,
         control,
-        monotonic_clock=clock.monotonic,
-        wall_clock=clock.now,
+        clock=clock,
     )
     assert status == "Active"
     assert isinstance(runner, SyncControllerRunner)

@@ -1,8 +1,7 @@
-from dataclasses import replace
-
 import pytest
 
 import controller.runtime.runner as controller_runtime_runner
+from controller.runtime.clock import Clock
 from controller.runtime.modes.hold import HoldMode
 from controller.runtime.runner import ControllerRunner, ControllerUpdateResult
 from controller.runtime.state import WorkCycleState
@@ -24,10 +23,10 @@ def _off():
 def hold_cycle(monkeypatch):
     """A HoldMode wired to a FakeControllerRunner, driven tick by tick.
 
-    Direct on_tick() calls keep the production wall-time API. Tests must
-    advance ctx.clock explicitly before each physical tick; this fixture does
-    not replace on_tick() or derive elapsed time from its wall-time argument.
-    It reproduces the state ControlMode.run() seeds before entering its loop.
+    Direct on_tick() calls take monotonic seconds. Tests must advance ctx.clock
+    explicitly before each physical tick; this fixture does not replace
+    on_tick() or derive elapsed time from wall provenance. It reproduces the
+    state ControlMode.run() seeds before entering its loop.
     """
 
     def build(
@@ -38,7 +37,7 @@ def hold_cycle(monkeypatch):
         controller="pid_sp",
         dc_fan=False,
         bind_learning_inputs=True,
-        clock=None,
+        clock: Clock | None = None,
     ):
         settings = base_settings()
         settings["controller"]["selected"] = controller
@@ -48,7 +47,7 @@ def hold_cycle(monkeypatch):
         control_data["primary_setpoint"] = 225
         ctx, _grill, _notifier = make_ctx(settings, control_data, base_pellet_db(), FakeProbes().script([225] * 200))
         if clock is not None:
-            ctx = replace(ctx, clock=clock)
+            ctx.clock = clock
         if bind_learning_inputs:
             bind_exact_learning_inputs(ctx, control_data, cook_id="hold-test-cook")
         if runner is not None:

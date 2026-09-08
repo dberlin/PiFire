@@ -247,7 +247,9 @@ class Controller(PIDControllerBase):
         self._model_persistence = model_persistence
         self._trajectory_repository = trajectory_repository
         self._fit_partition_digest = fit_partition_digest
-        self._clock_ms: Callable[[], int] = (lambda: int(self._clock.now() * 1_000)) if clock_ms is None else clock_ms
+        self._clock_ms: Callable[[], int] = (
+            (lambda: int(self._clock.wall_time() * 1_000)) if clock_ms is None else clock_ms
+        )
         self._learning_session_id = "runtime"
         self._learning_cook_id: str | None = None
         self._learning_role_generation = 0

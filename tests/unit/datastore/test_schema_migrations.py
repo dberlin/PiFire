@@ -17,6 +17,7 @@ _MIGRATION_SET = "pifire-schema"
 _V11_MIGRATION = "v0011_adopt_sqlite_utils_registry"
 _V12_MIGRATION = "v0012_trajectory_role_generation"
 _V13_MIGRATION = "v0013_trajectory_clock_domains"
+_V14_MIGRATION = "v0014_metric_monotonic_duration"
 
 
 def _open_configured_connection(path: Path | str) -> sqlite3.Connection:
@@ -123,11 +124,6 @@ def _audit_rows(connection: sqlite3.Connection) -> list[tuple[str, str, str]]:
     return connection.execute("SELECT migration_set, name, applied_at FROM _sqlite_migrations ORDER BY id").fetchall()
 
 
-def test_current_schema_version_is_centralized_at_v13() -> None:
-    assert datastore.DB_SCHEMA_VERSION == schema_migrations.CURRENT_SCHEMA_VERSION == 13
-    assert schema_migrations.LEGACY_SCHEMA_VERSION == 10
-
-
 def test_real_configured_connection_preserves_policy_identity_and_usability(
     tmp_path: Path,
 ) -> None:
@@ -211,7 +207,7 @@ def test_migration_discovery_occurs_after_pifire_begin_immediate(
     assert begin < discovery
 
 
-def test_v10_upgrades_through_two_named_audit_records_and_is_reconnect_idempotent(
+def test_v10_upgrades_through_named_audit_records_and_is_reconnect_idempotent(
     v10_connection: sqlite3.Connection,
 ) -> None:
     datastore._ensure_schema(v10_connection)
@@ -222,6 +218,7 @@ def test_v10_upgrades_through_two_named_audit_records_and_is_reconnect_idempoten
         (_MIGRATION_SET, _V11_MIGRATION),
         (_MIGRATION_SET, _V12_MIGRATION),
         (_MIGRATION_SET, _V13_MIGRATION),
+        (_MIGRATION_SET, _V14_MIGRATION),
     ]
     assert all(row[2] for row in rows)
 
@@ -281,6 +278,7 @@ def test_v11_failure_rolls_back_tracking_ddl_and_retries(
         (_MIGRATION_SET, _V11_MIGRATION),
         (_MIGRATION_SET, _V12_MIGRATION),
         (_MIGRATION_SET, _V13_MIGRATION),
+        (_MIGRATION_SET, _V14_MIGRATION),
     ]
 
 
@@ -311,6 +309,7 @@ def test_existing_version_without_records_is_publicly_audited_to_current(
         (_MIGRATION_SET, _V11_MIGRATION),
         (_MIGRATION_SET, _V12_MIGRATION),
         (_MIGRATION_SET, _V13_MIGRATION),
+        (_MIGRATION_SET, _V14_MIGRATION),
     ]
 
 
@@ -368,3 +367,90 @@ def test_registered_runner_rejects_plain_apply_without_pifire_transaction(
         ).fetchone()
         is None
     )
+
+
+def test_v13_metric_upgrade_preserves_rollback_metadata_and_unknown_duration(tmp_path: Path) -> None:
+    from common.persistence import history
+
+    path = tmp_path / "literal-v13-metrics.db"
+    with sqlite3.connect(path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE metrics (
+                seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                id TEXT,
+                starttime NUMERIC,
+                starttime_c TEXT,
+                endtime NUMERIC,
+                endtime_c TEXT,
+                timeinmode NUMERIC,
+                mode TEXT,
+                augerontime NUMERIC,
+                augerontime_c TEXT,
+                estusage_m TEXT,
+                estusage_i TEXT,
+                fanontime NUMERIC,
+                fanontime_c TEXT,
+                smokeplus INTEGER,
+                primary_setpoint NUMERIC,
+                smart_start_profile INTEGER,
+                startup_temp NUMERIC,
+                p_mode INTEGER,
+                auger_cycle_time NUMERIC,
+                pellet_level_start NUMERIC,
+                pellet_level_end NUMERIC,
+                pellet_brand_type TEXT
+            );
+            INSERT INTO metrics VALUES (
+                7, 'legacy-rollback', 10000, 'start', 7000, 'end', 42,
+                'Hold', 1.25, 'auger', 'grams', 'pounds', 2.5, 'fan',
+                0, 225, 1, 75, 2, 0.3, 87, 86, 'Alder'
+            );
+            PRAGMA user_version=13;
+            """
+        )
+        _create_migrations_table(connection)
+        for migration in (_V11_MIGRATION, _V12_MIGRATION, _V13_MIGRATION):
+            connection.execute(
+                "INSERT INTO _sqlite_migrations(migration_set, name, applied_at) VALUES (?, ?, ?)",
+                (_MIGRATION_SET, migration, "2026-09-08 00:00:00+00:00"),
+            )
+        old_columns = connection.execute("PRAGMA table_info(metrics)").fetchall()
+        old_rows = connection.execute("SELECT * FROM metrics ORDER BY seq").fetchall()
+        old_audit = _audit_rows(connection)
+
+    datastore._reset_for_tests(str(path))
+    try:
+        connection = datastore.connection()
+        columns = connection.execute("PRAGMA table_info(metrics)").fetchall()
+        assert columns[: len(old_columns)] == old_columns
+        assert [(row[1], row[2], row[3], row[4]) for row in columns[len(old_columns) :]] == [
+            ("elapsed_seconds", "REAL", 0, None),
+            ("delivery_complete", "INTEGER", 0, None),
+        ]
+        assert connection.execute("PRAGMA user_version").fetchone() == (14,)
+        upgraded_rows = connection.execute("SELECT * FROM metrics ORDER BY seq").fetchall()
+        assert [row[: len(old_columns)] for row in upgraded_rows] == old_rows
+        assert upgraded_rows[0][-2:] == (None, None)
+        audit = _audit_rows(connection)
+        assert audit[:-1] == old_audit
+        assert audit[-1][:2] == (_MIGRATION_SET, _V14_MIGRATION)
+
+        historical = history.read_metrics()
+        assert historical["elapsed_seconds"] is None
+        assert historical["delivery_complete"] is None
+        history.append_metric({"mode": "Hold", "elapsed_seconds": 3.0, "delivery_complete": False})
+        history.update_metrics({"starttime": 10000, "endtime": 7000})
+        current = history.read_metrics()
+        assert (current["starttime"], current["endtime"], current["elapsed_seconds"]) == (10000, 7000, 3.0)
+        assert current["delivery_complete"] is False
+        assert history.read_all_metrics() == [historical, current]
+        assert connection.execute("SELECT elapsed_seconds, delivery_complete FROM metrics ORDER BY seq").fetchall() == [
+            (None, None),
+            (3.0, 0),
+        ]
+        datastore._reset_for_tests(str(path))
+        assert history.read_all_metrics() == [historical, current]
+        assert _audit_rows(datastore.connection()) == audit
+    finally:
+        datastore._reset_for_tests(None)

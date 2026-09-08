@@ -546,6 +546,7 @@ def test_schema_v10_migration_is_additive_and_preserves_every_v9_authority_row(
             ("pifire-schema", "v0011_adopt_sqlite_utils_registry"),
             ("pifire-schema", "v0012_trajectory_role_generation"),
             ("pifire-schema", "v0013_trajectory_clock_domains"),
+            ("pifire-schema", "v0014_metric_monotonic_duration"),
         ]
     finally:
         datastore._reset_for_tests(None)
@@ -606,6 +607,7 @@ def test_schema_v10_migration_rolls_back_ddl_and_version_bump_together(
             ("pifire-schema", "v0011_adopt_sqlite_utils_registry"),
             ("pifire-schema", "v0012_trajectory_role_generation"),
             ("pifire-schema", "v0013_trajectory_clock_domains"),
+            ("pifire-schema", "v0014_metric_monotonic_duration"),
         ]
     finally:
         datastore._reset_for_tests(None)

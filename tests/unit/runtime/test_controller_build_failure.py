@@ -290,7 +290,7 @@ def test_build_core_contains_every_native_construction_failure(native_failure, d
 def test_native_failure_falls_back_to_safe_pid_with_exact_rebuild_guidance(native_failure, ds):
     settings = _settings()
     logger = _Logger()
-    clock = ManualClock(start=1_700_000_000.0, monotonic_start=100.0)
+    clock = ManualClock(wall_start=1_700_000_000.0, monotonic_start=100.0)
 
     runner, status = build_runner(settings, _control(), logger=logger, clock=clock)
     try:
@@ -305,7 +305,7 @@ def test_native_failure_falls_back_to_safe_pid_with_exact_rebuild_guidance(nativ
         assert result.diagnostics.observed_dt_seconds == 20.0
         assert result.solve_start_monotonic == clock.monotonic()
         assert result.solve_end_monotonic == clock.monotonic()
-        assert result.completed_wall_time == clock.now()
+        assert result.completed_wall_time == clock.wall_time()
         banner = " ".join(logger.errors)
         assert native_failure in banner
         assert _REBUILD in banner

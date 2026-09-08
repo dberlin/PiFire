@@ -24,6 +24,7 @@ from collections.abc import Callable
 from os.path import exists
 from typing import ClassVar
 
+from common.clock_domain import continuity_lost
 from common.common import ErrorKind
 from common.defaults import default_control
 from common.modes import COOK_MODES, SAFE_MODES, Mode, StatusState
@@ -86,7 +87,7 @@ class Controller:
         self.last = None
         # Last time the hopper level was written to pelletdb, by either the
         # automatic refresh or an explicit hopper_check. setup() re-stamps it.
-        self._hopper_refresh_time = ctx.clock.now()
+        self._hopper_refresh_time = ctx.clock.monotonic()
         self._cleanup_complete = False
 
     # --- work-cycle dispatch helpers ---
@@ -283,7 +284,7 @@ class Controller:
         self.eventLogger.info(f"Hopper Level Checked @ {self.pelletdb['current']['hopper_level']}%")
         # Start the automatic-refresh timer from the boot-time reading, so the
         # first timed refresh is a full interval after it rather than immediate.
-        self._hopper_refresh_time = self.ctx.clock.now()
+        self._hopper_refresh_time = self.ctx.clock.monotonic()
 
         self.last = self.grill_platform.get_input_status()
 
@@ -309,12 +310,43 @@ class Controller:
             self.tick()
             self.ctx.clock.sleep(0.1)
 
+    def _admit_idle_clock(self) -> bool:
+        ctx = self.ctx
+        domain = ctx.get_clock_domain()
+        stamp = domain.capture()
+        previous = ctx.last_clock_stamp
+        if continuity_lost(stamp if previous is None else previous, stamp):
+            self.grill_platform.auger_off()
+            self.grill_platform.igniter_off()
+            self.grill_platform.fan_off()
+            self.grill_platform.power_off()
+            self.probe_complex.invalidate_control_history()
+            ctx.store.execute_control_writes()
+            self.control = ctx.store.read_control()
+            self.control["manual"]["change"] = False
+            self.control["manual"]["output"] = False
+            request_transition(
+                ctx,
+                self.control,
+                Mode.ERROR,
+                kind=TransitionKind.SAFETY,
+                display=("text", "ERROR"),
+            )
+            domain.rotate_runtime()
+            ctx.last_clock_stamp = None
+            return False
+        ctx.last_clock_stamp = stamp
+        return True
+
     def tick(self):
         """One iteration of the control loop. Persistent state lives on self."""
         ctx = self.ctx
         store = ctx.store
         grill_platform = self.grill_platform
         settings = self.settings
+
+        if not self._admit_idle_clock():
+            return
 
         stamp_control_heartbeat(ctx)
 
@@ -355,7 +387,7 @@ class Controller:
             self.settings = settings = store.read_settings()
             self.probe_complex.set_thermocouple_inference_policy(
                 settings["thermocouple_health"]["inference_policy"],
-                now=ctx.clock.now(),
+                now=ctx.clock.monotonic(),
             )
 
         # Check if there are any notifications pending
@@ -363,7 +395,7 @@ class Controller:
 
         # Check if there is a timer running, see if it has expired, send notification and reset
         for index, item in enumerate(self.control["notify_data"]):
-            if item["type"] == "timer" and item["req"] and ctx.clock.now() >= self.control["timer"]["end"]:
+            if item["type"] == "timer" and item["req"] and ctx.clock.wall_time() >= self.control["timer"]["end"]:
                 send_notifications("Timer_Expired")
                 self.control["notify_data"][index]["req"] = False
                 self.control["timer"]["start"] = 0
@@ -393,7 +425,7 @@ class Controller:
             self.control["hopper_check"] = False
             store.write_control_snapshot(self.control, origin="control")
             self.eventLogger.info("Hopper Level Check requested.")
-        if (ctx.clock.now() - self._hopper_refresh_time) > HOPPER_LEVEL_REFRESH_INTERVAL:
+        if (ctx.clock.monotonic() - self._hopper_refresh_time) > HOPPER_LEVEL_REFRESH_INTERVAL:
             # Automatic refresh: the only thing that publishes a hopper level
             # after boot. There is no Refresh Status button any more, and in
             # Stop mode nothing else runs (the per-mode work cycle has its own
@@ -409,7 +441,7 @@ class Controller:
             self.pelletdb = store.read_pellet_db()
             self.pelletdb["current"]["hopper_level"] = self.dist_device.get_level()
             store.write_pellet_db(self.pelletdb)
-            self._hopper_refresh_time = ctx.clock.now()
+            self._hopper_refresh_time = ctx.clock.monotonic()
 
         # Rebuild every probe device if the probe MAP changed (POST /api/probe_map).
         # Distinct from probe_profile_update below: that only refills per-port
@@ -557,6 +589,12 @@ class Controller:
                 self.status["lid_open_detected"] = False
                 self.status["lid_open_endtime"] = 0
                 self.status["startup_timestamp"] = 0
+                self.status["elapsed_seconds"] = 0.0
+                self.status["remaining_seconds"] = None
+                self.status["lid_open_remaining_seconds"] = 0.0
+                self.status["cook_elapsed_seconds"] = ctx.cook_elapsed_seconds
+                self.status["running"] = False
+                self.status["clock_stamp"] = None if ctx.last_clock_stamp is None else ctx.last_clock_stamp.as_dict()
                 store.write_status(self.status)
 
                 if should_keep_power_on(self.control["mode"], self.control["status"]):

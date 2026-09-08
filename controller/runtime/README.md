@@ -39,8 +39,9 @@ for module globals. The context bundles:
   test double. A parity suite (`tests/unit/datastore/test_sqlite_store_parity.py`) and an
   end-to-end suite (`tests/e2e/`) pin the two to identical semantics against
   the real SQLite datastore.
-- **`clock`** (`clock.py`) — `RealClock` in production, `ManualClock` in tests,
-  so timers and sleeps are deterministic.
+- **`clock`** (`clock.py`) — explicit `wall_time()` for epoch provenance and
+  `monotonic()` for physical intervals. `ManualClock` moves the two axes
+  independently in tests; `now()` is not part of the contract.
 - **`notifications`** (`notifier.py`) — `LiveNotifier` in production,
   `FakeNotifier` in tests.
 - **`devices`** (`context.py` / `devices.py`) — grill platform, probes, distance
@@ -101,3 +102,26 @@ The approved boundary is 60 seconds of actual observation gap or suspend-offset
 discontinuity, not wall-clock correction; the existing 30-second process watchdog
 is separate. Pulse, shared-mode, probe and peripheral clock changes share a
 deployment gate. This pulse development unit alone does not authorize deployment.
+
+## Shared-mode duration authority
+
+Mode hooks, actuator edges, lid/manual deadlines, and runner rebuilds share the
+injected monotonic axis. Public metric start/end and startup timestamps remain
+epoch provenance, so an end timestamp can precede its start after a wall rollback.
+Database schema 14 stores physical `elapsed_seconds` and `delivery_complete`
+separately. Historical rows retain null duration/completeness; readers must not
+reconstruct duration from wall endpoints. Interrupted known delivery stays
+explicitly incomplete.
+
+Each admitted loop stamp carries boot/runtime identity and suspend offset. An
+observation gap or suspend-offset increase strictly greater than 60 seconds
+retires control at the last admitted physical instant, fences outputs, and clears
+untrusted history. Exactly 60 seconds is admitted; wall corrections alone never
+retire control. Normal teardown accounts the final observed ON interval once;
+unknown downtime is never charged as observed delivery. Re-entry requires the
+normal operator restart and health-admission path.
+
+Status publishes mode elapsed/remaining, lid remaining, known cook elapsed, and
+the same acquisition stamp. Epoch `start_time` remains metadata, not countdown
+authority. Persisted timer resume and display freshness belong to the coordinated
+peripheral migration; intermediate shared-mode revisions are not deployable alone.

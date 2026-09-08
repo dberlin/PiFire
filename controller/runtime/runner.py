@@ -684,7 +684,14 @@ def _with_result_quality(result: ControllerUpdateResult) -> ControllerUpdateResu
     )
 
 
-def _capture_completed_result(core, temp, revision, *, monotonic_clock, wall_clock):
+def _capture_completed_result(
+    core,
+    temp,
+    revision,
+    *,
+    monotonic_clock: Callable[[], float],
+    wall_clock: Callable[[], float],
+) -> ControllerUpdateResult:
     core = _adapt_controller_core(core)
     solve_start = monotonic_clock()
     raw = core.update(temp)
@@ -856,7 +863,7 @@ def _resolve_clock(
         return source
     return CallableClock(
         monotonic_clock=source.monotonic if monotonic_clock is None else monotonic_clock,
-        wall_clock=source.now if wall_clock is None else wall_clock,
+        wall_clock=source.wall_time if wall_clock is None else wall_clock,
     )
 
 
@@ -886,9 +893,9 @@ class SyncControllerRunner(ControllerRunner):
         self._revision = 0
         self._latest_result = None
         self._observation_buffer = ObservationOutcomeBuffer(_MAX_PENDING_OBSERVATIONS)
-        self._clock = _resolve_clock(clock, monotonic_clock, wall_clock)
-        self._monotonic_clock = self._clock.monotonic
-        self._wall_clock = self._clock.now
+        self._clock: Clock = _resolve_clock(clock, monotonic_clock, wall_clock)
+        self._monotonic_clock: Callable[[], float] = self._clock.monotonic
+        self._wall_clock: Callable[[], float] = self._clock.wall_time
         self._warning_callback = warning_callback
         self._controller_type = controller_type
         self._model_persistence = model_persistence
@@ -1287,9 +1294,9 @@ class ThreadedControllerRunner(ControllerRunner):
         self._fit_partition_digest = fit_partition_digest
         self._grey_learning_process = grey_learning_process
         self._quality = _ResultQualityTracker(_control_period_seconds(self._control_period))
-        self._clock = _resolve_clock(clock, monotonic_clock, wall_clock)
-        self._monotonic_clock = self._clock.monotonic
-        self._wall_clock = self._clock.now
+        self._clock: Clock = _resolve_clock(clock, monotonic_clock, wall_clock)
+        self._monotonic_clock: Callable[[], float] = self._clock.monotonic
+        self._wall_clock: Callable[[], float] = self._clock.wall_time
         self._warning_callback = warning_callback
         self._stop_event = threading.Event()
         self._learning_stop_event = threading.Event()

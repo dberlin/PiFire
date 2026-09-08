@@ -28,11 +28,11 @@ from tests.fakes.runner import FakeControllerRunner
 
 
 def test_manual_clock_has_independent_wall_and_elapsed_axes():
-    clock = ManualClock(1_800_000_000.0, monotonic_start=100.0)
+    clock = ManualClock(wall_start=1_800_000_000.0, monotonic_start=100.0)
     clock.advance(3.0)
     clock.jump_wall(-3600.0)
     clock.sleep(2.0)
-    assert clock.now() == 1_799_996_405.0
+    assert clock.wall_time() == 1_799_996_405.0
     assert clock.monotonic() == 105.0
 
 
@@ -54,7 +54,7 @@ def _hold_delivery(hold_cycle, jump):
         for revision in range(1, 100)
     ]
     runner = FakeControllerRunner(period=1.0).script(outputs)
-    clock = ManualClock(1_799_999_998.0, monotonic_start=98.0)
+    clock = ManualClock(wall_start=1_799_999_998.0, monotonic_start=98.0)
     hold = hold_cycle(runner, clock=clock)
     hold.setup()
     # Start sampling only once the synchronous controller has an accepted
@@ -65,20 +65,19 @@ def _hold_delivery(hold_cycle, jump):
             clock.advance(1.0)
         if second == 10:
             clock.jump_wall(jump)
-        hold.on_tick(clock.now(), 225.0, hold.grill.get_output_status())
+        hold.on_tick(clock.monotonic(), 225.0, hold.grill.get_output_status())
     observations = list(runner.observations)
     applied = list(runner.applied)
     delivered = hold.state.metrics.get("augerontime", 0.0)
     solves = runner._i
-    cycle_wall = hold.state.controller.cycle_start
     hold.teardown(225.0)
-    return observations, applied, delivered, solves, cycle_wall
+    return observations, applied, delivered, solves
 
 
 @pytest.mark.parametrize("jump", [-3600.0, 3600.0])
 def test_real_hold_delivery_and_solve_cadence_ignore_wall_jumps(hold_cycle, jump):
-    baseline, baseline_applied, baseline_delivery, baseline_solves, _ = _hold_delivery(hold_cycle, 0.0)
-    observations, applied, delivered, solves, cycle_wall = _hold_delivery(hold_cycle, jump)
+    baseline, baseline_applied, baseline_delivery, baseline_solves = _hold_delivery(hold_cycle, 0.0)
+    observations, applied, delivered, solves = _hold_delivery(hold_cycle, jump)
     assert len(observations) == len(baseline) == 3
     assert delivered == baseline_delivery == 30.0
     assert solves == baseline_solves
@@ -95,13 +94,12 @@ def test_real_hold_delivery_and_solve_cadence_ignore_wall_jumps(hold_cycle, jump
     assert observations[0].frame_start_s == 100.0
     assert observations[0].wall_start_ms == 1_800_000_000_000
     assert observations[0].wall_end_ms == int((1_800_000_020.0 + jump) * 1000)
-    assert cycle_wall > 1_000_000_000.0
 
 
 @pytest.mark.parametrize("jump", [-3600.0, 3600.0])
 def test_hold_factory_pid_sp_shares_injected_frame_and_predictor_axis(hold_cycle, monkeypatch, jump):
     def run(wall_jump):
-        clock = ManualClock(1_800_000_000.0, monotonic_start=100.0)
+        clock = ManualClock(wall_start=1_800_000_000.0, monotonic_start=100.0)
         hold = hold_cycle(None, clock=clock)
         monkeypatch.setattr(runner_module, "build_runner", build_runner)
         hold.setup()
@@ -131,7 +129,7 @@ def test_hold_factory_pid_sp_shares_injected_frame_and_predictor_axis(hold_cycle
                     clock.advance(1.0)
                 if second == 50:
                     clock.jump_wall(wall_jump)
-                hold.on_tick(clock.now(), 225.0 + second / 100.0, hold.grill.get_output_status())
+                hold.on_tick(clock.monotonic(), 225.0 + second / 100.0, hold.grill.get_output_status())
             assert frames
             assert solves
             assert all(100.0 <= frame.frame_start_s < frame.frame_end_s <= 200.0 for frame in frames)
@@ -163,7 +161,7 @@ def test_hold_factory_pid_sp_shares_injected_frame_and_predictor_axis(hold_cycle
 
 @pytest.mark.parametrize("fallback", [False, True])
 def test_factory_and_fallback_reconfigure_keep_pid_sp_clock_sources(monkeypatch, fallback):
-    clock = ManualClock(1_800_000_000.0, monotonic_start=100.0)
+    clock = ManualClock(wall_start=1_800_000_000.0, monotonic_start=100.0)
     settings = base_settings()
     settings["controller"]["selected"] = "missing-clock-test-controller" if fallback else "pid_sp"
     monkeypatch.setattr(runner_module, "_raise_banner", lambda *args, **kwargs: None)
@@ -171,7 +169,7 @@ def test_factory_and_fallback_reconfigure_keep_pid_sp_clock_sources(monkeypatch,
         settings,
         {"primary_setpoint": 225.0},
         monotonic_clock=clock.monotonic,
-        wall_clock=clock.now,
+        wall_clock=clock.wall_time,
     )
     assert status == "Active"
     assert isinstance(runner, SyncControllerRunner)
@@ -180,7 +178,7 @@ def test_factory_and_fallback_reconfigure_keep_pid_sp_clock_sources(monkeypatch,
         runner.submit(225.0)
         first = runner.latest()
         assert first.solve_start_monotonic == first.solve_end_monotonic == 100.0
-        assert first.completed_wall_time == clock.now()
+        assert first.completed_wall_time == clock.wall_time()
         clock.advance(20.0)
         clock.jump_wall(-3600.0)
         settings["controller"]["selected"] = "pid_sp"
@@ -188,7 +186,7 @@ def test_factory_and_fallback_reconfigure_keep_pid_sp_clock_sources(monkeypatch,
         runner.submit(226.0)
         replacement = runner.latest()
         assert replacement.solve_start_monotonic == replacement.solve_end_monotonic == 120.0
-        assert replacement.completed_wall_time == clock.now()
+        assert replacement.completed_wall_time == clock.wall_time()
         assert replacement.diagnostics.previous_update_time == 120.0
         runner.set_target(235.0)
         clock.advance(20.0)
@@ -202,7 +200,7 @@ def test_factory_and_fallback_reconfigure_keep_pid_sp_clock_sources(monkeypatch,
 
 
 def test_threaded_factory_reconfigure_retains_pid_sp_elapsed_and_wall_clocks(monkeypatch):
-    clock = ManualClock(1_800_000_000.0, monotonic_start=100.0)
+    clock = ManualClock(wall_start=1_800_000_000.0, monotonic_start=100.0)
     settings = base_settings()
     settings["controller"]["selected"] = "pid_sp"
     waiting = Queue()
@@ -224,7 +222,7 @@ def test_threaded_factory_reconfigure_retains_pid_sp_elapsed_and_wall_clocks(mon
         settings,
         {"primary_setpoint": 225.0},
         monotonic_clock=clock.monotonic,
-        wall_clock=clock.now,
+        wall_clock=clock.wall_time,
     )
     assert status == "Active"
     assert isinstance(runner, ThreadedControllerRunner)
@@ -235,7 +233,7 @@ def test_threaded_factory_reconfigure_retains_pid_sp_elapsed_and_wall_clocks(mon
         waiting.get(timeout=5.0)
         first = runner.latest()
         assert first.solve_start_monotonic == first.solve_end_monotonic == 100.0
-        assert first.completed_wall_time == clock.now()
+        assert first.completed_wall_time == clock.wall_time()
         clock.advance(20.0)
         clock.jump_wall(3600.0)
         assert runner.reconfigure(settings, {"primary_setpoint": 230.0}) == "Active"
@@ -245,7 +243,7 @@ def test_threaded_factory_reconfigure_retains_pid_sp_elapsed_and_wall_clocks(mon
         replacement = runner.latest()
         assert runner.configuration_revision() == 1
         assert replacement.solve_start_monotonic == replacement.solve_end_monotonic == 120.0
-        assert replacement.completed_wall_time == clock.now()
+        assert replacement.completed_wall_time == clock.wall_time()
         assert replacement.diagnostics.previous_update_time == 120.0
         clock.advance(20.0)
         runner.submit(227.0)
@@ -263,7 +261,7 @@ def test_threaded_factory_reconfigure_retains_pid_sp_elapsed_and_wall_clocks(mon
 
 def _pulse(clock):
     state = cast(PulseControllerState, ControllerState())
-    runtime = FramedPulseRuntime(wall_clock_ms=lambda: int(clock.now() * 1000))
+    runtime = FramedPulseRuntime(wall_clock_ms=lambda: int(clock.wall_time() * 1000))
     runtime.configure(ActuationMode.FRAMED_PULSE, controller=state, timing=AUGER_TIMING, now=clock.monotonic())
     state.pulse_result_revision = 1
     state.pulse_requested_duty = 0.5
@@ -275,7 +273,7 @@ def _pulse(clock):
 
 
 def test_true_monotonic_gap_still_rejects_learning():
-    clock = ManualClock(1_800_000_000.0, monotonic_start=100.0)
+    clock = ManualClock(wall_start=1_800_000_000.0, monotonic_start=100.0)
     runtime, sample = _pulse(clock)
     clock.advance(60.0)
     result = runtime.advance(clock.monotonic(), True, sample=sample)
@@ -290,7 +288,7 @@ def test_true_monotonic_gap_still_rejects_learning():
 
 @pytest.mark.parametrize("jump", [-3600.0, 3600.0])
 def test_pulse_reset_reports_real_wall_end_and_physical_duration(jump):
-    clock = ManualClock(1_800_000_000.0, monotonic_start=100.0)
+    clock = ManualClock(wall_start=1_800_000_000.0, monotonic_start=100.0)
     runtime, sample = _pulse(clock)
     clock.advance(5.0)
     clock.jump_wall(jump)
@@ -316,13 +314,13 @@ def test_pulse_reset_reports_real_wall_end_and_physical_duration(jump):
 @pytest.mark.parametrize("jump", [-3600.0, 3600.0])
 def test_pid_sp_update_target_and_predictor_use_frame_axis(jump):
     def run(wall_jump):
-        clock = ManualClock(1_800_000_000.0, monotonic_start=100.0)
+        clock = ManualClock(wall_start=1_800_000_000.0, monotonic_start=100.0)
         core = Controller(
             {"PB": 60.0, "Ti": 180.0, "Td": 45.0},
             "F",
             {},
             monotonic_clock=clock.monotonic,
-            clock_ms=lambda: int(clock.now() * 1000),
+            clock_ms=lambda: int(clock.wall_time() * 1000),
         )
         assert core.predictor.trust({"K": 100.0, "tau": 100.0, "theta": 20.0})
         core.set_target(225.0)
@@ -356,10 +354,10 @@ def test_pid_sp_update_target_and_predictor_use_frame_axis(jump):
 
 @pytest.mark.parametrize("jump", [-3600.0, 3600.0])
 def test_observed_delivery_edges_remain_exact_across_wall_jump(jump):
-    clock = ManualClock(1_800_000_000.0, monotonic_start=100.0)
+    clock = ManualClock(wall_start=1_800_000_000.0, monotonic_start=100.0)
     journal = ActuationDeliveryJournal(
         monotonic_clock=lambda: int(clock.monotonic() * 1000),
-        wall_clock=lambda: int(clock.now() * 1000),
+        wall_clock=lambda: int(clock.wall_time() * 1000),
     )
     grill = DeliveredGrillPlatform(FakeGrillPlatform(dc_fan=True), journal=journal, readback_authoritative=True)
     grill.fan_on()

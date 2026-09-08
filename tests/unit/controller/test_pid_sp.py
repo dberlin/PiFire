@@ -60,7 +60,7 @@ INSTALLATION_IDENTITY_DIGEST = installation_identity_digest(lambda: INSTALLATION
 
 @pytest.fixture
 def clock():
-    return ManualClock(1_700_000_000.0, monotonic_start=1000.0)
+    return ManualClock(wall_start=1_700_000_000.0, monotonic_start=1000.0)
 
 
 def _controller(name, clock, units="F", *, installation_identity=INSTALLATION_IDENTITY):
@@ -383,7 +383,7 @@ def test_corpus_fit_confirms_once_offpath_and_never_trusts_in_ending_cook(
         dict(CONFIG),
         "F",
         {},
-        clock=ManualClock(1_700_000_000.0, monotonic_start=1000.0),
+        clock=ManualClock(wall_start=1_700_000_000.0, monotonic_start=1000.0),
         model_persistence=persistence,
         trajectory_repository=repository,
         fit_partition_digest=lambda: "c" * 64,
@@ -549,7 +549,7 @@ def _lifecycle_controller(
         dict(CONFIG if config is None else config),
         "F",
         {},
-        clock=ManualClock(1_700_000_000.0, monotonic_start=1000.0),
+        clock=ManualClock(wall_start=1_700_000_000.0, monotonic_start=1000.0),
         model_persistence=persistence,
         trajectory_repository=repository,
         fit_partition_digest=lambda: "c" * 64,
@@ -958,7 +958,9 @@ def test_fit_manifest_completion_failure_never_queues_activatable_checkpoint(
     assert persistence.evidence[0].payload.reason == "fit-run-persistence-failed"
     assert persistence.evidence[0].payload.selected_form == "fopdt"
     assert persistence.evidence[0].payload.confirmation_candidate_digest is not None
-    fresh = PidSpController(dict(CONFIG), "F", {}, clock=ManualClock(1_700_000_000.0, monotonic_start=1000.0))
+    fresh = PidSpController(
+        dict(CONFIG), "F", {}, clock=ManualClock(wall_start=1_700_000_000.0, monotonic_start=1000.0)
+    )
     assert fresh.predictor.active is False
 
 
@@ -1141,7 +1143,7 @@ def test_twentieth_offpath_decision_checkpoints_for_cold_next_cook_without_live_
         dict(CONFIG),
         "F",
         {},
-        clock=ManualClock(1_700_000_000.0, monotonic_start=1000.0),
+        clock=ManualClock(wall_start=1_700_000_000.0, monotonic_start=1000.0),
         installation_identity_provider=lambda: INSTALLATION_IDENTITY,
     )
     assert fresh.restore_model(checkpoint)
@@ -1263,7 +1265,7 @@ def test_prepared_checkpoint_cold_recovery_at_every_durable_boundary(
         dict(CONFIG),
         "F",
         {},
-        clock=ManualClock(1_700_000_000.0, monotonic_start=1000.0),
+        clock=ManualClock(wall_start=1_700_000_000.0, monotonic_start=1000.0),
         model_persistence=recovery_persistence,
         installation_identity_provider=lambda: INSTALLATION_IDENTITY,
     )
@@ -1345,7 +1347,7 @@ def test_prepared_checkpoint_aborts_when_terminal_commitment_is_not_exact(
         dict(CONFIG),
         "F",
         {},
-        clock=ManualClock(1_700_000_000.0, monotonic_start=1000.0),
+        clock=ManualClock(wall_start=1_700_000_000.0, monotonic_start=1000.0),
         model_persistence=recovery_persistence,
         installation_identity_provider=lambda: INSTALLATION_IDENTITY,
     )
@@ -2544,7 +2546,7 @@ def test_get_status_survives_the_mqtt_encoder(clock):
 
 @pytest.mark.parametrize("jump", [-3600.0, 3600.0])
 def test_pid_sp_target_window_uses_monotonic_seconds(jump):
-    clock = ManualClock(1_700_000_000.0, monotonic_start=1000.0)
+    clock = ManualClock(wall_start=1_700_000_000.0, monotonic_start=1000.0)
     sp = _controller("pid_sp", clock)
     sp.set_target(225.0)
     clock.advance(59.0)
@@ -2562,7 +2564,7 @@ def test_pid_sp_target_window_uses_monotonic_seconds(jump):
 
 @pytest.mark.parametrize("jump", [-3600.0, 3600.0])
 def test_wall_jump_preserves_signed_raw_demand_and_bounded_allocation(jump):
-    clocks = [ManualClock(1_700_000_000.0, monotonic_start=1000.0) for _ in range(2)]
+    clocks = [ManualClock(wall_start=1_700_000_000.0, monotonic_start=1000.0) for _ in range(2)]
     cores = [_controller("pid_sp", clock) for clock in clocks]
     for core in cores:
         core.set_target(220.0)
@@ -2581,7 +2583,7 @@ def test_wall_jump_preserves_signed_raw_demand_and_bounded_allocation(jump):
 
 @pytest.mark.parametrize("jump", [-3600.0, 3600.0])
 def test_pid_sp_completed_history_and_uncompleted_gap_are_wall_invariant(jump):
-    clocks = [ManualClock(1_700_000_000.0, monotonic_start=1000.0) for _ in range(2)]
+    clocks = [ManualClock(wall_start=1_700_000_000.0, monotonic_start=1000.0) for _ in range(2)]
     cores = [_controller("pid_sp", clock) for clock in clocks]
     for core in cores:
         core.set_target(225.0)
@@ -2590,7 +2592,7 @@ def test_pid_sp_completed_history_and_uncompleted_gap_are_wall_invariant(jump):
         outputs = []
         for side, (clock, core) in enumerate(zip(clocks, cores, strict=True)):
             start = clock.monotonic()
-            wall_start = int(clock.now() * 1000)
+            wall_start = int(clock.wall_time() * 1000)
             clock.advance(20.0)
             if side == 1 and index == 1:
                 clock.jump_wall(jump)
@@ -2601,7 +2603,7 @@ def test_pid_sp_completed_history_and_uncompleted_gap_are_wall_invariant(jump):
                 (200.0 - 32.0) * 5.0 / 9.0,
                 duty=duty,
                 wall_start_ms=wall_start,
-                wall_end_ms=int(clock.now() * 1000),
+                wall_end_ms=int(clock.wall_time() * 1000),
             )
             assert outcome["eligible"]
             outputs.append(core.update(200.0))
@@ -2622,13 +2624,13 @@ def test_pid_sp_completed_history_and_uncompleted_gap_are_wall_invariant(jump):
 
 def test_rejected_frame_does_not_add_pid_sp_history(clock):
     core = _controller("pid_sp", clock)
-    start, wall = clock.monotonic(), int(clock.now() * 1000)
+    start, wall = clock.monotonic(), int(clock.wall_time() * 1000)
     clock.advance(20.0)
     assert _observe_completed_frame(
-        core, start, clock.monotonic(), 100.0, wall_start_ms=wall, wall_end_ms=int(clock.now() * 1000)
+        core, start, clock.monotonic(), 100.0, wall_start_ms=wall, wall_end_ms=int(clock.wall_time() * 1000)
     )["eligible"]
     count = core.get_status()["identifier"]["duty_segments"]
-    start, wall = clock.monotonic(), int(clock.now() * 1000)
+    start, wall = clock.monotonic(), int(clock.wall_time() * 1000)
     clock.advance(20.0)
     outcome = _observe_completed_frame(
         core,
@@ -2637,7 +2639,7 @@ def test_rejected_frame_does_not_add_pid_sp_history(clock):
         100.0,
         safety_inhibited=True,
         wall_start_ms=wall,
-        wall_end_ms=int(clock.now() * 1000),
+        wall_end_ms=int(clock.wall_time() * 1000),
     )
     assert not outcome["eligible"]
     assert outcome["effective_updates"] == 0
@@ -2645,12 +2647,12 @@ def test_rejected_frame_does_not_add_pid_sp_history(clock):
 
 
 def test_restart_restores_admitted_model_not_live_history():
-    old_clock = ManualClock(1_700_000_000.0, monotonic_start=10_000.0)
+    old_clock = ManualClock(wall_start=1_700_000_000.0, monotonic_start=10_000.0)
     old = _controller("pid_sp", old_clock)
     old.set_target(225.0)
     assert old.restore_model(_fopdt_checkpoint(revision=1))
     for _ in range(2):
-        start, wall = old_clock.monotonic(), int(old_clock.now() * 1000)
+        start, wall = old_clock.monotonic(), int(old_clock.wall_time() * 1000)
         old_clock.advance(20.0)
         _observe_completed_frame(
             old,
@@ -2658,11 +2660,11 @@ def test_restart_restores_admitted_model_not_live_history():
             old_clock.monotonic(),
             (200.0 - 32.0) * 5.0 / 9.0,
             wall_start_ms=wall,
-            wall_end_ms=int(old_clock.now() * 1000),
+            wall_end_ms=int(old_clock.wall_time() * 1000),
         )
         old.update(200.0)
     assert old.get_status()["selected_temp"] != 200.0
-    clock = ManualClock(1_700_000_100.0, monotonic_start=5.0)
+    clock = ManualClock(wall_start=1_700_000_100.0, monotonic_start=5.0)
     core = _controller("pid_sp", clock)
     assert core.restore_model(old.get_model_snapshot())
     core.set_target(225.0)
@@ -2688,7 +2690,7 @@ def test_set_target_preserves_admitted_model_across_wall_jump(clock):
 
 
 def test_duplicate_pid_sp_readings_are_wall_invariant():
-    clocks = [ManualClock(1_700_000_000.0, monotonic_start=1000.0) for _ in range(2)]
+    clocks = [ManualClock(wall_start=1_700_000_000.0, monotonic_start=1000.0) for _ in range(2)]
     cores = [_controller("pid_sp", clock) for clock in clocks]
     for core in cores:
         core.set_target(225.0)

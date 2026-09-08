@@ -132,6 +132,8 @@ class CookFileEvent(ExtensibleWireModel):
     pellet_level_start: FiniteNumber
     pellet_level_end: FiniteNumber
     timeinmode: str | Literal[0]
+    elapsed_seconds: Annotated[FiniteFloat, Field(ge=0)] | None = None
+    delivery_complete: bool | None = None
 
 
 class CookFileTotals(WireModel):
@@ -445,6 +447,8 @@ class MetricRecord(WireModel):
     endtime: FiniteNumber
     endtime_c: str | Literal[0]
     timeinmode: str
+    elapsed_seconds: Annotated[FiniteFloat, Field(ge=0)] | None = None
+    delivery_complete: bool | None = None
     mode: str
     augerontime: FiniteNumber
     augerontime_c: str

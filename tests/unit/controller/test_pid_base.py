@@ -43,8 +43,8 @@ def _pid(clock):
 
 @pytest.mark.parametrize("jump", [-3600.0, 3600.0])
 def test_pid_wall_jump_preserves_response(jump):
-    a = ManualClock(1_700_000_000.0, monotonic_start=100.0)
-    b = ManualClock(1_700_000_000.0, monotonic_start=100.0)
+    a = ManualClock(wall_start=1_700_000_000.0, monotonic_start=100.0)
+    b = ManualClock(wall_start=1_700_000_000.0, monotonic_start=100.0)
     left, right = _pid(a), _pid(b)
     for index, measured in enumerate((190.0, 195.0, 198.0)):
         a.advance(20.0)
@@ -59,7 +59,7 @@ def test_pid_wall_jump_preserves_response(jump):
 
 
 def test_pid_target_reset_uses_monotonic_origin():
-    clock = ManualClock(1_700_000_000.0, monotonic_start=100.0)
+    clock = ManualClock(wall_start=1_700_000_000.0, monotonic_start=100.0)
     core = _pid(clock)
     clock.advance(20.0)
     core.update(198.0)
@@ -73,7 +73,7 @@ def test_pid_target_reset_uses_monotonic_origin():
 
 @pytest.mark.parametrize("controller_cls", [PIDController, PIDSPController])
 def test_duplicate_pid_readings_preserve_response_across_wall_jump(controller_cls):
-    clocks = [ManualClock(1_700_000_000.0, monotonic_start=100.0) for _ in range(2)]
+    clocks = [ManualClock(wall_start=1_700_000_000.0, monotonic_start=100.0) for _ in range(2)]
     cores = [controller_cls({"PB": 60.0, "Ti": 180.0, "Td": 45.0}, "F", {}, clock=c) for c in clocks]
     for core in cores:
         core.set_target(225.0)
@@ -89,11 +89,11 @@ def test_duplicate_pid_readings_preserve_response_across_wall_jump(controller_cl
 
 
 def test_pid_restart_does_not_restore_old_elapsed_state():
-    old_clock = ManualClock(1_700_000_000.0, monotonic_start=10_000.0)
+    old_clock = ManualClock(wall_start=1_700_000_000.0, monotonic_start=10_000.0)
     old = _pid(old_clock)
     old_clock.advance(20.0)
     old.update(198.0)
-    clock = ManualClock(1_700_000_000.0, monotonic_start=5.0)
+    clock = ManualClock(wall_start=1_700_000_000.0, monotonic_start=5.0)
     core = _pid(clock)
     clock.advance(2.0)
     core.update(198.0)

@@ -196,6 +196,8 @@ def test_metrics_contract_preserves_running_status_and_rejects_non_finite_scalar
             "endtime_c": 0,
             "timeinmode": "Active",
             "mode": "Smoke",
+            "elapsed_seconds": 12.5,
+            "delivery_complete": False,
             "augerontime": 100,
             "augerontime_c": "100 s",
             "estusage_m": "30 grams",
@@ -217,6 +219,19 @@ def test_metrics_contract_preserves_running_status_and_rejects_non_finite_scalar
 
     payload = MetricsPayload(metrics=[record], units="F", augerrate=0.3)
     assert payload.model_dump(mode="json")["metrics"][0]["endtime_c"] == 0
+    assert record.elapsed_seconds == 12.5
+    assert record.delivery_complete is False
+    for invalid in (-1.0, math.inf, math.nan, "12.5", True):
+        with pytest.raises(ValidationError):
+            MetricRecord.model_validate({**record.model_dump(), "elapsed_seconds": invalid}, strict=True)
+    with pytest.raises(ValidationError):
+        MetricRecord.model_validate({**record.model_dump(), "delivery_complete": 1}, strict=True)
+    historical = record.model_dump()
+    historical.pop("elapsed_seconds")
+    historical.pop("delivery_complete")
+    parsed_history = MetricRecord.model_validate(historical, strict=True)
+    assert parsed_history.elapsed_seconds is None
+    assert parsed_history.delivery_complete is None
     with pytest.raises(ValidationError):
         MetricsPayload.model_validate({"metrics": [], "units": "F", "augerrate": math.nan}, strict=True)
 

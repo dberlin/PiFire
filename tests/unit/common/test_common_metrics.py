@@ -1,3 +1,7 @@
+import pytest
+
+from common.app import prepare_event_totals
+from common.common import epoch_to_time, process_metrics
 from common import datastore, defaults
 from common.persistence import history as c
 
@@ -175,3 +179,93 @@ def test_process_metrics_uses_the_supplied_auger_rate():
 
     assert default_rate == "30 grams"
     assert doubled == "60 grams"
+
+
+def test_processed_duration_uses_physical_elapsed_across_wall_rollback():
+    row = dict(
+        defaults.default_metrics(),
+        mode="Smoke",
+        starttime=1_800_000_000_000,
+        endtime=1_799_996_490_000,
+        elapsed_seconds=90.75,
+        delivery_complete=True,
+        augerontime=12.5,
+    )
+
+    (processed,) = process_metrics([row], augerrate=0.6)
+
+    assert processed["timeinmode"] == "1 m 30 s"
+    assert processed["starttime_c"] == epoch_to_time(1_800_000_000)
+    assert processed["endtime_c"] == epoch_to_time(1_799_996_490)
+    assert processed["augerontime"] == 12.5
+    assert processed["augerontime_c"] == "12 s"
+    assert processed["estusage_m"] == "7 grams"
+    assert processed["delivery_complete"] is True
+
+
+def test_historical_processed_duration_does_not_use_wall_endpoints():
+    row = dict(defaults.default_metrics(), mode="Smoke", starttime=100_000, endtime=200_000)
+    row.pop("elapsed_seconds", None)
+    row.pop("delivery_complete", None)
+
+    (processed,) = process_metrics([row])
+
+    assert processed["timeinmode"] == "Unknown"
+    assert processed["elapsed_seconds"] is None
+    assert processed["delivery_complete"] is None
+    assert processed["endtime_c"] == epoch_to_time(200)
+
+
+def test_event_totals_sum_physical_mode_durations_not_calendar_span(ds):
+    events = [
+        dict(
+            defaults.default_metrics(),
+            mode="Smoke",
+            starttime=200_000,
+            endtime=100_000,
+            elapsed_seconds=90.75,
+            delivery_complete=True,
+            augerontime=12.5,
+        ),
+        dict(
+            defaults.default_metrics(),
+            mode="Shutdown",
+            starttime=100_000,
+            endtime=50_000,
+            elapsed_seconds=29.25,
+            delivery_complete=True,
+            augerontime=7.5,
+        ),
+        dict(defaults.default_metrics(), mode="Stop", starttime=50_000),
+    ]
+
+    totals = prepare_event_totals(events)
+
+    assert totals["cooktime"] == "2m 0s"
+    assert totals["augerontime"] == "20s"
+    assert totals["estusage_m"] == "6 grams"
+
+
+@pytest.mark.parametrize("elapsed,complete", [(None, None), (10.0, False), (10.0, None)])
+def test_event_totals_do_not_present_unknown_history_as_complete(ds, elapsed, complete):
+    events = [
+        dict(
+            defaults.default_metrics(),
+            mode="Smoke",
+            starttime=100_000,
+            endtime=200_000,
+            elapsed_seconds=elapsed,
+            delivery_complete=complete,
+        ),
+        dict(
+            defaults.default_metrics(),
+            mode="Shutdown",
+            starttime=200_000,
+            endtime=300_000,
+            elapsed_seconds=100.0,
+            delivery_complete=True,
+        ),
+        dict(defaults.default_metrics(), mode="Stop", starttime=300_000),
+    ]
+
+    assert prepare_event_totals(events)["cooktime"] == "Unknown"

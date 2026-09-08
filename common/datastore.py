@@ -73,10 +73,10 @@ _HISTORY_INDEX_DDL = "CREATE INDEX IF NOT EXISTS ix_history_ts ON history(ts);\n
 
 _HISTORY_DDL = _HISTORY_TABLE_DDL.format(name="history") + _HISTORY_INDEX_DDL
 
-# Columnar metrics schema (schema v3). Columns mirror common.metrics_items in
-# order; `seq` is a surrogate PK so it doesn't clash with the metrics 'id'
-# field (a uuid string). Defined separately so the v1->v3 migration below can
-# reuse the exact same DDL when recreating the table.
+# Frozen legacy columnar metrics schema (schema v3); `seq` is a surrogate PK
+# separate from the metrics 'id' UUID. The v1->v3 migration reuses this exact
+# DDL, and registered v14 adds nullable monotonic duration/delivery columns on
+# both fresh and upgraded databases before current METRIC_COLUMNS are queried.
 #
 # Numeric columns that conventionally hold integer values use NUMERIC affinity
 # rather than REAL: SQLite's NUMERIC affinity stores an integer literal as

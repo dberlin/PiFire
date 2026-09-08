@@ -17,6 +17,7 @@ explicitly assert that nothing appears outside the history folder.
 Harness rationale: see tests/web/test_api_files_listing.py's docstring.
 """
 
+import csv
 import io
 import os
 import zipfile
@@ -113,12 +114,39 @@ def test_export_data_csv_has_a_header_and_one_row_per_sample(client, folders):
     assert "attachment" in resp.headers["Content-Disposition"]
 
 
-def test_export_events_csv(client, folders):
+@pytest.mark.parametrize("physical_duration", [90.75, None])
+def test_export_events_csv_uses_only_explicit_physical_duration(client, folders, physical_duration):
+    from file_mgmt.common import read_json_file_data, update_json_file_data
+
     history_dir, _ = folders
-    name = write_cookfile(history_dir, "ExportEv-Cook")
+    name = write_cookfile(history_dir, f"ExportEv-Cook-{physical_duration}")
+    events, status = read_json_file_data(history_dir + name, "events")
+    assert status == "OK"
+    event = events[0]
+    event["starttime"] = 200_000
+    event["endtime"] = 100_000
+    event["timeinmode"] = "old wall-derived duration"
+    if physical_duration is None:
+        event.pop("elapsed_seconds", None)
+        event.pop("delivery_complete", None)
+    else:
+        event["elapsed_seconds"] = physical_duration
+        event["delivery_complete"] = False
+    assert update_json_file_data(events, history_dir + name, "events") == "OK"
+
     resp = client.get(f"/api/files/cookfiles/export?file={name}&kind=events")
     assert resp.status_code == 200
-    assert len(resp.get_data(as_text=True).splitlines()) >= 3  # header + two events
+    rows = list(csv.DictReader(io.StringIO(resp.get_data(as_text=True)), skipinitialspace=True))
+    assert rows[0]["starttime"] == "200000"
+    assert rows[0]["endtime"] == "100000"
+    if physical_duration is None:
+        assert rows[0]["timeinmode"] == "Unknown"
+        assert rows[0]["elapsed_seconds"] == "None"
+        assert rows[0]["delivery_complete"] == "None"
+    else:
+        assert rows[0]["timeinmode"] == "1 m 30 s (incomplete)"
+        assert rows[0]["elapsed_seconds"] == "90.75"
+        assert rows[0]["delivery_complete"] == "False"
 
 
 def test_export_works_under_a_non_default_history_folder(client, folders):

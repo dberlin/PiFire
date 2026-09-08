@@ -103,10 +103,10 @@ class StartupMode(ControlMode):
 
         NOTE: this runs from setup_safety(), which `ControlMode.run()` calls
         BEFORE it sets self.state.timers.start_time (that happens later in the
-        shared pre-loop). We therefore take our own ctx.clock.now() reading here
+        shared pre-loop). We therefore capture ctx.clock.wall_time() here
         rather than reading self.state.timers.start_time (which is still its 0.0
         default at this point)."""
-        self.control["startup_timestamp"] = self.ctx.clock.now()
+        self.control["startup_timestamp"] = self.ctx.clock.wall_time()
         self.ctx.store.write_control_snapshot(self.control, origin="control")
 
     def on_settings_reload(self):

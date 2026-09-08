@@ -876,7 +876,7 @@ def test_wall_jump_during_teardown_keeps_one_terminal_interval(hold_cycle, monke
             hold.teardown(200.0)
     hold.ctx.clock.advance(120.0)
     hold.ctx.clock.jump_wall(7200.0)
-    publication_ms = round(hold.ctx.clock.now() * 1000)
+    publication_ms = round(hold.ctx.clock.wall_time() * 1000)
     hold.teardown(500.0)
     hold.teardown(500.0)
 

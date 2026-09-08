@@ -1,8 +1,11 @@
 """Identity-qualified physical time; wall coordinates are provenance only."""
 
 import math
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from functools import cache
+from pathlib import Path
 from typing import TypedDict, TypeGuard
 from uuid import UUID, uuid4
 
@@ -11,7 +14,12 @@ CONTROL_DISCONTINUITY_SECONDS = 60.0
 
 
 def _finite(value: object) -> TypeGuard[float]:
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
 
 
 def _valid_identity(value: object) -> TypeGuard[str]:
@@ -21,6 +29,16 @@ def _valid_identity(value: object) -> TypeGuard[str]:
         return str(UUID(value)) == value
     except ValueError:
         return False
+
+
+@cache
+def system_boot_id() -> str | None:
+    """Read Linux boot identity once; unavailable identity cannot authorize age."""
+    try:
+        value = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="ascii").strip()
+    except OSError, UnicodeError:
+        return None
+    return value if _valid_identity(value) else None
 
 
 class ClockStampPayload(TypedDict):
@@ -100,7 +118,7 @@ def stamp_age_s(
     if not _finite(monotonic_s) or not _finite(suspend_offset_s) or not _finite(stamp.suspend_offset_s):
         return None
     assert suspend_offset_s is not None and stamp.suspend_offset_s is not None
-    if abs(suspend_offset_s - stamp.suspend_offset_s) > CONTROL_DISCONTINUITY_SECONDS:
+    if suspend_offset_s - stamp.suspend_offset_s > CONTROL_DISCONTINUITY_SECONDS:
         return None
     age = monotonic_s - stamp.observed_monotonic_s
     return age if age >= 0 else None
@@ -143,13 +161,32 @@ class RuntimeClockDomain:
         self.boot_id: str | None = boot_id
         self.runtime_id: str = str(uuid4())
 
+    @classmethod
+    def for_system(cls, *, monotonic: Callable[[], float], wall_time: Callable[[], float]) -> RuntimeClockDomain:
+        boottime: Callable[[], float] | None = None
+        if hasattr(time, "CLOCK_BOOTTIME"):
+            boottime = lambda: time.clock_gettime(time.CLOCK_BOOTTIME)
+        return cls(
+            monotonic=monotonic,
+            wall_time=wall_time,
+            boot_id=system_boot_id(),
+            boottime=boottime,
+        )
+
     def rotate_runtime(self) -> str:
         self.runtime_id = str(uuid4())
         return self.runtime_id
 
     def capture(self) -> ClockStamp:
         monotonic = self._monotonic()
-        offset = None if self._boottime is None else self._boottime() - monotonic
+        if not _finite(monotonic):
+            raise ValueError("Monotonic source must return finite seconds")
+        offset = None
+        if self._boottime is not None:
+            boottime = self._boottime()
+            if not _finite(boottime):
+                raise ValueError("Boottime source must return finite seconds")
+            offset = boottime - monotonic
         return ClockStamp(
             schema_version=CLOCK_STAMP_SCHEMA,
             boot_id=self.boot_id,

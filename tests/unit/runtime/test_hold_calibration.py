@@ -497,6 +497,8 @@ def test_multiboundary_cancellation_reports_exact_old_frame_then_skipped_gap_and
     assert hold._control_trace is not None
     hold._control_trace.record = lambda kind, payload, _at: traces.append((kind, payload)) or True
     _advance_runtime(hold, 10.0, True, ptemp=200.0)
+    # This direct scheduler sample is an admitted physical observation too.
+    hold._admit_clock()
     hold.state.lid.open_detected = True
     hold.ctx.clock.advance(63.0 - hold.ctx.clock.monotonic())
     hold.on_tick(63.0, 200.0, hold.grill.get_output_status())

@@ -168,6 +168,13 @@ class ProbesMain:
         self._thermocouple_health_by_device = health_by_device
         self._thermocouple_health_transitions.clear()
 
+    def invalidate_control_history(self) -> None:
+        """Require fresh acquisition/inference after an unobserved control gap."""
+        self._thermocouple_inference_engines.clear()
+        self._thermocouple_health.clear()
+        self._thermocouple_health_by_device.clear()
+        self._thermocouple_health_transitions.clear()
+
     def set_thermocouple_inference_policy(self, policy, *, now=None) -> None:
         next_policy = ThermocoupleInferencePolicy(policy)
         if next_policy is ThermocoupleInferencePolicy.OFF:

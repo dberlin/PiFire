@@ -11,6 +11,7 @@ from common.control_trace import (
     TraceEventKind,
 )
 from controller.applied_output import FrameFeedbackDisposition
+from controller.runtime.clock import ManualClock
 from controller.runtime.framed_pulse import FramedPulseRuntime
 from controller.runtime.logic.pulse import PulseFrameResult, PulseResetReason
 from controller.runtime.runner import ControllerUpdateResult
@@ -38,6 +39,117 @@ def _runtime(mode) -> FramedPulseRuntime:
     runtime = mode._framed_pulse
     assert isinstance(runtime, FramedPulseRuntime)
     return runtime
+
+
+@pytest.mark.parametrize("jump", [-3600.0, 3600.0])
+def test_lid_pause_release_uses_monotonic_deadline_and_distinct_epoch_metadata(hold_cycle, request, jump):
+    clock = ManualClock(wall_start=1_800_000_000.0, monotonic_start=10.0)
+    runner = FakeControllerRunner(period=9999.0)
+    hold = hold_cycle(runner, clock=clock, cycle_data_extra={"LidOpenPauseTime": 30})
+    hold.setup()
+    request.addfinalizer(lambda: hold.teardown(200.0))
+    hold.control["lid_open_toggle"] = True
+    hold.on_tick(clock.monotonic(), 200.0, _status(hold))
+    epoch_estimate = hold.status_fragment()["lid_open_endtime"]
+    assert epoch_estimate == 1_800_000_030.0
+    assert _status(hold)["fan"] is False
+
+    clock.jump_wall(jump)
+    clock.advance(5.0)
+    hold.on_tick(clock.monotonic(), 200.0, _status(hold))
+    status = hold.status_fragment()
+    assert status["lid_open_remaining_seconds"] == 25.0
+    assert status["lid_open_endtime"] == epoch_estimate
+    assert _status(hold)["fan"] is False
+    assert _status(hold)["auger"] is False
+
+    clock.advance(25.0)
+    hold.on_tick(clock.monotonic(), 200.0, _status(hold))
+    assert hold.status_fragment()["lid_open_detected"] is True
+    assert _status(hold)["fan"] is False
+    clock.advance(0.05)
+    hold.on_tick(clock.monotonic(), 200.0, _status(hold))
+    assert hold.status_fragment()["lid_open_detected"] is False
+    assert hold.status_fragment()["lid_open_remaining_seconds"] == 0.0
+    assert _status(hold)["fan"] is True
+
+
+@pytest.mark.parametrize("jump", [-3600.0, 3600.0])
+def test_manual_auger_release_ignores_wall_jumps(hold_cycle, request, jump):
+    clock = ManualClock(wall_start=1_800_000_000.0, monotonic_start=10.0)
+    runner = FakeControllerRunner(period=9999.0)
+    hold = hold_cycle(runner, clock=clock)
+    hold.setup()
+    request.addfinalizer(lambda: hold.teardown(200.0))
+    hold.settings["safety"]["allow_manual_changes"] = True
+    hold.settings["safety"]["manual_override_time"] = 10.0
+    hold.control["manual"].update(change="auger", output=True)
+    hold._apply_manual_overrides(hold.control, clock.monotonic(), _status(hold))
+    assert _status(hold)["auger"] is True
+    assert runner.applied[-1].source is OutputSource.MANUAL_OVERRIDE
+
+    clock.jump_wall(jump)
+    clock.advance(5.0)
+    hold.on_tick(clock.monotonic(), 200.0, _status(hold))
+    assert _status(hold)["auger"] is True
+    clock.advance(5.0)
+    hold.on_tick(clock.monotonic(), 200.0, _status(hold))
+    assert _status(hold)["auger"] is True
+    clock.advance(0.05)
+    hold.on_tick(clock.monotonic(), 200.0, _status(hold))
+    assert _status(hold)["auger"] is False
+    assert hold.state.manual_override["auger"] == 0.0
+
+
+def test_terminal_manual_source_uses_latched_physical_cutoff(hold_cycle):
+    clock = ManualClock(wall_start=1_800_000_000.0, monotonic_start=10.0)
+    runner = FakeControllerRunner(period=9999.0)
+    hold = hold_cycle(runner, clock=clock)
+    hold.setup()
+    hold.settings["safety"]["allow_manual_changes"] = True
+    hold.settings["safety"]["manual_override_time"] = 10.0
+    hold.control["manual"].update(change="auger", output=True)
+    hold._apply_manual_overrides(hold.control, clock.monotonic(), _status(hold))
+    clock.advance(5.0)
+    hold._terminal_monotonic_s = clock.monotonic()
+    # Cleanup delay must not expire the manual interval being closed.
+    clock.advance(100.0)
+    clock.jump_wall(-3600.0)
+    runner.applied.clear()
+    hold.teardown(200.0)
+    assert _status(hold)["auger"] is False
+    assert runner.applied[-1].timestamp == 15.0
+    assert runner.applied[-1].source is OutputSource.MANUAL_OVERRIDE
+
+
+def test_blocking_solve_cannot_backfill_frames_before_gap_retirement(hold_cycle, monkeypatch):
+    clock = ManualClock(wall_start=1_800_000_000.0, monotonic_start=10.0)
+    runner = FakeControllerRunner(period=1.0).script([_output(1, 0.9), _output(2, 0.9)])
+    hold = hold_cycle(runner, clock=clock)
+    hold.setup()
+    hold._mode_setup_started = True
+    hold.on_tick(clock.monotonic(), 200.0, _status(hold))
+    hold.state.metrics = {"augerontime": 0.0}
+    latest = runner.latest
+
+    def delayed_latest():
+        clock.advance(61.0)
+        return latest()
+
+    monkeypatch.setattr(runner, "latest", delayed_latest)
+    clock.advance(1.1)
+    hold.on_tick(clock.monotonic(), 200.0, _status(hold))
+    assert hold.ctx.store.read_control()["mode"] == "Error"
+    assert not _status(hold)["auger"]
+    assert not _status(hold)["igniter"]
+    assert hold.state.metrics["augerontime"] <= 1.1
+    assert runner.observations == []
+    assert all(
+        not completion.applied.sample_complete
+        and completion.applied.feedback_disposition is FrameFeedbackDisposition.DISCARDED
+        for completion in runner.frame_completions
+    )
+    assert runner.stops == 1
 
 
 def _trace(mode):

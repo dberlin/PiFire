@@ -428,7 +428,7 @@ def test_tick_error_mode_cleanup(monkeypatch):
     names = [name for name, _ in grill.calls]
     assert "power_off" in names
     assert ("clear", None) in store.display_commands().list()
-    assert clock.now() >= 3  # the 3s error dwell went through ctx.clock.sleep
+    assert clock.monotonic() >= 3  # the 3s error dwell went through ctx.clock.sleep
 
 
 @pytest.mark.parametrize("mode", ["Stop", "Error"])
@@ -488,7 +488,7 @@ def test_tick_timer_expiry_sends_notification(monkeypatch):
     control_data["updated"] = False
     control_data["timer"] = {"start": 1, "paused": 0, "end": 5}
     control_data["notify_data"] = [{"type": "timer", "req": True, "shutdown": True, "keep_warm": True}]
-    clock = ManualClock(start=10)  # now (10) >= end (5)
+    clock = ManualClock(wall_start=10.0)  # wall time (10) >= persisted timer end (5)
     c, _ctx, store, _grill, _dist, _notifier = make_controller(settings, control_data, base_pellet_db(), clock=clock)
     _spy_dispatch(c)
     c.setup()
@@ -531,7 +531,7 @@ def test_tick_hopper_check_does_not_delay_the_next_refresh(monkeypatch):
     control_data = base_control(mode="Stop")
     control_data["updated"] = False
     control_data["hopper_check"] = True
-    clock = ManualClock(start=1000)
+    clock = ManualClock(wall_start=1000.0, monotonic_start=1000.0)
     dist = _RecordingDistance(level=42)
     c, _ctx, store, _grill, dist, _notifier = make_controller(
         settings, control_data, base_pellet_db(), dist=dist, clock=clock
@@ -561,7 +561,7 @@ def test_tick_refreshes_hopper_level_on_a_timer(monkeypatch):
     control_data = base_control(mode="Stop")
     control_data["updated"] = False
     control_data["hopper_check"] = False
-    clock = ManualClock(start=1000)
+    clock = ManualClock(wall_start=1000.0, monotonic_start=1000.0)
     dist = _RecordingDistance(level=77)
     c, _ctx, store, _grill, dist, _notifier = make_controller(
         settings, control_data, base_pellet_db(), dist=dist, clock=clock
@@ -604,7 +604,7 @@ def test_the_control_loop_never_waits_on_a_hopper_reading(monkeypatch):
     control_data = base_control(mode="Stop")
     control_data["updated"] = False
     control_data["hopper_check"] = False
-    clock = ManualClock(start=1000)
+    clock = ManualClock(wall_start=1000.0, monotonic_start=1000.0)
     dist = _HostileDistance()
     c, _ctx, _store, _grill, dist, _notifier = make_controller(
         settings, control_data, base_pellet_db(), dist=dist, clock=clock
@@ -633,7 +633,7 @@ def test_servicing_a_hopper_check_does_not_wait_either(monkeypatch):
     control_data = base_control(mode="Stop")
     control_data["updated"] = False
     control_data["hopper_check"] = True
-    clock = ManualClock(start=1000)
+    clock = ManualClock(wall_start=1000.0, monotonic_start=1000.0)
     # NOT hostile on request_sample: the loop is SUPPOSED to call it. Hostile on
     # everything else, so a wait bolted onto the request is still caught.
     dist = _HostileDistance()

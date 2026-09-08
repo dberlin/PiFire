@@ -12,6 +12,8 @@ const BASE: MetricRecord = {
   endtime: 1_700_000_090_000,
   endtime_c: "17:14:50",
   timeinmode: "1 m 30 s",
+  elapsed_seconds: 90,
+  delivery_complete: true,
   mode: "Smoke",
   augerontime: 100,
   augerontime_c: "100 s",
@@ -99,6 +101,7 @@ describe("metricRows", () => {
       endtime: 0,
       endtime_c: 0,
       timeinmode: "Active",
+      elapsed_seconds: 0,
     };
     const rows = metricRows(running, "F");
     expect(rows.find((r) => r.label === "End Time")).toEqual({
@@ -108,14 +111,27 @@ describe("metricRows", () => {
     });
     expect(rows.find((r) => r.label === "Time in Mode")).toEqual({
       label: "Time in Mode",
-      value: "—",
+      value: "0",
       converted: "Active",
     });
   });
 
-  it("reports the elapsed milliseconds as the raw Time in Mode", () => {
-    const rows = metricRows(BASE, "F");
-    expect(rows.find((r) => r.label === "Time in Mode")?.value).toBe("90000");
+  it("reports physical elapsed milliseconds even when the wall endpoints reverse", () => {
+    const rows = metricRows({ ...BASE, endtime: BASE.starttime - 3600_000 }, "F");
+    expect(rows.find((r) => r.label === "Time in Mode")).toEqual({
+      label: "Time in Mode",
+      value: "90000",
+      converted: "1 m 30 s",
+    });
+  });
+
+  it("keeps a historical missing physical duration unknown", () => {
+    const rows = metricRows({ ...BASE, elapsed_seconds: null, timeinmode: "Unknown" }, "F");
+    expect(rows.find((r) => r.label === "Time in Mode")).toEqual({
+      label: "Time in Mode",
+      value: "—",
+      converted: "Unknown",
+    });
   });
 
   it("renders Smoke Plus as Active or Disabled", () => {

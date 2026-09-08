@@ -39,6 +39,7 @@ from dataclasses import dataclass, field
 
 import controller.runtime.controller as controller_mod
 import controller.runtime.runner
+from common.clock_domain import RuntimeClockDomain
 from common.control_delta import control_delta
 from controller.runtime.clock import ManualClock
 from controller.runtime.context import ControllerContext, Devices
@@ -126,6 +127,12 @@ def make_ctx(settings, control_data, pellet_db, probes, grill=None, runner=None,
         clock=ManualClock(),
         event_log=capture_log,
         control_log=capture_log,
+    )
+    ctx.clock_domain = RuntimeClockDomain(
+        monotonic=lambda: ctx.clock.monotonic(),
+        wall_time=lambda: ctx.clock.wall_time(),
+        boot_id="00000000-0000-0000-0000-000000000001",
+        boottime=lambda: ctx.clock.monotonic(),
     )
     return ctx, grill, notifier
 

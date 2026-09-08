@@ -478,6 +478,24 @@ def guard_none_metric_field(metrics_data, index, field, caller, default=0):
     return value
 
 
+def metric_duration_display(
+    mode: str | None,
+    endtime: float | None,
+    elapsed_seconds: float | None,
+    delivery_complete: bool | None,
+) -> str:
+    """Format physical duration without inferring it from calendar metadata."""
+    if mode == Mode.STOP:
+        return "NA"
+    if elapsed_seconds is None:
+        return "Unknown"
+    if endtime == 0 and delivery_complete is True:
+        return "Active"
+    seconds = int(elapsed_seconds)
+    duration = f"{seconds // 60} m {seconds % 60} s" if seconds > 60 else f"{seconds} s"
+    return duration if delivery_complete is True else f"{duration} (incomplete)"
+
+
 def process_metrics(metrics_data, augerrate=0.3):
     # Process Additional Metrics Information for Display
     for index in range(len(metrics_data)):
@@ -491,18 +509,11 @@ def process_metrics(metrics_data, augerrate=0.3):
         else:
             endtime_c = epoch_to_time(endtime / 1000)
         metrics_data[index]["endtime_c"] = endtime_c
-        # Time in Mode
-        if metrics_data[index]["mode"] == Mode.STOP:
-            timeinmode = "NA"
-        elif endtime == 0:
-            timeinmode = "Active"
-        else:
-            seconds = int((endtime / 1000) - (starttime / 1000))
-            if seconds > 60:
-                timeinmode = f"{int(seconds / 60)} m {seconds % 60} s"
-            else:
-                timeinmode = f"{seconds} s"
-        metrics_data[index]["timeinmode"] = timeinmode
+        elapsed_seconds = metrics_data[index].setdefault("elapsed_seconds", None)
+        delivery_complete = metrics_data[index].setdefault("delivery_complete", None)
+        metrics_data[index]["timeinmode"] = metric_duration_display(
+            metrics_data[index]["mode"], endtime, elapsed_seconds, delivery_complete
+        )
         # Convert Auger On Time
         augerontime = guard_none_metric_field(metrics_data, index, "augerontime", "process_metrics")
         metrics_data[index]["augerontime_c"] = str(int(augerontime)) + " s"

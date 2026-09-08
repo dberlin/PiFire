@@ -158,6 +158,8 @@ def test_metric_append_stamps_mutable_input_and_preserves_column_shapes(monkeypa
     assert history.read_all_metrics() == [expected]
     assert list(history.read_metrics()) == METRIC_COLUMNS
     assert history.read_metrics()["smokeplus"] is False
+    assert history.read_metrics()["elapsed_seconds"] is None
+    assert history.read_metrics()["delivery_complete"] is None
 
 
 def test_metric_rows_keep_distinct_display_identities(monkeypatch, ds):
@@ -207,6 +209,8 @@ def test_metric_update_changes_only_last_row_and_inserts_when_empty(monkeypatch,
     assert inserted["id"] is None
     assert inserted["starttime"] is None
     assert inserted["smokeplus"] is False
+    assert inserted["elapsed_seconds"] is None
+    assert inserted["delivery_complete"] is None
 
 
 def test_metric_flush_is_isolated_but_history_flush_couples_all_owned_state(monkeypatch, ds):

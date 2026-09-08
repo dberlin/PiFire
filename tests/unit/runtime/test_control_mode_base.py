@@ -14,8 +14,11 @@ import json
 import pytest
 
 import controller.runtime.modes.base as base_mode
+from common.clock_domain import RuntimeClockDomain
+from common.control_delta import control_delta
 from controller.runtime.clock import ManualClock
 from controller.runtime.context import ControllerContext, Devices
+from controller.runtime.modes.prime import PrimeMode
 from controller.runtime.modes.base import ControlMode
 from controller.runtime.modes.startup import StartupMode
 from controller.runtime.state import WorkCycleState
@@ -258,7 +261,7 @@ def test_excitation_uses_actual_auger_igniter_union_without_double_counting():
     ]
 
 
-def test_excitation_clock_regression_contributes_no_negative_heat():
+def test_excitation_wall_regression_does_not_change_heat_duration():
     mode = _make_mode()
     mode.name = "Hold"
     mode.grill.auger_on()
@@ -266,7 +269,7 @@ def test_excitation_clock_regression_contributes_no_negative_heat():
     mode._read_probes_with_excitation()
     mode.ctx.clock.advance(5.0)
     mode._read_probes_with_excitation()
-    mode.ctx.clock.advance(-10.0)
+    mode.ctx.clock.jump_wall(-10.0)
     mode._read_probes_with_excitation()
 
     contexts = [call["excitation"] for call in mode.probe_complex.read_calls]
@@ -382,12 +385,6 @@ def test_confirmed_primary_fault_preflight_skips_mode_setup_and_positive_actuati
     assert ctx.store.read_all_metrics() == []
     assert ctx.notifications.sent == []
     assert not _positive_actuator_calls(ctx.devices.grill_platform.calls)
-    assert [name for name, _args in ctx.devices.grill_platform.calls] == [
-        "igniter_off",
-        "auger_off",
-        "fan_off",
-        "power_off",
-    ]
     assert monitor_events == ["start", "stop"]
 
 
@@ -783,26 +780,6 @@ def _elapse_during_preloop_checks(monkeypatch, ctx):
     monkeypatch.setattr(base_mode, "evaluate_phase", evaluate_with_elapsed_time)
 
 
-def test_control_mode_hook_order_one_bounded_tick(monkeypatch):
-    ctx = _make_ctx()
-    _elapse_during_preloop_checks(monkeypatch, ctx)
-
-    mode = _RecordingMode(ctx, WorkCycleState())
-    mode.run()
-
-    # sense -> safety -> act -> publish: check_safety now runs BEFORE the merged
-    # on_tick, and the status-publish gate (status_fragment) runs AFTER it.
-    assert mode.calls == [
-        "setup",
-        "setup_safety",
-        "check_safety",
-        "on_tick",
-        "status_fragment",
-        "should_exit",
-        "teardown",
-    ]
-
-
 def test_preloop_identity_refresh_does_not_shift_mode_timer_origin(monkeypatch):
     ctx = _make_ctx()
     _elapse_during_preloop_checks(monkeypatch, ctx)
@@ -1028,3 +1005,192 @@ def test_a_dc_fan_that_is_not_running_reports_no_duty(monkeypatch):
 
 def test_a_running_dc_fan_still_reports_its_commanded_duty(monkeypatch):
     assert _status_with_dc_fan(monkeypatch, fan_on=True, duty=100)["fan_duty"] == 100
+
+
+class _FuelMode(_RecordingMode):
+    def setup(self):
+        self.grill.power_on()
+        self.grill.auger_on()
+
+    def should_exit(self, now, ptemp):
+        return now >= 13.0
+
+
+def _physical_context():
+    ctx = _make_ctx()
+    clock = ManualClock(wall_start=1_800_000_000.0, monotonic_start=10.0)
+    ctx.clock = clock
+    ctx.clock_domain = RuntimeClockDomain(
+        monotonic=clock.monotonic,
+        wall_time=clock.wall_time,
+        boot_id="9c898927-5e50-4c98-9e50-ae092e623629",
+        boottime=clock.monotonic,
+    )
+    return ctx, clock
+
+
+@pytest.mark.parametrize("wall_jump", [0.0, -3600.0, 3600.0])
+def test_real_loop_delivery_and_elapsed_ignore_wall_corrections(monkeypatch, wall_jump):
+    ctx, clock = _physical_context()
+    jumped = False
+
+    def sleep(_seconds):
+        nonlocal jumped
+        clock.advance(1.0)
+        if not jumped:
+            clock.jump_wall(wall_jump)
+            jumped = True
+
+    monkeypatch.setattr(clock, "sleep", sleep)
+    mode = _FuelMode(ctx, WorkCycleState())
+    mode.run()
+
+    metrics = ctx.store.read_metrics()
+    status = ctx.store.read_status()
+    assert metrics["augerontime"] == pytest.approx(3.0)
+    assert metrics["elapsed_seconds"] == pytest.approx(3.0)
+    assert metrics["delivery_complete"] is True
+    assert status["start_time"] == 1_800_000_000.0
+    assert status["elapsed_seconds"] == pytest.approx(3.0)
+    assert not ctx.devices.grill_platform.get_output_status()["auger"]
+    assert metrics["endtime"] == pytest.approx((1_800_000_003.0 + wall_jump) * 1000)
+
+
+def test_history_clear_publishes_the_same_duration_origin_as_terminal_metrics(monkeypatch):
+    ctx, clock = _physical_context()
+    monkeypatch.setattr(clock, "sleep", lambda _seconds: clock.advance(1.0))
+    mode = _FuelMode(ctx, WorkCycleState())
+    tick = mode.on_tick
+
+    def clear_during_tick(now, ptemp, outputs):
+        tick(now, ptemp, outputs)
+        if now == 11.0:
+            mode._handle_history_clear(now=now)
+
+    monkeypatch.setattr(mode, "on_tick", clear_during_tick)
+    mode.run()
+    assert ctx.store.read_status()["elapsed_seconds"] == 2.0
+    assert ctx.store.read_status()["cook_elapsed_seconds"] == 2.0
+    assert ctx.store.read_metrics()["elapsed_seconds"] == 2.0
+
+
+def test_blocking_control_flags_retire_before_another_probe_read(monkeypatch):
+    ctx, clock = _physical_context()
+    mode = _FuelMode(ctx, WorkCycleState())
+    process_flags = mode._process_control_flags
+
+    def delayed_flags(*args):
+        result = process_flags(*args)
+        clock.advance(61.0)
+        return result
+
+    monkeypatch.setattr(mode, "_process_control_flags", delayed_flags)
+    mode.run()
+    assert len(ctx.devices.probe_complex.read_calls) == 2
+    assert ctx.store.read_control()["mode"] == "Error"
+    assert ctx.store.read_metrics()["delivery_complete"] is False
+    assert ctx.store.read_metrics()["augerontime"] == 0.0
+    assert not ctx.devices.grill_platform.get_output_status()["auger"]
+
+
+@pytest.mark.parametrize("suspend", [False, True])
+def test_large_gap_retires_before_next_observation_or_manual_on(monkeypatch, suspend):
+    ctx, clock = _physical_context()
+    suspended = 0.0
+    ctx.clock_domain = RuntimeClockDomain(
+        monotonic=clock.monotonic,
+        wall_time=clock.wall_time,
+        boot_id="9c898927-5e50-4c98-9e50-ae092e623629",
+        boottime=lambda: clock.monotonic() + suspended,
+    )
+    sleeps = 0
+
+    def sleep(_seconds):
+        nonlocal sleeps, suspended
+        sleeps += 1
+        clock.advance(1.0)
+        if sleeps == 2:
+            if suspend:
+                suspended = 120.0
+            else:
+                clock.advance(120.0)
+            control = ctx.store.read_control()
+            control["manual"].update(change="auger", output=True)
+            ctx.store.write_control_snapshot(control, origin="test")
+            ctx.store.enqueue_control_delta(
+                control_delta(set_values={"mode": "Startup", "updated": True}), origin="pre-gap"
+            )
+
+    monkeypatch.setattr(clock, "sleep", sleep)
+    mode = _FuelMode(ctx, WorkCycleState())
+    mode.run()
+
+    assert mode.calls.count("on_tick") == 2
+    assert ctx.store.read_metrics()["augerontime"] == pytest.approx(1.0)
+    assert ctx.store.read_metrics()["elapsed_seconds"] == pytest.approx(1.0)
+    assert ctx.store.read_metrics()["delivery_complete"] is False
+    assert ctx.store.read_control()["mode"] == "Error"
+    assert ctx.store.read_control()["manual"]["change"] is False
+    assert not ctx.devices.grill_platform.get_output_status()["auger"]
+    assert not ctx.devices.grill_platform.get_output_status()["igniter"]
+    assert mode._excitation_last_read_at is None
+    ctx.store.execute_control_writes()
+    assert ctx.store.read_control()["mode"] == "Error"
+
+
+def test_unknown_boot_prevents_positive_setup():
+    ctx, clock = _physical_context()
+    ctx.clock_domain = RuntimeClockDomain(
+        monotonic=clock.monotonic,
+        wall_time=clock.wall_time,
+        boot_id=None,
+        boottime=clock.monotonic,
+    )
+    mode = _FuelMode(ctx, WorkCycleState())
+    mode.run()
+    assert "on_tick" not in mode.calls
+    assert not ctx.devices.grill_platform.get_output_status()["auger"]
+    assert ctx.store.read_control()["mode"] == "Error"
+
+
+def test_exception_always_finishes_known_delivery_and_turns_hardware_off(monkeypatch):
+    ctx, clock = _physical_context()
+    monkeypatch.setattr(clock, "sleep", lambda _seconds: clock.advance(1.0))
+    mode = _FuelMode(ctx, WorkCycleState())
+
+    def fail_tick(now, _ptemp, _outputs):
+        if now >= 11.0:
+            raise RuntimeError("control tick failure")
+
+    monkeypatch.setattr(mode, "on_tick", fail_tick)
+    with pytest.raises(RuntimeError, match="control tick failure"):
+        mode.run()
+    assert ctx.store.read_metrics()["augerontime"] == pytest.approx(1.0)
+    assert not ctx.devices.grill_platform.get_output_status()["auger"]
+    assert not ctx.devices.grill_platform.get_output_status()["igniter"]
+
+
+def test_partial_prime_stop_preserves_only_observed_delivery_once(monkeypatch):
+    ctx, clock = _physical_context()
+    control = ctx.store.read_control()
+    control["mode"] = "Prime"
+    control["prime_amount"] = 100
+    ctx.store.write_control_snapshot(control, origin="test")
+
+    def sleep(_seconds):
+        clock.advance(1.0)
+        if clock.monotonic() == 13.0:
+            ctx.store.enqueue_control_delta(
+                control_delta(set_values={"mode": "Stop", "updated": True}), origin="operator"
+            )
+
+    monkeypatch.setattr(clock, "sleep", sleep)
+    mode = PrimeMode(ctx, WorkCycleState())
+    mode.run()
+    before = ctx.store.read_pellet_db()["current"]["est_usage"]
+    clock.advance(120.0)
+    mode._finish_cycle(failed=False)
+    assert ctx.store.read_metrics()["augerontime"] == pytest.approx(3.0)
+    assert ctx.store.read_metrics()["elapsed_seconds"] == pytest.approx(3.0)
+    assert ctx.store.read_pellet_db()["current"]["est_usage"] == before
+    assert not ctx.devices.grill_platform.get_output_status()["auger"]

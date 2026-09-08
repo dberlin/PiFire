@@ -9,7 +9,8 @@ collection side effects, and couples the two files together).
 import logging
 
 import controller.runtime.controller as controller_mod
-from controller.runtime.clock import ManualClock
+from common.clock_domain import RuntimeClockDomain
+from controller.runtime.clock import Clock, ManualClock
 from controller.runtime.context import ControllerContext, Devices
 from controller.runtime.controller import Controller
 from controller.runtime.store import InMemoryStore
@@ -35,7 +36,7 @@ class _RecordingDistance(FakeDistance):
         self.update_distances_calls.append((empty, full))
 
 
-def make_controller(settings, control_data, pellet_db, *, grill=None, dist=None, clock=None):
+def make_controller(settings, control_data, pellet_db, *, grill=None, dist=None, clock: Clock | None = None):
     store = InMemoryStore(control=control_data, settings=settings, pellet_db=pellet_db)
     grill = grill or FakeGrillPlatform(
         standalone=settings["platform"].get("standalone", True), outputs=tuple(settings["platform"]["outputs"])
@@ -47,9 +48,15 @@ def make_controller(settings, control_data, pellet_db, *, grill=None, dist=None,
         devices=Devices(grill_platform=grill, probe_complex=FakeProbes().script([70] * 4), dist_device=dist),
         store=store,
         notifications=notifier,
-        clock=clock or ManualClock(),
+        clock=ManualClock() if clock is None else clock,
         event_log=logger,
         control_log=logger,
+    )
+    ctx.clock_domain = RuntimeClockDomain(
+        monotonic=lambda: ctx.clock.monotonic(),
+        wall_time=lambda: ctx.clock.wall_time(),
+        boot_id="00000000-0000-0000-0000-000000000001",
+        boottime=lambda: ctx.clock.monotonic(),
     )
     c = Controller(ctx)
     return c, ctx, store, grill, dist, notifier

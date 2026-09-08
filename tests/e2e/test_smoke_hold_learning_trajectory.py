@@ -13,7 +13,7 @@ from io import BytesIO
 from itertools import count, pairwise
 from math import ceil
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, cast, override
 
 import pytest
 
@@ -66,6 +66,7 @@ from controller.model_learning.contracts import (
 from controller.mpc import Controller
 from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.runtime.actuation_delivery import ActuationDeliveryJournal, DeliveredGrillPlatform
+from controller.runtime.clock import Clock
 from controller.runtime.control_trace_recorder import ControlTraceRecorder
 from controller.runtime.control_trace_session import ControlTraceSession
 from controller.runtime.controller import run_work_cycle
@@ -111,24 +112,31 @@ def _digest(label: str) -> str:
 
 
 @dataclass(slots=True)
-class _FixedTimeline:
+class _FixedTimeline(Clock):
     monotonic_ms: int = 0
+    wall_offset_ms: int = _WALL_OFFSET_MS
 
     def advance_frame(self) -> None:
         self.monotonic_ms += _FRAME_MS
 
-    def now(self) -> float:
+    @override
+    def wall_time(self) -> float:
         return self.wall_ms() / 1_000
 
+    @override
     def monotonic(self) -> float:
         return self.monotonic_ms / 1_000
 
+    @override
     def sleep(self, seconds: float) -> None:
         # Probe reads drive this frame-stepped scenario.
         assert seconds >= 0.0
 
     def wall_ms(self) -> int:
-        return _WALL_OFFSET_MS + self.monotonic_ms
+        return self.wall_offset_ms + self.monotonic_ms
+
+    def jump_wall(self, seconds: float) -> None:
+        self.wall_offset_ms += round(seconds * 1_000)
 
 
 class _TransitioningProbes:
@@ -865,7 +873,7 @@ class _DeterministicRunnerPeriodGate:
             self._condition.notify_all()
 
 
-class _RealCookClock:
+class _RealCookClock(Clock):
     def __init__(self, stream: _RealCookHoldStream, *, start_index: int) -> None:
         self._stream = stream
         start_ms = stream.temperatures[start_index][0]
@@ -875,6 +883,8 @@ class _RealCookClock:
         source_timestamps.update(range(start_ms, end_ms + 1, slot_ms))
         source_timestamps.add(end_ms)
         self._ticks = tuple(sorted(source_timestamps))
+        self._monotonic_origin_ms: int = stream.temperatures[0][0]
+        self._wall_offset_s: float = 0.0
         self._tick_index = 0
         self._sample_index = start_index
         self._period_gate: _DeterministicRunnerPeriodGate | None = None
@@ -888,11 +898,16 @@ class _RealCookClock:
     def timestamp_ms(self) -> int:
         return self._ticks[self._tick_index]
 
-    def now(self) -> float:
-        return self.timestamp_ms / 1_000
+    @override
+    def wall_time(self) -> float:
+        return self.timestamp_ms / 1_000 + self._wall_offset_s
 
+    @override
     def monotonic(self) -> float:
-        return self.timestamp_ms / 1_000
+        return (self.timestamp_ms - self._monotonic_origin_ms) / 1_000
+
+    def jump_wall(self, seconds: float) -> None:
+        self._wall_offset_s += seconds
 
     def bind_period_gate(self, gate: _DeterministicRunnerPeriodGate) -> None:
         self._period_gate = gate
@@ -900,6 +915,7 @@ class _RealCookClock:
     def pause_next_sleep(self) -> None:
         self._pause_next_sleep = True
 
+    @override
     def sleep(self, seconds: float) -> None:
         assert seconds >= 0.0
         if self._pause_next_sleep:
@@ -913,7 +929,7 @@ class _RealCookClock:
         ):
             self._sample_index += 1
         if self._period_gate is not None:
-            self._period_gate.advance_to(self.now())
+            self._period_gate.advance_to(self.monotonic())
 
 
 class _RealCookProbes:
@@ -1106,8 +1122,8 @@ def _assert_real_cook_hold_smoke(
     _seed_sqlite_store(store, settings, control)
     clock = _RealCookClock(stream, start_index=stream_start_index)
     journal = ActuationDeliveryJournal(
-        monotonic_clock=lambda: clock.timestamp_ms,
-        wall_clock=lambda: clock.timestamp_ms,
+        monotonic_clock=lambda: round(clock.monotonic() * 1_000),
+        wall_clock=lambda: round(clock.wall_time() * 1_000),
     )
     physical_grill = FakeGrillPlatform(
         dc_fan=stream.fan_pwm_capable,
@@ -1170,7 +1186,7 @@ def _assert_real_cook_hold_smoke(
         runner, _status = built
         if runner is not None and runner.runs_async():
             period_gate = _DeterministicRunnerPeriodGate(
-                start_s=clock.now(),
+                start_s=clock.monotonic(),
                 period_s=float(runner.control_period()),
             )
             runner._wait_for_period = period_gate  # noqa: SLF001 - deterministic executor barrier
@@ -1183,8 +1199,8 @@ def _assert_real_cook_hold_smoke(
         hold_module,
         "ControlTraceRecorder",
         lambda warning=None: real_recorder(
-            monotonic_clock=lambda: clock.timestamp_ms,
-            wall_clock=lambda: clock.timestamp_ms,
+            monotonic_clock=lambda: round(clock.monotonic() * 1_000),
+            wall_clock=lambda: round(clock.wall_time() * 1_000),
             warning=warning,
         ),
     )

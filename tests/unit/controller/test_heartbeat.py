@@ -32,7 +32,7 @@ class _Ctx:
 
 def _ctx(start=1000.0):
     heartbeat_mod.reset_for_tests()
-    return _Ctx(ManualClock(start), InMemoryStore())
+    return _Ctx(ManualClock(wall_start=start), InMemoryStore())
 
 
 def _stamp(ctx):
@@ -103,7 +103,7 @@ def test_the_idle_tick_stamps(monkeypatch):
 
     c.tick()
 
-    assert store._generic[CONTROL_HEARTBEAT_KEY] == ctx.clock.now()
+    assert store._generic[CONTROL_HEARTBEAT_KEY] == ctx.clock.wall_time()
 
 
 def test_the_per_mode_work_cycle_stamps():

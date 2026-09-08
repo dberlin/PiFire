@@ -138,6 +138,7 @@ def _assert_current_schema_complete(path: Path) -> None:
             ("pifire-schema", "v0011_adopt_sqlite_utils_registry"),
             ("pifire-schema", "v0012_trajectory_role_generation"),
             ("pifire-schema", "v0013_trajectory_clock_domains"),
+            ("pifire-schema", "v0014_metric_monotonic_duration"),
         ]
     finally:
         connection.close()

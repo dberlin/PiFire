@@ -283,3 +283,34 @@ uv run python scripts/exact_revision_gate.py push --bookmark massive-reworks-and
 ```
 
 The authoritative wrapper runs the separate contract preflight before the five ordered release commands and verifies exact revision before/after each and before publication. A failed/interrupted/drifted preflight leaves all five not run. Preserve schema-v2 evidence at `.artifacts/exact-revision/<full-revision>/evidence.json`, its preflight evidence, and all referenced stdout/stderr/hash artifacts; schema-v1 evidence is historical-only. Focused test success or a Jujutsu operation is not release evidence and does not authorize push.
+
+## Execution record
+
+Implemented the user-authorized shared-mode development unit. The approved
+60-second policy supersedes the smaller unapproved thresholds in the original
+proposal: only an observation gap or suspend-offset increase strictly greater
+than 60 seconds retires control; a wall-only correction does not.
+
+- Removed `Clock.now()` and migrated runtime, runner rebuilds, tools and fake
+  clocks to explicit independent axes.
+- Moved physical mode deadlines and non-Hold delivery accounting to monotonic
+  observations. Kept epoch publication explicit and added duration/stamp status.
+- Added fail-closed pre-read and post-blocking Hold accounting checks, terminal
+  cutoff reuse, safe hardware cleanup, and incomplete gap metrics.
+- Migrated database metrics to schema 14 with nullable historical physical
+  duration/completeness, strict wire contracts, archive/CSV/aggregate readers and
+  generated TypeScript. Historical wall endpoints remain unchanged.
+- Runtime review found a stale duration origin after history clear and a missing
+  post-solve pulse-accounting fence. Both were corrected with regressions.
+  Independent metrics-schema/reader review reported no findings.
+
+Verification: 1,753 runtime/controller/characterization/E2E tests passed; 218
+duration/schema/persistence/API tests passed; 16 frontend metrics tests and
+frontend typecheck passed. A disconnected real-loop smoke delivered exactly
+three seconds for zero, -3,600 and +3,600 wall corrections. A Chromium metrics
+surface showed `3000` / `3 s (incomplete)` with reversed epoch endpoints and
+an unknown duration for a historical row. No fueled hardware was exercised.
+
+Probe acquisition and peripheral heartbeat/timer/display authority remain the
+next coordinated plans. This development unit is not independently deployable
+and does not authorize a release or push.

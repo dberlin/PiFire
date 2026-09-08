@@ -327,7 +327,7 @@ def run_scenario(
     core_config, cycle_data, controller_override, cycle_override = _effective_configuration(
         controller, config, cycle_config
     )
-    clock = ManualClock(start=1_700_000_000.0, monotonic_start=-float(AUGER_TIMING.frame_s))
+    clock = ManualClock(wall_start=1_700_000_000.0, monotonic_start=-float(AUGER_TIMING.frame_s))
     mod = importlib.import_module(f"controller.{controller}")
     clock_options = {"clock": clock} if controller in {"pid", "pid_sp"} else {}
     core = mod.Controller(dict(core_config), "F", dict(cycle_data), **clock_options)
@@ -487,7 +487,7 @@ def run_scenario(
         elif inhibited:
             actual_auger_on = False
         else:
-            wall_now_ms = round(clock.now() * 1_000)
+            wall_now_ms = round(clock.wall_time() * 1_000)
             if frame_wall_start_ms is None:
                 frame_wall_start_ms = wall_now_ms
             decision = scheduler.advance(requested, now, actual_auger_on)

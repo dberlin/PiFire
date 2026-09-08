@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import override
+
 import pytest
 
 from common.control_trace import ControllerBranch
@@ -12,11 +14,12 @@ CYCLE_DATA = {"u_min": 0.1, "u_max": 0.9}
 
 def test_pid_trace_diagnostics_reproduce_completed_update():
     class _ReadTimeline(ManualClock):
-        def __init__(self):
-            super().__init__(1_700_000_000.0)
+        def __init__(self) -> None:
+            super().__init__(wall_start=1_700_000_000.0, monotonic_start=0.0)
             self.readings = iter((0.0, 0.0, 0.0, 100.0, 102.0))
 
-        def monotonic(self):
+        @override
+        def monotonic(self) -> float:
             return next(self.readings)
 
     core = pid.Controller(
@@ -43,7 +46,7 @@ def test_pid_trace_diagnostics_reproduce_completed_update():
 
 
 def test_pid_sp_trace_diagnostics_reproduce_completed_update():
-    clock = ManualClock(1_700_000_000.0)
+    clock = ManualClock(wall_start=1_700_000_000.0, monotonic_start=0.0)
     # tau/theta are no longer configuration: the identifier learns them, so a
     # controller built here carries no model at all.
     core = pid_sp.Controller(
@@ -51,7 +54,7 @@ def test_pid_sp_trace_diagnostics_reproduce_completed_update():
         "F",
         dict(CYCLE_DATA),
         monotonic_clock=clock.monotonic,
-        clock_ms=lambda: int(clock.now() * 1_000),
+        clock_ms=lambda: int(clock.wall_time() * 1_000),
     )
     core.set_target(200.0)
     core.last = 190.0
@@ -92,13 +95,13 @@ def test_pid_sp_trace_diagnostics_reproduce_completed_update():
     ],
 )
 def test_pid_sp_trace_diagnostics_identify_each_control_branch(current, new_target, last, expected):
-    clock = ManualClock(1_700_000_000.0)
+    clock = ManualClock(wall_start=1_700_000_000.0, monotonic_start=0.0)
     core = pid_sp.Controller(
         {"PB": 20.0, "tau": 10.0, "theta": 5.0, "stable_window": 12.0},
         "F",
         dict(CYCLE_DATA),
         monotonic_clock=clock.monotonic,
-        clock_ms=lambda: int(clock.now() * 1_000),
+        clock_ms=lambda: int(clock.wall_time() * 1_000),
     )
     core.set_target(200.0)
     core.last = last

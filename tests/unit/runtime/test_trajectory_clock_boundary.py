@@ -494,12 +494,17 @@ def test_clock_schema_migration_preserves_historical_canonical_rows(tmp_path: Pa
             "CREATE INDEX ix_learning_frame_revision ON learning_trajectory_frame"
             "(segment_id, created_corpus_revision, ordinal)"
         )
-        connection.execute("DELETE FROM _sqlite_migrations WHERE name='v0013_trajectory_clock_domains'")
+        connection.execute(
+            "DELETE FROM _sqlite_migrations WHERE name IN "
+            "('v0013_trajectory_clock_domains', 'v0014_metric_monotonic_duration')"
+        )
+        connection.execute("ALTER TABLE metrics DROP COLUMN elapsed_seconds")
+        connection.execute("ALTER TABLE metrics DROP COLUMN delivery_complete")
         connection.execute("PRAGMA user_version=12")
     cold = LearningTrajectoryRepository(path)
     assert cold.read_segment(original.segment_id) == original
     with sqlite3.connect(path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone() == (13,)
+        assert connection.execute("PRAGMA user_version").fetchone() == (14,)
         assert connection.execute("SELECT * FROM learning_trajectory_frame").fetchall() == before
 
 

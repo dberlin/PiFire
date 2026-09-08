@@ -95,7 +95,7 @@ class _HoldOutputStatus:
 
 @dataclass(frozen=True, slots=True)
 class _HoldTickContext:
-    now: float
+    wall_time: float
     monotonic_s: float
     ptemp: float
     output_status: _HoldOutputStatus
@@ -187,7 +187,7 @@ class _FramedDispatchState:
 @dataclass(slots=True)
 class _HoldTeardownState:
     phase: _TeardownPhase = _TeardownPhase.ACTIVE
-    now: float | None = None
+    wall_time: float | None = None
     monotonic_s: float | None = None
     ptemp: float | None = None
     auger_on: bool = False
@@ -246,6 +246,7 @@ class HoldMode(ControlMode):
     _hold_learning: HoldLearningRuntime | None = None
     _teardown: _HoldTeardownState
     _last_solve_monotonic_s: float = 0.0
+    _lid_open_end_wall_time: float = 0.0
     _calibration_command_high_water: int = 0
     _last_target: float | None = None
     _safety_ceiling_fault: str | None = None
@@ -328,7 +329,7 @@ class HoldMode(ControlMode):
         applied = feedback.applied
         self._set_output(
             applied,
-            self.ctx.clock.now(),
+            self.ctx.clock.wall_time(),
             producing_revision=applied.producing_result_revision,
             producing_calibration_revision=applied.producing_calibration_revision,
             producing_calibration_action=applied.producing_calibration_action,
@@ -357,7 +358,7 @@ class HoldMode(ControlMode):
                 trace.record_frame(
                     TraceFrameContext(
                         completion=completion,
-                        timestamp_ms=int(self.ctx.clock.now() * 1_000),
+                        timestamp_ms=int(self.ctx.clock.wall_time() * 1_000),
                         pulse_slot_seconds=float(scheduler.timing.pulse_s),
                         frame_seconds=float(scheduler.timing.frame_s),
                     )
@@ -366,7 +367,7 @@ class HoldMode(ControlMode):
                     trace.record_terminal_framed_output(
                         completion,
                         controls_fan=self.state.controller.controls_fan,
-                        timestamp_ms=int(self.ctx.clock.now() * 1_000),
+                        timestamp_ms=int(self.ctx.clock.wall_time() * 1_000),
                     )
             except Exception as error:
                 self.ctx.event_log.warning(f"Framed pulse trace failed: {error}")
@@ -479,13 +480,16 @@ class HoldMode(ControlMode):
         runtime = self._framed_pulse
         if runtime is None or runtime.scheduler is None:
             return
+        stamp = self._admit_clock()
+        if stamp is None:
+            return
         source = classify_output_source(
             lid_open=self.state.lid.open_detected or inhibit is InhibitReason.LID_OPEN,
             manual_override_active=(
                 self.state.manual_override["auger"] >= now or inhibit is InhibitReason.MANUAL_OVERRIDE
             ),
         )
-        monotonic_s = self.ctx.clock.monotonic()
+        monotonic_s = stamp.observed_monotonic_s
         result = runtime.reset(
             reason,
             monotonic_s,
@@ -510,7 +514,7 @@ class HoldMode(ControlMode):
             ),
             scheduler_reset=(
                 reason,
-                now,
+                self.ctx.clock.wall_time(),
                 monotonic_s,
                 inhibit,
                 self.state.controller.pulse_frame_result_revision,
@@ -538,7 +542,7 @@ class HoldMode(ControlMode):
                     result_revision=completion.result_revision,
                     observation_sequence=sequence,
                 ),
-                int(self.ctx.clock.now() * 1_000),
+                int(self.ctx.clock.wall_time() * 1_000),
             )
 
     def _trace_warning(self, message: str) -> None:
@@ -628,11 +632,15 @@ class HoldMode(ControlMode):
                 learning.retire_generation(reserved_generation)
         trace.rotate(runner_snapshot_fallback_safe=not runner.runs_async())
         context = self._trace_session_context()
-        identity = None if context is None else trace.ensure_open(context, timestamp_ms=int(now * 1_000))
+        identity = (
+            None
+            if context is None
+            else trace.ensure_open(context, timestamp_ms=int(self.ctx.clock.wall_time() * 1_000))
+        )
         self._bind_trajectory_trace(identity)
         if identity is not None:
             learning.bind_generation(generation)
-        learning.reconcile_outcomes(now)
+        learning.reconcile_outcomes(self.ctx.clock.wall_time())
 
     def _trace_session_context(self) -> TraceSessionContext | None:
         trace = self._control_trace
@@ -830,6 +838,7 @@ class HoldMode(ControlMode):
 
     def setup(self):
         self._teardown = _HoldTeardownState()
+        self._lid_open_end_wall_time = 0.0
 
         self._control_trace = None
         self._hold_learning = None
@@ -840,7 +849,7 @@ class HoldMode(ControlMode):
         self._fit_segment_id_cache = None
         learning_evidence_available = True
         self._reachability_advisory_key = None
-        self._framed_pulse = FramedPulseRuntime(wall_clock_ms=lambda: int(self.ctx.clock.now() * 1_000))
+        self._framed_pulse = FramedPulseRuntime(wall_clock_ms=lambda: int(self.ctx.clock.wall_time() * 1_000))
         self._last_ptemp = None
         self._last_target = None
         self._estimator_seeded = False
@@ -970,7 +979,7 @@ class HoldMode(ControlMode):
                 except Exception as error:
                     self._hold_learning.mark_evidence_unavailable()
                     self._trace_warning(f"Model authority migration failed: {error}")
-            self._hold_learning.restore_model(timestamp_ms=int(self.ctx.clock.now() * 1_000))
+            self._hold_learning.restore_model(timestamp_ms=int(self.ctx.clock.wall_time() * 1_000))
             self._hold_learning.reconcile_activation()
 
         self.ctx.event_log.debug(
@@ -987,7 +996,7 @@ class HoldMode(ControlMode):
         # Initialize the cycle start time to now. `ControlMode.run()` has not yet
         # set self.state.timers.start_time (that happens after setup_safety,
         # later in the shared pre-loop).
-        self.state.controller.cycle_start = self.ctx.clock.now()
+        self.state.controller.cycle_start = self.ctx.clock.monotonic()
         self._last_solve_monotonic_s = self.ctx.clock.monotonic()
         self._seed_output_start_time = max(
             0.0,
@@ -1001,7 +1010,7 @@ class HoldMode(ControlMode):
                 manual_override_active=False,
                 auger_output=self.grill.get_output_status()["auger"],
             )
-            self._set_output(initial_output, self.ctx.clock.now())
+            self._set_output(initial_output, self.ctx.clock.wall_time())
 
     def setup_safety(self, ptemp) -> str:
         # Flameout is now a declarative pre_loop guard (GUARDS["Hold"], fired by
@@ -1222,7 +1231,7 @@ class HoldMode(ControlMode):
                 seed,
                 role_generation=role_generation,
                 candidate_generation=candidate_generation,
-                timestamp_ms=int(context.now * 1_000),
+                timestamp_ms=int(context.wall_time * 1_000),
             )
         except Exception as error:
             self._trace_warning(f"Estimator seed trace failed: {error}")
@@ -1236,9 +1245,11 @@ class HoldMode(ControlMode):
 
     def _adopt_runner_configuration(self, now, current_output_status):
         """Adopt one actually installed runner generation exactly once."""
+        if self._admit_clock() is None:
+            return
         self._emit_trajectory_boundary(
             TrajectoryBreakReason.RESET,
-            now,
+            self.ctx.clock.wall_time(),
             "controller-update-reset",
         )
         runner = cast(_runner_mod.ControllerRunner, self._runner)
@@ -1254,13 +1265,13 @@ class HoldMode(ControlMode):
                     inhibit_reason=InhibitReason.NONE,
                     result_revision=trace.update_state.result_revision,
                     detail="controller reconfigured",
-                    timestamp_ms=int(now * 1_000),
+                    timestamp_ms=int(self.ctx.clock.wall_time() * 1_000),
                     monotonic_ms=round(self.ctx.clock.monotonic() * 1_000),
                 )
             )
             trace.record_applied_interval(
                 TraceAppliedIntervalContext(
-                    timestamp_ms=int(now * 1_000),
+                    timestamp_ms=int(self.ctx.clock.wall_time() * 1_000),
                     monotonic_ms=round(self.ctx.clock.monotonic() * 1_000),
                     sample_complete=False,
                     realized_combustion_load=None,
@@ -1287,8 +1298,10 @@ class HoldMode(ControlMode):
                 ptemp=self._last_ptemp,
                 terminal_feedback=False,
             )
+        if self._admit_clock() is None:
+            return
         self.ctx.event_log.info("Controller reinitialized with updated settings")
-        learning.reconcile_outcomes(now)
+        learning.reconcile_outcomes(self.ctx.clock.wall_time())
         installed_generation = runner.configuration_revision()
         learning.retire_generation(retiring_generation)
         trace.rotate(runner_snapshot_fallback_safe=not runner.runs_async())
@@ -1296,6 +1309,8 @@ class HoldMode(ControlMode):
         self._controller_name = (
             actual_type.value if isinstance(actual_type, ControllerType) else self.settings["controller"]["selected"]
         )
+        if self._admit_clock() is None:
+            return
         runtime.configure(
             runner.actuation_mode(),
             controller=cast(PulseControllerState, self.state.controller),
@@ -1307,7 +1322,7 @@ class HoldMode(ControlMode):
         self.state.cycle.on_time = self.state.cycle.off_time = self.state.cycle.cycle_time = 0.0
         self.grill.auger_off()
         learning.restore_model(
-            timestamp_ms=int(now * 1_000),
+            timestamp_ms=int(self.ctx.clock.wall_time() * 1_000),
             controller_name=self._controller_name,
         )
         learning.reconcile_activation()
@@ -1315,12 +1330,14 @@ class HoldMode(ControlMode):
         self._runner_configuration_revision = installed_generation
         context = self._trace_session_context()
         identity = (
-            None if trace is None or context is None else trace.ensure_open(context, timestamp_ms=int(now * 1_000))
+            None
+            if trace is None or context is None
+            else trace.ensure_open(context, timestamp_ms=int(self.ctx.clock.wall_time() * 1_000))
         )
         self._bind_trajectory_trace(identity)
         if identity is not None:
             learning.bind_generation(installed_generation)
-        learning.reconcile_outcomes(now)
+        learning.reconcile_outcomes(self.ctx.clock.wall_time())
         self._estimator_seeded = False
         self._estimator_seed_status = None
         self._estimator_seed_digest = None
@@ -1343,7 +1360,7 @@ class HoldMode(ControlMode):
                 manual_override_active=self.state.manual_override["auger"] > now,
                 auger_output=False,
             )
-            self._set_output(initial_output, now)
+            self._set_output(initial_output, self.ctx.clock.wall_time())
             self._seed_output_start_time = None
 
     def _retarget_running_controller(self) -> None:
@@ -1398,7 +1415,7 @@ class HoldMode(ControlMode):
                             inhibit_reason=InhibitReason.SAFETY,
                             result_revision=trace.update_state.result_revision,
                             detail=f"cannot read the grill maximum temperature: {error}",
-                            timestamp_ms=int(now * 1_000),
+                            timestamp_ms=int(self.ctx.clock.wall_time() * 1_000),
                             monotonic_ms=round(self.ctx.clock.monotonic() * 1_000),
                         )
                     )
@@ -1443,7 +1460,7 @@ class HoldMode(ControlMode):
                         inhibit_reason=InhibitReason.SAFETY,
                         result_revision=trace.update_state.result_revision,
                         detail=f"invalid calibration command: {error}",
-                        timestamp_ms=int(now * 1_000),
+                        timestamp_ms=int(self.ctx.clock.wall_time() * 1_000),
                         monotonic_ms=round(self.ctx.clock.monotonic() * 1_000),
                     )
                 )
@@ -1653,7 +1670,7 @@ class HoldMode(ControlMode):
         if action == "reset-progress":
             self._emit_trajectory_boundary(
                 TrajectoryBreakReason.RESET,
-                now,
+                self.ctx.clock.wall_time(),
                 "operator-reset-progress",
             )
         return self._cancel_active_framed_calibration(
@@ -1725,6 +1742,7 @@ class HoldMode(ControlMode):
     ) -> None:
         if self._teardown.discontinuity_reason is not None:
             return
+        self._last_now = now
         seed_source: _EstimatorSeedSource | None = None
         if self._runner is not None:
             trajectory = self.ctx.learning_trajectory
@@ -1739,6 +1757,8 @@ class HoldMode(ControlMode):
             ptemp,
             current_output_status,
         )
+        if self._admit_clock() is None:
+            return
         self._seed_runner_before_first_solve(context, seed_source)
         if self._controller_name == ControllerType.MPC.value and not self._estimator_seeded:
             return
@@ -1749,18 +1769,24 @@ class HoldMode(ControlMode):
             calibration_handled=(context.calibration_handled or calibration_handled),
         )
         runner_result = self._submit_obtain_and_handle_calibration_cancellation(context)
+        if self._admit_clock() is None:
+            return
         inhibition = self._decide_safety_manual_lid_inhibition(context, runner_result)
         framed_pulse = self._advance_or_reset_framed_pulse(
             context,
             runner_result,
             inhibition,
         )
+        if self._teardown.discontinuity_reason is not None:
+            return
         self._command_grill_hardware(framed_pulse)
+        if self._teardown.discontinuity_reason is not None:
+            return
         if self._deferred_seed_output is not None:
             deferred = self._deferred_seed_output
             self._set_output(
                 deferred,
-                self.ctx.clock.now(),
+                self.ctx.clock.wall_time(),
                 producing_revision=self._deferred_seed_output_revision,
                 producing_calibration_revision=0,
                 producing_calibration_action="none",
@@ -1771,7 +1797,7 @@ class HoldMode(ControlMode):
             if not self._deferred_seed_output_dispatch and context.trace is not None:
                 context.trace.record_applied_interval(
                     TraceAppliedIntervalContext(
-                        timestamp_ms=int(context.now * 1_000),
+                        timestamp_ms=int(self.ctx.clock.wall_time() * 1_000),
                         monotonic_ms=round(context.monotonic_s * 1_000),
                         sample_complete=True,
                         realized_combustion_load=deferred.ratio,
@@ -1816,7 +1842,7 @@ class HoldMode(ControlMode):
         identity = (
             None
             if trace is None or session_context is None
-            else trace.ensure_open(session_context, timestamp_ms=int(now * 1_000))
+            else trace.ensure_open(session_context, timestamp_ms=int(self.ctx.clock.wall_time() * 1_000))
         )
         self._bind_trajectory_trace(identity)
         learning = self._hold_learning
@@ -1875,14 +1901,14 @@ class HoldMode(ControlMode):
                         inhibit_reason=InhibitReason.SAFETY,
                         result_revision=trace.update_state.result_revision,
                         detail="controller reconfigure fell back",
-                        timestamp_ms=int(now * 1_000),
+                        timestamp_ms=int(self.ctx.clock.wall_time() * 1_000),
                         monotonic_ms=round(self.ctx.clock.monotonic() * 1_000),
                     )
                 )
 
         return _HoldTickContext(
-            now=now,
-            monotonic_s=self.ctx.clock.monotonic(),
+            wall_time=self.ctx.clock.wall_time(),
+            monotonic_s=now,
             ptemp=ptemp,
             output_status=self._hold_output_status(current_output_status),
             trace=trace,
@@ -1899,11 +1925,11 @@ class HoldMode(ControlMode):
         context: _HoldTickContext,
     ) -> _HoldTickContext:
         manual_auger_until = self.state.manual_override["auger"]
-        if manual_auger_until == 0 or manual_auger_until >= context.now:
+        if manual_auger_until == 0 or manual_auger_until >= context.monotonic_s:
             return context
         self._on_manual_release(
             "auger",
-            context.now,
+            context.monotonic_s,
             reseed=not context.runner_adopted,
         )
         current_output_status = self.grill.get_output_status()
@@ -1917,12 +1943,12 @@ class HoldMode(ControlMode):
         context: _HoldTickContext,
     ) -> bool:
         self._retarget_running_controller()
-        self._publish_safety_ceiling(context.now)
+        self._publish_safety_ceiling(context.monotonic_s)
         calibration_handled = self._cancel_newer_operator_command(
-            now=context.now,
+            now=context.monotonic_s,
             ptemp=context.ptemp,
         )
-        self._consume_calibration_command(context.now)
+        self._consume_calibration_command(context.monotonic_s)
         return calibration_handled
 
     def _submit_obtain_and_handle_calibration_cancellation(
@@ -1939,7 +1965,7 @@ class HoldMode(ControlMode):
         self._first_solve_temperature = None
         runner.submit(submitted_temperature)
         learning = cast(HoldLearningRuntime, self._hold_learning)
-        learning.reconcile_outcomes(context.now)
+        learning.reconcile_outcomes(self.ctx.clock.wall_time())
         runtime = cast(FramedPulseRuntime, self._framed_pulse)
         controller_interval = runner.control_period() or runtime.frame_seconds
         if (
@@ -1975,7 +2001,7 @@ class HoldMode(ControlMode):
         if waiting_for_first_solve:
             self._first_solve_pending = False
         if self._initial_seed_output_pending:
-            manual_override_active = self.state.manual_override["auger"] > context.now
+            manual_override_active = self.state.manual_override["auger"] > context.monotonic_s
             if manual_override_active:
                 applied_state = None if context.trace is None else context.trace.applied_state
                 if self._manual_seed_output_start_time is not None:
@@ -2027,13 +2053,13 @@ class HoldMode(ControlMode):
         else:
             cancellation = self._admit_calibration_cancellation(
                 result,
-                context.now,
+                context.monotonic_s,
             )
             if cancellation is not None:
                 result = self._cancel_calibration_probe(
                     result,
                     cancellation,
-                    context.now,
+                    context.monotonic_s,
                     context.ptemp,
                 )
         cancellation_reason = None if cancellation is None else cancellation.reason
@@ -2041,7 +2067,7 @@ class HoldMode(ControlMode):
             learning.handoff_calibration(
                 result.calibration,
                 result_revision=result.revision,
-                timestamp_ms=int(context.now * 1_000),
+                timestamp_ms=int(self.ctx.clock.wall_time() * 1_000),
             )
             if learning is not None
             else None
@@ -2070,7 +2096,7 @@ class HoldMode(ControlMode):
         framed_feedback_due = result is not None
         if result is not None:
             controller = self.state.controller
-            controller.cycle_start = context.now
+            controller.cycle_start = context.monotonic_s
             self._last_solve_monotonic_s = context.monotonic_s
             if result.revision > 0 and (
                 result.revision > controller.pulse_result_revision
@@ -2143,7 +2169,7 @@ class HoldMode(ControlMode):
         )
         permit_framed_pulse = (
             not self.state.controller.pulse_stale_command
-            and self.state.manual_override["auger"] < context.now
+            and self.state.manual_override["auger"] < context.monotonic_s
             and not self.state.lid.open_detected
             and not runner_result.calibration_pending
         )
@@ -2173,7 +2199,7 @@ class HoldMode(ControlMode):
             ):
                 self._inhibit_framed_pulse(
                     PulseResetReason.SAFETY,
-                    context.now,
+                    context.monotonic_s,
                     InhibitReason.STALE_COMMAND,
                     ptemp=context.ptemp,
                     terminal_feedback=True,
@@ -2192,7 +2218,7 @@ class HoldMode(ControlMode):
                 trace.record_update(
                     TraceUpdateContext(
                         result=result,
-                        timestamp_ms=int(context.now * 1_000),
+                        timestamp_ms=int(self.ctx.clock.wall_time() * 1_000),
                         controller_interval_seconds=float(runner_result.controller_interval),
                         setpoint=float(control["primary_setpoint"]),
                         prior_requested_auger_duty=applied_state.requested_auger_duty,
@@ -2200,7 +2226,7 @@ class HoldMode(ControlMode):
                         prior_fan_duty=applied_state.fan_duty,
                         controls_fan=controller.controls_fan,
                         lid_open=self.state.lid.open_detected,
-                        manual_override_active=self.state.manual_override["auger"] >= context.now,
+                        manual_override_active=self.state.manual_override["auger"] >= context.monotonic_s,
                         lifecycle_event=lifecycle,
                     )
                 )
@@ -2225,7 +2251,15 @@ class HoldMode(ControlMode):
         if runtime is None:
             raise RuntimeError("Hold framed pulse runtime is unavailable")
         prior_output_source = None if context.trace is None else context.trace.applied_state.output_source
-        observed_at_s = self.ctx.clock.monotonic()
+        stamp = self._admit_clock()
+        if stamp is None:
+            return _HoldFramedPulse(
+                result=None,
+                lid_will_open=inhibition.lid_will_open,
+                report_feedback=False,
+                observed_at_s=None,
+            )
+        observed_at_s = stamp.observed_monotonic_s
         result = runtime.advance(
             observed_at_s,
             context.output_status.auger,
@@ -2240,6 +2274,8 @@ class HoldMode(ControlMode):
         )
 
     def _command_grill_hardware(self, framed_pulse: _HoldFramedPulse) -> None:
+        if self._admit_clock() is None:
+            return
         result = framed_pulse.result
         if result is None:
             return
@@ -2257,7 +2293,7 @@ class HoldMode(ControlMode):
         context: _HoldTickContext,
         framed_pulse: _HoldFramedPulse,
     ) -> None:
-        now = context.now
+        now = context.monotonic_s
         trace = context.trace
         pulse_result = framed_pulse.result
         if pulse_result is not None:
@@ -2292,7 +2328,9 @@ class HoldMode(ControlMode):
         context: _HoldTickContext,
         lid_will_open: bool,
     ) -> None:
-        now = context.now
+        if self._admit_clock() is None:
+            return
+        now = context.monotonic_s
         ptemp = context.ptemp
         trace = context.trace
         control = self.control
@@ -2305,14 +2343,14 @@ class HoldMode(ControlMode):
         if lid_will_open:
             self._emit_trajectory_boundary(
                 TrajectoryBreakReason.LID_OPEN,
-                now,
+                self.ctx.clock.wall_time(),
                 "lid-open-detected",
             )
             self.state.lid.open_detected = True
             if trace is not None:
                 trace.record_applied_interval(
                     TraceAppliedIntervalContext(
-                        timestamp_ms=int(now * 1_000),
+                        timestamp_ms=int(self.ctx.clock.wall_time() * 1_000),
                         monotonic_ms=round(self.ctx.clock.monotonic() * 1_000),
                         sample_complete=False,
                         realized_combustion_load=None,
@@ -2348,14 +2386,15 @@ class HoldMode(ControlMode):
                     timestamp=self.ctx.clock.monotonic(),
                     requested=self.state.controller.output,
                 ),
-                now,
+                self.ctx.clock.wall_time(),
             )
             grill_platform.fan_off()
             self.state.timers.auger_toggle = now
             self.state.lid.expires = now + settings["cycle_data"]["LidOpenPauseTime"]
+            self._lid_open_end_wall_time = self.ctx.clock.wall_time() + settings["cycle_data"]["LidOpenPauseTime"]
             self.state.target_temp_achieved = False
 
-        if self.state.lid.open_detected and self.ctx.clock.now() > self.state.lid.expires:
+        if self.state.lid.open_detected and now > self.state.lid.expires:
             self.state.lid.open_detected = False
             if trace is not None:
                 trace.record_safety(
@@ -2364,7 +2403,7 @@ class HoldMode(ControlMode):
                         inhibit_reason=InhibitReason.NONE,
                         result_revision=trace.update_state.result_revision,
                         detail="lid open pause elapsed",
-                        timestamp_ms=int(now * 1_000),
+                        timestamp_ms=int(self.ctx.clock.wall_time() * 1_000),
                         monotonic_ms=round(self.ctx.clock.monotonic() * 1_000),
                     )
                 )
@@ -2381,7 +2420,7 @@ class HoldMode(ControlMode):
                             inhibit_reason=InhibitReason.NONE,
                             result_revision=trace.update_state.result_revision,
                             detail="lid open cleared by operator",
-                            timestamp_ms=int(now * 1_000),
+                            timestamp_ms=int(self.ctx.clock.wall_time() * 1_000),
                             monotonic_ms=round(self.ctx.clock.monotonic() * 1_000),
                         )
                     )
@@ -2390,7 +2429,7 @@ class HoldMode(ControlMode):
                 if trace is not None:
                     trace.record_applied_interval(
                         TraceAppliedIntervalContext(
-                            timestamp_ms=int(now * 1_000),
+                            timestamp_ms=int(self.ctx.clock.wall_time() * 1_000),
                             monotonic_ms=round(self.ctx.clock.monotonic() * 1_000),
                             sample_complete=False,
                             realized_combustion_load=None,
@@ -2426,11 +2465,12 @@ class HoldMode(ControlMode):
                         timestamp=self.ctx.clock.monotonic(),
                         requested=self.state.controller.output,
                     ),
-                    now,
+                    self.ctx.clock.wall_time(),
                 )
                 grill_platform.fan_off()
                 self.state.timers.auger_toggle = now
                 self.state.lid.expires = now + settings["cycle_data"]["LidOpenPauseTime"]
+                self._lid_open_end_wall_time = self.ctx.clock.wall_time() + settings["cycle_data"]["LidOpenPauseTime"]
 
         if (
             settings["platform"]["dc_fan"]
@@ -2457,8 +2497,8 @@ class HoldMode(ControlMode):
             return
         if teardown.discontinuity_reason is None:
             teardown.discontinuity_reason = reason
-            if teardown.now is None:
-                teardown.now = self.ctx.clock.now()
+            if teardown.wall_time is None:
+                teardown.wall_time = self.ctx.clock.wall_time()
                 teardown.monotonic_s = last_observed_monotonic
                 teardown.ptemp = None
             self._estimator_seeded = False
@@ -2495,7 +2535,7 @@ class HoldMode(ControlMode):
         if trace is not None:
             trace.record_applied_interval(
                 TraceAppliedIntervalContext(
-                    timestamp_ms=int(self._last_now * 1_000),
+                    timestamp_ms=int(self.ctx.clock.wall_time() * 1_000),
                     monotonic_ms=round(self.ctx.clock.monotonic() * 1_000),
                     sample_complete=False,
                     realized_combustion_load=None,
@@ -2521,6 +2561,8 @@ class HoldMode(ControlMode):
                 safety_event=SafetyEventType.MANUAL_TAKEOVER,
                 safety_detail="manual auger output applied",
             )
+        if self._admit_clock() is None:
+            return
         if output and not self.grill.get_output_status()["auger"]:
             self.grill.auger_on()
         elif not output and self.grill.get_output_status()["auger"]:
@@ -2534,7 +2576,7 @@ class HoldMode(ControlMode):
                 ),
                 timestamp=self.ctx.clock.monotonic(),
             ),
-            self._last_now,
+            self.ctx.clock.wall_time(),
         )
 
     def _on_manual_release(
@@ -2569,7 +2611,7 @@ class HoldMode(ControlMode):
                     inhibit_reason=InhibitReason.NONE,
                     result_revision=trace.update_state.result_revision,
                     detail="manual auger override expired",
-                    timestamp_ms=int(now * 1_000),
+                    timestamp_ms=int(self.ctx.clock.wall_time() * 1_000),
                     monotonic_ms=round(self.ctx.clock.monotonic() * 1_000),
                 )
             )
@@ -2586,7 +2628,7 @@ class HoldMode(ControlMode):
         if trace is None:
             self._runner.set_output(seeded)
         else:
-            self._set_output(seeded, now)
+            self._set_output(seeded, self.ctx.clock.wall_time())
 
     def _on_safety_event(self, event, now):
         if self._teardown.discontinuity_reason is not None:
@@ -2603,7 +2645,9 @@ class HoldMode(ControlMode):
             context = self._trace_session_context()
             previous_identity = None if trace is None else trace.identity
             identity = (
-                None if trace is None or context is None else trace.ensure_open(context, timestamp_ms=int(now * 1_000))
+                None
+                if trace is None or context is None
+                else trace.ensure_open(context, timestamp_ms=int(self.ctx.clock.wall_time() * 1_000))
             )
             self._bind_trajectory_trace(identity)
             learning = self._hold_learning
@@ -2633,9 +2677,14 @@ class HoldMode(ControlMode):
     # ControlMode default (return False) applies here.
 
     def status_fragment(self) -> dict:
+        stamp = self._last_clock_stamp
+        now = self.ctx.clock.monotonic() if stamp is None else stamp.observed_monotonic_s
         status = {
             "lid_open_detected": self.state.lid.open_detected,
-            "lid_open_endtime": self.state.lid.expires,
+            "lid_open_endtime": self._lid_open_end_wall_time,
+            "lid_open_remaining_seconds": (
+                max(0.0, self.state.lid.expires - now) if self.state.lid.open_detected else 0.0
+            ),
             "actuation_mode": ActuationMode.FRAMED_PULSE.value,
         }
         learning_runtime = self._hold_learning
@@ -2665,11 +2714,13 @@ class HoldMode(ControlMode):
         if teardown.phase >= _TeardownPhase.FINISHED:
             return
         trace = self._control_trace
-        if teardown.now is None:
-            teardown.now = self.ctx.clock.now()
-            teardown.monotonic_s = self.ctx.clock.monotonic()
+        if teardown.wall_time is None:
+            teardown.wall_time = self.ctx.clock.wall_time()
+            teardown.monotonic_s = (
+                self.ctx.clock.monotonic() if self._terminal_monotonic_s is None else self._terminal_monotonic_s
+            )
             teardown.ptemp = ptemp
-        now = teardown.now
+        now = teardown.wall_time
         monotonic_s = teardown.monotonic_s
         assert monotonic_s is not None
         runtime = self._framed_pulse
@@ -2688,7 +2739,7 @@ class HoldMode(ControlMode):
             self.ctx.store.write_control_snapshot(self.control, origin="control")
             self._emit_trajectory_boundary(
                 TrajectoryBreakReason.CLOCK_DISCONTINUITY,
-                self.ctx.clock.now(),
+                self.ctx.clock.wall_time(),
                 teardown.discontinuity_reason,
                 monotonic_ms=round(monotonic_s * 1_000),
             )
@@ -2721,7 +2772,7 @@ class HoldMode(ControlMode):
                         pulse_result.decision.delivered_on_s,
                         source=classify_output_source(
                             lid_open=self.state.lid.open_detected,
-                            manual_override_active=(self.state.manual_override["auger"] >= now),
+                            manual_override_active=(self.state.manual_override["auger"] >= monotonic_s),
                         ),
                         prior_output_source=(teardown.prior_output_source),
                         dispatch=not bool(pulse_result.decision.completed_frames),
@@ -2755,7 +2806,7 @@ class HoldMode(ControlMode):
                         )
                         source = classify_output_source(
                             lid_open=self.state.lid.open_detected,
-                            manual_override_active=(self.state.manual_override["auger"] >= now),
+                            manual_override_active=(self.state.manual_override["auger"] >= monotonic_s),
                         )
                         reset_dispatch = _FramedDispatchState(
                             result=runtime.reset(
@@ -2795,7 +2846,7 @@ class HoldMode(ControlMode):
                 if stop_error is None:
                     if stopped is False:
                         self._trace_warning("Controller worker did not stop; corpus fit was not scheduled")
-                    self._rotate_evidence_sessions_for_reserved_runner_generations(self.ctx.clock.now())
+                    self._rotate_evidence_sessions_for_reserved_runner_generations(self.ctx.clock.wall_time())
             self._resolve_fit_partition_digest()
             self._emit_trajectory_boundary(
                 TrajectoryBreakReason.STOP,
@@ -2822,7 +2873,7 @@ class HoldMode(ControlMode):
                 if trace is not None and not trace.status.closed:
                     trace.record_applied_interval(
                         TraceAppliedIntervalContext(
-                            timestamp_ms=int(self.ctx.clock.now() * 1_000),
+                            timestamp_ms=int(self.ctx.clock.wall_time() * 1_000),
                             monotonic_ms=round(monotonic_s * 1_000),
                             sample_complete=False,
                             realized_combustion_load=None,

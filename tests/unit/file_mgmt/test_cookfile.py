@@ -710,8 +710,8 @@ def test_prepare_chartdata_reduce_path_ignores_the_mapper_entirely():
 def test_read_cookfile_ok_returns_full_struct_matching_file_contents(ds, tmp_path):
     """A current legacy archive without diagnostics remains readable.
 
-    Its seven required members round-trip unchanged and the optional
-    diagnostics value is explicitly absent.
+    Calendar metadata and stored usage estimates survive without turning the
+    old wall-derived duration into physical elapsed.
     """
     version = _current_version(ds)
     metadata = _base_metadata(version, title="My Cook", starttime=111, endtime=222)
@@ -722,7 +722,19 @@ def test_read_cookfile_ok_returns_full_struct_matching_file_contents(ds, tmp_pat
     }
     raw_data = [{"T": 111, "P": {"grill1": 100}, "PSP": 225, "F": {}, "NT": {}, "AUX": {}}]
     graph_labels = {"probes": {"grill1": "Grill"}, "targets": {}, "primarysp": {}}
-    events = [dict(default_metrics(), id=0, mode="Smoke")]
+    events = [
+        dict(
+            default_metrics(),
+            id=0,
+            mode="Smoke",
+            starttime=111_000,
+            endtime=222_000,
+            timeinmode="111 s",
+            estusage_m="historical estimate",
+        )
+    ]
+    events[0].pop("elapsed_seconds", None)
+    events[0].pop("delivery_complete", None)
     comments = [{"id": "c1", "text": "hi", "assets": []}]
 
     path = str(tmp_path / "ok.pifire")
@@ -746,7 +758,14 @@ def test_read_cookfile_ok_returns_full_struct_matching_file_contents(ds, tmp_pat
     assert struct["graph_data"] == graph_data
     assert struct["raw_data"] == raw_data
     assert struct["graph_labels"] == graph_labels
-    assert struct["events"] == events
+    assert struct["events"][0]["timeinmode"] == "Unknown"
+    assert struct["events"][0]["elapsed_seconds"] is None
+    assert struct["events"][0]["delivery_complete"] is None
+    assert struct["events"][0]["starttime"] == 111_000
+    assert struct["events"][0]["endtime"] == 222_000
+    assert struct["events"][0]["estusage_m"] == "historical estimate"
+    with zipfile.ZipFile(path) as archive:
+        assert json.loads(archive.read("events.json")) == events
     assert struct["comments"] == comments
     assert struct["assets"] == []
     assert struct["learning_diagnostics"] is None
@@ -1466,7 +1485,10 @@ def test_create_cookfile_writes_pifire_archive_with_seeded_history_and_metrics(d
     _seed_history_row(primary_label, food_labels, 100, 90)
     _seed_history_row(primary_label, food_labels, 110, 95)
 
-    append_metric(dict(default_metrics(), id=0, mode="Smoke", augerontime=120))
+    append_metric(
+        dict(default_metrics(), id=0, mode="Smoke", augerontime=120, elapsed_seconds=150.25, delivery_complete=False)
+    )
+    update_metrics({"starttime": 200_000, "endtime": 100_000})
     append_metric(dict(default_metrics(), id=1, mode="Stop", augerontime=30))
 
     create_cookfile(cook_id=None, learning_report_provider=_no_learning_report)
@@ -1494,6 +1516,11 @@ def test_create_cookfile_writes_pifire_archive_with_seeded_history_and_metrics(d
     assert len(events) == 2
     assert events[0]["mode"] == "Smoke"
     assert events[0]["augerontime_c"] == "120 s"
+    assert events[0]["timeinmode"] == "2 m 30 s (incomplete)"
+    assert events[0]["elapsed_seconds"] == 150.25
+    assert events[0]["delivery_complete"] is False
+    assert events[0]["starttime"] == 200_000
+    assert events[0]["endtime"] == 100_000
     assert events[1]["mode"] == "Stop"
 
     assert comments == []
@@ -1536,7 +1563,6 @@ def test_process_metrics_none_starttime_uses_safe_default():
 
     assert result[0]["starttime"] == 0  # safe default substituted
     assert result[0]["starttime_c"] == epoch_to_time(0)
-    assert result[0]["timeinmode"] == "Active"  # endtime == 0 branch, unaffected
     # The healthy row is processed normally and unaffected by the poisoned one.
     assert result[1]["starttime_c"] == epoch_to_time(100000 / 1000)
     assert result[1]["endtime_c"] == epoch_to_time(200000 / 1000)
@@ -1549,7 +1575,6 @@ def test_process_metrics_none_endtime_uses_safe_default():
 
     assert result[0]["endtime"] == 0  # safe default substituted
     assert result[0]["endtime_c"] == 0
-    assert result[0]["timeinmode"] == "Active"  # endtime == 0 branch after the guard
     assert result[0]["starttime_c"] == epoch_to_time(100000 / 1000)  # untouched by the endtime guard
 
 

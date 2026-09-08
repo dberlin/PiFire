@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import pytest
 
 import controller.runtime.controller as controller_mod
+from common.clock_domain import RuntimeClockDomain
 from common.persistence import runtime as runtime_persistence
 from controller.runtime.clock import ManualClock
 from controller.runtime.context import ControllerContext, Devices
@@ -61,7 +62,7 @@ class _SimulatedSinglePortThermocouple:
         self._sample = ThermocoupleJunctionSample(hot_c=0.0, cold_c=0.0)
 
     def read_all_ports(self, _output_data):
-        now = self.clock.now()
+        now = self.clock.monotonic()
         self._sample = self.sample_at(now)
         self.raw_reads.append((now, self._sample))
         return {
@@ -102,7 +103,7 @@ class _TimedGrill(FakeGrillPlatform):
         )
 
     def _rec(self, name, *args):
-        self.timed_calls.append((self.clock.now(), name, args))
+        self.timed_calls.append((self.clock.monotonic(), name, args))
         super()._rec(name, *args)
 
 
@@ -113,7 +114,7 @@ class _TimedNotifier(FakeNotifier):
         self.timed_sent = []
 
     def send(self, name):
-        self.timed_sent.append((self.clock.now(), name))
+        self.timed_sent.append((self.clock.monotonic(), name))
         super().send(name)
 
 
@@ -182,6 +183,12 @@ def _run_scenario(ds, caplog, *, sample_at, duration, setpoint_f=425):
         store=store,
         notifications=notifier,
         clock=clock,
+        clock_domain=RuntimeClockDomain(
+            monotonic=clock.monotonic,
+            wall_time=clock.wall_time,
+            boot_id="00000000-0000-0000-0000-000000000001",
+            boottime=clock.monotonic,
+        ),
         event_log=logger,
         control_log=logger,
     )
@@ -236,7 +243,7 @@ def _assert_authoritative_stop(result, report):
 def _dash_health(result, monkeypatch):
     from blueprints.mobile import socket_io
 
-    monkeypatch.setattr(socket_io.time, "monotonic", result.clock.now)
+    monkeypatch.setattr(socket_io.time, "monotonic", result.clock.monotonic)
     payload = socket_io._get_dash_data(
         result.store.read_settings(),
         result.store.read_pellet_db(),

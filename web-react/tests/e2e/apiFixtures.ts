@@ -187,6 +187,8 @@ const METRICS_PAYLOAD = {
         endtime: 1700000090000,
         endtime_c: "17:14:50",
         timeinmode: "1 m 30 s",
+        elapsed_seconds: 90,
+        delivery_complete: true,
         mode: "Smoke",
         augerontime: 100,
         augerontime_c: "100 s",
