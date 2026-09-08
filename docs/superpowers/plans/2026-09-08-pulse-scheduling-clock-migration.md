@@ -12,6 +12,32 @@
 
 **Integrated baseline:** The coupled learning implementation is now in the working tree: trace 10, observation 4, evidence 6, database 13, required independent wall endpoints, and callable clocks through Hold/runner factories and reconfiguration. References below to Main's “in-flight” work describe the drafting baseline, not remaining implementation. Reconcile those steps against the shared spec before executing; the destination shared `Clock` API and remaining timers are still proposals.
 
+## Execution record
+
+The user authorized sequential execution and the shared spec's **Approved
+discontinuity and timer policy** supersedes the draft approval restrictions below:
+60 seconds for a genuine monotonic observation gap or suspend-offset discontinuity;
+wall-only corrections never trigger retirement. The 30-second watchdog is unchanged.
+
+Implemented the pulse development unit: direct no-advance gap invalidation,
+discarded partial feedback at the last observed instant, cleared credit, suppressed
+thermal history, and Hold hardware-OFF retirement with immutable retry cutoffs.
+The shared-mode plan remains responsible for calling this hook before actuation,
+generation rotation, and the disconnected-platform full-loop proof. This unit is
+not independently deployable.
+
+Verification: 132 focused clock-domain/framed-pulse/Hold tests passed, followed by
+358 clock/PID-SP/golden/pulse/Hold-trace/cookfile integration tests. A direct
+production FramedPulseRuntime smoke with wall corrections 0 and ±3600 seconds
+kept the OFF edge at monotonic 22, two known delivered seconds, and a discarded
+gap cutoff at 22 after 120 unobserved seconds; repeated invalidation emitted no
+completion. Independent runtime and Hold reviews reported no findings.
+
+The new clock stamp remains a typed value with an explicit TypedDict wire payload;
+no Any, casts, or type-ignore escape hatches were introduced. PID/PID-SP clock
+injection annotations were audited and completed. Common clock-domain and runtime
+clock static diagnostics are clean. Release commands and push have not been run.
+
 ## Global Constraints
 
 - This is a proposal, not authorization to implement. Source inspection is the evidence for this plan; no tests, builds, formatters, hardware experiments, or gate commands were executed while writing it.

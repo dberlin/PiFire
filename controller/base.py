@@ -156,7 +156,7 @@ Class Definition
 
 
 class ControllerBase:
-    def __init__(self, config, units, cycle_data, *, logger=None, clock: Clock | None = None):
+    def __init__(self, config, units, cycle_data, *, logger=None, clock: Clock | None = None) -> None:
         self.config = config
         self.units = units
         self.cycle_data = cycle_data
@@ -164,7 +164,7 @@ class ControllerBase:
         #: context reaches a controller core, so this parameter is how it
         #: arrives; the default is the name the context itself defaults to.
         self._logger = logging.getLogger(EVENT_LOG_NAME) if logger is None else logger
-        self._clock = RealClock() if clock is None else clock
+        self._clock: Clock = RealClock() if clock is None else clock
 
     def update(self, current):
         """

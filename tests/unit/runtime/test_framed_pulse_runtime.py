@@ -80,6 +80,134 @@ def _latch_controller_frame(runtime: FramedPulseRuntime, controller: PulseContro
     runtime.advance(0.0, True, sample=_sample())
 
 
+@pytest.mark.parametrize("last_on", [False, True])
+def test_observation_gap_does_not_claim_unobserved_delivery(last_on: bool) -> None:
+    runtime, controller = _runtime(now=20.0)
+    controller.pulse_result_revision = 1
+    controller.pulse_requested_duty = 0.35
+    runtime.advance(20.0, True, sample=_sample())
+    observed = runtime.advance(21.0, last_on, sample=_sample())
+    assert observed.delivered_delta_s == 1.0
+    assert observed.decision.credit_s == pytest.approx(1.0)
+    lost = runtime.invalidate_observation_gap(sample=_sample())
+    assert lost.delivered_delta_s == 0.0
+    assert lost.decision.delivered_on_s == 1.0
+    assert not lost.decision.command_on
+    assert lost.decision.credit_s == 0.0
+    assert len(lost.completions) == 1
+    completion = lost.completions[0]
+    assert completion.frame.ended_at_s == 21.0
+    assert not completion.frame.complete
+    assert completion.inhibit is InhibitReason.SAFETY
+    assert completion.frame.reset_reason is PulseResetReason.SAFETY
+    assert completion.applied is not None
+    assert completion.applied.feedback_disposition is FrameFeedbackDisposition.DISCARDED
+    assert not completion.applied.sample_complete
+    assert completion.observation is None
+    assert lost.feedback is None
+
+
+def test_observation_gap_retries_preserve_known_delivery_and_feedback_baselines() -> None:
+    runtime, controller = _runtime()
+    _latch_controller_frame(runtime, controller)
+    runtime.advance(6.0, False, sample=_sample())
+    runtime.advance(20.0, True, sample=_sample())
+    runtime.advance(21.0, True, sample=_sample())
+
+    first = runtime.invalidate_observation_gap(sample=_sample())
+    repeated = runtime.invalidate_observation_gap(sample=_sample(temperature=300.0))
+
+    assert first.decision.delivered_on_s == 7.0
+    assert first.completions[0].frame.delivered_on_s == 1.0
+    assert repeated.decision.delivered_on_s == 7.0
+    assert repeated.delivered_delta_s == 0.0
+    assert repeated.completions == ()
+    assert repeated.feedback is None
+    assert repeated.decision.command_on is False
+    assert repeated.decision.transition is None
+    assert repeated.decision.credit_s == 0.0
+    assert controller.pulse_metrics_delivered_on_s == 7.0
+    assert controller.pulse_feedback_start_s == 20.0
+    assert controller.pulse_feedback_delivered_on_s == 6.0
+
+
+def test_observation_gap_without_active_frame_does_not_create_history() -> None:
+    runtime, controller = _runtime(now=35.0)
+
+    result = runtime.invalidate_observation_gap(sample=_sample())
+
+    assert result.completions == ()
+    assert result.feedback is None
+    assert result.delivered_delta_s == 0.0
+    assert result.decision.delivered_on_s == 0.0
+    assert result.decision.command_on is False
+    assert result.decision.transition is None
+    assert result.decision.credit_s == 0.0
+    assert runtime.observation_sequence == 0
+    assert controller.pulse_feedback_start_s == 35.0
+
+
+def test_observation_gap_discards_zero_delivery_without_using_resume_temperature() -> None:
+    runtime, controller = _runtime(now=20.0)
+    controller.pulse_result_revision = 1
+    runtime.advance(20.0, False, sample=_sample())
+    runtime.advance(21.0, False, sample=_sample())
+
+    result = runtime.invalidate_observation_gap(sample=_sample(temperature=300.0))
+
+    completion = result.completions[0]
+    assert completion.frame.ended_at_s == 21.0
+    assert completion.frame.delivered_on_s == 0.0
+    assert completion.frame.complete is False
+    assert completion.observation is None
+    assert completion.applied is not None
+    assert completion.applied.ratio == 0.0
+    assert completion.applied.feedback_disposition is FrameFeedbackDisposition.DISCARDED
+    assert completion.applied.sample_complete is False
+    assert result.decision.delivered_on_s == 0.0
+    assert result.delivered_delta_s == 0.0
+
+
+def test_observation_gap_at_first_observation_cannot_complete_an_interval() -> None:
+    runtime, controller = _runtime(now=20.0)
+    controller.pulse_result_revision = 1
+    controller.pulse_requested_duty = 0.3
+    runtime.advance(20.0, True, sample=_sample())
+
+    result = runtime.invalidate_observation_gap(sample=_sample())
+
+    completion = result.completions[0]
+    assert completion.frame.ended_at_s == completion.frame.nominal_start_s == 20.0
+    assert completion.frame.complete is False
+    assert completion.observation is None
+    assert completion.applied is None
+    assert result.feedback is None
+    assert result.decision.command_on is False
+    assert result.decision.delivered_on_s == 0.0
+    assert result.delivered_delta_s == 0.0
+
+
+def test_observation_gap_cancels_latched_calibration_without_relatching_new_result() -> None:
+    runtime, controller = _runtime()
+    controller.pulse_calibration_status = "active"
+    _latch_controller_frame(runtime, controller)
+    runtime.advance(1.0, True, sample=_sample())
+    controller.pulse_result_revision = 10
+    controller.pulse_calibration_command_revision = 13
+
+    result = runtime.invalidate_observation_gap(sample=_sample(role_generation=8))
+
+    completion = result.completions[0]
+    assert completion.result_revision == 9
+    assert completion.applied is not None
+    assert completion.applied.producing_calibration_revision == 12
+    assert completion.applied.producing_calibration_generation == 3
+    assert completion.observation is None
+    assert controller.pulse_frame_calibration_status == "cancelled"
+    assert controller.pulse_frame_calibration_cancellation_reason == "safety"
+    assert controller.pulse_frame_cancellation_command_action == "safety-cancel"
+
+
 def test_scheduler_is_absent_until_framed_configuration() -> None:
     runtime = FramedPulseRuntime()
 

@@ -33,6 +33,7 @@ Imported Libraries
 """
 from controller.base import PidTraceDiagnostics
 from controller.pid_base import PIDControllerBase
+from controller.runtime.clock import Clock
 
 """
 Class Definition
@@ -40,7 +41,7 @@ Class Definition
 
 
 class Controller(PIDControllerBase):
-    def __init__(self, config, units, cycle_data, *, logger=None, clock=None):
+    def __init__(self, config, units, cycle_data, *, logger=None, clock: Clock | None = None) -> None:
         super().__init__(config, units, cycle_data, logger=logger, clock=clock)
 
         self._calculate_gains(config.get("PB", 60.0), config.get("Ti", 180.0), config.get("Td", 45.0))

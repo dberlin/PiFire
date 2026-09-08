@@ -197,6 +197,9 @@ class _HoldTeardownState:
     feedback: FramedPulseFeedback | None = None
     feedback_dispatched: bool = False
     reset_dispatch: _FramedDispatchState | None = None
+    discontinuity_reason: str | None = None
+    discontinuity_boundary_recorded: bool = False
+    calibration_cancelled: bool = False
 
 
 class HoldMode(ControlMode):
@@ -1720,6 +1723,8 @@ class HoldMode(ControlMode):
         ptemp: float,
         current_output_status: Mapping[str, bool | int | float],
     ) -> None:
+        if self._teardown.discontinuity_reason is not None:
+            return
         seed_source: _EstimatorSeedSource | None = None
         if self._runner is not None:
             trajectory = self.ctx.learning_trajectory
@@ -2445,7 +2450,41 @@ class HoldMode(ControlMode):
         if trace is not None:
             trace.flush_due(time.monotonic_ns() // 1_000_000)
 
+    def _on_control_discontinuity(self, last_observed_monotonic: float, reason: str) -> None:
+        """Retire this control generation without accounting for unknown time."""
+        teardown = self._teardown
+        if teardown.phase >= _TeardownPhase.FINISHED:
+            return
+        if teardown.discontinuity_reason is None:
+            teardown.discontinuity_reason = reason
+            if teardown.now is None:
+                teardown.now = self.ctx.clock.now()
+                teardown.monotonic_s = last_observed_monotonic
+                teardown.ptemp = None
+            self._estimator_seeded = False
+            self._estimator_seed_status = "uncertain"
+            self._estimator_seed_digest = None
+            self._estimator_seed_pre_roll_frames = 0
+            self._first_solve_temperature = None
+            self._initial_seed_output_pending = False
+            self._deferred_seed_output = None
+            self._manual_seed_output_start_time = None
+            for name in self.state.manual_override:
+                self.state.manual_override[name] = 0
+        self.teardown(None)
+
+    def _apply_manual_overrides(self, control, now, current_output_status):
+        if self._teardown.discontinuity_reason is not None:
+            if control["manual"]["change"]:
+                control["manual"]["change"] = False
+                control["manual"]["output"] = False
+                self.ctx.store.write_control_snapshot(control, origin="control")
+            return
+        super()._apply_manual_overrides(control, now, current_output_status)
+
     def _on_manual_output(self, name, output):
+        if self._teardown.discontinuity_reason is not None:
+            return
         if name != "auger" or self._runner is None:
             return
         if (
@@ -2505,6 +2544,8 @@ class HoldMode(ControlMode):
         *,
         reseed: bool = True,
     ) -> None:
+        if self._teardown.discontinuity_reason is not None:
+            return
         if name != "auger":
             return
         calibration_cancelled = self._runner is not None and self._cancel_active_framed_calibration(
@@ -2548,6 +2589,8 @@ class HoldMode(ControlMode):
             self._set_output(seeded, now)
 
     def _on_safety_event(self, event, now):
+        if self._teardown.discontinuity_reason is not None:
+            return
         events = {
             "stop": SafetyEventType.STOP,
             "error": SafetyEventType.ERROR,
@@ -2639,8 +2682,24 @@ class HoldMode(ControlMode):
             self.grill.igniter_off()
             self.grill.power_off()
             teardown.phase = _TeardownPhase.HARDWARE_OFF
+        if teardown.discontinuity_reason is not None and not teardown.discontinuity_boundary_recorded:
+            self.control["manual"]["change"] = False
+            self.control["manual"]["output"] = False
+            self.ctx.store.write_control_snapshot(self.control, origin="control")
+            self._emit_trajectory_boundary(
+                TrajectoryBreakReason.CLOCK_DISCONTINUITY,
+                self.ctx.clock.now(),
+                teardown.discontinuity_reason,
+                monotonic_ms=round(monotonic_s * 1_000),
+            )
+            teardown.discontinuity_boundary_recorded = True
         if teardown.phase < _TeardownPhase.FRAMED_FINALIZED:
-            if runtime is not None and runtime.scheduler is not None and runner is not None:
+            if (
+                teardown.discontinuity_reason is None
+                and runtime is not None
+                and runtime.scheduler is not None
+                and runner is not None
+            ):
                 advance_dispatch = teardown.advance_dispatch
                 if advance_dispatch is None:
                     teardown.prior_output_source = None if trace is None else trace.applied_state.output_source
@@ -2675,38 +2734,55 @@ class HoldMode(ControlMode):
             if runtime is not None and runtime.scheduler is not None:
                 reset_dispatch = teardown.reset_dispatch
                 if reset_dispatch is None:
-                    prior_output_source = (
-                        teardown.prior_output_source
-                        if teardown.advance_dispatch is not None
-                        else (None if trace is None else trace.applied_state.output_source)
-                    )
-                    source = classify_output_source(
-                        lid_open=self.state.lid.open_detected,
-                        manual_override_active=(self.state.manual_override["auger"] >= now),
-                    )
-                    reset_dispatch = _FramedDispatchState(
-                        result=runtime.reset(
-                            PulseResetReason.MODE_CHANGE,
-                            monotonic_s,
-                            InhibitReason.SAFETY,
-                            actual_auger_on=self.grill.get_output_status()["auger"],
-                            sample=self._framed_sample(teardown.ptemp),
-                            terminal_feedback=True,
-                            feedback_source=source,
-                            prior_output_source=prior_output_source,
-                        ),
-                        record_terminal_trace=True,
-                        scheduler_reset=(
-                            PulseResetReason.MODE_CHANGE,
-                            now,
-                            monotonic_s,
-                            InhibitReason.SAFETY,
-                            self.state.controller.pulse_frame_result_revision,
-                            None,
-                        ),
-                    )
+                    if teardown.discontinuity_reason is not None:
+                        reset_dispatch = _FramedDispatchState(
+                            result=runtime.invalidate_observation_gap(sample=self._framed_sample(None)),
+                            record_terminal_trace=True,
+                            scheduler_reset=(
+                                PulseResetReason.SAFETY,
+                                now,
+                                monotonic_s,
+                                InhibitReason.SAFETY,
+                                self.state.controller.pulse_frame_result_revision,
+                                (SafetyEventType.STOP, teardown.discontinuity_reason, None),
+                            ),
+                        )
+                    else:
+                        prior_output_source = (
+                            teardown.prior_output_source
+                            if teardown.advance_dispatch is not None
+                            else (None if trace is None else trace.applied_state.output_source)
+                        )
+                        source = classify_output_source(
+                            lid_open=self.state.lid.open_detected,
+                            manual_override_active=(self.state.manual_override["auger"] >= now),
+                        )
+                        reset_dispatch = _FramedDispatchState(
+                            result=runtime.reset(
+                                PulseResetReason.MODE_CHANGE,
+                                monotonic_s,
+                                InhibitReason.SAFETY,
+                                actual_auger_on=self.grill.get_output_status()["auger"],
+                                sample=self._framed_sample(teardown.ptemp),
+                                terminal_feedback=True,
+                                feedback_source=source,
+                                prior_output_source=prior_output_source,
+                            ),
+                            record_terminal_trace=True,
+                            scheduler_reset=(
+                                PulseResetReason.MODE_CHANGE,
+                                now,
+                                monotonic_s,
+                                InhibitReason.SAFETY,
+                                self.state.controller.pulse_frame_result_revision,
+                                None,
+                            ),
+                        )
                     teardown.reset_dispatch = reset_dispatch
                 self._resume_framed_dispatch(reset_dispatch)
+            if teardown.discontinuity_reason is not None and runner is not None and not teardown.calibration_cancelled:
+                runner.cancel_calibration("safety")
+                teardown.calibration_cancelled = True
             teardown.phase = _TeardownPhase.FRAMED_FINALIZED
         stop_error: Exception | None = None
         stopped: bool | None = None
@@ -2725,6 +2801,7 @@ class HoldMode(ControlMode):
                 TrajectoryBreakReason.STOP,
                 now,
                 "hold-stop",
+                monotonic_ms=round(monotonic_s * 1_000),
             )
             drained = (
                 True
@@ -2746,7 +2823,7 @@ class HoldMode(ControlMode):
                     trace.record_applied_interval(
                         TraceAppliedIntervalContext(
                             timestamp_ms=int(self.ctx.clock.now() * 1_000),
-                            monotonic_ms=round(self.ctx.clock.monotonic() * 1_000),
+                            monotonic_ms=round(monotonic_s * 1_000),
                             sample_complete=False,
                             realized_combustion_load=None,
                             controls_fan=self.state.controller.controls_fan,

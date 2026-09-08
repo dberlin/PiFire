@@ -86,3 +86,18 @@ and `build_runner()` picks between them based on the controller core's
   guarded by a lock; the thread mutates the running core. `HoldMode` submits
   the latest probe reading every tick and calls `stop()` on the runner during
   teardown to join the background thread cleanly.
+
+## Pulse observation continuity
+
+`FramedPulseRuntime.invalidate_observation_gap()` retires a partial frame at its
+last observed monotonic instant without advancing through the unknown interval.
+It preserves known delivered seconds, clears credit, and emits discarded partial
+feedback without a thermal observation. Hold forces hardware OFF before dispatch,
+retires its runner, and reuses the saved terminal cutoff during teardown retries.
+It rejects subsequent ticks and manual actuation in that retired generation.
+
+The coordinated clock migration wires the shared pre-actuation guard to this hook.
+The approved boundary is 60 seconds of actual observation gap or suspend-offset
+discontinuity, not wall-clock correction; the existing 30-second process watchdog
+is separate. Pulse, shared-mode, probe and peripheral clock changes share a
+deployment gate. This pulse development unit alone does not authorize deployment.

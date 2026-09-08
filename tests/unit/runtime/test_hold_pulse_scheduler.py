@@ -626,6 +626,96 @@ def test_teardown_turns_auger_off_before_dispatching_final_frame_progress(hold_c
     assert events.index("auger-off") < feedback_index
 
 
+def test_discontinuity_teardown_never_extends_last_observation(hold_cycle, monkeypatch):
+    runner = FakeControllerRunner(period=1.0).script([_output(1, 0.9)])
+    hold = hold_cycle(runner, controller="mpc")
+    hold.setup()
+    hold.state.metrics = {"augerontime": 0.0}
+    hold.ctx.clock.advance(20.0)
+    hold.on_tick(20.0, 200.0, _status(hold))
+    hold.on_tick(20.0, 200.0, _status(hold))
+    hold.ctx.clock.advance(1.0)
+    hold.on_tick(21.0, 200.0, _status(hold))
+    assert _status(hold)["auger"] is True
+    assert hold.state.metrics["augerontime"] == pytest.approx(1.0)
+    runner.applied.clear()
+    frames = []
+    intervals = []
+    trace = _trace(hold)
+    original_frame = trace.record_frame
+    original_interval = trace.record_applied_interval
+
+    def record_frame(context):
+        frames.append(context)
+        return original_frame(context)
+
+    def record_interval(context):
+        intervals.append(context)
+        return original_interval(context)
+
+    monkeypatch.setattr(trace, "record_frame", record_frame)
+    monkeypatch.setattr(trace, "record_applied_interval", record_interval)
+    hold.ctx.clock.advance(120.0)
+    hold._on_control_discontinuity(21.0, "observation-gap")
+    hold.ctx.clock.advance(120.0)
+    hold.teardown(500.0)
+    hold.ctx.clock.advance(120.0)
+    hold.teardown(500.0)
+
+    assert _status(hold)["auger"] is False
+    assert _status(hold)["igniter"] is False
+    assert hold.state.metrics["augerontime"] == pytest.approx(1.0)
+    assert len(frames) == 1
+    completion = frames[0].completion
+    assert completion.frame.ended_at_s == 21.0
+    assert completion.frame.complete is False
+    assert completion.observation is None
+    assert completion.applied.feedback_disposition is FrameFeedbackDisposition.DISCARDED
+    assert completion.applied.sample_complete is False
+    assert [interval.monotonic_ms for interval in intervals] == [21000]
+    assert len(runner.applied) == 1
+    assert runner.observations == []
+    assert runner.stops == 1
+
+
+def test_resume_rejects_old_result_and_manual_outputs_in_retired_generation(hold_cycle, monkeypatch):
+    runner = FakeControllerRunner(period=1.0).script([_output(1, 0.9)])
+    hold = hold_cycle(runner, controller="mpc")
+    hold.setup()
+    hold.ctx.clock.advance(20.0)
+    hold.on_tick(20.0, 200.0, _status(hold))
+    hold.ctx.clock.advance(1.0)
+    hold.on_tick(21.0, 200.0, _status(hold))
+    hold.control["manual"]["change"] = "auger"
+    hold.control["manual"]["output"] = True
+    hold.state.manual_override["auger"] = 1000.0
+    hold.ctx.clock.advance(120.0)
+    hold._on_control_discontinuity(21.0, "observation-gap")
+    assert hold.control["manual"]["change"] is False
+    assert hold.control["manual"]["output"] is False
+    assert hold.state.manual_override["auger"] == 0
+    runner.script([_output(2, 1.0)])
+    positive_commands = []
+    monkeypatch.setattr(hold.grill, "auger_on", lambda: positive_commands.append("auger"))
+    monkeypatch.setattr(hold.grill, "igniter_on", lambda: positive_commands.append("igniter"))
+    hold.settings["safety"]["allow_manual_changes"] = True
+
+    hold.on_tick(141.0, 200.0, _status(hold))
+    for name in ("auger", "igniter"):
+        hold.control["manual"]["change"] = name
+        hold.control["manual"]["output"] = True
+        hold._apply_manual_overrides(hold.control, 141.0, _status(hold))
+        hold._on_manual_output(name, True)
+    hold._on_manual_release("auger", 141.0)
+    hold._on_safety_event("stop", 141.0)
+
+    assert positive_commands == []
+    assert runner.observations == []
+    assert hold.state.controller.pulse_result_revision == 1
+    assert hold.state.manual_override["auger"] == 0
+    assert hold.control["manual"]["change"] is False
+
+
 class _ObservationStatusRunner(FakeControllerRunner):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

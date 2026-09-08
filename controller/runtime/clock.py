@@ -3,6 +3,7 @@
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from typing import override
 
 
 class Clock(ABC):
@@ -19,13 +20,16 @@ class Clock(ABC):
 
 
 class RealClock(Clock):
-    def now(self):
+    @override
+    def now(self) -> float:
         return time.time()
 
-    def monotonic(self):
+    @override
+    def monotonic(self) -> float:
         return time.monotonic()
 
-    def sleep(self, seconds):
+    @override
+    def sleep(self, seconds: float) -> None:
         time.sleep(seconds)
 
 
@@ -37,38 +41,44 @@ class CallableClock(Clock):
         *,
         monotonic_clock: Callable[[], float],
         wall_clock: Callable[[], float],
-    ):
-        self._monotonic_clock = monotonic_clock
-        self._wall_clock = wall_clock
+    ) -> None:
+        self._monotonic_clock: Callable[[], float] = monotonic_clock
+        self._wall_clock: Callable[[], float] = wall_clock
 
-    def now(self):
+    @override
+    def now(self) -> float:
         return self._wall_clock()
 
-    def monotonic(self):
+    @override
+    def monotonic(self) -> float:
         return self._monotonic_clock()
 
-    def sleep(self, seconds):
+    @override
+    def sleep(self, seconds: float) -> None:
         time.sleep(seconds)
 
 
 class ManualClock(Clock):
-    def __init__(self, start: float = 0.0, *, monotonic_start: float = 0.0):
-        self._t = float(start)
-        self._monotonic = float(monotonic_start)
+    def __init__(self, start: float = 0.0, *, monotonic_start: float = 0.0) -> None:
+        self._t: float = float(start)
+        self._monotonic: float = float(monotonic_start)
 
-    def now(self):
+    @override
+    def now(self) -> float:
         return self._t
 
-    def monotonic(self):
+    @override
+    def monotonic(self) -> float:
         return self._monotonic
 
-    def sleep(self, seconds):
+    @override
+    def sleep(self, seconds: float) -> None:
         self.advance(seconds)
 
-    def advance(self, seconds):
+    def advance(self, seconds: float) -> None:
         self._t += seconds
         self._monotonic += seconds
 
-    def jump_wall(self, seconds):
+    def jump_wall(self, seconds: float) -> None:
         """Adjust epoch provenance without advancing physical time."""
         self._t += seconds

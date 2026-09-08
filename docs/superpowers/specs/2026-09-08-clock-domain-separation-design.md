@@ -2,7 +2,7 @@
 
 ## Authorization and scope
 
-On 2026-09-08 the user requested a learning-clock fix and separate implementation plans for PID, PID-SP, pulse scheduling, shared-mode timers, probe contracts, and peripheral timing. After the physical-frame dependency was explained, the user selected **Implement coupled learning boundary**: implement learning capture, replay/evidence clock semantics, and the necessary pulse/PID-SP timestamp producers together now. The remaining subsystem changes are plans, not authorized implementations. The previously verified warmup-admission fix remains included.
+On 2026-09-08 the user first approved the coupled learning-clock boundary, then authorized executing the six remaining migration plans sequentially. The coupled boundary is implemented; PID and PID-SP development units are verified. Remaining plans form one coordinated deployment, not independently deployable partial clock migrations.
 
 ## Time semantics
 
@@ -52,11 +52,13 @@ class Clock:
 
 PID-SP, pulse and shared-mode changes must never deploy with mixed physical axes. Independently authored plans are not independently deployable when their producer/consumer cutover is shared.
 
-## Explicitly proposed policies, not implicit implementation scope
+## Approved discontinuity and timer policy
 
-Suspend invalidates live control/learning history: unknown hardware delivery is not manufactured from elapsed time. A suspend detector may compare Linux boot-time and monotonic clocks, but its threshold and platform behavior require review. An arbitrary one-second loop-gap safe-stop threshold is not approved by this design.
+The user rejected small-gap fail-stop thresholds. The approved threshold is **60 seconds** for an actual monotonic observation gap or a BOOTTIME-minus-MONOTONIC suspend-offset increase. Wall-clock corrections alone never trigger discontinuity handling. This supersedes the draft 1-second active-loop and 0.25-second suspend proposals in the sibling plans, and the earlier illustrative 600-second discussion. Preserve the existing separate process watchdog; this migration does not change its timeout.
 
-For persisted relative timers, conservative proposed behavior is pause/interruption on unclean restart or suspend, with explicit resume rather than automatic delayed cooking actions. Historical epoch-only timers cannot produce trustworthy remaining duration after an unknown clock correction; require explicit rearm. This product behavior is a review point in the peripheral plan.
+A qualifying discontinuity stops fuel delivery and invalidates live control/learning history. End physical accounting at the last observed instant; never manufacture delivery during the unknown interval. Restart requires fresh health/history admission and explicit operator action.
+
+The user approved **stop counting until I resume** for user/recipe timers: normal countdown and pause/resume remain unchanged; restart or qualifying discontinuity interrupts and disarms a running timer, retaining its last saved remaining duration as an estimate. Downtime does not count, and restarting must not automatically advance a recipe, enter keep-warm, or trigger timer-based shutdown. Explicit resume starts the remaining duration. Historical running epoch-only timers with unknowable remainder require a new duration. This does not cancel an independently required safety shutdown.
 
 ## Acceptance and release discipline
 

@@ -820,6 +820,89 @@ def test_teardown_retry_latches_first_timestamp_and_temperature(
     assert events.count("runner:finish") == 1
 
 
+@pytest.mark.parametrize("discontinuity", [False, True])
+def test_wall_jump_during_teardown_keeps_one_terminal_interval(hold_cycle, monkeypatch, discontinuity):
+    events = []
+    runner = _OrderedRunner(events)
+    _install_boundaries(monkeypatch, events)
+    hold = hold_cycle(runner, controller="mpc")
+    hold.ctx.clock.jump_wall(1_800_000_000.0)
+    hold.setup()
+    hold.state.metrics = {"id": "teardown-clock-cutoff", "augerontime": 0.0}
+    hold.ctx.clock.advance(20.0)
+    hold.on_tick(20.0, 200.0, hold.grill.get_output_status())
+    hold.on_tick(20.0, 200.0, hold.grill.get_output_status())
+    hold.ctx.clock.advance(2.0)
+    hold.on_tick(22.0, 200.0, hold.grill.get_output_status())
+    assert hold.state.metrics["augerontime"] == pytest.approx(2.0)
+    trace = hold._control_trace
+    assert trace is not None
+    frames = []
+    intervals = []
+    original_frame = trace.record_frame
+    original_interval = trace.record_applied_interval
+    original_output = runner.set_output
+    failed = False
+
+    def record_frame(context):
+        frames.append(context)
+        return original_frame(context)
+
+    def record_interval(context):
+        intervals.append(context)
+        return original_interval(context)
+
+    def fail_terminal_once(applied):
+        nonlocal failed
+        assert hold.grill.get_output_status()["auger"] is False
+        assert hold.grill.get_output_status()["igniter"] is False
+        if applied.feedback_disposition is not FrameFeedbackDisposition.PROGRESS and not failed:
+            failed = True
+            raise RuntimeError("terminal delivery interrupted")
+        return original_output(applied)
+
+    monkeypatch.setattr(trace, "record_frame", record_frame)
+    monkeypatch.setattr(trace, "record_applied_interval", record_interval)
+    monkeypatch.setattr(runner, "set_output", fail_terminal_once)
+    events.clear()
+    _record_hardware(monkeypatch, events, hold.grill)
+    hold.ctx.clock.jump_wall(-3600.0)
+    if discontinuity:
+        hold.ctx.clock.advance(120.0)
+    with pytest.raises(RuntimeError, match="terminal delivery interrupted"):
+        if discontinuity:
+            hold._on_control_discontinuity(22.0, "observation-gap")
+        else:
+            hold.teardown(200.0)
+    hold.ctx.clock.advance(120.0)
+    hold.ctx.clock.jump_wall(7200.0)
+    publication_ms = round(hold.ctx.clock.now() * 1000)
+    hold.teardown(500.0)
+    hold.teardown(500.0)
+
+    _assert_hardware_off_first(events)
+    assert hold.state.metrics["augerontime"] == pytest.approx(2.0)
+    assert len(frames) == 1
+    assert frames[0].completion.frame.ended_at_s == 22.0
+    assert frames[0].timestamp_ms == publication_ms
+    assert [item.monotonic_ms for item in intervals] == [22000]
+    assert intervals[0].timestamp_ms == publication_ms
+    terminal = [
+        event
+        for event in events
+        if isinstance(event, tuple)
+        and event[0] == "runner:feedback"
+        and event[2] is not FrameFeedbackDisposition.PROGRESS
+    ]
+    assert len(terminal) == 1
+    assert events.count("runner:stop-and-retain") == 1
+    assert events.count("runner:finish") == 1
+    assert events.count(("runner:schedule", CandidateOrigin.PASSIVE_ONLINE)) <= 1
+    if discontinuity:
+        assert runner.observations == []
+        assert terminal[0][2] is FrameFeedbackDisposition.DISCARDED
+
+
 def test_repeated_setup_starts_a_fresh_teardown_transaction(
     hold_cycle,
     monkeypatch,

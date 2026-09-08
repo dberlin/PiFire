@@ -384,6 +384,48 @@ class FramedPulseRuntime:
         controller.pulse_feedback_delivered_on_s = decision.delivered_on_s
         return FramedPulseResult(decision, tuple(completions), feedback, delivered_delta_s)
 
+    def invalidate_observation_gap(self, *, sample: FramedPulseSample) -> FramedPulseResult:
+        """Discard an unknown interval without advancing beyond the last observation."""
+        scheduler, controller, _ = self._configured()
+        interrupted = scheduler.reset(PulseResetReason.SAFETY)
+        self._stamp_calibration_cancellation(
+            PulseResetReason.SAFETY.value,
+            command_revision=0,
+            command_action="safety-cancel",
+        )
+        latched = self._frame
+        assert latched is not None
+        completions = ()
+        if interrupted is not None:
+            completions = (
+                self._complete_frame(
+                    interrupted,
+                    latched=latched,
+                    # The resume temperature cannot describe the interrupted frame.
+                    sample=replace(sample, temperature=None),
+                    sample_at_s=interrupted.ended_at_s,
+                    inhibit=InhibitReason.SAFETY,
+                    terminal_feedback=True,
+                    feedback_source=latched.output_source,
+                ),
+            )
+        decision = PulseDecision(
+            reason=PulseReason.RESET,
+            frame_start_s=(
+                interrupted.nominal_start_s if interrupted is not None else controller.pulse_feedback_start_s or 0.0
+            ),
+            latched_request=0.0,
+            scheduled_on_s=0,
+            credit_s=0.0,
+            command_on=False,
+            transition=None,
+            delivered_on_s=controller.pulse_metrics_delivered_on_s,
+            frame_delivered_on_s=0.0,
+            reset_reason=PulseResetReason.SAFETY,
+            completed_frames=() if interrupted is None else (interrupted,),
+        )
+        return FramedPulseResult(decision, completions, None, 0.0)
+
     def complete_frame(
         self,
         frame: PulseFrameResult,

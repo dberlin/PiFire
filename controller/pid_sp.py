@@ -45,6 +45,7 @@ import json
 import math
 import threading
 from collections import deque
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import asdict, dataclass
 from enum import StrEnum
@@ -103,6 +104,7 @@ from controller.pid_sp_observation import (
     PidSpObservationOutcome,
     canonical_pid_sp_observation_model_digest,
 )
+from controller.runtime.clock import Clock
 from controller.smith_predictor import SmithPredictor
 from grillplat.actuator_capabilities import AUGER_TIMING
 
@@ -161,14 +163,14 @@ class Controller(PIDControllerBase):
         cycle_data,
         *,
         logger=None,
-        clock=None,
+        clock: Clock | None = None,
         model_persistence=None,
         trajectory_repository=None,
         fit_partition_digest=None,
-        clock_ms=None,
-        monotonic_clock=None,
+        clock_ms: Callable[[], int] | None = None,
+        monotonic_clock: Callable[[], float] | None = None,
         installation_identity_provider: InstallationIdentityProvider = os_installation_identity,
-    ):
+    ) -> None:
         super().__init__(config, units, cycle_data, logger=logger, clock=clock)
 
         self._calculate_gains(config.get("PB", 60.0), config.get("Ti", 180.0), config.get("Td", 45.0))
@@ -182,7 +184,9 @@ class Controller(PIDControllerBase):
 
         self.units = units
 
-        self._monotonic_clock = self._clock.monotonic if monotonic_clock is None else monotonic_clock
+        self._monotonic_clock: Callable[[], float] = (
+            self._clock.monotonic if monotonic_clock is None else monotonic_clock
+        )
         self.last_update = self._monotonic_clock()
         self.last_set_time = self._monotonic_clock()
         self.error = 0.0
@@ -243,7 +247,7 @@ class Controller(PIDControllerBase):
         self._model_persistence = model_persistence
         self._trajectory_repository = trajectory_repository
         self._fit_partition_digest = fit_partition_digest
-        self._clock_ms = (lambda: int(self._clock.now() * 1_000)) if clock_ms is None else clock_ms
+        self._clock_ms: Callable[[], int] = (lambda: int(self._clock.now() * 1_000)) if clock_ms is None else clock_ms
         self._learning_session_id = "runtime"
         self._learning_cook_id: str | None = None
         self._learning_role_generation = 0

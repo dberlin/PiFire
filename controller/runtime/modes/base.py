@@ -444,11 +444,14 @@ class ControlMode:
         *,
         configuration=False,
         replacement=False,
+        monotonic_ms=None,
     ):
         recorder = getattr(self.ctx, "learning_trajectory", None)
         if recorder is None:
             return
-        monotonic_ms, wall_ms = self._trajectory_clock_pair()
+        captured_monotonic_ms, wall_ms = self._trajectory_clock_pair()
+        if monotonic_ms is None:
+            monotonic_ms = captured_monotonic_ms
         replacement_mode = self._trajectory_mode_event(monotonic_ms, wall_ms) if replacement else None
         if replacement_mode is not None:
             self._trajectory_active_event = replacement_mode
