@@ -67,13 +67,93 @@ def test_action_slots_dispatch_expected_commands():
     assert ("cmd_splus", 0) in b._calls
 
 
-def test_timer_text_counts_down_in_startup():
-    status = {"mode": "Startup", "units": "F", "outpins": {}, "start_time": 1000.0, "start_duration": 240}
+def test_timer_text_counts_down_in_startup(monkeypatch):
+    status = {"mode": "Startup", "running": True, "remaining_seconds": 200, "clock_stamp": clock_stamp().as_dict()}
+    monkeypatch.setattr("display.qtbackend.local_clock_stamp", lambda: clock_stamp(monotonic_s=105))
+    monkeypatch.setattr("display.qtbackend.read_control_heartbeat", clock_stamp)
     in_data = {"P": {"Grill": 100}, "F": {}, "AUX": {}, "PSP": 0, "NT": {}}
     b = make_backend(in_data, status)
-    b._now = lambda: 1000.0 + 45  # 45s elapsed -> 195s -> 03:15
     b.poll()
     assert b.timerText == "03:15"
+
+
+@pytest.mark.parametrize("wall_jump", [-3600, 3600])
+def test_duration_display_uses_live_status_age_and_freezes_stale_snapshot(monkeypatch, wall_jump):
+    clock = {"steady": 100.0, "wall": 1_800_000_000.0}
+    status = {
+        "mode": "Startup",
+        "running": True,
+        "remaining_seconds": 10,
+        "cook_elapsed_seconds": 125,
+        "clock_stamp": clock_stamp().as_dict(),
+    }
+    monkeypatch.setattr(
+        "display.qtbackend.local_clock_stamp",
+        lambda: clock_stamp(monotonic_s=clock["steady"], wall_s=clock["wall"]),
+    )
+    monkeypatch.setattr("display.qtbackend.read_control_heartbeat", lambda: clock_stamp(monotonic_s=clock["steady"]))
+    monkeypatch.setattr("time.time", lambda: clock["wall"])
+    b = make_backend({"P": {}, "F": {}, "AUX": {}, "PSP": 0, "NT": {}}, status)
+    b._monotonic = lambda: clock["steady"]
+    b.poll()
+    assert (b.timerText, b.cookElapsedText) == ("00:10", "02:05")
+    clock["wall"] += wall_jump
+    clock["steady"] = 105
+    b.poll()
+    assert (b.timerText, b.cookElapsedText) == ("00:05", "02:10")
+    clock["steady"] = 110
+    b.poll()
+    assert b.timerText == "00:00"
+    assert b._calls == []
+    clock["steady"] = 116
+    b.poll()
+    assert (b.timerText, b.cookElapsedText) == ("00:10", "02:05")
+    status.update(
+        mode="Hold",
+        remaining_seconds=None,
+        cook_elapsed_seconds=141,
+        clock_stamp=clock_stamp(monotonic_s=116).as_dict(),
+    )
+    b.poll()
+    assert (b.timerText, b.cookElapsedText) == ("", "02:21")
+
+
+@pytest.mark.parametrize("wall_jump", [-3600, 3600])
+def test_settings_refresh_and_idle_deadline_ignore_wall_steps(monkeypatch, wall_jump):
+    clock = {"steady": 0.0, "wall": 1_800_000_000.0}
+    state = {"accent": "Ember"}
+    status = {"mode": "Stop"}
+    monkeypatch.setattr("time.time", lambda: clock["wall"])
+    b = PiFireBackend(
+        lambda: ({"P": {}, "F": {}, "AUX": {}, "PSP": 0, "NT": {}}, status),
+        lambda command, value: None,
+        PROBE_INFO,
+        accent_fn=lambda: state["accent"],
+        timeout_fn=lambda: 10,
+    )
+    b._monotonic = lambda: clock["steady"]
+    b.registerInteraction()
+    b.poll()
+    state["accent"] = "Ice"
+    clock["wall"] += wall_jump
+    clock["steady"] = 0.999
+    b.poll()
+    assert b.accentTheme == "Ember"
+    clock["steady"] = 1
+    b.poll()
+    assert b.accentTheme == "Ice"
+    clock["steady"] = 10
+    b.poll()
+    assert b.asleep is False
+    clock["steady"] = 10.001
+    b.poll()
+    assert b.asleep is True
+    b.registerInteraction()
+    assert b.asleep is False
+    status["mode"] = "Hold"
+    clock["steady"] = 30
+    b.poll()
+    assert b.asleep is False
 
 
 def test_food_probe_model_reflects_current_data():
@@ -163,9 +243,8 @@ def test_pmode_active_only_in_startup_smoke():
 
 
 def test_hold_lid_open_countdown_timer():
-    status = {"mode": "Hold", "units": "F", "outpins": {}, "lid_open_detected": True, "lid_open_endtime": 2000.0}
+    status = {"mode": "Hold", "lid_open_detected": True, "lid_open_remaining_seconds": 65}
     b = make_backend({"P": {"Grill": 225}, "F": {}, "AUX": {}, "PSP": 250, "NT": {}}, status)
-    b._now = lambda: 2000.0 - 65  # 65s remaining -> 01:05
     b.poll()
     assert b.timerText == "01:05"
     assert b.timerLabel == "Lid Pause"
@@ -180,7 +259,7 @@ def test_sleep_wake_state_machine():
         {"primary": {"name": "Grill"}, "food": [], "aux": []},
     )
     b.TIMEOUT = 10
-    b._now = lambda: clock["t"]
+    b._monotonic = lambda: clock["t"]
     b._last_interaction = clock["t"]
     # In Stop, before timeout: awake.
     b.poll()
@@ -235,7 +314,7 @@ def test_accent_theme_updates_live_and_throttles():
         accent_fn=lambda: state["accent"],
     )
     clock = {"t": 1000.0}
-    b._now = lambda: clock["t"]
+    b._monotonic = lambda: clock["t"]
     events = []
     b.accentThemeChanged.connect(lambda: events.append(b.accentTheme))
     b.poll()
@@ -250,10 +329,9 @@ def test_accent_theme_updates_live_and_throttles():
     assert "Ice" in events
 
 
-def test_cook_elapsed_text_counts_up_else_zero():
-    status = {"mode": "Smoke", "units": "F", "outpins": {}, "startup_timestamp": 1000.0}
+def test_cook_elapsed_text_retains_unknown_when_snapshot_missing():
+    status = {"mode": "Smoke", "cook_elapsed_seconds": 125}
     b = make_backend({"P": {}, "F": {}, "AUX": {}, "PSP": 0, "NT": {}}, status)
-    b._now = lambda: 1000.0 + 125  # 2:05 elapsed
     b.poll()
     assert b.cookElapsedText == "02:05"
     b._fetch_fn = lambda: (
@@ -261,7 +339,7 @@ def test_cook_elapsed_text_counts_up_else_zero():
         {"mode": "Stop", "units": "F", "outpins": {}, "startup_timestamp": 0},
     )
     b.poll()
-    assert b.cookElapsedText == "00:00"
+    assert b.cookElapsedText == "--:--"
 
 
 def test_timeout_seeded_from_timeout_fn():
@@ -282,7 +360,7 @@ def test_zero_timeout_never_sleeps():
         {"primary": {"name": "Grill"}, "food": [], "aux": []},
         timeout_fn=lambda: 0,
     )
-    b._now = lambda: clock["t"]
+    b._monotonic = lambda: clock["t"]
     b._last_interaction = clock["t"]
     clock["t"] = 999999.0
     b.poll()
@@ -298,7 +376,7 @@ def test_zero_timeout_wakes_already_asleep_screen():
         {"primary": {"name": "Grill"}, "food": [], "aux": []},
         timeout_fn=lambda: state["timeout"],
     )
-    b._now = lambda: clock["t"]
+    b._monotonic = lambda: clock["t"]
     b._last_interaction = clock["t"]
     clock["t"] = 1031.0  # >30s since last interaction -> asleep
     b.poll()
@@ -319,7 +397,7 @@ def test_timeout_live_reread():
         {"primary": {"name": "Grill"}, "food": [], "aux": []},
         timeout_fn=lambda: state["timeout"],
     )
-    b._now = lambda: clock["t"]
+    b._monotonic = lambda: clock["t"]
     state["timeout"] = 5
     clock["t"] = 1002.0  # >1s since last settings check -> re-read
     b.poll()
@@ -560,7 +638,6 @@ def test_backend_throttles_health_reads_independently_from_fast_polling():
         health_fetch_fn=lambda: health_calls.append(clock["t"]) or [_health_item()],
     )
     backend._monotonic = lambda: clock["t"]
-    backend._now = lambda: 1_800_000_000.0
 
     backend.poll()
     for _ in range(20):
@@ -602,7 +679,6 @@ def test_backend_failed_health_read_preserves_invalid_state_while_advancing_fres
         health_fetch_fn=fetch_health,
     )
     backend._monotonic = lambda: clock["t"]
-    backend._now = lambda: 1_800_000_000.0
 
     backend.poll()
     clock["t"] += backend.HEALTH_POLL_SECONDS
@@ -648,7 +724,6 @@ def test_backend_successful_empty_health_read_clears_confirmed_invalid_state(emp
         health_fetch_fn=lambda: next(health_reads),
     )
     backend._monotonic = lambda: clock["t"]
-    backend._now = lambda: 1_800_000_000.0
 
     backend.poll()
     assert backend.probeHealth.invalid_labels() == {"Grill"}
@@ -672,7 +747,6 @@ def test_backend_exposes_health_list_model_and_clears_malformed_reads():
     )
     clock = {"t": 1000.0}
     backend._monotonic = lambda: clock["t"]
-    backend._now = lambda: 1_800_000_000.0
     backend.poll()
     assert backend.probeHealth.rowCount() == 1
 
@@ -890,7 +964,7 @@ def test_qtapp_health_fetch_reads_and_projects_the_generic_blob_once(monkeypatch
 
 @pytest.mark.parametrize("wall_delta", [-3600.0, 3600.0])
 @pytest.mark.parametrize("temperature_result", ["live", "missing", "error"])
-def test_health_poll_wall_steps_do_not_freeze_cached_rows(wall_delta, temperature_result):
+def test_health_poll_wall_steps_do_not_freeze_cached_rows(monkeypatch, wall_delta, temperature_result):
     clock = {"mono": 100.0, "wall": 1_800_000_000.0}
     healthy_transport = True
 
@@ -909,7 +983,7 @@ def test_health_poll_wall_steps_do_not_freeze_cached_rows(wall_delta, temperatur
 
     backend = PiFireBackend(fetch_temperatures, lambda c, d: None, PROBE_INFO, health_fetch_fn=fetch_health)
     backend._monotonic = lambda: clock["mono"]
-    backend._now = lambda: clock["wall"]
+    monkeypatch.setattr("time.time", lambda: clock["wall"])
     backend.poll()
     assert _health_row(backend.probeHealth)["freshnessCurrent"] is True
     healthy_transport = False

@@ -159,12 +159,8 @@ describe("createCommand issues the right URLs", () => {
 //
 //   /api/set/timer/start/{seconds}/{expiry options}
 //
-// The DURATION is what travels; the server (common/api_commands.py
-// _cmd_set_timer) computes control.timer.end from its OWN time.time(). The
-// control process judges expiry against that same clock, so a client clock
-// running behind the Pi's must not be able to arm an already-expired timer --
-// and an expired timer with "Shutdown Grill" ticked shuts the grill down
-// mid-cook. No timestamp is ever sent, so there is nothing to skew.
+// The duration travels unchanged; only an admitted controller tick establishes
+// its monotonic deadline. Browser wall-clock changes cannot alter the request.
 describe("timerStartWithOptions", () => {
   let fetchMock: ReturnType<typeof rs.fn>;
   beforeEach(() => {

@@ -34,6 +34,7 @@ class Display:
         self, dev_pins, buttonslevel="HIGH", rotation=0, units="F", config=None, *, event_log=None, control_log=None
     ):
         config = {} if config is None else config
+        self._monotonic = time.monotonic
         # Init Global Variables and Constants
         self.eventLogger, self.controlLogger = resolve_loggers(event_log, control_log)
         self.units = units
@@ -76,7 +77,7 @@ class Display:
             events = pygame.event.get()  # noqa: F841  # event-pump
 
             """ Normal display loop"""
-            if self.display_timeout and time.time() > self.display_timeout:
+            if self.display_timeout and self._monotonic() > self.display_timeout:
                 self.display_command = "clear"
 
             if self.display_command == "clear":
@@ -88,7 +89,7 @@ class Display:
             if self.display_command == "splash":
                 self.display_active = True
                 self._display_splash()
-                self.display_timeout = time.time() + 3
+                self.display_timeout = self._monotonic() + 3
                 self.display_command = None
                 time.sleep(3)  # Hold splash screen for 3 seconds
 
@@ -96,7 +97,7 @@ class Display:
                 self.display_active = True
                 self._display_text()
                 self.display_command = None
-                self.display_timeout = time.time() + 10
+                self.display_timeout = self._monotonic() + 10
 
             if self.display_command == "network":
                 self.display_active = True
@@ -105,7 +106,7 @@ class Display:
                 network_ip = s.getsockname()[0]
                 if network_ip != "":
                     self._display_network(network_ip)
-                    self.display_timeout = time.time() + 30
+                    self.display_timeout = self._monotonic() + 30
                     self.display_command = None
                 else:
                     self.display_text("No IP Found")

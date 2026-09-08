@@ -5,6 +5,7 @@ import sqlite3
 import pytest
 
 from common.control_delta import control_delta
+from tests.fakes.clock import clock_stamp
 from common.persistence.control import (
     read_pending_control_writes,
 )
@@ -49,14 +50,14 @@ def test_control_live_update_and_dequeue_roll_back_together(ds):
 
     try:
         with pytest.raises(sqlite3.IntegrityError, match="simulated control dequeue failure"):
-            store.execute_control_writes()
+            store.execute_control_writes(timer_now=clock_stamp())
 
         assert store.read_control() == {"mode": "Stop", "primary_setpoint": 100}
         assert read_pending_control_writes() == pending
     finally:
         ds.connection().execute("DROP TRIGGER fail_control_dequeue")
 
-    store.execute_control_writes()
+    store.execute_control_writes(timer_now=clock_stamp())
     assert store.read_control() == {"mode": "Stop", "primary_setpoint": 225}
     assert read_pending_control_writes() == ()
 

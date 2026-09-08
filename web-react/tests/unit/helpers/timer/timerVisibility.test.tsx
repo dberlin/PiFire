@@ -5,13 +5,11 @@ import { useTimerVisibility } from "../../../../src/helpers/timer/timerVisibilit
 
 afterEach(cleanup);
 
-// LiveState["timer"].start values: 0 = no timer, otherwise the epoch second the
-// timer was started at.
-const STARTED = 1_700_000_000;
+const STARTED = "66cc24ec-0bb4-42b7-af5d-c5e21124ec90";
 
-function mount(start = 0) {
-  return renderHook((timerStart: number) => useTimerVisibility(timerStart), {
-    initialProps: start,
+function mount(timerId: string | null = null) {
+  return renderHook((id: string | null) => useTimerVisibility(id), {
+    initialProps: timerId,
   });
 }
 
@@ -31,12 +29,6 @@ describe("useTimerVisibility", () => {
     expect(result.current.visible).toBe(false);
   });
 
-  it("keeps the toggle stable across re-renders so it can be a plain prop", () => {
-    const { result, rerender } = mount();
-    const first = result.current.toggle;
-    rerender(0);
-    expect(result.current.toggle).toBe(first);
-  });
 
   it("reveals itself when a timer starts elsewhere (timer.js:150-157)", () => {
     const { result, rerender } = mount();
@@ -58,8 +50,7 @@ describe("useTimerVisibility", () => {
     act(() => result.current.toggle());
     expect(result.current.visible).toBe(false);
 
-    // Every socket payload re-renders with the same `start`; only a NEW timer
-    // may override the user's choice.
+    // Wall metadata changes cannot override dismissal of the same timer UUID.
     rerender(STARTED);
     rerender(STARTED);
     expect(result.current.visible).toBe(false);
@@ -70,7 +61,7 @@ describe("useTimerVisibility", () => {
     act(() => result.current.toggle());
     expect(result.current.visible).toBe(false);
 
-    rerender(0);
+    rerender(null);
 
     expect(result.current.visible).toBe(false);
   });
@@ -78,9 +69,9 @@ describe("useTimerVisibility", () => {
   it("reveals again for the next timer after one was cleared", () => {
     const { result, rerender } = mount(STARTED);
     act(() => result.current.toggle());
-    rerender(0);
+    rerender(null);
 
-    rerender(STARTED + 900);
+    rerender("fcc611be-61db-4fd4-87b8-d401d7c10c6e");
 
     expect(result.current.visible).toBe(true);
   });

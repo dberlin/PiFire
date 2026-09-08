@@ -40,6 +40,7 @@ import pytest
 import distance._sampled_base as sampled_base
 from distance._sampled_base import SampledHopperLevel, SensorOpenTimeout
 from distance._tof_base import ToFReadTimeout
+from controller.runtime.clock import ManualClock
 
 # Short enough to keep the suite quick, long enough that a thread that has
 # merely not been scheduled yet cannot be mistaken for one that is stuck.
@@ -67,7 +68,7 @@ class _FakeClock:
     def __init__(self):
         self._now = 0.0
 
-    def time(self):
+    def monotonic(self):
         return self._now
 
     def sleep(self, seconds):
@@ -805,11 +806,12 @@ def test_the_wait_after_a_failure_doubles_and_stops_at_the_cap():
 def test_consecutive_failures_climb_the_schedule_and_one_success_returns_to_the_base():
     hopper = _idle_sampler()
     clock = _FakeClock()
+    hopper._monotonic = clock.monotonic
     with mock.patch.object(sampled_base, "time", clock):
         waits = []
         for _failure in range(6):
             hopper._note_cycle_failed("simulated")
-            waits.append(hopper._backoff_until - clock.time())
+            waits.append(hopper._backoff_until - clock.monotonic())
         assert waits == [1, 2, 4, 8, 10, 10]
 
         hopper._note_cycle_succeeded()
@@ -817,7 +819,7 @@ def test_consecutive_failures_climb_the_schedule_and_one_success_returns_to_the_
         assert hopper._consecutive_failures == 0
 
         hopper._note_cycle_failed("simulated")
-        assert hopper._backoff_until - clock.time() == hopper.backoff_base_seconds
+        assert hopper._backoff_until - clock.monotonic() == hopper.backoff_base_seconds
 
 
 def test_a_run_of_failures_is_logged_once_and_so_is_the_recovery(stack):
@@ -900,3 +902,109 @@ def test_a_healthy_sampler_never_backs_off_and_never_logs(stack, ticking_loop_cl
         assert fake.reads == hopper.sample_count * hopper.samples_per_cycle
     finally:
         _stop(hopper)
+
+
+@pytest.mark.parametrize("wall_jump", [-3600, 3600])
+@pytest.mark.parametrize("request_during_backoff", [False, True])
+def test_backoff_and_pending_request_use_elapsed_time(monkeypatch, wall_jump, request_during_backoff):
+    clock = ManualClock(wall_start=1_800_000_000)
+    reads = []
+    restarts = []
+
+    class Hopper(SampledHopperLevel):
+        samples_per_cycle = 1
+        backoff_base_seconds = 3
+
+        def _read_distance_mm(self):
+            reads.append(clock.monotonic())
+            if len(reads) == 1:
+                raise OSError("sensor disconnected")
+            return 100
+
+        def _restart_sensor(self):
+            restarts.append(clock.monotonic())
+
+    def sleep(seconds):
+        if len(reads) == 2:
+            hopper.sensor_thread_active = False
+            return
+        assert reads == [0]
+        assert hopper.get_level() == 73  # failed read cannot publish a fabricated measurement
+        if request_during_backoff:
+            hopper.request_sample()
+        clock.jump_wall(wall_jump)
+        clock.advance(seconds)
+        assert clock.monotonic() <= 3, "wall step extended sensor failure backoff"
+
+    monkeypatch.setattr(
+        sampled_base, "time", types.SimpleNamespace(monotonic=clock.monotonic, time=clock.wall_time, sleep=sleep)
+    )
+    hopper = Hopper()
+    hopper.distance_read = 73
+    hopper.sensor_thread_active = True
+    hopper.sensor_thread_read_interval = 0
+    hopper.sample_requested = True
+    hopper._sensing_loop()
+    assert reads == [0, 3]
+    assert restarts == []
+    assert hopper.get_level() == 66
+
+
+@pytest.mark.parametrize("wall_jump", [-3600, 3600])
+@pytest.mark.parametrize("elapsed,expected_restarts", [(0.5, 0), (0.51, 1)])
+def test_slow_cycle_uses_real_elapsed(monkeypatch, wall_jump, elapsed, expected_restarts):
+    clock = ManualClock(wall_start=1_800_000_000)
+    restarts = []
+
+    class Hopper(SampledHopperLevel):
+        samples_per_cycle = 1
+
+        def _read_distance_mm(self):
+            clock.jump_wall(wall_jump)
+            clock.advance(elapsed)
+            return 100
+
+        def _restart_sensor(self):
+            restarts.append(clock.monotonic())
+
+    monkeypatch.setattr(sampled_base, "time", types.SimpleNamespace(monotonic=clock.monotonic, time=clock.wall_time))
+    hopper = Hopper()
+    hopper._take_sample()
+    assert hopper.get_level() == 66
+    assert len(restarts) == expected_restarts
+    assert hopper.sensor_healthy
+
+
+@pytest.mark.parametrize("wall_jump", [-3600, 3600])
+def test_periodic_sample_cadence_ignores_wall_jump(monkeypatch, wall_jump):
+    clock = ManualClock(wall_start=1_800_000_000)
+    reads = []
+
+    class Hopper(SampledHopperLevel):
+        samples_per_cycle = 1
+
+        def _read_distance_mm(self):
+            reads.append(clock.monotonic())
+            return 100
+
+        def _restart_sensor(self):
+            pytest.fail("wall-only movement must not reinitialize the sensor")
+
+    def sleep(seconds):
+        if len(reads) == 2:
+            hopper.sensor_thread_active = False
+            return
+        assert reads == [0]
+        clock.jump_wall(wall_jump)
+        clock.advance(seconds)
+        assert clock.monotonic() <= 3
+
+    monkeypatch.setattr(
+        sampled_base, "time", types.SimpleNamespace(monotonic=clock.monotonic, time=clock.wall_time, sleep=sleep)
+    )
+    hopper = Hopper()
+    hopper.sensor_thread_active = True
+    hopper.sensor_thread_read_interval = 2
+    hopper.sample_requested = True
+    hopper._sensing_loop()
+    assert reads == [0, 3]  # strict periodic interval comparison, no early catch-up

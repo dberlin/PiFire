@@ -14,6 +14,7 @@ control carries no armed target, so the writer emits no extra delta.
 
 from common.common import notify_target_conversion_ops
 from common.control_delta import apply_control_delta, control_delta
+from tests.fakes.clock import clock_stamp
 
 
 def _probe_notify(target_probe=0, target_high=0, target_low=0):
@@ -60,7 +61,9 @@ def test_all_zero_control_yields_no_ops():
 
 def test_ops_apply_cleanly_and_touch_only_the_target():
     control = {"notify_data": _probe_notify(203, 250, 150)}
-    apply_control_delta(control, control_delta(ops=notify_target_conversion_ops(control["notify_data"], "C")))
+    apply_control_delta(
+        control, control_delta(ops=notify_target_conversion_ops(control["notify_data"], "C")), timer_now=clock_stamp()
+    )
     by_type = {e["type"]: e for e in control["notify_data"]}
     assert by_type["probe"]["target"] == 95
     assert by_type["probe_limit_high"]["target"] == 121

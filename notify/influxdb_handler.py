@@ -1,17 +1,14 @@
 import threading
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 
 class InfluxNotificationHandler:
-    def __init__(self, settings) -> None:
+    def __init__(self, settings, *, monotonic: Callable[[], float] = time.monotonic) -> None:
         self.queue = []
-        # Seeded to 0 (not time.time()) so the very first notify() call after
-        # construction -- the caller constructs the handler then calls
-        # notify() in the same statement sequence
-        # (notify/notifications.py:_send_influxdb_notification) -- is not
-        # immediately swallowed by the 1s debounce in notify().
-        self.last_updated = 0
+        self._monotonic = monotonic
+        self.last_updated: float | None = None
 
         t1 = threading.Thread(
             target=self.publishing_thread,
@@ -67,7 +64,7 @@ class InfluxNotificationHandler:
                 time.sleep(10)
 
     def notify(self, notifyevent, control, settings, pelletdb, in_data, grill_platform):
-        if time.time() - self.last_updated < 1:
+        if self.last_updated is not None and self._monotonic() - self.last_updated < 1:
             return
 
         from influxdb_client import Point
@@ -122,4 +119,4 @@ class InfluxNotificationHandler:
 
         self.queue.append(p)
 
-        self.last_updated = time.time()
+        self.last_updated = self._monotonic()

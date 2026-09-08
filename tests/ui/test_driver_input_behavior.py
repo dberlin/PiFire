@@ -157,9 +157,9 @@ def test_group_a_enter_received_cancels_a_pending_up(group_a_driver):
     _inc_callback does NOT set input_event/input_counter
     (the `if not self.enter_received:` guard suppresses it) -- and the
     callback consumes/clears enter_received on its way out, because the
-    `time.time() - self.last_movement_time < 0.3` branch reads as
+    `self._monotonic() - self.last_movement_time < 0.3` branch reads as
     near-always-true immediately after `self.last_movement_time` is just
-    set to `current_time` a few lines above (near-zero elapsed wall time).
+    set to `current_time` a few lines above (near-zero elapsed time).
     This is characterized verbatim, not "fixed": the < 0.3 check does not
     meaningfully gate anything at this call site."""
     d = group_a_driver
@@ -209,6 +209,22 @@ def test_group_a_direction_reversal_within_debounce_window_is_a_no_op(group_a_dr
     assert d.input_event == "UP"  # unchanged -- dec_callback's body never ran
     assert d.input_counter == 1  # unchanged
     assert d.last_direction == "UP"  # unchanged
+
+
+@pytest.mark.parametrize("wall_jump", [-3600, 3600])
+def test_encoder_reversal_uses_elapsed_time(group_a_driver, monkeypatch, wall_jump):
+    d = group_a_driver
+    clock = {"steady": 100.0, "wall": 1_800_000_000.0}
+    d._monotonic = lambda: clock["steady"]
+    monkeypatch.setattr("time.time", lambda: clock["wall"])
+    d._inc_callback(0)
+    clock["wall"] += wall_jump
+    clock["steady"] = 100.5
+    d._dec_callback(0)
+    assert d.input_event == "UP"
+    clock["steady"] = 100.501
+    d._dec_callback(0)
+    assert d.input_event == "DOWN"
 
 
 def test_group_a_event_detect_invokes_menu_display_and_resets_counter(group_a_driver):

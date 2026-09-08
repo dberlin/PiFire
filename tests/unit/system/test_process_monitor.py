@@ -2,6 +2,10 @@ import os
 import subprocess
 import sys
 
+import pytest
+
+from common.modes import Mode
+from controller.runtime.clock import ManualClock
 from common.process_mon import Process_Monitor
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -17,10 +21,6 @@ def test_stop_monitor_terminates_the_thread():
     thread.join(timeout=3)
     assert not thread.is_alive()
     assert mon.status() == "killed"
-
-
-def test_kill_monitor_removed():
-    assert not hasattr(Process_Monitor, "kill_monitor")
 
 
 def test_an_unstopped_monitor_does_not_keep_the_process_alive(tmp_path):
@@ -61,3 +61,42 @@ def test_an_unstopped_monitor_does_not_keep_the_process_alive(tmp_path):
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("wall_jump", [-3600, 3600])
+def test_watchdog_timeout_uses_thirty_elapsed_seconds(monkeypatch, wall_jump):
+    import common.process_mon as module
+
+    clock = ManualClock(wall_start=1_800_000_000, monotonic_start=100)
+    snapshots = []
+    recoveries = []
+    notifications = []
+    monkeypatch.setattr(module.threading.Thread, "start", lambda self: None)
+    monkeypatch.setattr(module, "is_real_hardware", lambda: True)
+    monkeypatch.setattr(module, "read_control", lambda: {})
+    monkeypatch.setattr(module, "write_control_snapshot", lambda control, **kwargs: snapshots.append(control))
+    monkeypatch.setattr(module, "send_notifications", notifications.append)
+    monkeypatch.setattr(module.time, "time", clock.wall_time)
+    monitor = Process_Monitor("test", lambda: recoveries.append("recovered"), timeout=30, monotonic=clock.monotonic)
+    monitor.heartbeat()
+    monitor.start_monitor()
+    clock.jump_wall(wall_jump)
+    clock.advance(29.9)
+    advances = iter((0.1, 0.1))
+
+    def next_check(seconds):
+        if recoveries:
+            monitor.stop_monitor()
+            return
+        assert snapshots == []
+        assert notifications == []
+        clock.advance(next(advances))
+
+    monkeypatch.setattr(module.time, "sleep", next_check)
+    try:
+        monitor._heartbeat_check()
+    finally:
+        monitor.stop_monitor()
+    assert snapshots == [{"updated": True, "mode": Mode.ERROR, "critical_error": True}]
+    assert recoveries == ["recovered"]
+    assert notifications == ["Control_Process_Stopped"]

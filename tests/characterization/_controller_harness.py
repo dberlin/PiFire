@@ -58,6 +58,7 @@ def make_controller(settings, control_data, pellet_db, *, grill=None, dist=None,
         boot_id="00000000-0000-0000-0000-000000000001",
         boottime=lambda: ctx.clock.monotonic(),
     )
+    ctx.last_clock_stamp = ctx.clock_domain.capture()
     c = Controller(ctx)
     return c, ctx, store, grill, dist, notifier
 

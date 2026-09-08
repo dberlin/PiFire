@@ -3,8 +3,7 @@ that are not its own.
 
 `get_system_command_output(requested=...)` popped entries off `queue_systemo`
 one at a time and **threw away** every entry whose command did not match
-`requested`. The queue has many concurrent consumers -- ``dash_page`` and
-``socket_io._check_control_status`` poll for ``check_alive``,
+`requested`. The queue has many concurrent consumers -- system-command routes,
 ``get_supported_cmds`` for ``supported_commands``, ``common/system.py``'s
 system-info gather for ``check_wifi_quality`` / ``check_throttled`` /
 ``check_cpu_temp`` / ``network_info`` / ``hardware_info``, and the wizard for
@@ -21,6 +20,7 @@ import pytest
 
 from common.app import get_system_command_output
 from common.sqlite_queue import SqliteQueue
+from controller.runtime.clock import ManualClock
 
 
 def _out(command, result="OK"):
@@ -83,8 +83,26 @@ def test_missing_entry_still_returns_the_error_envelope(systemo):
     }
 
 
-def test_common_and_app_share_one_implementation():
-    """Two byte-identical copies used to drift apart unnoticed."""
-    from common import app, common
+@pytest.mark.parametrize("wall_jump", [-3600, 3600])
+def test_output_queue_timeout_ignores_wall_steps(systemo, monkeypatch, wall_jump):
+    from common import common
 
-    assert app.get_system_command_output is common.get_system_command_output
+    clock = ManualClock(wall_start=1_800_000_000)
+    systemo.push(_out("supported_commands"))
+    monkeypatch.setattr(common.time, "time", clock.wall_time)
+    sleeps = []
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        clock.jump_wall(wall_jump)
+        clock.advance(seconds)
+        assert clock.monotonic() < 1, "queue wait exceeded its steady budget"
+
+    monkeypatch.setattr(common.time, "sleep", sleep)
+    missed = get_system_command_output("missing", timeout=0.1, monotonic=clock.monotonic)
+    assert missed["result"] == "ERROR"
+    assert clock.monotonic() == pytest.approx(0.1)
+    assert sleeps == [0.025] * 4
+    assert systemo.list() == [_out("supported_commands")]
+    assert get_system_command_output("supported_commands", monotonic=clock.monotonic) == _out("supported_commands")
+    assert clock.monotonic() == pytest.approx(0.1)

@@ -48,11 +48,22 @@ export const FIXTURE_DASH = {
   // matters to consumers is that it changes between frames, not its value.
   uiHash: 0,
   timer: {
-    start: 0,
-    paused: 0,
-    end: 0,
+    timerId: null,
+    state: "stopped",
+    remainingS: 0,
+    current: false,
+    startedWallS: null,
+    projectedEndWallS: null,
     keepWarm: false,
     shutdown: false,
+  },
+  durations: {
+    modeElapsedS: null,
+    modeRemainingS: null,
+    lidRemainingS: null,
+    cookElapsedS: null,
+    current: false,
+    running: false,
   },
   outputs: {
     fan: false,

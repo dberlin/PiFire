@@ -1,6 +1,7 @@
 import { createCommand } from "@pifire/core/command";
 import { FIXTURE_DASH } from "@pifire/core/fixture";
 import { createLiveConnection, monotonicNowMs } from "@pifire/core/liveConnection";
+import type * as ConnectionModule from "@pifire/core/liveConnection";
 import { act, renderHook } from "@testing-library/react-native";
 import { AppState, type AppStateStatus } from "react-native";
 
@@ -8,6 +9,7 @@ import { qualifyRetainedHealth, receiptFreshness, useLive, type LiveResult } fro
 import { wireHealth } from "./healthFixture";
 
 jest.mock("@pifire/core/liveConnection", () => ({
+  ...jest.requireActual<typeof ConnectionModule>("@pifire/core/liveConnection"),
   createLiveConnection: jest.fn(() => ({ reconnect: jest.fn(), close: jest.fn() })),
   monotonicNowMs: jest.fn(() => 100_000),
 }));
@@ -115,4 +117,22 @@ it("keeps a reset receipt invalid after the clock catches up until another paylo
   } finally {
     jest.useRealTimers();
   }
+});
+
+it("projects timers and durations through the shared receipt, including when health is absent", () => {
+  const result = liveResult();
+  result.live = {
+    ...FIXTURE_DASH,
+    timer: { ...FIXTURE_DASH.timer, state: "running", remainingS: 600, current: true },
+    durations: { ...FIXTURE_DASH.durations, cookElapsedS: 3723, modeRemainingS: 180, current: true, running: true },
+  };
+  const fresh = qualifyRetainedHealth(result, 105_000).live;
+  expect(fresh.timer.remainingS).toBe(595);
+  expect(fresh.durations.cookElapsedS).toBe(3728);
+  expect(fresh.durations.modeRemainingS).toBe(175);
+  const stale = qualifyRetainedHealth(result, 131_000).live;
+  expect(stale.timer.current).toBe(false);
+  expect(stale.timer.remainingS).toBe(600);
+  expect(stale.durations.cookElapsedS).toBe(3723);
+  expect(qualifyRetainedHealth({ ...result, lastPayloadMonotonicMs: null }, 105_000).live.durations.current).toBe(false);
 });

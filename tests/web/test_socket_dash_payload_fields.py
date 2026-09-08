@@ -63,6 +63,22 @@ def test_dash_payload_matches_the_strict_wire_contract(ds):
     assert validated.model_dump(mode="json", by_alias=True, exclude_none=False) == payload
 
 
+@pytest.mark.parametrize("age,current", [(5.0, True), (16.0, False)])
+def test_dash_duration_snapshot_keeps_its_own_age_despite_fresh_heartbeat(ds, age, current):
+    payload = _dash_data(
+        elapsed_seconds=10.0,
+        remaining_seconds=20.0,
+        lid_open_remaining_seconds=4.0,
+        cook_elapsed_seconds=80.0,
+        running=True,
+        clock_stamp=clock_stamp(monotonic_s=100.0 - age).as_dict(),
+    )
+    durations = payload["durations"]
+    assert durations["current"] is current
+    assert durations["cookElapsedS"] == (85.0 if current else 80.0)
+    assert durations["modeRemainingS"] == (15.0 if current else 20.0)
+
+
 def test_dash_payload_rejects_non_finite_numbers(ds):
     payload = _dash_data()
     payload["safetyMaxTemp"] = float("inf")

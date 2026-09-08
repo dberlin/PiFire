@@ -1,5 +1,7 @@
 import pytest
 
+from tests.fakes.clock import clock_stamp
+
 from common.defaults import default_notify, default_probe_config
 from common.modes import Mode
 from common.persistence.control import (
@@ -118,7 +120,7 @@ def test_apply_writes_live_settings_and_flags_the_controller(ds, client):
     # named-flag delta (common/app.py:419) rather than overwriting
     # control:general, so the queue has to be drained before it is visible -- in
     # production that drain is the control loop's own execute_control_writes.
-    execute_control_writes()
+    execute_control_writes(timer_now=clock_stamp())
     assert read_control()["probe_map_update"] is True
 
 
@@ -301,7 +303,7 @@ def test_rename_leaves_no_stale_notify_entry(ds, client):
 
     assert client.post("/api/probe_map", json={"probe_map": _renamed_map()}).status_code == 200
 
-    execute_control_writes()
+    execute_control_writes(timer_now=clock_stamp())
     probe_labels = {e["label"] for e in read_control()["notify_data"] if e["type"].startswith("probe")}
     # Probe1 is gone, so nothing may still be notifying on it -- and Brisket,
     # which is what the user now sees, must be notifiable at all.
@@ -315,7 +317,7 @@ def test_rename_keeps_the_untouched_probes_notification(ds, client):
 
     client.post("/api/probe_map", json={"probe_map": _renamed_map()})
 
-    execute_control_writes()
+    execute_control_writes(timer_now=clock_stamp())
     grill = next(e for e in read_control()["notify_data"] if e["label"] == "Grill" and e["type"] == "probe")
     assert grill["req"] is True
     assert grill["target"] == 225
@@ -352,7 +354,7 @@ def test_removing_a_probe_takes_its_notify_entries_with_it(ds, client):
         json={"probe_map": _map([_virtual_device()], [_probe("Grill", "VirtDev", "VIRT0")])},
     )
 
-    execute_control_writes()
+    execute_control_writes(timer_now=clock_stamp())
     notify_data = read_control()["notify_data"]
     assert {e["label"] for e in notify_data if e["type"].startswith("probe")} == {"Grill"}
     # The non-probe entries default_notify() always appends are not probes and

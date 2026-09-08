@@ -64,6 +64,8 @@ import threading
 
 import pytest
 
+from tests.fakes.clock import clock_stamp
+
 _PLAYWRIGHT_UNAVAILABLE_REASON = None
 try:
     from playwright.sync_api import sync_playwright
@@ -247,7 +249,7 @@ def drain_control_writes():
     POST that queues intent and before reading back the resulting live state."""
     from common.persistence.control import execute_control_writes
 
-    execute_control_writes()
+    execute_control_writes(timer_now=clock_stamp())
 
 
 # --- Precondition seeding helpers ---------------------------------------

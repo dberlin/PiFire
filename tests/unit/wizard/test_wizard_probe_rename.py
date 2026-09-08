@@ -22,6 +22,7 @@ tests/unit/wizard/test_wizard_run_no_probes.py uses.
 import logging
 
 import pytest
+from tests.fakes.clock import clock_stamp
 
 import wizard
 from common import defaults
@@ -90,7 +91,7 @@ def test_installer_rename_leaves_no_stale_notify_entry(ds, no_install):
 
     _run_with_renamed_probe(settings)
 
-    control_persistence.execute_control_writes()
+    control_persistence.execute_control_writes(timer_now=clock_stamp())
     notify_data = control_persistence.read_control()["notify_data"]
     probe_labels = {e["label"] for e in notify_data if e["type"].startswith("probe")}
     assert probe_labels == {"Grill", "Brisket"}

@@ -139,6 +139,7 @@ def make_ctx(settings, control_data, pellet_db, probes, grill=None, runner=None,
         boot_id="00000000-0000-0000-0000-000000000001",
         boottime=lambda: ctx.clock.monotonic(),
     )
+    ctx.last_clock_stamp = ctx.clock_domain.capture()
     return ctx, grill, notifier
 
 

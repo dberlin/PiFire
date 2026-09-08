@@ -1,6 +1,7 @@
 import pytest
 
 import distance.sen0628 as sen_mod
+from controller.runtime.clock import ManualClock
 
 
 class _FakeSerial:
@@ -68,6 +69,7 @@ def test_open_sensor_sends_setmode_and_succeeds_on_first_ack(monkeypatch):
     monkeypatch.setattr(sen_mod.time, "sleep", lambda seconds: None)
     ser = _FakeSerial(rx_bytes=_success_packet(sen_mod.CMD_SETMODE))
     hopper = sen_mod.HopperLevel.__new__(sen_mod.HopperLevel)
+    hopper._monotonic = sen_mod.time.monotonic
     hopper._open_sensor(ser)
     assert hopper.ser is ser
     assert ser.written == sen_mod._SYNC_BYTE + sen_mod._build_packet(sen_mod.CMD_SETMODE, args=[0, 0, 0, 8])
@@ -77,6 +79,7 @@ def test_open_sensor_raises_after_repeated_failure(monkeypatch):
     monkeypatch.setattr(sen_mod.time, "sleep", lambda seconds: None)
     ser = _FakeSerial(rx_bytes=b"")  # never responds
     hopper = sen_mod.HopperLevel.__new__(sen_mod.HopperLevel)
+    hopper._monotonic = sen_mod.time.monotonic
     hopper._setmode_recv_timeout = 0.02  # keep the 3 retries fast in this test
     with pytest.raises(RuntimeError):
         hopper._open_sensor(ser)
@@ -105,6 +108,7 @@ def test_read_distance_mm_returns_zero_when_all_invalid(monkeypatch):
 def test_get_fixed_point_mm_sends_request_and_parses_response():
     ser = _FakeSerial(rx_bytes=_success_packet(sen_mod.CMD_FIXED_POINT, data=bytes([0x2C, 0x01])))  # 300mm
     hopper = sen_mod.HopperLevel.__new__(sen_mod.HopperLevel)
+    hopper._monotonic = sen_mod.time.monotonic
     hopper.ser = ser
     assert hopper._get_fixed_point_mm(3, 3) == 300
     assert ser.written == sen_mod._SYNC_BYTE + sen_mod._build_packet(sen_mod.CMD_FIXED_POINT, args=[3, 3])
@@ -113,6 +117,26 @@ def test_get_fixed_point_mm_sends_request_and_parses_response():
 def test_get_fixed_point_mm_returns_zero_on_no_response():
     ser = _FakeSerial(rx_bytes=b"")
     hopper = sen_mod.HopperLevel.__new__(sen_mod.HopperLevel)
+    hopper._monotonic = sen_mod.time.monotonic
     hopper.ser = ser
     hopper._read_recv_timeout = 0.02
     assert hopper._get_fixed_point_mm(3, 3) == 0
+
+
+@pytest.mark.parametrize("wall_jump", [-3600, 3600])
+@pytest.mark.parametrize("budget", [0.5, 2.0])
+def test_sen0628_silent_response_budget_survives_clock_step(monkeypatch, wall_jump, budget):
+    clock = ManualClock(wall_start=1_800_000_000)
+    monkeypatch.setattr(sen_mod.time, "time", clock.wall_time)
+
+    class SilentSerial:
+        def read(self, length):
+            clock.jump_wall(wall_jump)
+            clock.advance(0.2)  # existing bounded pyserial read timeout
+            assert clock.monotonic() <= budget + 0.4, "response wait exceeded its budget"
+            return b""
+
+    assert (
+        sen_mod._recv_packet(SilentSerial(), sen_mod.CMD_FIXED_POINT, timeout=budget, monotonic=clock.monotonic) is None
+    )
+    assert budget <= clock.monotonic() < budget + 0.2 + 1e-9

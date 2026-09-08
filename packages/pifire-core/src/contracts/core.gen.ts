@@ -19,6 +19,12 @@ type Criticalerror = boolean;
 type Currentmode = string;
 type Cycleratio = number;
 type Displaymode = string;
+type Cookelapseds = number | null;
+type Current = boolean;
+type Lidremainings = number | null;
+type Modeelapseds = number | null;
+type Moderemainings = number | null;
+type Running = boolean;
 type Errors = string[];
 type Fanduty = number;
 type Device = string | null;
@@ -89,7 +95,7 @@ type Policy = "off" | "observe" | "enforce";
 type Source = "hardware" | "software" | "mixed";
 type Device1 = string;
 type Displayname = string;
-type Current = boolean;
+type Current1 = boolean;
 type Lastreportedages = number | null;
 type Reason = "current" | "stale" | "unknown-clock" | "retained";
 type Label1 = string;
@@ -107,11 +113,14 @@ type State = "unmonitored" | "healthy" | "suspected" | "confirmed";
 type Temperaturevalid = boolean;
 type Role = "Primary" | "Food" | "Aux";
 type Thermocouplehealth = ThermocoupleHealthView[];
-type End = number;
+type Current2 = boolean;
 type Keepwarm = boolean;
-type Paused1 = number;
+type Projectedendwalls = number | null;
+type Remainings = number | null;
 type Shutdown = boolean;
-type Start = number;
+type Startedwalls = number | null;
+type State1 = "stopped" | "running" | "paused" | "interrupted" | "expired";
+type Timerid = string | null;
 type Uihash = number;
 type Uuid = string;
 type Warnings = string[];
@@ -180,6 +189,7 @@ export interface DashSocketPayload {
   currentMode: Currentmode;
   cycleRatio: Cycleratio;
   displayMode: Displaymode;
+  durations: DurationStatusPayload;
   errors: Errors;
   fanDuty: Fanduty;
   foodProbes: Foodprobes;
@@ -218,6 +228,18 @@ export interface DashSocketPayload {
   uuid: Uuid;
   warnings: Warnings;
   warningsMaxId: Warningsmaxid;
+}
+/**
+ * This interface was referenced by `PiFireCoreWebContracts`'s JSON-Schema
+ * via the `definition` "DurationStatusPayload".
+ */
+export interface DurationStatusPayload {
+  cookElapsedS: Cookelapseds;
+  current: Current;
+  lidRemainingS: Lidremainings;
+  modeElapsedS: Modeelapseds;
+  modeRemainingS: Moderemainings;
+  running: Running;
 }
 /**
  * This interface was referenced by `PiFireCoreWebContracts`'s JSON-Schema
@@ -311,7 +333,7 @@ export interface ThermocoupleHealthDetectorView {
  * via the `definition` "ThermocoupleHealthFreshnessView".
  */
 export interface ThermocoupleHealthFreshnessView {
-  current: Current;
+  current: Current1;
   lastReportedAgeS: Lastreportedages;
   reason: Reason;
 }
@@ -334,11 +356,14 @@ interface Detail {
  * via the `definition` "TimerPayload".
  */
 export interface TimerPayload {
-  end: End;
+  current: Current2;
   keepWarm: Keepwarm;
-  paused: Paused1;
+  projectedEndWallS: Projectedendwalls;
+  remainingS: Remainings;
   shutdown: Shutdown;
-  start: Start;
+  startedWallS: Startedwalls;
+  state: State1;
+  timerId: Timerid;
 }
 /**
  * This interface was referenced by `PiFireCoreWebContracts`'s JSON-Schema

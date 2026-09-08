@@ -26,7 +26,6 @@ PiFire Display Interface Library
  Imported Libraries
 """
 import threading
-import time
 
 from pyky040 import pyky040
 
@@ -89,26 +88,26 @@ class EncoderInputMixin:
         self.enter_received = True
 
     def _inc_callback(self, v):
-        current_time = time.time()
+        current_time = self._monotonic()
         if self.last_direction is None or self.last_direction == "UP" or current_time - self.last_movement_time > 0.5:
             if not self.enter_received:
                 self.input_event = "UP"
                 self.input_counter += 1
             self.last_direction = "UP"
             self.last_movement_time = current_time
-            if time.time() - self.last_movement_time < 0.3 and self.enter_received:
+            if self._monotonic() - self.last_movement_time < 0.3 and self.enter_received:
                 self.enter_received = False
                 return  # if enter command is received during this time, execute the enter command and not the up
 
     def _dec_callback(self, v):
-        current_time = time.time()
+        current_time = self._monotonic()
         if self.last_direction is None or self.last_direction == "DOWN" or current_time - self.last_movement_time > 0.5:
             if not self.enter_received:
                 self.input_event = "DOWN"
                 self.input_counter += 1
             self.last_direction = "DOWN"
             self.last_movement_time = current_time
-            if time.time() - self.last_movement_time < 0.3 and self.enter_received:
+            if self._monotonic() - self.last_movement_time < 0.3 and self.enter_received:
                 self.enter_received = False
                 return  # if enter command is received during this time, execute the enter command and not the down
 
@@ -137,7 +136,7 @@ class EncoderInputMixin:
                 self.display_data = None
                 self.input_event = None
                 self.menu_active = True
-                self.menu_time = time.time()
+                self.menu_time = self._monotonic()
                 if self._reset_data_on_event:
                     self.monitor_display = False
                 self._menu_display(command)
@@ -215,6 +214,6 @@ class SimpleEncoderInputMixin:
                 self.display_data = None
                 self.input_event = None
                 self.menu_active = True
-                self.menu_time = time.time()
+                self.menu_time = self._monotonic()
                 self._menu_display(command)
                 self.input_counter = 0

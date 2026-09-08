@@ -121,7 +121,14 @@ class StartupMode(ControlMode):
 
     def on_publish(self, now):
         pid_data = {"cycle_ratio": round(self.state.cycle.ratio, 2)}
-        self.ctx.notifications.check(self.settings, self.control, pid_data=pid_data)
+        self.ctx.notifications.check(
+            self.settings,
+            self.control,
+            pid_data=pid_data,
+            now=self.ctx.admitted_stamp(),
+            hopper_cooldowns=self.ctx.hopper_cooldowns,
+            persist=self.ctx.store.write_control_snapshot,
+        )
 
     def check_safety(self, now, ptemp):
         self.control["safety"]["afterstarttemp"] = ptemp

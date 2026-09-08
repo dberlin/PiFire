@@ -19,11 +19,14 @@ import copy
 import logging
 import math
 from collections.abc import Mapping
+from uuid import UUID
 
+from common.clock_domain import ClockStamp
 from common.modes import Mode
+from common.timer import default_timer, parse_timer, pause_timer, resume_timer, start_timer
 
 CONTROL_DELTA_KEY = "__control_delta__"
-CONTROL_DELTA_VERSION = 1
+CONTROL_DELTA_VERSION = 2
 
 #: Top-level members an envelope may carry. A strict whitelist, not a minimum:
 #: a key we do not recognise means the writer and this reader disagree about
@@ -31,8 +34,8 @@ CONTROL_DELTA_VERSION = 1
 _ALLOWED_MEMBERS = frozenset({CONTROL_DELTA_KEY, "origin", "set", "delete", "ops"})
 
 #: Members that may never appear in `set`. `timer` is a coupled value object
-#: (start/paused/end are one countdown and the code branches on their
-#: COMBINATIONS) and `notify_data` is an array whose elements need addressing;
+#: (state/checkpoint/remaining are one countdown) and `notify_data` is an array
+#: whose elements need addressing;
 #: both are expressible only as ops, which is what lets the drain stop guessing.
 _SET_FORBIDDEN = frozenset({"timer", "notify_data", "cook_id"})
 
@@ -40,10 +43,10 @@ _CALIBRATION_ACTIONS = frozenset(("start", "pause", "resume", "stop", "reset-pro
 _AMBIENT_SOURCES = frozenset(("measured", "manual", "weather", "configured"))
 
 _OP_FIELDS = {
-    "timer.clear": (),
-    "timer.pause": ("at",),
-    "timer.start_or_resume": ("at", "seconds"),
-    "timer.start_with_options": ("at", "seconds", "shutdown", "keep_warm"),
+    "timer.clear": ("requested_wall_s", "target_runtime_id"),
+    "timer.pause": ("requested_wall_s", "target_runtime_id"),
+    "timer.start_or_resume": ("requested_wall_s", "target_runtime_id", "seconds"),
+    "timer.start_with_options": ("requested_wall_s", "target_runtime_id", "seconds", "shutdown", "keep_warm"),
     "notify.set": ("label", "type", "fields"),
     "notify.delete": ("label", "type"),
     "notify.replace": ("entries",),
@@ -121,7 +124,7 @@ def is_control_delta(payload):
 
 
 def validate_control_delta(envelope):
-    """Raise ControlDeltaError unless `envelope` is a well-formed version-1 delta."""
+    """Raise ControlDeltaError unless `envelope` is a well-formed current delta."""
     if not isinstance(envelope, Mapping):
         raise ControlDeltaError(f"delta must be a mapping, got {type(envelope).__name__}")
     unknown = sorted(set(envelope) - _ALLOWED_MEMBERS)
@@ -184,6 +187,26 @@ def _validate_ops(ops):
 def _validate_op_types(ops):
     for op in ops:
         name = op["op"]
+        if name.startswith("timer."):
+            requested = op["requested_wall_s"]
+            if isinstance(requested, bool) or not isinstance(requested, (int, float)) or not math.isfinite(requested):
+                raise ControlDeltaError("Timer request wall provenance must be finite")
+            try:
+                UUID(op["target_runtime_id"])
+            except (ValueError, TypeError, AttributeError) as error:
+                raise ControlDeltaError("Timer command requires a target runtime identity") from error
+            seconds = op.get("seconds")
+            if seconds is not None and (
+                isinstance(seconds, bool)
+                or not isinstance(seconds, (int, float))
+                or not math.isfinite(seconds)
+                or seconds < 0
+            ):
+                raise ControlDeltaError("Timer duration must be finite and nonnegative")
+            if name == "timer.start_with_options" and (
+                not isinstance(op["shutdown"], bool) or not isinstance(op["keep_warm"], bool)
+            ):
+                raise ControlDeltaError("Timer options must be booleans")
         if name == "notify.set" and not isinstance(op["fields"], Mapping):
             raise ControlDeltaError("notify.set 'fields' must be a mapping")
         if name == "notify.replace" and not isinstance(op["entries"], list):
@@ -247,7 +270,7 @@ def notify_ops_from_post(payload):
     return members, (ops or None)
 
 
-def apply_control_delta(control, envelope, log=None):
+def apply_control_delta(control, envelope, log=None, *, timer_now: ClockStamp):
     """Apply a delta envelope to `control` IN PLACE and return it.
 
     Order is `set` -> `ops` -> `delete`. `set` and `ops` have disjoint domains by
@@ -271,11 +294,15 @@ def apply_control_delta(control, envelope, log=None):
             envelope.get("origin"),
         )
         return control
+    validate_control_delta(envelope)
+    for op in envelope.get("ops", ()):
+        if op["op"].startswith("timer.") and op["target_runtime_id"] != timer_now.runtime_id:
+            raise ControlDeltaError("Timer command targets a retired control generation")
 
     if "set" in envelope:
         _deep_assign(control, copy.deepcopy(envelope["set"]))
     for op in envelope.get("ops", ()):
-        _apply_op(control, op, log)
+        _apply_op(control, op, log, timer_now)
     for path in envelope.get("delete", ()):
         _delete_path(control, path)
     return control
@@ -341,9 +368,12 @@ def _delete_path(target, path):
         node.pop(path[-1], None)
 
 
-def _apply_op(control, op, log):
+def _apply_op(control, op, log, timer_now):
     log.debug("apply_control_delta: applying %s", op["op"])
-    _OP_APPLIERS[op["op"]](control, op, log)
+    if op["op"].startswith("timer."):
+        _OP_APPLIERS[op["op"]](control, op, log, timer_now)
+    else:
+        _OP_APPLIERS[op["op"]](control, op, log)
 
 
 def _notify_index(control, label, type_):
@@ -382,10 +412,8 @@ def _timer_notify_index(control):
     return None
 
 
-def _op_timer_clear(control, op, log):
-    control["timer"]["start"] = 0
-    control["timer"]["end"] = 0
-    control["timer"]["paused"] = 0
+def _op_timer_clear(control, op, log, now):
+    control["timer"] = default_timer()
     index = _timer_notify_index(control)
     if index is not None:
         entry = control["notify_data"][index]
@@ -394,47 +422,38 @@ def _op_timer_clear(control, op, log):
         entry["keep_warm"] = False
 
 
-def _op_timer_pause(control, op, log):
-    if control["timer"]["start"] == 0:
-        # _cmd_set_timer's own start == 0 branch is a full clear, not a pause.
-        _op_timer_clear(control, op, log)
-        return
+def _op_timer_pause(control, op, log, now):
+    timer = pause_timer(parse_timer(control["timer"]), now)
+    control["timer"] = timer
     index = _timer_notify_index(control)
     if index is not None:
         control["notify_data"][index]["req"] = False
-    control["timer"]["paused"] = op["at"]
 
 
-def _op_timer_start_or_resume(control, op, log):
+def _op_timer_start_or_resume(control, op, log, now):
+    timer = parse_timer(control["timer"])
+    if timer["state"] in ("paused", "interrupted"):
+        timer = resume_timer(timer, now)
+    else:
+        timer = start_timer(op["seconds"] if op["seconds"] is not None else 60, now)
+    control["timer"] = timer
     index = _timer_notify_index(control)
     if index is not None:
-        # Set BEFORE the branch, matching common/api_commands.py:665.
         control["notify_data"][index]["req"] = True
-    if control["timer"]["paused"] == 0:
-        seconds = op["seconds"] if op["seconds"] is not None else 60
-        control["timer"]["start"] = op["at"]
-        control["timer"]["end"] = op["at"] + seconds
-    else:
-        control["timer"]["end"] = (control["timer"]["end"] - control["timer"]["paused"]) + op["at"]
-        control["timer"]["paused"] = 0
 
 
-def _op_timer_start_with_options(control, op, log):
-    if control["timer"]["paused"] != 0:
-        log.error(
-            "apply_control_delta: dropping timer.start_with_options -- the timer is paused at drain time. "
-            "The 4-argument REST form rejects a paused timer at request time, so another writer paused it "
-            "inside this control cycle. Resume or stop it first."
-        )
-        return
+def _op_timer_start_with_options(control, op, log, now):
+    timer = parse_timer(control["timer"])
+    if timer["state"] == "paused" or (timer["state"] == "interrupted" and timer["remaining_s"] is not None):
+        raise ControlDeltaError("Resume or stop the paused timer before starting with options")
+    timer = start_timer(op["seconds"], now)
+    control["timer"] = timer
     index = _timer_notify_index(control)
     if index is not None:
         entry = control["notify_data"][index]
         entry["req"] = True
         entry["shutdown"] = op["shutdown"]
         entry["keep_warm"] = op["keep_warm"]
-    control["timer"]["start"] = op["at"]
-    control["timer"]["end"] = op["at"] + op["seconds"]
 
 
 #: op name -> applier. Every name here must also appear in _OP_FIELDS, which is

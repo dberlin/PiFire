@@ -370,3 +370,67 @@ def test_shutdown_that_completes_still_powers_off(monkeypatch):
 
     assert store.read_control()["mode"] == "Stop"
     assert [call[0] for call in sent if call[0] == "shutdown_system"] == ["shutdown_system"]
+
+
+def test_recipe_retired_clock_routes_error_without_a_new_drain(monkeypatch):
+    c, store = build_controller(monkeypatch, mode="Recipe")
+    _install_recipe(monkeypatch, c, store, [_step()])
+
+    def retire_generation(_mode):
+        control = store.read_control()
+        control["mode"] = "Error"
+        control["updated"] = True
+        store.write_control_snapshot(control)
+        c.ctx.last_clock_stamp = None
+
+    c.work_cycle = retire_generation
+    c.recipe_mode()
+    assert store.read_control()["mode"] == "Error"
+    assert store.read_control()["recipe"]["filename"] == ""
+
+
+def test_recipe_expiry_during_reignite_retains_completion_on_retry(monkeypatch):
+    import notify.notifications as notifications
+    from common.timer import start_timer
+    from tests.fakes.clock import clock_stamp
+
+    c, store = build_controller(monkeypatch, mode="Recipe")
+    step = _step()
+    step["timer"] = 1
+    _install_recipe(monkeypatch, c, store, [step])
+    calls = []
+    events = []
+    monkeypatch.setattr(notifications, "send_notifications", events.append)
+    c.ctx.last_clock_stamp = clock_stamp()
+
+    def work_cycle(mode):
+        calls.append(mode)
+        control = store.read_control()
+        if len(calls) == 1:
+            control["timer"] = start_timer(10, clock_stamp())
+            for item in control["notify_data"]:
+                if item["type"] == "timer":
+                    item["req"] = True
+            control["mode"] = "Reignite"
+            control["updated"] = True
+            store.write_control_snapshot(control)
+        elif mode == "Reignite":
+            c.ctx.last_clock_stamp = clock_stamp(monotonic_s=110)
+            notifications.check_notify(
+                c.settings,
+                control,
+                pelletdb=base_pellet_db(),
+                grill_platform=c.grill_platform,
+                now=c.ctx.admitted_stamp(),
+                hopper_cooldowns=c.ctx.hopper_cooldowns,
+                persist=store.write_control_snapshot,
+            )
+        else:
+            assert control["recipe"]["step_data"]["triggered"] is True
+            assert control["timer"]["state"] == "expired"
+
+    c.work_cycle = work_cycle
+    c.recipe_mode()
+    assert calls == ["Smoke", "Reignite", "Smoke"]
+    assert events == ["Timer_Expired"]
+    assert store.read_control()["mode"] == "Stop"

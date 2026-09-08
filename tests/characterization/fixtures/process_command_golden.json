@@ -163,7 +163,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "hopper_check": true
           }
@@ -566,58 +566,6 @@
       "data": {},
       "message": "Probe NoSuchProbe not found or not specified.",
       "result": "ERROR"
-    },
-    "settings_diff": {},
-    "sleeps": [],
-    "systemq": []
-  },
-  "get_timer": {
-    "arglist_after": [
-      "timer",
-      null,
-      null,
-      null
-    ],
-    "cmd_calls": [],
-    "control_diff_after_execute": {},
-    "log_calls": [],
-    "queued_writes": [],
-    "return": {
-      "data": {
-        "end": 333.0,
-        "keep_warm": false,
-        "paused": 222.0,
-        "shutdown": true,
-        "start": 111.0
-      },
-      "message": "Command was accepted successfully.",
-      "result": "OK"
-    },
-    "settings_diff": {},
-    "sleeps": [],
-    "systemq": []
-  },
-  "get_timer_inverted": {
-    "arglist_after": [
-      "timer",
-      null,
-      null,
-      null
-    ],
-    "cmd_calls": [],
-    "control_diff_after_execute": {},
-    "log_calls": [],
-    "queued_writes": [],
-    "return": {
-      "data": {
-        "end": 666.0,
-        "keep_warm": true,
-        "paused": 555.0,
-        "shutdown": false,
-        "start": 444.0
-      },
-      "message": "Command was accepted successfully.",
-      "result": "OK"
     },
     "settings_diff": {},
     "sleeps": [],
@@ -1262,7 +1210,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "duty_cycle": 60
           }
@@ -1297,7 +1245,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "lid_open_toggle": true
           }
@@ -1332,7 +1280,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "lid_open_toggle": true
           }
@@ -1717,7 +1665,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "ops": [
             {
               "fields": {
@@ -2129,7 +2077,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "ops": [
             {
               "fields": {
@@ -2175,7 +2123,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "manual": {
               "change": "auger",
@@ -2217,7 +2165,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "manual": {
               "change": "auger",
@@ -2259,7 +2207,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "manual": {
               "change": "auger",
@@ -2301,7 +2249,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "manual": {
               "change": "auger",
@@ -2343,7 +2291,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "manual": {
               "change": "auger",
@@ -2385,7 +2333,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "manual": {
               "change": "fan",
@@ -2432,7 +2380,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "manual": {
               "change": "fan",
@@ -2475,7 +2423,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "manual": {
               "change": "fan",
@@ -2517,7 +2465,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "manual": {
               "change": "fan",
@@ -2560,7 +2508,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "manual": {
               "change": "fan",
@@ -2602,7 +2550,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "manual": {
               "change": "power",
@@ -2664,7 +2612,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "manual": {
               "change": "igniter",
@@ -2706,7 +2654,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "manual": {
               "change": "igniter",
@@ -2748,7 +2696,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "manual": {
               "change": "igniter",
@@ -2790,7 +2738,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "manual": {
               "change": "igniter",
@@ -2832,7 +2780,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "manual": {
               "change": "power",
@@ -2874,7 +2822,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "manual": {
               "change": "power",
@@ -2916,7 +2864,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "manual": {
               "change": "power",
@@ -2958,7 +2906,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "manual": {
               "change": "power",
@@ -3004,7 +2952,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "manual": {
               "change": "pwm",
@@ -3078,7 +3026,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1
+          "__control_delta__": 2
         },
         "origin": "test"
       }
@@ -3114,7 +3062,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "mode": "Hold",
             "primary_setpoint": 121.6,
@@ -3155,7 +3103,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "mode": "Hold",
             "primary_setpoint": 250,
@@ -3232,7 +3180,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "mode": "Manual",
             "updated": true
@@ -3292,7 +3240,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "mode": "Prime",
             "next_mode": "Stop",
@@ -3338,7 +3286,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "mode": "Prime",
             "next_mode": "Startup",
@@ -3416,7 +3364,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "mode": "Startup",
             "updated": true
@@ -3447,7 +3395,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "mode": "Stop",
             "updated": true
@@ -3853,7 +3801,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "ops": [
             {
               "fields": {
@@ -4285,7 +4233,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "ops": [
             {
               "fields": {
@@ -4322,7 +4270,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "ops": [
             {
               "fields": {
@@ -4714,7 +4662,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "ops": [
             {
               "fields": {
@@ -5106,7 +5054,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "ops": [
             {
               "fields": {
@@ -5498,7 +5446,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "ops": [
             {
               "fields": {
@@ -5890,7 +5838,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "ops": [
             {
               "fields": {
@@ -5927,7 +5875,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1
+          "__control_delta__": 2
         },
         "origin": "test"
       }
@@ -5954,7 +5902,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1
+          "__control_delta__": 2
         },
         "origin": "test"
       }
@@ -5981,7 +5929,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1
+          "__control_delta__": 2
         },
         "origin": "test"
       }
@@ -6073,7 +6021,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "settings_update": true
           }
@@ -6121,7 +6069,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "ops": [
             {
               "op": "hold.set_setpoint",
@@ -6163,7 +6111,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "ops": [
             {
               "op": "hold.set_setpoint",
@@ -6221,7 +6169,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "pwm_control": false
           }
@@ -6256,7 +6204,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "pwm_control": true
           }
@@ -6291,7 +6239,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "s_plus": false
           }
@@ -6326,7 +6274,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "s_plus": true
           }
@@ -6338,2199 +6286,6 @@
       "data": {},
       "message": "Command was accepted successfully.",
       "result": "OK"
-    },
-    "settings_diff": {},
-    "sleeps": [],
-    "systemq": []
-  },
-  "set_timer_keep_warm_false": {
-    "arglist_after": [
-      "timer",
-      "keep_warm",
-      "false",
-      null
-    ],
-    "cmd_calls": [],
-    "control_diff_after_execute": {},
-    "log_calls": [],
-    "queued_writes": [
-      {
-        "delta": {
-          "__control_delta__": 1,
-          "ops": [
-            {
-              "fields": {
-                "keep_warm": false
-              },
-              "label": "Timer",
-              "op": "notify.set",
-              "type": "timer"
-            }
-          ]
-        },
-        "origin": "test"
-      }
-    ],
-    "return": {
-      "data": {},
-      "message": "Command was accepted successfully.",
-      "result": "OK"
-    },
-    "settings_diff": {},
-    "sleeps": [],
-    "systemq": []
-  },
-  "set_timer_keep_warm_true": {
-    "arglist_after": [
-      "timer",
-      "keep_warm",
-      "true",
-      null
-    ],
-    "cmd_calls": [],
-    "control_diff_after_execute": {
-      "notify_data": [
-        [
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Grill",
-            "name": "Grill",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Grill",
-            "name": "Grill",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Grill",
-            "name": "Grill",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe1",
-            "name": "Probe-1",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe1",
-            "name": "Probe-1",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe1",
-            "name": "Probe-1",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe2",
-            "name": "Probe-2",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe2",
-            "name": "Probe-2",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe2",
-            "name": "Probe-2",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe3",
-            "name": "Probe-3",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe3",
-            "name": "Probe-3",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe3",
-            "name": "Probe-3",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "keep_warm": false,
-            "label": "Timer",
-            "req": false,
-            "shutdown": false,
-            "type": "timer"
-          },
-          {
-            "keep_warm": false,
-            "label": "Hopper",
-            "last_check": 0,
-            "req": true,
-            "shutdown": false,
-            "type": "hopper"
-          },
-          {
-            "keep_warm": false,
-            "label": "Test",
-            "req": false,
-            "shutdown": false,
-            "type": "test"
-          }
-        ],
-        [
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Grill",
-            "name": "Grill",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Grill",
-            "name": "Grill",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Grill",
-            "name": "Grill",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe1",
-            "name": "Probe-1",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe1",
-            "name": "Probe-1",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe1",
-            "name": "Probe-1",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe2",
-            "name": "Probe-2",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe2",
-            "name": "Probe-2",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe2",
-            "name": "Probe-2",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe3",
-            "name": "Probe-3",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe3",
-            "name": "Probe-3",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe3",
-            "name": "Probe-3",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "keep_warm": true,
-            "label": "Timer",
-            "req": false,
-            "shutdown": false,
-            "type": "timer"
-          },
-          {
-            "keep_warm": false,
-            "label": "Hopper",
-            "last_check": 0,
-            "req": true,
-            "shutdown": false,
-            "type": "hopper"
-          },
-          {
-            "keep_warm": false,
-            "label": "Test",
-            "req": false,
-            "shutdown": false,
-            "type": "test"
-          }
-        ]
-      ]
-    },
-    "log_calls": [],
-    "queued_writes": [
-      {
-        "delta": {
-          "__control_delta__": 1,
-          "ops": [
-            {
-              "fields": {
-                "keep_warm": true
-              },
-              "label": "Timer",
-              "op": "notify.set",
-              "type": "timer"
-            }
-          ]
-        },
-        "origin": "test"
-      }
-    ],
-    "return": {
-      "data": {},
-      "message": "Command was accepted successfully.",
-      "result": "OK"
-    },
-    "settings_diff": {},
-    "sleeps": [],
-    "systemq": []
-  },
-  "set_timer_pause_not_started": {
-    "arglist_after": [
-      "timer",
-      "pause",
-      null,
-      null
-    ],
-    "cmd_calls": [],
-    "control_diff_after_execute": {},
-    "log_calls": [
-      "Timer cleared."
-    ],
-    "queued_writes": [
-      {
-        "delta": {
-          "__control_delta__": 1,
-          "ops": [
-            {
-              "at": 1700000000.0,
-              "op": "timer.pause"
-            }
-          ]
-        },
-        "origin": "app"
-      }
-    ],
-    "return": {
-      "data": {},
-      "message": "Command was accepted successfully.",
-      "result": "OK"
-    },
-    "settings_diff": {},
-    "sleeps": [],
-    "systemq": []
-  },
-  "set_timer_pause_running": {
-    "arglist_after": [
-      "timer",
-      "pause",
-      null,
-      null
-    ],
-    "cmd_calls": [],
-    "control_diff_after_execute": {
-      "timer.paused": [
-        0,
-        1700000000.0
-      ]
-    },
-    "log_calls": [
-      "Timer paused."
-    ],
-    "queued_writes": [
-      {
-        "delta": {
-          "__control_delta__": 1,
-          "ops": [
-            {
-              "at": 1700000000.0,
-              "op": "timer.pause"
-            }
-          ]
-        },
-        "origin": "app"
-      }
-    ],
-    "return": {
-      "data": {},
-      "message": "Command was accepted successfully.",
-      "result": "OK"
-    },
-    "settings_diff": {},
-    "sleeps": [],
-    "systemq": []
-  },
-  "set_timer_shutdown_false": {
-    "arglist_after": [
-      "timer",
-      "shutdown",
-      "false",
-      null
-    ],
-    "cmd_calls": [],
-    "control_diff_after_execute": {},
-    "log_calls": [],
-    "queued_writes": [
-      {
-        "delta": {
-          "__control_delta__": 1,
-          "ops": [
-            {
-              "fields": {
-                "shutdown": false
-              },
-              "label": "Timer",
-              "op": "notify.set",
-              "type": "timer"
-            }
-          ]
-        },
-        "origin": "test"
-      }
-    ],
-    "return": {
-      "data": {},
-      "message": "Command was accepted successfully.",
-      "result": "OK"
-    },
-    "settings_diff": {},
-    "sleeps": [],
-    "systemq": []
-  },
-  "set_timer_shutdown_true": {
-    "arglist_after": [
-      "timer",
-      "shutdown",
-      "true",
-      null
-    ],
-    "cmd_calls": [],
-    "control_diff_after_execute": {
-      "notify_data": [
-        [
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Grill",
-            "name": "Grill",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Grill",
-            "name": "Grill",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Grill",
-            "name": "Grill",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe1",
-            "name": "Probe-1",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe1",
-            "name": "Probe-1",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe1",
-            "name": "Probe-1",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe2",
-            "name": "Probe-2",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe2",
-            "name": "Probe-2",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe2",
-            "name": "Probe-2",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe3",
-            "name": "Probe-3",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe3",
-            "name": "Probe-3",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe3",
-            "name": "Probe-3",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "keep_warm": false,
-            "label": "Timer",
-            "req": false,
-            "shutdown": false,
-            "type": "timer"
-          },
-          {
-            "keep_warm": false,
-            "label": "Hopper",
-            "last_check": 0,
-            "req": true,
-            "shutdown": false,
-            "type": "hopper"
-          },
-          {
-            "keep_warm": false,
-            "label": "Test",
-            "req": false,
-            "shutdown": false,
-            "type": "test"
-          }
-        ],
-        [
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Grill",
-            "name": "Grill",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Grill",
-            "name": "Grill",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Grill",
-            "name": "Grill",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe1",
-            "name": "Probe-1",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe1",
-            "name": "Probe-1",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe1",
-            "name": "Probe-1",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe2",
-            "name": "Probe-2",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe2",
-            "name": "Probe-2",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe2",
-            "name": "Probe-2",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe3",
-            "name": "Probe-3",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe3",
-            "name": "Probe-3",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe3",
-            "name": "Probe-3",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "keep_warm": false,
-            "label": "Timer",
-            "req": false,
-            "shutdown": true,
-            "type": "timer"
-          },
-          {
-            "keep_warm": false,
-            "label": "Hopper",
-            "last_check": 0,
-            "req": true,
-            "shutdown": false,
-            "type": "hopper"
-          },
-          {
-            "keep_warm": false,
-            "label": "Test",
-            "req": false,
-            "shutdown": false,
-            "type": "test"
-          }
-        ]
-      ]
-    },
-    "log_calls": [],
-    "queued_writes": [
-      {
-        "delta": {
-          "__control_delta__": 1,
-          "ops": [
-            {
-              "fields": {
-                "shutdown": true
-              },
-              "label": "Timer",
-              "op": "notify.set",
-              "type": "timer"
-            }
-          ]
-        },
-        "origin": "api"
-      }
-    ],
-    "return": {
-      "data": {},
-      "message": "Command was accepted successfully.",
-      "result": "OK"
-    },
-    "settings_diff": {},
-    "sleeps": [],
-    "systemq": []
-  },
-  "set_timer_start": {
-    "arglist_after": [
-      "timer",
-      "start",
-      "300",
-      null
-    ],
-    "cmd_calls": [],
-    "control_diff_after_execute": {
-      "notify_data": [
-        [
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Grill",
-            "name": "Grill",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Grill",
-            "name": "Grill",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Grill",
-            "name": "Grill",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe1",
-            "name": "Probe-1",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe1",
-            "name": "Probe-1",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe1",
-            "name": "Probe-1",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe2",
-            "name": "Probe-2",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe2",
-            "name": "Probe-2",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe2",
-            "name": "Probe-2",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe3",
-            "name": "Probe-3",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe3",
-            "name": "Probe-3",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe3",
-            "name": "Probe-3",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "keep_warm": false,
-            "label": "Timer",
-            "req": false,
-            "shutdown": false,
-            "type": "timer"
-          },
-          {
-            "keep_warm": false,
-            "label": "Hopper",
-            "last_check": 0,
-            "req": true,
-            "shutdown": false,
-            "type": "hopper"
-          },
-          {
-            "keep_warm": false,
-            "label": "Test",
-            "req": false,
-            "shutdown": false,
-            "type": "test"
-          }
-        ],
-        [
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Grill",
-            "name": "Grill",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Grill",
-            "name": "Grill",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Grill",
-            "name": "Grill",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe1",
-            "name": "Probe-1",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe1",
-            "name": "Probe-1",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe1",
-            "name": "Probe-1",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe2",
-            "name": "Probe-2",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe2",
-            "name": "Probe-2",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe2",
-            "name": "Probe-2",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe3",
-            "name": "Probe-3",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe3",
-            "name": "Probe-3",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe3",
-            "name": "Probe-3",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "keep_warm": false,
-            "label": "Timer",
-            "req": true,
-            "shutdown": false,
-            "type": "timer"
-          },
-          {
-            "keep_warm": false,
-            "label": "Hopper",
-            "last_check": 0,
-            "req": true,
-            "shutdown": false,
-            "type": "hopper"
-          },
-          {
-            "keep_warm": false,
-            "label": "Test",
-            "req": false,
-            "shutdown": false,
-            "type": "test"
-          }
-        ]
-      ],
-      "timer.end": [
-        0,
-        1700000300.0
-      ],
-      "timer.start": [
-        0,
-        1700000000.0
-      ]
-    },
-    "log_calls": [
-      "Timer started.  Ends at: 17:18:20"
-    ],
-    "queued_writes": [
-      {
-        "delta": {
-          "__control_delta__": 1,
-          "ops": [
-            {
-              "at": 1700000000.0,
-              "op": "timer.start_or_resume",
-              "seconds": 300
-            }
-          ]
-        },
-        "origin": "app"
-      }
-    ],
-    "return": {
-      "data": {},
-      "message": "Command was accepted successfully.",
-      "result": "OK"
-    },
-    "settings_diff": {},
-    "sleeps": [],
-    "systemq": []
-  },
-  "set_timer_start_default_60": {
-    "arglist_after": [
-      "timer",
-      "start",
-      "soon",
-      null
-    ],
-    "cmd_calls": [],
-    "control_diff_after_execute": {
-      "notify_data": [
-        [
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Grill",
-            "name": "Grill",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Grill",
-            "name": "Grill",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Grill",
-            "name": "Grill",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe1",
-            "name": "Probe-1",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe1",
-            "name": "Probe-1",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe1",
-            "name": "Probe-1",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe2",
-            "name": "Probe-2",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe2",
-            "name": "Probe-2",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe2",
-            "name": "Probe-2",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe3",
-            "name": "Probe-3",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe3",
-            "name": "Probe-3",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe3",
-            "name": "Probe-3",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "keep_warm": false,
-            "label": "Timer",
-            "req": false,
-            "shutdown": false,
-            "type": "timer"
-          },
-          {
-            "keep_warm": false,
-            "label": "Hopper",
-            "last_check": 0,
-            "req": true,
-            "shutdown": false,
-            "type": "hopper"
-          },
-          {
-            "keep_warm": false,
-            "label": "Test",
-            "req": false,
-            "shutdown": false,
-            "type": "test"
-          }
-        ],
-        [
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Grill",
-            "name": "Grill",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Grill",
-            "name": "Grill",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Grill",
-            "name": "Grill",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe1",
-            "name": "Probe-1",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe1",
-            "name": "Probe-1",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe1",
-            "name": "Probe-1",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe2",
-            "name": "Probe-2",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe2",
-            "name": "Probe-2",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe2",
-            "name": "Probe-2",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe3",
-            "name": "Probe-3",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe3",
-            "name": "Probe-3",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe3",
-            "name": "Probe-3",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "keep_warm": false,
-            "label": "Timer",
-            "req": true,
-            "shutdown": false,
-            "type": "timer"
-          },
-          {
-            "keep_warm": false,
-            "label": "Hopper",
-            "last_check": 0,
-            "req": true,
-            "shutdown": false,
-            "type": "hopper"
-          },
-          {
-            "keep_warm": false,
-            "label": "Test",
-            "req": false,
-            "shutdown": false,
-            "type": "test"
-          }
-        ]
-      ],
-      "timer.end": [
-        0,
-        1700000060.0
-      ],
-      "timer.start": [
-        0,
-        1700000000.0
-      ]
-    },
-    "log_calls": [
-      "Timer started.  Ends at: 17:14:20"
-    ],
-    "queued_writes": [
-      {
-        "delta": {
-          "__control_delta__": 1,
-          "ops": [
-            {
-              "at": 1700000000.0,
-              "op": "timer.start_or_resume",
-              "seconds": null
-            }
-          ]
-        },
-        "origin": "app"
-      }
-    ],
-    "return": {
-      "data": {},
-      "message": "Command was accepted successfully.",
-      "result": "OK"
-    },
-    "settings_diff": {},
-    "sleeps": [],
-    "systemq": []
-  },
-  "set_timer_start_resume": {
-    "arglist_after": [
-      "timer",
-      "start",
-      "300",
-      null
-    ],
-    "cmd_calls": [],
-    "control_diff_after_execute": {
-      "notify_data": [
-        [
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Grill",
-            "name": "Grill",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Grill",
-            "name": "Grill",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Grill",
-            "name": "Grill",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe1",
-            "name": "Probe-1",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe1",
-            "name": "Probe-1",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe1",
-            "name": "Probe-1",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe2",
-            "name": "Probe-2",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe2",
-            "name": "Probe-2",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe2",
-            "name": "Probe-2",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe3",
-            "name": "Probe-3",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe3",
-            "name": "Probe-3",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe3",
-            "name": "Probe-3",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "keep_warm": false,
-            "label": "Timer",
-            "req": false,
-            "shutdown": false,
-            "type": "timer"
-          },
-          {
-            "keep_warm": false,
-            "label": "Hopper",
-            "last_check": 0,
-            "req": true,
-            "shutdown": false,
-            "type": "hopper"
-          },
-          {
-            "keep_warm": false,
-            "label": "Test",
-            "req": false,
-            "shutdown": false,
-            "type": "test"
-          }
-        ],
-        [
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Grill",
-            "name": "Grill",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Grill",
-            "name": "Grill",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Grill",
-            "name": "Grill",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe1",
-            "name": "Probe-1",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe1",
-            "name": "Probe-1",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe1",
-            "name": "Probe-1",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe2",
-            "name": "Probe-2",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe2",
-            "name": "Probe-2",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe2",
-            "name": "Probe-2",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe3",
-            "name": "Probe-3",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "type": "probe"
-          },
-          {
-            "condition": "equal_above",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe3",
-            "name": "Probe-3",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_high"
-          },
-          {
-            "condition": "equal_below",
-            "eta": null,
-            "keep_warm": false,
-            "label": "Probe3",
-            "name": "Probe-3",
-            "reignite": false,
-            "req": false,
-            "shutdown": false,
-            "target": 0,
-            "triggered": false,
-            "type": "probe_limit_low"
-          },
-          {
-            "keep_warm": false,
-            "label": "Timer",
-            "req": true,
-            "shutdown": false,
-            "type": "timer"
-          },
-          {
-            "keep_warm": false,
-            "label": "Hopper",
-            "last_check": 0,
-            "req": true,
-            "shutdown": false,
-            "type": "hopper"
-          },
-          {
-            "keep_warm": false,
-            "label": "Test",
-            "req": false,
-            "shutdown": false,
-            "type": "test"
-          }
-        ]
-      ],
-      "timer.end": [
-        2000.0,
-        1700000500.0
-      ],
-      "timer.paused": [
-        1500.0,
-        0
-      ]
-    },
-    "log_calls": [
-      "Timer unpaused.  Ends at: 17:21:40"
-    ],
-    "queued_writes": [
-      {
-        "delta": {
-          "__control_delta__": 1,
-          "ops": [
-            {
-              "at": 1700000000.0,
-              "op": "timer.start_or_resume",
-              "seconds": 300
-            }
-          ]
-        },
-        "origin": "app"
-      }
-    ],
-    "return": {
-      "data": {},
-      "message": "Command was accepted successfully.",
-      "result": "OK"
-    },
-    "settings_diff": {},
-    "sleeps": [],
-    "systemq": []
-  },
-  "set_timer_stop": {
-    "arglist_after": [
-      "timer",
-      "stop",
-      null,
-      null
-    ],
-    "cmd_calls": [],
-    "control_diff_after_execute": {
-      "timer.end": [
-        2000.0,
-        0
-      ],
-      "timer.start": [
-        1000.0,
-        0
-      ]
-    },
-    "log_calls": [
-      "Timer stopped."
-    ],
-    "queued_writes": [
-      {
-        "delta": {
-          "__control_delta__": 1,
-          "ops": [
-            {
-              "op": "timer.clear"
-            }
-          ]
-        },
-        "origin": "app"
-      }
-    ],
-    "return": {
-      "data": {},
-      "message": "Command was accepted successfully.",
-      "result": "OK"
-    },
-    "settings_diff": {},
-    "sleeps": [],
-    "systemq": []
-  },
-  "set_timer_unknown": {
-    "arglist_after": [
-      "timer",
-      "rewind",
-      null,
-      null
-    ],
-    "cmd_calls": [],
-    "control_diff_after_execute": {},
-    "log_calls": [],
-    "queued_writes": [],
-    "return": {
-      "data": {},
-      "message": "Timer command not recognized.",
-      "result": "ERROR"
     },
     "settings_diff": {},
     "sleeps": [],
@@ -8554,7 +6309,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "tuning_mode": false
           }
@@ -8589,7 +6344,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "tuning_mode": true
           }
@@ -8628,7 +6383,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "settings_update": true
           }
@@ -8637,7 +6392,7 @@
       },
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "units_change": true,
             "updated": true
@@ -8748,7 +6503,7 @@
     "queued_writes": [
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "settings_update": true
           }
@@ -8757,7 +6512,7 @@
       },
       {
         "delta": {
-          "__control_delta__": 1,
+          "__control_delta__": 2,
           "set": {
             "units_change": true,
             "updated": true

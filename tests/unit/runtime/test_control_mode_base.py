@@ -35,6 +35,7 @@ from probes.thermocouple_inference import (
     fuse_thermocouple_health,
 )
 from tests.characterization.fixtures import base_control, base_pellet_db, base_settings
+from tests.fakes.clock import clock_stamp
 from tests.fakes.distance import FakeDistance
 from tests.fakes.grill import FakeGrillPlatform
 from tests.fakes.notifier import FakeNotifier
@@ -1145,7 +1146,7 @@ def test_large_gap_retires_before_next_observation_or_manual_on(monkeypatch, sus
     assert not ctx.devices.grill_platform.get_output_status()["auger"]
     assert not ctx.devices.grill_platform.get_output_status()["igniter"]
     assert mode._excitation_last_read_at is None
-    ctx.store.execute_control_writes()
+    ctx.store.execute_control_writes(timer_now=clock_stamp())
     assert ctx.store.read_control()["mode"] == "Error"
 
 
@@ -1205,3 +1206,29 @@ def test_partial_prime_stop_preserves_only_observed_delivery_once(monkeypatch):
     assert ctx.store.read_metrics()["elapsed_seconds"] == pytest.approx(3.0)
     assert ctx.store.read_pellet_db()["current"]["est_usage"] == before
     assert not ctx.devices.grill_platform.get_output_status()["auger"]
+
+
+def test_startup_teardown_cannot_restore_running_timer_after_stop():
+    from common.timer import start_timer
+
+    ctx = _make_ctx()
+    ctx.last_clock_stamp = clock_stamp(monotonic_s=103)
+    control = ctx.store.read_control()
+    control["mode"] = "Startup"
+    control["timer"] = start_timer(10, clock_stamp())
+    mode = StartupMode(ctx, WorkCycleState())
+    mode.settings = ctx.store.read_settings()
+    mode.control = control
+    mode._mode_setup_started = True
+    mode._terminal_monotonic_s = 103
+    mode._last_valid_ptemp = 120
+    stopped = dict(control, mode="Stop")
+    ctx.store.write_control_snapshot(stopped)
+
+    mode._finish_cycle(failed=False)
+
+    persisted = ctx.store.read_control()
+    assert persisted["mode"] == "Stop"
+    assert persisted["timer"]["state"] == "paused"
+    assert persisted["timer"]["remaining_s"] == 7
+    assert persisted["timer"]["action_armed"] is False

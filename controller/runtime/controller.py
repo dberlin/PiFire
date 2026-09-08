@@ -29,6 +29,7 @@ from common.common import ErrorKind
 from common.defaults import default_control
 from common.modes import COOK_MODES, SAFE_MODES, Mode, StatusState
 from common.system import shutdown_system
+from common.timer import checkpoint_timer, parse_timer, pause_timer, restore_timer
 from controller.learning_report import controller_learning_report
 from controller.runtime.heartbeat import stamp_control_heartbeat
 from controller.runtime.modes.hold import HoldMode
@@ -145,27 +146,25 @@ class Controller:
 
         num_steps = len(recipe["steps"])
         step_num = start_step  # Start at step 0 by default unless requested to start at a later step
+        retrying_step = False
 
         # 4. Walk through steps, and execute work cycle
         while step_num < num_steps:
-            # 4a. Setup all step data and write to control
-            control["recipe"]["step"] = step_num
-            # Copy the step so the in-place trigger_temps remap below does not
-            # corrupt the source recipe -- otherwise a reignite retry (which
-            # re-enters step setup for the same step_num) reads a step whose
-            # trigger_temps were already replaced with the probe-mapped form and
-            # KeyErrors on ["primary"].
-            control["recipe"]["step_data"] = copy.deepcopy(recipe["steps"][step_num])
-            """ Setup trigger_temps structure that the work_cycle expects, mapping to real probes """
-            trigger_temps = {}
-            trigger_temps[settings["recipe"]["probe_map"]["primary"]] = recipe["steps"][step_num]["trigger_temps"][
-                "primary"
-            ]
-            for index, value in enumerate(recipe["steps"][step_num]["trigger_temps"]["food"]):
-                trigger_temps[settings["recipe"]["probe_map"]["food"][index]] = value
-            control["recipe"]["step_data"]["trigger_temps"] = trigger_temps
-            control["recipe"]["step_data"]["triggered"] = False
-            control["primary_setpoint"] = recipe["steps"][step_num]["hold_temp"]  # Set Hold Temp if applicable.
+            # Reignition retries retain the live trigger/pause state: timer
+            # expiry during recovery must not be erased when re-entering a step.
+            if not retrying_step:
+                control["recipe"]["step"] = step_num
+                control["recipe"]["step_data"] = copy.deepcopy(recipe["steps"][step_num])
+                trigger_temps = {}
+                trigger_temps[settings["recipe"]["probe_map"]["primary"]] = recipe["steps"][step_num]["trigger_temps"][
+                    "primary"
+                ]
+                for index, value in enumerate(recipe["steps"][step_num]["trigger_temps"]["food"]):
+                    trigger_temps[settings["recipe"]["probe_map"]["food"][index]] = value
+                control["recipe"]["step_data"]["trigger_temps"] = trigger_temps
+                control["recipe"]["step_data"]["triggered"] = False
+                control["primary_setpoint"] = recipe["steps"][step_num]["hold_temp"]
+            retrying_step = False
             control["updated"] = False  # Clear Updated Flag if Set
             ctx.store.write_control_snapshot(control, origin="control")
             # 4b. Start the recipe step work cycle
@@ -177,7 +176,8 @@ class Controller:
                 self.ctx.trajectory_next_effective_mode = None
 
             # 4c. If reignite is required, run a reignite cycle and retry current step
-            ctx.store.execute_control_writes()
+            if ctx.last_clock_stamp is not None:
+                ctx.store.execute_control_writes(timer_now=ctx.admitted_stamp())
             control = ctx.store.read_control()
             if control["mode"] == Mode.REIGNITE and control["updated"]:
                 control["updated"] = False
@@ -190,6 +190,7 @@ class Controller:
                     self.eventLogger.info(f"Recipe mode cancelled due to mode change: {control['mode']}")
                     break
                 # 4c-2. Rerun current step
+                retrying_step = True
             # 4d. If another mode was requested (or an error occurred) then exit recipe mode
             elif control["mode"] != Mode.RECIPE and control["updated"]:
                 self.eventLogger.info(f"Recipe mode cancelled due to mode change: {control['mode']}")
@@ -202,6 +203,8 @@ class Controller:
         control["recipe"]["step"] = 0
         control["recipe"]["step_data"] = {}
         control["recipe"]["filename"] = ""
+        control["recipe"].pop("timer_id", None)
+        control["recipe"].pop("timer_step", None)
 
         # If recipe is exiting normally (i.e. no other mode requested, then initiate stop mode)
         if not control["updated"] or (step_num == num_steps):
@@ -224,6 +227,13 @@ class Controller:
         if self._cleanup_complete:
             return
         self._cleanup_complete = True
+        if self.ctx.last_clock_stamp is not None:
+            control = self.ctx.store.read_control()
+            control["timer"] = pause_timer(parse_timer(control["timer"]), self.ctx.admitted_stamp())
+            for item in control["notify_data"]:
+                if item["type"] == "timer":
+                    item["req"] = False
+            self.ctx.store.write_control_snapshot(control, origin="control")
         for logger in (self.eventLogger, self.controlLogger):
             try:
                 logger.info("Control Script Exiting.")
@@ -270,6 +280,14 @@ class Controller:
     def setup(self):
         """One-time initialization run before the main loop starts."""
         store = self.ctx.store
+        control = store.read_control()
+        control["timer"], diagnostic = restore_timer(control["timer"])
+        if diagnostic is not None:
+            control["timer_migration_diagnostic"] = diagnostic
+        for item in control["notify_data"]:
+            if item["type"] == "timer":
+                item["req"] = False
+        store.write_control_snapshot(control, origin="control")
 
         # Initial hopper-level publish on boot. Without this, `pelletdb` is
         # unbound the first time the loop calls check_notify.
@@ -321,8 +339,14 @@ class Controller:
             self.grill_platform.fan_off()
             self.grill_platform.power_off()
             self.probe_complex.invalidate_control_history()
-            ctx.store.execute_control_writes()
+            domain.rotate_runtime()
+            ctx.hopper_cooldowns.clear()
+            ctx.store.execute_control_writes(timer_now=domain.capture())
             self.control = ctx.store.read_control()
+            self.control["timer"], _ = restore_timer(self.control["timer"])
+            for item in self.control["notify_data"]:
+                if item["type"] == "timer":
+                    item["req"] = False
             self.control["manual"]["change"] = False
             self.control["manual"]["output"] = False
             request_transition(
@@ -332,7 +356,6 @@ class Controller:
                 kind=TransitionKind.SAFETY,
                 display=("text", "ERROR"),
             )
-            domain.rotate_runtime()
             ctx.last_clock_stamp = None
             return False
         ctx.last_clock_stamp = stamp
@@ -374,8 +397,10 @@ class Controller:
         store.write_status(self.status)
 
         # Check control for changes
-        store.execute_control_writes()
+        store.execute_control_writes(timer_now=ctx.admitted_stamp())
         self.control = store.read_control()
+        self.control["timer"] = checkpoint_timer(parse_timer(self.control["timer"]), ctx.admitted_stamp())
+        store.write_control_snapshot(self.control, origin="control")
 
         # Check for system commands
         self.control = self.process_system_commands()
@@ -385,24 +410,21 @@ class Controller:
             self.control["settings_update"] = False
             store.write_control_snapshot(self.control, origin="control")
             self.settings = settings = store.read_settings()
+            ctx.hopper_cooldowns.clear()
             self.probe_complex.set_thermocouple_inference_policy(
                 settings["thermocouple_health"]["inference_policy"],
             )
 
         # Check if there are any notifications pending
-        check_notify(settings, self.control, pelletdb=self.pelletdb, grill_platform=grill_platform)
-
-        # Check if there is a timer running, see if it has expired, send notification and reset
-        for index, item in enumerate(self.control["notify_data"]):
-            if item["type"] == "timer" and item["req"] and ctx.clock.wall_time() >= self.control["timer"]["end"]:
-                send_notifications("Timer_Expired")
-                self.control["notify_data"][index]["req"] = False
-                self.control["timer"]["start"] = 0
-                self.control["timer"]["paused"] = 0
-                self.control["timer"]["end"] = 0
-                self.control["notify_data"][index]["shutdown"] = False
-                self.control["notify_data"][index]["keep_warm"] = False
-                store.write_control_snapshot(self.control, origin="control")
+        check_notify(
+            settings,
+            self.control,
+            pelletdb=self.pelletdb,
+            grill_platform=grill_platform,
+            now=ctx.admitted_stamp(),
+            hopper_cooldowns=ctx.hopper_cooldowns,
+            persist=store.write_control_snapshot,
+        )
 
         # Check if user changed hopper levels and update if required
         if self.control["distance_update"]:
@@ -513,6 +535,20 @@ class Controller:
                 grill_platform.auger_off()
                 grill_platform.igniter_off()
                 grill_platform.fan_off()
+                retained_timer = pause_timer(
+                    parse_timer(self.control["timer"]),
+                    ctx.admitted_stamp(),
+                    interrupted=self.control["mode"] == Mode.ERROR,
+                )
+                retained_timer_options = [
+                    dict(item, req=False) for item in self.control["notify_data"] if item["type"] == "timer"
+                ]
+                timer_diagnostic = self.control.get("timer_migration_diagnostic")
+                self.control["timer"] = retained_timer
+                for item in self.control["notify_data"]:
+                    if item["type"] == "timer":
+                        item["req"] = False
+                store.write_control_snapshot(self.control, origin="control")
                 # Terminal modes have driven every actuator off. Publish zero
                 # duties before cook-file archival, which can take long enough
                 # for dashboards to read this terminal state.
@@ -619,6 +655,13 @@ class Controller:
                     # assignment -- flush_control() rebinds control to a fresh
                     # default_control() (status ""), discarding it, so Stop persisted "".
                     self.control = store.flush_control(cook_id=retained_cook_id)
+                    self.control["timer"] = retained_timer
+                    self.control["notify_data"] = [
+                        item for item in self.control["notify_data"] if item["type"] != "timer"
+                    ]
+                    self.control["notify_data"].extend(retained_timer_options)
+                    if timer_diagnostic is not None:
+                        self.control["timer_migration_diagnostic"] = timer_diagnostic
                     self.control["critical_error"] = critical_error
                     self.control["status"] = StatusState.INACTIVE
                     self.control["updated"] = False
@@ -635,6 +678,13 @@ class Controller:
                     # Reset transient control state while retaining the durable
                     # clear-history command exactly as the Stop branch does.
                     self.control = store.flush_control(cook_id=retained_cook_id)
+                    self.control["timer"] = retained_timer
+                    self.control["notify_data"] = [
+                        item for item in self.control["notify_data"] if item["type"] != "timer"
+                    ]
+                    self.control["notify_data"].extend(retained_timer_options)
+                    if timer_diagnostic is not None:
+                        self.control["timer_migration_diagnostic"] = timer_diagnostic
                     self.control["critical_error"] = critical_error
                     self.control["mode"] = Mode.ERROR
                     self.control["status"] = StatusState.INACTIVE
@@ -663,8 +713,19 @@ class Controller:
             # elif-ladder saw.
             settings = self.settings
 
-        if settings["notify_services"].get("mqtt") != None and settings["notify_services"]["mqtt"]["enabled"]:
-            check_notify(settings, self.control, pelletdb=self.pelletdb)
+        if (
+            ctx.last_clock_stamp is not None
+            and settings["notify_services"].get("mqtt") != None
+            and settings["notify_services"]["mqtt"]["enabled"]
+        ):
+            check_notify(
+                settings,
+                self.control,
+                pelletdb=self.pelletdb,
+                now=ctx.admitted_stamp(),
+                hopper_cooldowns=ctx.hopper_cooldowns,
+                persist=store.write_control_snapshot,
+            )
 
     # --- per-mode dispatch handlers (registered in _MODE_DISPATCH below) ---
 

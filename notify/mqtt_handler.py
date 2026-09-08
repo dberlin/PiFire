@@ -15,6 +15,7 @@
 import json
 import logging
 import time
+from collections.abc import Callable
 from socket import getfqdn
 
 import paho.mqtt.client as mqtt
@@ -31,7 +32,7 @@ def _connack_text(reason_code):
 
 
 class MqttNotificationHandler:
-    def __init__(self, settings) -> None:
+    def __init__(self, settings, *, monotonic: Callable[[], float] = time.monotonic) -> None:
         """Initialize an mqtt client
         Home Assistant mqtt sensor metadata: https://www.home-assistant.io/integrations/sensor.mqtt/
         Home Assistant auto-discovery description: https://www.home-assistant.io/integrations/mqtt/
@@ -40,18 +41,19 @@ class MqttNotificationHandler:
         settings: PiFire settings dict
         """
 
+        self._monotonic = monotonic
         try:
             self.client = None  # Initialize to none so we can check its existance later
             self.initialized_topics = []  # Topics that have already sent auto-discover data
             self.last = {}  # Last published values so we can send by exception
             self.last_mode = None  # Last mode we were in
-            self.last_conn_time = 0  # Last time we tried to connect to the mqtt broker
+            self.last_conn_time: float | None = None  # No pending connection attempt
             self.subscriptions = []  # Topics we have subscribed to so we can be remotely controlled
             self.control = None  # Link to the control structure so we can send controls to the Control app
 
             # Keep track of the last time we published different types of MQTT data so that we can
             # throttle our updates to the configured rate
-            self.pub_times = {"base": 0, "pellet": 0, "pid": 0}
+            self.pub_times: dict[str, float | None] = {"base": None, "pellet": None, "pid": None}
             self.pub_rate = float(settings["notify_services"]["mqtt"]["update_sec"])
 
             # Create shortcuts to settings we will use frequently
@@ -206,7 +208,7 @@ class MqttNotificationHandler:
         self._mqttLogger.info(
             f"Connection to '{self._mqtt_settings['broker']}' returned result: '{_connack_text(reason_code)}'"
         )
-        self.last_conn_time = 0
+        self.last_conn_time = None
         self._publish_data(topic=f"{self._mqtt_settings['id']}/availability", payload="online", qos=1)
 
         # Restore any subscriptions that we have
@@ -229,14 +231,14 @@ class MqttNotificationHandler:
     def _check_connection(self):
 
         # Connection process is async, so give it some time
-        if time.time() < self.last_conn_time + 5:
+        if self.last_conn_time is not None and self._monotonic() < self.last_conn_time + 5:
             return False
 
         # Connect if not already connected
         if self.client is None or not self.client.is_connected():
             self._mqttLogger.error("Need to connect to the broker")
+            self.last_conn_time = self._monotonic()
             self._connect()
-            self.last_conn_time = time.time()
 
         return self.client.is_connected()
 

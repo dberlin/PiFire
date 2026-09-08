@@ -16,7 +16,7 @@ export async function ensureStopped(request: APIRequestContext): Promise<void> {
   const baseUrl = API;
   const maxWaitMs = 10000;
   const pollIntervalMs = 200;
-  const startTime = Date.now();
+  const startTime = performance.now();
 
   // Check current mode
   const modeRes = await request.get(`${baseUrl}/api/get/mode`);
@@ -39,7 +39,7 @@ export async function ensureStopped(request: APIRequestContext): Promise<void> {
   }
 
   // Poll until mode is Stop or timeout
-  while (Date.now() - startTime < maxWaitMs) {
+  while (performance.now() - startTime < maxWaitMs) {
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
 
     const checkRes = await request.get(`${baseUrl}/api/get/mode`);
@@ -96,7 +96,7 @@ async function pollCurrent(
   maxWaitMs: number,
   what: string,
 ): Promise<CurrentBlob> {
-  const startTime = Date.now();
+  const startTime = performance.now();
   let last = "never read";
   for (;;) {
     const res = await request.get(`${API}/api/current`);
@@ -107,7 +107,7 @@ async function pollCurrent(
         if (ok(current)) return current;
       }
     }
-    if (Date.now() - startTime >= maxWaitMs) {
+    if (performance.now() - startTime >= maxWaitMs) {
       throw new Error(`${what} after ${maxWaitMs}ms; /api/current last read ${last}.`);
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
@@ -177,7 +177,7 @@ export async function monitorProbeReadings(
   const silentIn = (labels: string[], group: Record<string, number> | undefined) =>
     labels.filter((label) => !((group?.[label] ?? 0) > 0));
 
-  const startTime = Date.now();
+  const startTime = performance.now();
   let last: CurrentBlob | null = null;
   for (;;) {
     const res = await request.get(`${API}/api/current`);
@@ -189,7 +189,7 @@ export async function monitorProbeReadings(
         if (silent.length === 0) return { current, silent };
       }
     }
-    if (Date.now() - startTime >= maxWaitMs) {
+    if (performance.now() - startTime >= maxWaitMs) {
       return {
         current: null,
         silent: last

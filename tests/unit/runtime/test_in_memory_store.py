@@ -1,5 +1,6 @@
 from common.control_delta import control_delta
 from controller.runtime.store import InMemoryStore
+from tests.fakes.clock import clock_stamp
 
 
 def test_snapshot_replaces_whole_control_immediately():
@@ -16,7 +17,7 @@ def test_delta_is_deferred_until_execute():
     store.enqueue_control_delta(control_delta(set_values={"nested": {"x": 9}}), origin="display")
 
     assert store.read_control()["nested"] == {"x": 1, "y": 2}
-    store.execute_control_writes()
+    store.execute_control_writes(timer_now=clock_stamp())
     assert store.read_control()["nested"] == {"x": 9, "y": 2}
     assert store.read_control()["mode"] == "Stop"
 
@@ -26,7 +27,7 @@ def test_deltas_apply_in_fifo_order():
     store.enqueue_control_delta(control_delta(set_values={"v": 1}), origin="first")
     store.enqueue_control_delta(control_delta(set_values={"v": 2}), origin="second")
 
-    store.execute_control_writes()
+    store.execute_control_writes(timer_now=clock_stamp())
 
     assert store.read_control()["v"] == 2
 

@@ -408,7 +408,7 @@ def test_pygame_240x320b_display_loop_drives_each_command_and_menu_timeout_branc
                 # iteration.
                 d.display_timeout = None
                 d.menu_active = True
-                d.menu_time = time.time() - 10
+                d.menu_time = d._monotonic() - 10
                 d.display_active = False
             elif n == 6:
                 d.menu_active = False
@@ -426,8 +426,67 @@ def test_pygame_240x320b_display_loop_drives_each_command_and_menu_timeout_branc
         _assert_no_reboot_or_shutdown(mock_os_system)
 
 
+@pytest.mark.parametrize("wall_jump", [-3600, 3600])
+def test_fixed_transient_text_clears_on_elapsed_deadline(monkeypatch, wall_jump):
+    with _fixed_driver_guarded(mod_320b) as (d, _logger):
+        clock = {"steady": 100.0, "wall": 1_800_000_000.0}
+        d._monotonic = lambda: clock["steady"]
+        monkeypatch.setattr("time.time", lambda: clock["wall"])
+        monkeypatch.setattr(pygame.time, "delay", lambda ms: None)
+        frames = []
+
+        def on_event(n):
+            if n == 1:
+                d.display_command = "text"
+                d.display_data = "225"
+            else:
+                frames.append(pygame.image.tostring(d.display_surface, "RGB"))
+                clock["steady"] = {2: 109.99, 3: 110.0, 4: 110.001, 5: 111.0}[n]
+                clock["wall"] += wall_jump
+
+        monkeypatch.setattr(pygame.event, "get", _stop_loop_after(6, on_event))
+        try:
+            with pytest.raises(RuntimeError, match="loop-guard-stop"):
+                d._display_loop()
+        finally:
+            pygame.quit()
+        assert frames[0] == frames[1] == frames[2]
+        assert frames[3] != frames[2]
+
+
+@pytest.mark.parametrize("wall_jump", [-3600, 3600])
+def test_fixed_menu_closes_after_monotonic_idle_interval(monkeypatch, wall_jump):
+    with _fixed_driver_guarded(mod_320b) as (d, _logger):
+        clock = {"steady": 100.0, "wall": 1_800_000_000.0}
+        d._monotonic = lambda: clock["steady"]
+        monkeypatch.setattr("time.time", lambda: clock["wall"])
+        monkeypatch.setattr(pygame.time, "delay", lambda ms: None)
+        _, read_control, enqueue_control_delta, _ = _fake_control_pair()
+        monkeypatch.setattr("display._base_fixed.read_control", read_control)
+        monkeypatch.setattr("display._base_fixed.enqueue_control_delta", enqueue_control_delta)
+        visible = []
+
+        def on_event(n):
+            if n == 1:
+                d.display_command = None
+                d.input_event = "ENTER"
+            else:
+                visible.append(d.menu_active)
+                clock["steady"] = {2: 104.99, 3: 105.0, 4: 105.001, 5: 106.0}[n]
+                clock["wall"] += wall_jump
+
+        monkeypatch.setattr(pygame.event, "get", _stop_loop_after(6, on_event))
+        try:
+            with pytest.raises(RuntimeError, match="loop-guard-stop"):
+                d._display_loop()
+        finally:
+            pygame.quit()
+        assert visible == [True, True, True, False]
+
+
 def _fake_control_pair(initial_mode=Mode.STOP):
     from common.control_delta import apply_control_delta
+    from tests.fakes.clock import clock_stamp
     from common.defaults import default_control
 
     state = default_control()
@@ -439,7 +498,7 @@ def _fake_control_pair(initial_mode=Mode.STOP):
 
     def enqueue_control_delta(delta, *, origin=None):
         calls.append((dict(delta.get("set", {})), origin))
-        apply_control_delta(state, delta)
+        apply_control_delta(state, delta, timer_now=clock_stamp())
 
     return state, read_control, enqueue_control_delta, calls
 
@@ -561,6 +620,21 @@ def _make_dsi(monkeypatch, event_log=None, control_log=None, **config_overrides)
             control_log=control_log,
         )
     return d
+
+
+@pytest.mark.parametrize("wall_jump", [-3600, 3600])
+def test_dsi_dashboard_refresh_ignores_wall_steps(monkeypatch, wall_jump):
+    from tests.ui._driver_helpers import exercise_flex_refresh
+
+    d = _make_dsi(monkeypatch)
+    monkeypatch.setattr(pygame.time, "delay", lambda ms: None)
+    monkeypatch.setattr(pygame.event, "get", lambda: [])
+    try:
+        exercise_flex_refresh(
+            d, monkeypatch, _dsi_status_data(mode="Hold"), wall_jump=wall_jump, run_loop=d._display_loop
+        )
+    finally:
+        pygame.quit()
 
 
 class _FakeFlexObject:

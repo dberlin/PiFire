@@ -1,173 +1,73 @@
-import type { CommandClient, CommandResult } from "@pifire/core/command";
+import { createCommand } from "@pifire/core/command";
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
-import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { act, fireEvent, render, screen } from "@testing-library/react";
-
+import { FIXTURE_DASH } from "@pifire/core/fixture";
+import { projectLiveDurations } from "@pifire/core/liveConnection";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { TimerBar } from "../../../../src/components/shell/TimerBar";
 
-const OK: CommandResult = { ok: true, message: "" };
+const running: DashSocketPayload = {
+  ...FIXTURE_DASH,
+  timer: { ...FIXTURE_DASH.timer, timerId: "66cc24ec-0bb4-42b7-af5d-c5e21124ec90", state: "running", current: true, remainingS: 600 },
+};
 
-type Timer = DashSocketPayload["timer"];
+afterEach(() => { cleanup(); rs.unstubAllGlobals(); });
 
-// A fixed wall clock so "remaining" is deterministic. Epoch SECONDS, matching
-// the control process's math.trunc'd timer block.
-const NOW = 1_700_000_000;
-
-const timer = (over: Partial<Timer> = {}): Timer => ({
-  start: 0,
-  paused: 0,
-  end: 0,
-  keepWarm: false,
-  shutdown: false,
-  ...over,
-});
-
-function stubCommand(): CommandClient {
-  return {
-    setMode: rs.fn(async () => OK),
-    hold: rs.fn(async () => OK),
-    setSmokePlus: rs.fn(async () => OK),
-    setPMode: rs.fn(async () => OK),
-    prime: rs.fn(async () => OK),
-    timerStart: rs.fn(async () => OK),
-    timerStartWithOptions: rs.fn(async () => OK),
-    timerPause: rs.fn(async () => OK),
-    timerStop: rs.fn(async () => OK),
-    timerShutdown: rs.fn(async () => OK),
-    timerKeepWarm: rs.fn(async () => OK),
-    system: rs.fn(async () => OK),
-    setUnits: rs.fn(async () => OK),
-    manualOutput: rs.fn(async () => OK),
-    manualPwm: rs.fn(async () => OK),
-    recipeNextStep: rs.fn(async () => OK),
-    recipeUnpause: rs.fn(async () => OK),
-  };
+function mount(timer: DashSocketPayload["timer"] = FIXTURE_DASH.timer) {
+  const fetchMock = rs.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => ({ ok: true, json: async () => ({ result: "OK" }) }));
+  rs.stubGlobal("fetch", fetchMock);
+  const command = createCommand("");
+  return { ...render(<TimerBar timer={timer} command={command} />), command, fetchMock };
 }
 
-function mount(over: Partial<Timer> = {}) {
-  const command = stubCommand();
-  const view = render(<TimerBar timer={timer(over)} command={command} />);
-  return { command, view };
-}
-
-async function tick(ms: number) {
-  await act(async () => {
-    await rs.advanceTimersByTimeAsync(ms);
-  });
-}
-
-// Frozen clock for every case: the bar reads Date.now() itself, so the fake
-// timers must be installed before any render.
-beforeEach(() => {
-  rs.useFakeTimers();
-  rs.setSystemTime(NOW * 1000);
-});
-
-afterEach(() => {
-  rs.useRealTimers();
-});
-
-const btn = (name: RegExp | string) => screen.queryByRole("button", { name });
-
-describe("TimerBar when stopped", () => {
-  it("offers only a start affordance", () => {
+describe("TimerBar", () => {
+  it("opens a duration form when stopped", () => {
     mount();
-    expect(btn(/start timer/i)).toBeTruthy();
-    expect(btn(/pause timer/i)).toBeNull();
-    expect(btn(/resume timer/i)).toBeNull();
-    expect(btn(/stop timer/i)).toBeNull();
-  });
-
-  it("shows a placeholder rather than a zeroed clock", () => {
-    const { view } = mount();
-    expect(view.container.querySelector(".pf-timer-time")?.textContent).toBe("--:--:--");
-  });
-
-  it("ignores a stale end time left over from a previous cook", () => {
-    mount({ end: NOW + 5_000, paused: NOW - 10 });
-    expect(btn(/start timer/i)).toBeTruthy();
-    expect(btn(/stop timer/i)).toBeNull();
-  });
-
-  it("opens the set-timer modal from the start affordance", () => {
-    mount();
-    expect(screen.queryByRole("dialog")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /start timer/i }));
+    expect(screen.getByText("--:--:--")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Start timer" }));
     expect(screen.getByRole("dialog")).toBeTruthy();
   });
-});
 
-describe("TimerBar when running", () => {
-  it("offers pause and stop but no start", () => {
-    mount({ start: NOW - 60, end: NOW + 600 });
-    expect(btn(/pause timer/i)).toBeTruthy();
-    expect(btn(/stop timer/i)).toBeTruthy();
-    expect(btn(/start timer/i)).toBeNull();
+  it("renders projected zero without emitting an expiry action", () => {
+    const view = mount(running.timer);
+    expect(screen.getByText("00:10:00")).toBeTruthy();
+    const nearExpiry = { ...running, timer: { ...running.timer, remainingS: 2 } };
+    const timer = projectLiveDurations(nearExpiry, 100_000, 110_000, true).timer;
+    view.rerender(<TimerBar timer={timer} command={view.command} />);
+    expect(screen.getByText("00:00:00")).toBeTruthy();
+    expect(view.fetchMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Pause timer" })).toBeTruthy();
   });
 
-  it("renders the remaining time and ticks it down", async () => {
-    const { view } = mount({ start: NOW - 60, end: NOW + 600 });
-    const time = () => view.container.querySelector(".pf-timer-time")?.textContent;
-    expect(time()).toBe("00:10:00");
-
-    await tick(5_000);
-    expect(time()).toBe("00:09:55");
-
-    await tick(55_000);
-    expect(time()).toBe("00:09:00");
+  it("pauses and stops only on operator commands", async () => {
+    const { fetchMock } = mount(running.timer);
+    fireEvent.click(screen.getByRole("button", { name: "Pause timer" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop timer" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual(["/api/set/timer/pause", "/api/set/timer/stop"]);
   });
 
-  it("clamps an expired timer at zero instead of counting into the negative", async () => {
-    const { view } = mount({ start: NOW - 60, end: NOW + 2 });
-    await tick(10_000);
-    expect(view.container.querySelector(".pf-timer-time")?.textContent).toBe("00:00:00");
+  it("keeps interrupted checkpoint remaining visible and requires explicit resume", async () => {
+    const { fetchMock } = mount({ ...running.timer, state: "interrupted", current: false });
+    expect(screen.getByText(/remaining from last checkpoint/)).toBeTruthy();
+    expect(screen.getByText("00:10:00")).toBeTruthy();
+    expect(fetchMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Resume timer" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/set/timer/start/600");
   });
 
-  it("pauses via the pause command", () => {
-    const { command } = mount({ start: NOW - 60, end: NOW + 600 });
-    fireEvent.click(screen.getByRole("button", { name: /pause timer/i }));
-    expect(command.timerPause).toHaveBeenCalled();
+  it("unknown interrupted timers offer a new duration, not resume", () => {
+    mount({ ...running.timer, state: "interrupted", remainingS: null, current: false });
+    expect(screen.getByText("--:--:--")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Resume timer" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Start timer" })).toBeTruthy();
   });
 
-  it("stops via the stop command", () => {
-    const { command } = mount({ start: NOW - 60, end: NOW + 600 });
-    fireEvent.click(screen.getByRole("button", { name: /stop timer/i }));
-    expect(command.timerStop).toHaveBeenCalled();
-  });
-
-  it("stops ticking once unmounted", async () => {
-    const { view } = mount({ start: NOW - 60, end: NOW + 600 });
-    expect(rs.getTimerCount()).toBeGreaterThan(0);
-    view.unmount();
-    expect(rs.getTimerCount()).toBe(0);
-  });
-});
-
-describe("TimerBar when paused", () => {
-  it("offers resume and stop but no pause", () => {
-    mount({ start: NOW - 600, paused: NOW - 10, end: NOW + 590 });
-    expect(btn(/resume timer/i)).toBeTruthy();
-    expect(btn(/stop timer/i)).toBeTruthy();
-    expect(btn(/pause timer/i)).toBeNull();
-    expect(btn(/start timer/i)).toBeNull();
-  });
-
-  it("freezes the remaining time while the wall clock advances", async () => {
-    const { view } = mount({ start: NOW - 600, paused: NOW - 10, end: NOW + 590 });
-    const time = () => view.container.querySelector(".pf-timer-time")?.textContent;
-    expect(time()).toBe("00:10:00");
-
-    await tick(120_000);
-    expect(time()).toBe("00:10:00");
-  });
-
-  // /api/set/timer/start doubles as the unpause command: when timer.paused is
-  // non-zero the backend shifts the existing end time and IGNORES the seconds
-  // argument entirely (common/api_commands.py _cmd_set_timer).
-  it("resumes by re-issuing the start command", () => {
-    const { command } = mount({ start: NOW - 600, paused: NOW - 10, end: NOW + 590 });
-    fireEvent.click(screen.getByRole("button", { name: /resume timer/i }));
-    expect(command.timerStart).toHaveBeenCalled();
-    expect(command.timerPause).not.toHaveBeenCalled();
+  it("qualifies retained data and leaves paused remaining frozen", () => {
+    const paused: DashSocketPayload = { ...running, timer: { ...running.timer, state: "paused" } };
+    mount(projectLiveDurations(paused, null, 500_000, true).timer);
+    expect(screen.getByText("Last reported")).toBeTruthy();
+    expect(screen.getByText("00:10:00")).toBeTruthy();
   });
 });

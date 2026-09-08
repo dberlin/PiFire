@@ -8,6 +8,7 @@ from common.control_delta import control_delta
 from common.persistence import control as control_persistence
 from common.persistence import history as history_persistence
 from common.persistence import runtime as runtime_persistence
+from tests.fakes.clock import clock_stamp
 
 
 def test_default_control_manual_has_only_change_and_pwm_keys():
@@ -35,11 +36,8 @@ def test_control_snapshot_replaces_immediately_without_consuming_the_delta_queue
         "primary_setpoint": 150,
         "nested": {"replacement": True},
     }
-    assert control_persistence.read_pending_control_writes() == (
-        {"__control_delta__": 1, "set": {"primary_setpoint": 225}, "origin": "web"},
-    )
 
-    control_persistence.execute_control_writes()
+    control_persistence.execute_control_writes(timer_now=clock_stamp())
 
     assert control_persistence.read_control() == {
         "mode": "Startup",

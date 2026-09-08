@@ -261,7 +261,7 @@ def test_stopped_controller_settings_reload_updates_inference_policy_without_pro
         base_pellet_db(),
     )
     controller_now = 1_800_000_000.0
-    ctx.clock.advance(controller_now)
+    ctx.clock.jump_wall(controller_now - ctx.clock.wall_time())
     _neutralize_externals(monkeypatch)
     _spy_dispatch(controller)
     controller.setup()

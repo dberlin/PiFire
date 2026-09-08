@@ -5,7 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { type CSSProperties, useState } from "react";
 import { useNavigate } from "react-router";
 
-import { useNow } from "../../helpers/clock";
+import { useWallNow } from "../../helpers/clock";
 import { useControlHealth } from "../../helpers/dashboard/controlHealth";
 import { cookElapsed, fmtElapsed } from "../../helpers/dashboard/cookTime";
 import { lidCountdown, modeCountdown, recipeLabel } from "../../helpers/dashboard/countdowns";
@@ -87,7 +87,7 @@ export function Dashboard({
   const view = deriveView(dash);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const nowSeconds = useNow(true);
+  const nowSeconds = useWallNow(true);
   const health = useControlHealth(controlAlive, apiBase);
   const { data: settings } = useSettings(apiBase);
   const configuredAmbient = settings?.controller?.config?.mpc?.T_amb;
@@ -105,14 +105,7 @@ export function Dashboard({
   // that box is the area left under the navbar, not the whole viewport.
   const { scale, fitted, ref: fitRef } = useFitScale(1280, 720);
 
-  // Elapsed cook time comes from the CONTROLLER's startup_timestamp
-  // (blueprints/mobile/socket_io.py:234, epoch seconds), not from when this
-  // browser happened to mount. Reloading four hours into a brisket used to
-  // report 00:00, and two devices watching the same cook disagreed with each
-  // other. Reignite deliberately does not rewrite the timestamp
-  // (controller/runtime/modes/reignite.py:17-18), so a reignited cook keeps
-  // counting from the original ignition -- which is what Flask has always done.
-  const cookTime = fmtElapsed(cookElapsed(dash.startupTimestamp, nowSeconds));
+  const cookTime = fmtElapsed(cookElapsed(dash.durations));
   const now = new Date(nowSeconds * 1000);
   const clock = now.toLocaleTimeString([], {
     hour: "2-digit",
@@ -122,8 +115,8 @@ export function Dashboard({
   // Status readouts Flask carries and this port had dropped. All three render
   // INSIDE existing boxes -- no new rows -- so the 1280x720 geometry is
   // unchanged when they are absent, which is every frame in the demo fixture.
-  const modeLeft = modeCountdown(dash, nowSeconds);
-  const lidLeft = lidCountdown(dash, nowSeconds);
+  const modeLeft = modeCountdown(dash);
+  const lidLeft = lidCountdown(dash);
   // A running recipe replaces the gauge's mode badge outright, matching Flask's
   // "Recipe | <step mode>" status header (dash_default.js:297-300).
   const modeLabel = recipeLabel(dash) ?? view.modeLabel;
@@ -314,11 +307,11 @@ export function Dashboard({
                       integer is injected there. Rendered as a second line in
                       this card's existing label column so the 52px row keeps
                       its height. */}
-                  {modeLeft !== null && (
-                    <span className="pf-dash-modeleft">Time Left in Mode: {modeLeft}s</span>
+                  {(modeLeft !== null || (!dash.recipeStatus?.recipeMode && ["Startup", "Reignite", "Prime", "Shutdown"].includes(dash.currentMode))) && (
+                    <span className="pf-dash-modeleft">Time Left in Mode: {modeLeft === null ? "--" : `${modeLeft}s`}{!dash.durations.current ? " (last reported)" : ""}</span>
                   )}
                 </div>
-                <span className="pf-dash-cookval">{cookTime}</span>
+                <span className="pf-dash-cookval" title={dash.durations.current ? "Cook elapsed" : "Last reported cook elapsed"}>{cookTime}</span>
               </div>
               {/* The primary probe gets a bell too: the Flask dashboard renders
                   the notify modal for probe_status['P'] as well as ['F']
@@ -340,9 +333,7 @@ export function Dashboard({
                   {/* Flask: "Lid Open Detected: PID Paused Ns"
                       (dash_default.js:397). Two lines inside the SAME 210x52
                       box -- the box is not widened. */}
-                  {lidLeft !== null && (
-                    <span className="pf-dash-lid-sub">PID Paused {lidLeft}s</span>
-                  )}
+                  <span className="pf-dash-lid-sub">PID Paused {lidLeft === null ? "--" : `${lidLeft}s`}{!dash.durations.current ? " (last reported)" : ""}</span>
                 </div>
               )}
             </div>

@@ -428,6 +428,7 @@ def test_api_post_settings_update_valid_delta_writes_strict(client_and_store):
 def test_save_settings_and_flag_update_writes_strict(ds):
     from common.app import save_settings_and_flag_update
     from common.persistence.control import execute_control_writes, read_control
+    from tests.fakes.clock import clock_stamp
 
     write_settings_store(default_settings())
     settings = read_settings()
@@ -435,7 +436,7 @@ def test_save_settings_and_flag_update_writes_strict(ds):
     control = default_control()
 
     save_settings_and_flag_update(settings, control, "settings_update", origin="test")
-    execute_control_writes()  # the validated delta is queued; drain it to read back.
+    execute_control_writes(timer_now=clock_stamp())  # Drain the queued intent before reading back.
 
     assert read_settings()["globals"]["grill_name"] == "Direct App Helper"
     assert read_control()["settings_update"] is True

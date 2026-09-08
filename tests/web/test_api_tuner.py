@@ -10,6 +10,7 @@ docs/superpowers/plans/2026-07-28-react-tuner-manual.md.
 import pytest
 
 from app import app as flask_app
+from tests.fakes.clock import clock_stamp
 
 
 def control_now():
@@ -24,7 +25,7 @@ def control_now():
     """
     from common.persistence.control import execute_control_writes, read_control
 
-    execute_control_writes()
+    execute_control_writes(timer_now=clock_stamp())
     return read_control()
 
 
@@ -50,7 +51,7 @@ def set_mode(mode):
     #  Drain immediately so a test's precondition is live before it POSTs.
     from common.persistence.control import execute_control_writes
 
-    execute_control_writes()
+    execute_control_writes(timer_now=clock_stamp())
 
 
 def test_opening_a_session_enables_tuning_and_monitors(ds, client):

@@ -25,6 +25,7 @@
 import logging
 import threading
 import time
+from collections.abc import Callable
 
 # The watchdog binds these directly instead of going through the `time` module
 # attribute the sampling loop reads. It has to measure elapsed real time on a
@@ -114,6 +115,7 @@ class SampledHopperLevel:
     sensor_label = "sensor"
 
     def __init__(self, empty=22, full=4, debug=False):
+        self._monotonic: Callable[[], float] = time.monotonic
         self.logger = logging.getLogger("events")
         self.empty = empty  # Empty is greater than distance measured for empty
         self.full = full  # Full is less than or equal to the minimum full distance.
@@ -282,7 +284,7 @@ class SampledHopperLevel:
         deadline, so the wait doubles while the failures keep coming."""
         self._consecutive_failures += 1
         delay = self._backoff_delay(self._consecutive_failures)
-        self._backoff_until = time.time() + delay
+        self._backoff_until = self._monotonic() + delay
 
         if self._failure_reported:
             return
@@ -331,9 +333,9 @@ class SampledHopperLevel:
 
     def _sensing_loop(self):
         """This loop should run in a thread so that it does not stall the main control process"""
-        sample_time = time.time()
+        sample_time = self._monotonic()
         while self.sensor_thread_active:
-            now = time.time()
+            now = self._monotonic()
 
             if self._backoff_until is not None:
                 if now < self._backoff_until:
@@ -378,7 +380,7 @@ class SampledHopperLevel:
                 # sees a fully finished cycle -- reading published and any
                 # re-init already done -- rather than a half-completed one.
                 self.sample_count += 1
-                sample_time = time.time()
+                sample_time = self._monotonic()
             time.sleep(1)
 
     def _take_sample(self):
@@ -389,7 +391,7 @@ class SampledHopperLevel:
         publish; the sampling loop turns that into a backoff."""
         # Read the sensor multiple times and average the result
         avg_dist = 0
-        start_time = time.time()
+        start_time = self._monotonic()
         # Stamped for the whole cycle -- the reads AND the re-initialization a
         # slow cycle triggers, either of which can park on the device -- so the
         # watchdog, on its own thread, can see how long the cycle has been in
@@ -436,7 +438,7 @@ class SampledHopperLevel:
             self.distance_read = int(self._level_from_distance_cm(avg_dist))
 
             # If it took a long time to get sensor data, then the sensor might be having issues
-            if (time.time() - start_time) > self.slow_cycle_seconds:
+            if (self._monotonic() - start_time) > self.slow_cycle_seconds:
                 event = (
                     f"Warning: The {self.sensor_label} took longer than normal to get a reading.  "
                     "Re-initializing the sensor."

@@ -1,3 +1,4 @@
+from common.control_delta import CONTROL_DELTA_VERSION
 from common.current_schema import CurrentSchema
 from common.persistence.transforms import (
     apply_control_delta,
@@ -5,6 +6,7 @@ from common.persistence.transforms import (
     history_row_to_dict,
     initial_status,
 )
+from tests.fakes.clock import clock_stamp
 
 
 def test_initial_status_preserves_the_exact_existing_defaults_when_distance_module_is_missing():
@@ -250,11 +252,11 @@ def test_history_row_to_dict_decodes_extended_data_into_a_detached_result():
 def test_apply_control_delta_deep_merges_against_live_state_without_aliasing_the_delta():
     control = {"mode": "Stop", "nested": {"x": 1, "y": 2}}
     delta = {
-        "__control_delta__": 1,
+        "__control_delta__": CONTROL_DELTA_VERSION,
         "set": {"mode": "Hold", "nested": {"x": 9}},
     }
 
-    returned = apply_control_delta(control, delta)
+    returned = apply_control_delta(control, delta, timer_now=clock_stamp())
     delta["set"]["nested"]["x"] = 999
 
     assert returned is control

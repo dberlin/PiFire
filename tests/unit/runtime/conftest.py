@@ -46,6 +46,9 @@ def hold_cycle(monkeypatch):
         control_data = base_control(mode="Hold")
         control_data["primary_setpoint"] = 225
         ctx, _grill, _notifier = make_ctx(settings, control_data, base_pellet_db(), FakeProbes().script([225] * 200))
+        # This fixture enters Hold directly, without an outer admitted tick.
+        # Its first actual Hold observation establishes continuity.
+        ctx.last_clock_stamp = None
         if clock is not None:
             ctx.clock = clock
         if bind_learning_inputs:

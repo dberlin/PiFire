@@ -19,6 +19,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.fakes.clock import clock_stamp
+
 from common.common import display_sleep_timeout
 from common.persistence import runtime as persistence_runtime
 from common.persistence.control import (
@@ -39,7 +41,7 @@ def test_settings_update_persists_delta_and_sets_flag(client):
     assert resp.get_json()["result"] == "success"
     assert read_settings()["pwm"]["update_time"] == 7
 
-    execute_control_writes()
+    execute_control_writes(timer_now=clock_stamp())
     assert read_control()["settings_update"] is True
 
 
@@ -52,7 +54,7 @@ def test_settings_update_empty_flags_sets_none(client):
     assert resp.status_code == 200
     assert read_settings()["globals"]["grill_name"] == "Smokey"
 
-    execute_control_writes()
+    execute_control_writes(timer_now=clock_stamp())
     assert read_control()["settings_update"] is False
 
 
@@ -70,7 +72,7 @@ def test_settings_update_normalizes_legacy_falsy_flags_to_empty(client, flags):
     assert response.status_code == 200
     assert response.get_json()["result"] == "success"
     assert read_settings()["globals"]["grill_name"] == "Falsy Flags"
-    execute_control_writes()
+    execute_control_writes(timer_now=clock_stamp())
     assert read_control()["settings_update"] is False
 
 
@@ -91,7 +93,7 @@ def test_settings_update_rejects_unknown_flag(client):
     assert read_settings()["globals"]["grill_name"] == original_grill_name
 
     # Control must NOT have gained a bogus "mode" flag.
-    execute_control_writes()
+    execute_control_writes(timer_now=clock_stamp())
     assert read_control().get("mode") is not True
 
 
@@ -313,7 +315,7 @@ def test_settings_update_table_save_flag_does_not_alter_stored_settings(
     # 1) React's write: the delta plus the settings_update flag.
     _reset_settings_update_flag()
     assert _settings_update(client, {"settings": delta, "flags": ["settings_update"]}).get_json()["result"] == "success"
-    execute_control_writes()
+    execute_control_writes(timer_now=clock_stamp())
     with_flag = read_settings()
     assert read_control()["settings_update"] is True  # the flag's ONLY intended effect
 
@@ -321,7 +323,7 @@ def test_settings_update_table_save_flag_does_not_alter_stored_settings(
     write_settings(baseline)
     _reset_settings_update_flag()
     assert _settings_update(client, {"settings": delta, "flags": []}).get_json()["result"] == "success"
-    execute_control_writes()
+    execute_control_writes(timer_now=clock_stamp())
     without_flag = read_settings()
     assert read_control()["settings_update"] is False
 

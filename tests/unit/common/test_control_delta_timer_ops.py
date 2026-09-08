@@ -1,177 +1,196 @@
-"""The four timer ops.
+"""Timer commands use the admitted drain clock, never queued wall provenance."""
 
-Each op reproduces one branch of common/api_commands.py::_cmd_set_timer, with
-one difference that is the entire point: the BRANCH is chosen at drain time from
-live state, while the CLOCK travels in the op as `at`. So a stop followed by a
-pause inside one control cycle pauses a timer that is already cleared -- which is
-`_cmd_set_timer`'s own start == 0 branch, i.e. a no-op -- instead of resurrecting
-a countdown from a pre-stop read.
-"""
+from copy import deepcopy
+from typing import NotRequired, TypedDict
 
-import logging
+import pytest
 
-from common.control_delta import apply_control_delta, control_delta
-
-NOW = 1_700_000_000.0
+from common.control_delta import ControlDeltaError, apply_control_delta, control_delta
+from common.timer import TimerRecord, default_timer, pause_timer, remaining_seconds, start_timer
+from tests.fakes.clock import clock_stamp
 
 
-def _running():
+NOW = clock_stamp()
+
+
+class _TimerControl(TypedDict):
+    mode: str
+    timer: TimerRecord
+    notify_data: list[dict[str, str | bool]]
+    recipe: NotRequired[dict[str, int]]
+
+
+def _control(timer: TimerRecord | None = None) -> _TimerControl:
     return {
-        "timer": {"start": 1000.0, "paused": 0, "end": 2000.0},
+        "mode": "Hold",
+        "timer": default_timer() if timer is None else timer,
         "notify_data": [{"label": "Timer", "type": "timer", "req": True, "shutdown": True, "keep_warm": False}],
     }
 
 
-def _paused():
-    control = _running()
-    control["timer"]["paused"] = 1500.0
-    return control
-
-
-def _stopped():
+def _op(name: str, **fields: object) -> dict[str, object]:
     return {
-        "timer": {"start": 0, "paused": 0, "end": 0},
-        "notify_data": [{"label": "Timer", "type": "timer", "req": False, "shutdown": False, "keep_warm": False}],
+        "op": name,
+        "requested_wall_s": NOW.observed_wall_s,
+        "target_runtime_id": NOW.runtime_id,
+        **fields,
     }
 
 
-def _timer_entry(control):
-    return next(e for e in control["notify_data"] if e["type"] == "timer")
+def test_delayed_drain_starts_the_full_requested_duration():
+    control = _control()
+    envelope = control_delta(ops=[_op("timer.start_or_resume", seconds=300)])
+    drained = clock_stamp(monotonic_s=800, wall_s=NOW.observed_wall_s + 700)
+
+    apply_control_delta(control, envelope, timer_now=drained)
+
+    assert remaining_seconds(control["timer"], drained) == 300
+    assert remaining_seconds(control["timer"], clock_stamp(monotonic_s=825)) == 275
+    assert control["timer"]["action_armed"] is True
 
 
-def test_clear_zeroes_the_countdown_and_disarms_both_expiry_flags():
-    control = _running()
-    apply_control_delta(control, control_delta(ops=[{"op": "timer.clear"}]))
-    assert control["timer"] == {"start": 0, "paused": 0, "end": 0}
-    assert _timer_entry(control) == {
-        "label": "Timer",
-        "type": "timer",
-        "req": False,
-        "shutdown": False,
-        "keep_warm": False,
-    }
+@pytest.mark.parametrize("wall_jump", [-86_400, 86_400])
+def test_pause_uses_elapsed_duration_despite_wall_jumps(wall_jump):
+    control = _control(start_timer(300, NOW))
+    paused = clock_stamp(monotonic_s=130, wall_s=NOW.observed_wall_s + wall_jump)
+
+    apply_control_delta(control, control_delta(ops=[_op("timer.pause")]), timer_now=paused)
+
+    assert control["timer"]["state"] == "paused"
+    assert remaining_seconds(control["timer"], clock_stamp(monotonic_s=900)) == 270
+    assert control["timer"]["action_armed"] is False
+    assert control["notify_data"][0]["req"] is False
 
 
-def test_pause_on_a_running_timer_stamps_paused_from_the_requests_clock():
-    control = _running()
-    apply_control_delta(control, control_delta(ops=[{"op": "timer.pause", "at": NOW}]))
-    assert control["timer"] == {"start": 1000.0, "paused": NOW, "end": 2000.0}
-    assert _timer_entry(control)["req"] is False
+@pytest.mark.parametrize("interrupted", [False, True])
+def test_resume_preserves_known_remaining_instead_of_replacing_with_requested_seconds(interrupted):
+    timer = pause_timer(start_timer(300, NOW), clock_stamp(monotonic_s=130))
+    if interrupted:
+        timer["state"] = "interrupted"
+    control = _control(timer)
+    resumed = clock_stamp(monotonic_s=800, wall_s=NOW.observed_wall_s - 50_000)
+
+    apply_control_delta(control, control_delta(ops=[_op("timer.start_or_resume", seconds=500)]), timer_now=resumed)
+
+    assert control["timer"]["state"] == "running"
+    assert remaining_seconds(control["timer"], resumed) == 270
+    assert remaining_seconds(control["timer"], clock_stamp(monotonic_s=820)) == 250
+    assert control["timer"]["action_armed"] is True
+    assert control["notify_data"][0]["req"] is True
 
 
-def test_pause_on_a_stopped_timer_clears():
-    """_cmd_set_timer's start == 0 branch (common/api_commands.py:685-693)."""
-    control = _stopped()
-    control["timer"]["end"] = 5.0
-    apply_control_delta(control, control_delta(ops=[{"op": "timer.pause", "at": NOW}]))
-    assert control["timer"] == {"start": 0, "paused": 0, "end": 0}
+def test_fifo_pause_then_resume_reads_the_newly_paused_duration():
+    control = _control(start_timer(300, NOW))
+    drained = clock_stamp(monotonic_s=130)
 
-
-def test_start_or_resume_on_a_stopped_timer_arms_seconds_from_at():
-    control = _stopped()
-    apply_control_delta(control, control_delta(ops=[{"op": "timer.start_or_resume", "at": NOW, "seconds": 300}]))
-    assert control["timer"] == {"start": NOW, "paused": 0, "end": NOW + 300}
-    assert _timer_entry(control)["req"] is True
-
-
-def test_start_or_resume_substitutes_sixty_seconds_for_a_null_duration():
-    """The bare form's is_float() fallback (common/api_commands.py:672)."""
-    control = _stopped()
-    apply_control_delta(control, control_delta(ops=[{"op": "timer.start_or_resume", "at": NOW, "seconds": None}]))
-    assert control["timer"]["end"] == NOW + 60
-
-
-def test_start_or_resume_on_a_paused_timer_shifts_the_end_and_unpauses():
-    control = _paused()
-    apply_control_delta(control, control_delta(ops=[{"op": "timer.start_or_resume", "at": NOW, "seconds": 500}]))
-    assert control["timer"] == {"start": 1000.0, "paused": 0, "end": 2000.0 - 1500.0 + NOW}
-
-
-def test_start_with_options_arms_the_countdown_and_both_flags():
-    control = _stopped()
     apply_control_delta(
         control,
-        control_delta(
-            ops=[
-                {
-                    "op": "timer.start_with_options",
-                    "at": NOW,
-                    "seconds": 600,
-                    "shutdown": True,
-                    "keep_warm": False,
-                }
-            ]
-        ),
+        control_delta(ops=[_op("timer.pause"), _op("timer.start_or_resume", seconds=500)]),
+        timer_now=drained,
     )
-    assert control["timer"] == {"start": NOW, "paused": 0, "end": NOW + 600}
-    entry = _timer_entry(control)
-    assert (entry["req"], entry["shutdown"], entry["keep_warm"]) == (True, True, False)
+
+    assert control["timer"]["state"] == "running"
+    assert remaining_seconds(control["timer"], drained) == 270
+    assert control["timer"]["action_armed"] is True
 
 
-def test_start_with_options_drops_and_logs_when_the_timer_became_paused(caplog):
-    """Request time already rejected a paused timer (common/api_commands.py:620-623).
-    Reaching the drain paused means another writer paused it in the same cycle."""
-    control = _paused()
-    with caplog.at_level(logging.ERROR, logger="control"):
+def test_clear_then_pause_cannot_resurrect_a_countdown_or_expiry_actions():
+    control = _control(start_timer(300, NOW))
+
+    apply_control_delta(control, control_delta(ops=[_op("timer.clear"), _op("timer.pause")]), timer_now=NOW)
+
+    assert control["timer"]["state"] == "stopped"
+    assert remaining_seconds(control["timer"], NOW) == 0
+    assert control["timer"]["action_armed"] is False
+    assert control["notify_data"][0]["req"] is False
+    assert control["notify_data"][0]["shutdown"] is False
+    assert control["notify_data"][0]["keep_warm"] is False
+
+
+def test_clear_then_start_replaces_the_old_paused_duration():
+    control = _control(pause_timer(start_timer(300, NOW), clock_stamp(monotonic_s=130)))
+
+    apply_control_delta(
+        control,
+        control_delta(ops=[_op("timer.clear"), _op("timer.start_or_resume", seconds=500)]),
+        timer_now=clock_stamp(monotonic_s=800),
+    )
+
+    assert remaining_seconds(control["timer"], clock_stamp(monotonic_s=800)) == 500
+    assert control["timer"]["action_armed"] is True
+    assert control["notify_data"][0]["shutdown"] is False
+
+
+def test_start_then_clear_leaves_no_armed_countdown():
+    control = _control()
+
+    apply_control_delta(
+        control,
+        control_delta(ops=[_op("timer.start_or_resume", seconds=600), _op("timer.clear")]),
+        timer_now=NOW,
+    )
+
+    assert control["timer"]["state"] == "stopped"
+    assert remaining_seconds(control["timer"], NOW) == 0
+    assert control["timer"]["action_armed"] is False
+    assert control["notify_data"][0]["req"] is False
+
+
+def test_start_with_options_arms_the_selected_expiry_action():
+    control = _control()
+
+    apply_control_delta(
+        control,
+        control_delta(ops=[_op("timer.start_with_options", seconds=600, shutdown=False, keep_warm=True)]),
+        timer_now=NOW,
+    )
+
+    assert remaining_seconds(control["timer"], NOW) == 600
+    assert control["timer"]["action_armed"] is True
+    assert control["notify_data"][0]["req"] is True
+    assert control["notify_data"][0]["shutdown"] is False
+    assert control["notify_data"][0]["keep_warm"] is True
+
+
+def test_start_with_options_cannot_replace_a_paused_timer():
+    control = _control(pause_timer(start_timer(300, NOW), clock_stamp(monotonic_s=130)))
+    before = deepcopy(control)
+
+    with pytest.raises(ControlDeltaError):
         apply_control_delta(
             control,
-            control_delta(
-                ops=[
-                    {
-                        "op": "timer.start_with_options",
-                        "at": NOW,
-                        "seconds": 600,
-                        "shutdown": True,
-                        "keep_warm": False,
-                    }
-                ]
-            ),
+            control_delta(ops=[_op("timer.start_with_options", seconds=600, shutdown=False, keep_warm=True)]),
+            timer_now=clock_stamp(monotonic_s=800),
         )
-    assert control["timer"] == {"start": 1000.0, "paused": 1500.0, "end": 2000.0}
-    assert "timer.start_with_options" in caplog.text
+
+    assert control == before
 
 
-# --- the two resurrections, at the op level --------------------------------
+def test_resume_with_unknown_remaining_is_rejected_without_rearming():
+    timer = default_timer()
+    timer.update(state="interrupted", remaining_s=None)
+    control = _control(timer)
+    control["notify_data"][0]["req"] = False
+    before = deepcopy(control)
+
+    with pytest.raises(ValueError):
+        apply_control_delta(control, control_delta(ops=[_op("timer.start_or_resume", seconds=300)]), timer_now=NOW)
+
+    assert control == before
 
 
-def test_clear_then_pause_leaves_the_timer_stopped():
-    """web-react TimerBar's Stop-then-Pause pair. Pinned as resurrecting at
-    tests/characterization/test_process_command_golden.py::
-    test_a_pause_after_a_stop_in_one_cycle_resurrects_the_timer."""
-    control = _running()
-    apply_control_delta(control, control_delta(ops=[{"op": "timer.clear"}, {"op": "timer.pause", "at": NOW}]))
-    assert control["timer"] == {"start": 0, "paused": 0, "end": 0}
-    assert _timer_entry(control)["shutdown"] is False
-
-
-def test_clear_then_start_or_resume_arms_a_fresh_timer_rather_than_the_old_one():
-    """Stop-then-Resume. The old end time (2000.0) must NOT come back; what the
-    user gets is what they would get one control cycle apart -- the resume sees
-    paused == 0 and arms a fresh countdown."""
-    control = _paused()
-    apply_control_delta(
-        control,
-        control_delta(ops=[{"op": "timer.clear"}, {"op": "timer.start_or_resume", "at": NOW, "seconds": 500}]),
+def test_stale_generation_rejects_the_whole_envelope_before_any_mutation():
+    control = _control(start_timer(300, NOW))
+    control["recipe"] = {"step": 2}
+    before = deepcopy(control)
+    stale_op = _op("timer.clear", target_runtime_id="962c8912-46d2-4784-90af-7d8ea1c0d878")
+    envelope = control_delta(
+        set_values={"mode": "Shutdown"},
+        ops=[_op("timer.pause"), stale_op],
+        delete_paths=[["recipe", "step"]],
     )
-    assert control["timer"] == {"start": NOW, "paused": 0, "end": NOW + 500}
 
+    with pytest.raises(ControlDeltaError):
+        apply_control_delta(control, envelope, timer_now=clock_stamp(monotonic_s=130))
 
-def test_start_or_resume_then_clear_leaves_the_timer_stopped():
-    """A `stop` against an already-zero ancestor carries no evidence of intent
-    under a whole-dict write, so start + stop in one cycle left the timer
-    RUNNING. The op form disarms it."""
-    control = _stopped()
-    apply_control_delta(
-        control,
-        control_delta(ops=[{"op": "timer.start_or_resume", "at": NOW, "seconds": 600}, {"op": "timer.clear"}]),
-    )
-    assert control["timer"] == {"start": 0, "paused": 0, "end": 0}
-
-
-def test_every_validated_op_name_has_an_applier():
-    """A name in _OP_FIELDS but not in _OP_APPLIERS passes validation at PUSH
-    time in the web process and then raises KeyError in the control loop's
-    drain, a process away. Pin both ends of the table against each other."""
-    from common.control_delta import _OP_APPLIERS, CONTROL_DELTA_OPS
-
-    assert set(_OP_APPLIERS) == set(CONTROL_DELTA_OPS)
+    assert control == before

@@ -7,11 +7,13 @@ See docs/superpowers/plans/2026-07-28-react-tuner-auto.md.
 
 import pytest
 
+from tests.fakes.clock import clock_stamp
+
 
 def control_now():
     from common.persistence.control import execute_control_writes, read_control
 
-    execute_control_writes()
+    execute_control_writes(timer_now=clock_stamp())
     return read_control()
 
 
@@ -28,7 +30,7 @@ def set_mode(mode):
     from common.persistence.control import enqueue_control_delta, execute_control_writes
 
     enqueue_control_delta(control_delta(set_values={"mode": mode}), origin="test")
-    execute_control_writes()
+    execute_control_writes(timer_now=clock_stamp())
 
 
 def test_opening_a_session_flushes_the_autotune_store(ds, client):

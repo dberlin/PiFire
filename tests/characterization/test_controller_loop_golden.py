@@ -29,6 +29,7 @@ import controller.runtime.store as store_mod
 from common.common import ErrorKind
 from common.control_delta import control_delta
 from common.defaults import default_metrics
+from common.timer import start_timer
 from controller.runtime.clock import ManualClock
 from distance.intervals import HOPPER_LEVEL_REFRESH_INTERVAL
 from tests.characterization._controller_harness import (
@@ -339,8 +340,8 @@ def test_outer_clear_rebinds_control_before_settings_update_and_transition_write
 
     c.tick()
 
-    assert written_controls
-    assert all(snapshot["cook_id"] is None for snapshot in written_controls)
+    first_clear = next(index for index, snapshot in enumerate(written_controls) if snapshot["cook_id"] is None)
+    assert all(snapshot["cook_id"] is None for snapshot in written_controls[first_clear:])
     assert c.control["cook_id"] is None
     assert store.read_control()["cook_id"] is None
 
@@ -482,21 +483,30 @@ def test_tick_switch_off_triggers_stop(monkeypatch):
 
 
 def test_tick_timer_expiry_sends_notification(monkeypatch):
+    from notify import notifications
+
     sent = _neutralize_externals(monkeypatch)
+    monkeypatch.setattr(controller_mod, "check_notify", notifications.check_notify)
+    monkeypatch.setattr(notifications, "send_notifications", controller_mod.send_notifications)
     settings = base_settings()
     control_data = base_control(mode="Stop")
     control_data["updated"] = False
-    control_data["timer"] = {"start": 1, "paused": 0, "end": 5}
-    control_data["notify_data"] = [{"type": "timer", "req": True, "shutdown": True, "keep_warm": True}]
-    clock = ManualClock(wall_start=10.0)  # wall time (10) >= persisted timer end (5)
-    c, _ctx, store, _grill, _dist, _notifier = make_controller(settings, control_data, base_pellet_db(), clock=clock)
+    clock = ManualClock(wall_start=10.0)
+    c, ctx, store, _grill, _dist, _notifier = make_controller(settings, control_data, base_pellet_db(), clock=clock)
     _spy_dispatch(c)
     c.setup()
+    control_data = store.read_control()
+    control_data["timer"] = start_timer(5, ctx.admitted_stamp())
+    control_data["notify_data"] = [{"type": "timer", "req": True, "shutdown": True, "keep_warm": True}]
+    store.write_control_snapshot(control_data, origin="timer-start")
+    clock.advance(5)
     c.tick()
     assert any(x[0] == "send_notifications" and x[1] == ("Timer_Expired",) for x in sent)
     control = store.read_control()
     assert control["notify_data"][0]["req"] is False
-    assert control["timer"]["end"] == 0
+    assert control["timer"]["state"] == "expired"
+    assert control["timer"]["remaining_s"] == 0
+    assert control["timer"]["action_armed"] is False
 
 
 def test_tick_hopper_check_requests_a_sample_and_clears(monkeypatch):

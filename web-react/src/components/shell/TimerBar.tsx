@@ -2,17 +2,13 @@ import type { CommandClient } from "@pifire/core/command";
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
 import { useState } from "react";
 
-import { useNow } from "../../helpers/clock";
 import { deriveTimer, formatRemaining } from "../../helpers/timer/timerState";
 import { TimerModal } from "./TimerModal";
 
 import "./shell.css";
 
-// Ported from templates/_macro_timer.html:1-29. Like the Flask bar this one is
-// hidden until the navbar's stopwatch button reveals it: the shell renders it
-// only while useTimerVisibility (helpers/timer/timerVisibility.ts) says it is
-// showing, so hiding the bar also unmounts it and detaches it from the clock.
-
+// The shell owns visibility; the connection owner projects durations even while
+// the bar is hidden, so remounting cannot make an old snapshot fresh.
 export function TimerBar({
   timer,
   command,
@@ -22,23 +18,20 @@ export function TimerBar({
 }) {
   const [modalOpen, setModalOpen] = useState(false);
 
-  // The remaining time is derived at render from timer + now and never stored.
-  // `now` comes from the app's shared clock (helpers/clock.ts) rather than an
-  // interval of this component's own, and is subscribed to only while a timer
-  // is actually counting down: a stopped or paused bar reads a real time, it
-  // just has no reason to be woken when that time changes.
-  const ticking = timer.start !== 0 && timer.paused === 0;
-  const now = useNow(ticking);
-
-  const { state, remaining } = deriveTimer(timer, now);
+  const { state, remaining } = deriveTimer(timer);
 
   return (
     <div className="pf-timer-bar">
       <span className="pf-timer-time">
         {state === "stopped" ? "--:--:--" : formatRemaining(remaining)}
       </span>
+      {state === "interrupted" ? (
+        <span role="status">Interrupted — remaining from last checkpoint</span>
+      ) : !timer.current && state !== "stopped" ? (
+        <span role="status">Last reported</span>
+      ) : null}
 
-      {state === "stopped" ? (
+      {state === "stopped" || state === "expired" || (state === "interrupted" && remaining === null) ? (
         <button
           type="button"
           className="pf-timer-btn"
@@ -60,15 +53,12 @@ export function TimerBar({
         </button>
       ) : null}
 
-      {state === "paused" ? (
+      {(state === "paused" || state === "interrupted") && remaining !== null ? (
         <button
           type="button"
           className="pf-timer-btn"
           aria-label="Resume timer"
-          // /api/set/timer/start is ALSO the unpause command: with
-          // timer.paused non-zero the backend shifts the existing end time and
-          // ignores this argument entirely. It is passed anyway so the call
-          // still reads as "run for the time that is left" if that ever changes.
+          // Resume is explicit intent; only the controller may rearm it.
           onClick={() => command.timerStart(remaining)}
         >
           Resume
@@ -98,9 +88,3 @@ export function TimerBar({
   );
 }
 
-// Every timer gesture queues an OP, not a computed timer state
-// (common/control_delta.py). Two gestures in one control cycle compose in the
-// drain against live state -- a stop followed by a pause pauses a timer that is
-// already cleared, i.e. nothing -- so the bar does not need to serialize them.
-// Pinned in Python at tests/characterization/test_control_delta_seam.py and
-// here by the ControlProcess model in TimerBar.controlCycle.test.tsx.

@@ -37,6 +37,7 @@
 # *****************************************
 
 import time
+from collections.abc import Callable
 
 from distance._serial_tof_base import SerialToFHopperLevel
 
@@ -63,12 +64,12 @@ def _recv_data(ser, length):
     return list(ser.read(length))
 
 
-def _recv_packet(ser, cmd, timeout=2.0):
+def _recv_packet(ser, cmd, timeout=2.0, *, monotonic: Callable[[], float] = time.monotonic):
     """Read and validate a response packet for `cmd`. Returns the response
     payload (list of ints), or None on timeout / status failure / a
     malformed or mismatched response."""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
+    deadline = monotonic() + timeout
+    while monotonic() < deadline:
         status = _recv_data(ser, 1)
         if not status:
             continue
@@ -104,7 +105,7 @@ class HopperLevel(SerialToFHopperLevel):
             ser.reset_input_buffer()
             ser.write(_SYNC_BYTE)
             ser.write(_build_packet(CMD_SETMODE, args=[0, 0, 0, _RANGING_MATRIX_8X8]))
-            response = _recv_packet(ser, CMD_SETMODE, timeout=self._setmode_recv_timeout)
+            response = _recv_packet(ser, CMD_SETMODE, timeout=self._setmode_recv_timeout, monotonic=self._monotonic)
             if response is not None:
                 time.sleep(5)  # matches the vendor driver's post-configure settle time
                 return
@@ -114,7 +115,7 @@ class HopperLevel(SerialToFHopperLevel):
         self.ser.reset_input_buffer()
         self.ser.write(_SYNC_BYTE)
         self.ser.write(_build_packet(CMD_FIXED_POINT, args=[x, y]))
-        data = _recv_packet(self.ser, CMD_FIXED_POINT, timeout=self._read_recv_timeout)
+        data = _recv_packet(self.ser, CMD_FIXED_POINT, timeout=self._read_recv_timeout, monotonic=self._monotonic)
         if not data or len(data) < 2:
             return 0
         return (data[1] << 8) | data[0]

@@ -69,6 +69,7 @@ from common.persistence.runtime import (
     write_settings_store,
 )
 from common.web_contracts.core import PelletSocketPayload
+from tests.fakes.clock import clock_stamp
 
 # Index of the single ``type == "timer"`` entry in a default notify_data list
 # (12 probe/limit entries for 4 probes come first). Pinned so the timer tests
@@ -82,11 +83,11 @@ def _drain():
     Production drains the validated delta queue on each control-loop tick. This
     harness has no control loop, so it drains by hand before asserting state.
     """
-    execute_control_writes()
+    execute_control_writes(timer_now=clock_stamp())
 
 
 @pytest.fixture
-def sio(ds):
+def sio(ds, monkeypatch):
     """Seed a fresh datastore with defaults and import the socket_io module.
 
     os.system stays stubbed as a blanket guard, but the module no longer
@@ -107,6 +108,8 @@ def sio(ds):
     write_generic_key("probe_device_info", {})
 
     from blueprints.mobile import socket_io
+
+    monkeypatch.setattr(socket_io, "local_clock_stamp", clock_stamp)
 
     # The control-liveness verdict is process-local module state that outlives
     # the `ds` datastore, so reset it around every test or a check that failed
@@ -381,7 +384,7 @@ def test_get_probe_data_aux_section_direct_call(sio):
 
 def _stamp_heartbeat(age_seconds):
     """Write a control heartbeat `age_seconds` old, as the control loop would."""
-    write_generic_key(CONTROL_HEARTBEAT_KEY, time.time() - age_seconds)
+    write_generic_key(CONTROL_HEARTBEAT_KEY, clock_stamp(monotonic_s=100.0 - age_seconds).as_dict())
 
 
 def test_check_control_status_records_a_failure_without_writing_the_blob(sio):
@@ -417,12 +420,10 @@ def test_check_control_status_needs_no_cooperation_from_the_control_process(sio)
     assert sio.mod._control_alive is True
 
 
-def test_check_control_status_stays_optimistic_when_never_stamped(sio):
-    # Fresh datastore, or a control process too old to publish a heartbeat:
-    # do not flash a control-down banner mid-upgrade.
+def test_check_control_status_cannot_retain_optimism_without_a_stamp(sio):
     sio.mod._set_control_alive(True)
     sio.mod._check_control_status()
-    assert sio.mod._control_alive is True
+    assert sio.mod._control_alive is False
 
 
 def test_check_control_status_treats_a_stamp_just_inside_the_window_as_alive(sio):

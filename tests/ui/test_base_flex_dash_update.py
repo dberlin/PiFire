@@ -14,7 +14,6 @@ plumbing.
 
 import json
 import os
-import time
 
 import pytest
 
@@ -278,10 +277,8 @@ def test_update_dash_lid_alert_tracks_lid_open_detected(tmp_path):
     assert _obj_data(display, "lid_alert")["active"] is True
 
 
-def test_update_dash_cook_time_elapsed_when_no_active_timer(tmp_path, monkeypatch):
-    now = 10_000.0
-    monkeypatch.setattr("display._base_flex.time.time", lambda: now)
-    display = _make_display(tmp_path, status_data=_status_data(mode="Hold", startup_timestamp=now - 125))
+def test_update_dash_cook_time_elapsed_when_no_active_timer(tmp_path):
+    display = _make_display(tmp_path, status_data=_status_data(mode="Hold", cook_elapsed_seconds=125))
     display.in_data = _in_data()
     display._update_dash_objects()
 
@@ -290,14 +287,46 @@ def test_update_dash_cook_time_elapsed_when_no_active_timer(tmp_path, monkeypatc
     assert cook_time["data"]["value"] == "02:05"
 
 
-def test_update_dash_cook_time_zero_when_stopped(tmp_path):
-    import time
-
-    display = _make_display(tmp_path, status_data=_status_data(mode="Stop", startup_timestamp=time.time() - 500))
+def test_update_dash_cook_time_retains_known_snapshot_when_stopped(tmp_path):
+    display = _make_display(tmp_path, status_data=_status_data(mode="Stop", cook_elapsed_seconds=500))
     display.in_data = _in_data()
     display._update_dash_objects()
 
+    assert _obj_data(display, "cook_time")["data"]["value"] == "08:20"
+
+
+@pytest.mark.parametrize("wall_jump", [-3600, 3600])
+def test_flex_cook_display_ages_current_snapshot_without_wall_arithmetic(tmp_path, monkeypatch, wall_jump):
+    clock = {"steady": 100.0, "wall": 1_800_000_000.0}
+    monkeypatch.setattr("time.time", lambda: clock["wall"])
+    monkeypatch.setattr(
+        "display._base_flex.local_clock_stamp",
+        lambda: clock_stamp(monotonic_s=clock["steady"], wall_s=clock["wall"]),
+    )
+    monkeypatch.setattr("display._base_flex.read_control_heartbeat", lambda: clock_stamp(monotonic_s=clock["steady"]))
+    display = _make_display(
+        tmp_path,
+        status_data=_status_data(
+            mode="Startup",
+            running=True,
+            remaining_seconds=10,
+            cook_elapsed_seconds=125,
+            clock_stamp=clock_stamp().as_dict(),
+        ),
+    )
+    display.in_data = _in_data()
+    display._update_dash_objects()
+    assert _obj_data(display, "cook_time")["data"]["value"] == "00:10"
+    clock["wall"] += wall_jump
+    clock["steady"] = 110
+    display._update_dash_objects()
     assert _obj_data(display, "cook_time")["data"]["value"] == "00:00"
+    display.status_data.update(mode="Hold")
+    display._update_dash_objects()
+    assert _obj_data(display, "cook_time")["data"]["value"] == "02:15"
+    clock["steady"] = 116
+    display._update_dash_objects()
+    assert _obj_data(display, "cook_time")["data"]["value"] == "02:05"
 
 
 def test_hopper_vertical_hidden_when_disabled(tmp_path):
@@ -405,56 +434,23 @@ def test_duty_pills_smoke_plus_on_highlights():
     assert right == {"label": "SMOKE+", "value": "ON", "highlight": True}
 
 
-def test_cook_time_data_active_countdown_timer():
-    now = 1000.0
-    status = {"mode": "Startup", "start_time": now - 5, "start_duration": 10}
-    data = DisplayBase._cook_time_data(status, now)
-    assert data == {"label": "Timer", "value": "00:05"}
-
-
-def test_cook_time_data_lid_pause_countdown():
-    now = 1000.0
-    status = {"mode": "Hold", "lid_open_detected": True, "lid_open_endtime": now + 30}
-    data = DisplayBase._cook_time_data(status, now)
-    assert data == {"label": "Lid Pause", "value": "00:30"}
-
-
-def test_cook_time_data_elapsed_cook_time():
-    now = 1000.0
-    status = {"mode": "Hold", "startup_timestamp": now - 125}
-    data = DisplayBase._cook_time_data(status, now)
-    assert data == {"label": "COOK TIME", "value": "02:05"}
-
-
-def test_cook_time_data_elapsed_with_hours():
-    now = 5000.0
-    status = {"mode": "Hold", "startup_timestamp": now - 3665}  # 1h 1m 5s
-    data = DisplayBase._cook_time_data(status, now)
-    assert data == {"label": "COOK TIME", "value": "1:01:05"}
-
-
-def test_cook_time_data_zero_when_stopped():
-    now = 1000.0
-    assert DisplayBase._cook_time_data({"mode": "Stop", "startup_timestamp": now - 500}, now) == {
-        "label": "COOK TIME",
-        "value": "00:00",
-    }
-
-
-def test_cook_time_data_zero_when_monitor():
-    now = 1000.0
-    assert DisplayBase._cook_time_data({"mode": "Monitor", "startup_timestamp": now - 500}, now) == {
-        "label": "COOK TIME",
-        "value": "00:00",
-    }
-
-
-def test_cook_time_data_zero_when_no_timestamp():
-    now = 1000.0
-    assert DisplayBase._cook_time_data({"mode": "Hold", "startup_timestamp": 0}, now) == {
-        "label": "COOK TIME",
-        "value": "00:00",
-    }
+@pytest.mark.parametrize(
+    ("status", "snapshot", "label", "value"),
+    [
+        ({"mode": "Startup"}, {"modeRemainingS": 5}, "Timer", "00:05"),
+        ({"mode": "Startup"}, {"modeRemainingS": 0}, "Timer", "00:00"),
+        ({"mode": "Startup"}, {"modeRemainingS": None}, "Timer", "--:--"),
+        ({"mode": "Hold", "lid_open_detected": True}, {"lidRemainingS": 30}, "Lid Pause", "00:30"),
+        ({"mode": "Hold", "lid_open_detected": True}, {"lidRemainingS": None}, "Lid Pause", "--:--"),
+        ({"mode": "Hold"}, {"cookElapsedS": 125}, "COOK TIME", "02:05"),
+        ({"mode": "Hold"}, {"cookElapsedS": 3665}, "COOK TIME", "1:01:05"),
+        ({"mode": "Stop"}, {"cookElapsedS": 500}, "COOK TIME", "08:20"),
+        ({"mode": "Monitor"}, {"cookElapsedS": None}, "COOK TIME", "--:--"),
+        ({"mode": "Hold", "startup_timestamp": 1000}, {"cookElapsedS": None}, "COOK TIME", "--:--"),
+    ],
+)
+def test_cook_time_data_renders_snapshot(status, snapshot, label, value):
+    assert DisplayBase._cook_time_data(status, snapshot) == {"label": label, "value": value}
 
 
 def _probe_card_data(display, card="probe_card_0"):

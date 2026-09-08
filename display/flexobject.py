@@ -1808,8 +1808,9 @@ class TimerStatus(FlexObject):
         canvas = Image.new("RGBA", size)
         draw = ImageDraw.Draw(canvas)
 
-        # If not in use, display empty box
-        if self.objectData["data"]["seconds"] > 0:
+        # Zero with no active countdown remains blank; unknown stays visible.
+        seconds = self.objectData["data"]["seconds"]
+        if seconds is None or seconds > 0:
             # Timer Background
             draw.rounded_rectangle((15, 15, size[0] - 15, size[1] - 15), radius=20, fill=bg_color)
 
@@ -1827,7 +1828,7 @@ class TimerStatus(FlexObject):
             canvas.paste(timer_label, (80, 30), timer_label)
 
             # Draw Seconds Remaining
-            seconds_remaining = f"{self.objectData['data']['seconds']}s"
+            seconds_remaining = "--" if seconds is None else f"{seconds}s"
             timer_text = self._draw_text(seconds_remaining, "trebuc.ttf", 100, fg_color)
             timer_text_position = ((size[0] // 2) - (timer_text.width // 2), 90)
             canvas.paste(timer_text, timer_text_position, timer_text)

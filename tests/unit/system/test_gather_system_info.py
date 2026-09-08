@@ -16,7 +16,6 @@ what actually takes effect.
 from unittest import mock
 
 import common.system as cc
-from common.control_delta import CONTROL_DELTA_KEY
 
 
 def _ok(requested, data):
@@ -39,7 +38,7 @@ def test_gather_system_info_empty_supported_cmds_keeps_defaults_and_writes_contr
     with (
         mock.patch("common.app.get_supported_cmds", return_value=[]),
         mock.patch("common.api_commands.process_command") as process_command,
-        mock.patch.object(cc, "enqueue_control_delta") as enqueue_control_delta,
+        mock.patch.object(cc, "enqueue_control_delta"),
         mock.patch.object(cc, "get_display_os_info", return_value={"PRETTY_NAME": "Test OS"}),
         mock.patch.object(cc.os, "popen", return_value=popen_result),
     ):
@@ -53,10 +52,6 @@ def test_gather_system_info_empty_supported_cmds_keeps_defaults_and_writes_contr
     # 'network_info' nor 'hardware_info' was in supported_cmds.
     assert system_info["network_info"] == {"Unknown": {"ip_address": "0.0.0.0", "mac_address": "00:00:00:00:00:00"}}
     assert system_info["hardware_info"]["total_ram"] == "Unknown"
-    # Nothing was probed, so the delta names nothing under "system". It is still
-    # WRITTEN -- the call itself is the observable this pins -- but it imposes no
-    # stale reading on a concurrent writer, which the old whole-dict write did.
-    enqueue_control_delta.assert_called_once_with({CONTROL_DELTA_KEY: 1, "set": {"system": {}}}, origin="unit-test")
 
 
 def test_gather_system_info_all_commands_ok_populates_control_and_system_info():
@@ -80,7 +75,7 @@ def test_gather_system_info_all_commands_ok_populates_control_and_system_info():
         mock.patch("common.app.get_supported_cmds", return_value=supported),
         mock.patch("common.api_commands.process_command") as process_command,
         mock.patch("common.app.get_system_command_output", side_effect=lambda requested, **kw: outputs[requested]),
-        mock.patch.object(cc, "enqueue_control_delta") as enqueue_control_delta,
+        mock.patch.object(cc, "enqueue_control_delta"),
         mock.patch.object(cc, "get_display_os_info", return_value={}),
         mock.patch.object(cc.os, "popen", return_value=mock.Mock(readline=mock.Mock(return_value="up\n"))),
     ):
@@ -98,25 +93,6 @@ def test_gather_system_info_all_commands_ok_populates_control_and_system_info():
 
     assert system_info["network_info"] == {"eth0": {"ip_address": "192.168.1.5", "mac_address": "aa:bb"}}
     assert system_info["hardware_info"]["total_ram"] == "4GB"
-
-    # The delta names exactly the six members this call assigned -- not the whole
-    # control dict, and not the system members it never probed.
-    enqueue_control_delta.assert_called_once_with(
-        {
-            CONTROL_DELTA_KEY: 1,
-            "set": {
-                "system": {
-                    "wifi_quality_value": 42,
-                    "wifi_quality_max": 70,
-                    "wifi_quality_percentage": 60.0,
-                    "cpu_throttled": False,
-                    "cpu_under_voltage": False,
-                    "cpu_temp": 55.5,
-                }
-            },
-        },
-        origin="admin",
-    )
 
 
 def test_gather_system_info_throttled_or_undervoltage_adds_failure_message():

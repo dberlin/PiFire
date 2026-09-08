@@ -241,3 +241,25 @@ describe("thermocouple health alerts", () => {
     },
   );
 });
+
+describe("timer completion", () => {
+  const timerId = "66cc24ec-0bb4-42b7-af5d-c5e21124ec90";
+  const running: DashSocketPayload = {
+    ...FIXTURE_DASH,
+    timer: { ...FIXTURE_DASH.timer, timerId, state: "running", remainingS: 10, current: true },
+  };
+
+  it("alerts once only on an explicit matching controller expiry", () => {
+    const expired: DashSocketPayload = { ...running, timer: { ...running.timer, state: "expired", remainingS: 0 } };
+    expect(alertsFor(running, expired).map((alert) => alert.id)).toEqual([`timer:${timerId}`]);
+    expect(alertsFor(expired, expired)).toEqual([]);
+  });
+
+  it("does not treat local zero, manual stop or interruption as completion", () => {
+    const states: DashSocketPayload["timer"]["state"][] = ["running", "stopped", "interrupted", "paused"];
+    for (const state of states) {
+      expect(alertsFor(running, { ...running, timer: { ...running.timer, state, remainingS: 0 } })).toEqual([]);
+    }
+    expect(alertsFor(running, { ...running, timer: { ...running.timer, state: "expired", timerId: "fcc611be-61db-4fd4-87b8-d401d7c10c6e" } })).toEqual([]);
+  });
+});

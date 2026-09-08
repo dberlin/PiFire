@@ -1,7 +1,9 @@
 import type { PelletDbSchema } from "@pifire/core/contracts/control";
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
 import type { ConnectionPhase, LiveConnectionHandlers } from "@pifire/core/liveConnection";
+import * as actualConnection from "@pifire/core/liveConnection" with { rstest: "importActual" };
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { FIXTURE_DASH } from "@pifire/core/fixture";
 import { act, renderHook } from "@testing-library/react";
 
 const PELLET_DB: PelletDbSchema = {
@@ -44,6 +46,7 @@ function fakeConnection(url: string, incoming: LiveConnectionHandlers) {
 }
 
 rs.mock("@pifire/core/liveConnection", () => ({
+  ...actualConnection,
   createLiveConnection: (url: string, incoming: LiveConnectionHandlers) =>
     fakeConnection(url, incoming),
 }));
@@ -54,11 +57,94 @@ beforeEach(() => {
   urls = [];
   closeMock.mockClear();
   reconnectMock.mockClear();
+  rs.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
 });
 
 afterEach(() => {
-  handlers = undefined as unknown as LiveConnectionHandlers;
+  rs.useRealTimers();
+  rs.restoreAllMocks();
 });
+
+describe("duration receipts", () => {
+  const payload: DashSocketPayload = {
+    ...FIXTURE_DASH,
+    timer: { ...FIXTURE_DASH.timer, state: "running", remainingS: 600, current: true },
+    durations: { ...FIXTURE_DASH.durations, cookElapsedS: 3723, modeRemainingS: 180, current: true, running: true },
+  };
+
+  it("ticks independently of wall jumps, invalidates resets, and reanchors only on new payload", () => {
+    rs.useFakeTimers();
+    let mono = 100_000;
+    rs.spyOn(performance, "now").mockImplementation(() => mono);
+    const { result } = renderHook(() => useLiveState());
+    act(() => {
+      handlers.onPhase("live");
+      handlers.onDash(payload);
+    });
+    act(() => {
+      rs.setSystemTime(new Date("2026-09-08T14:00:00Z"));
+      mono = 105_000;
+      rs.advanceTimersByTime(1000);
+    });
+    expect(result.current.live.timer.remainingS).toBe(595);
+    expect(result.current.live.durations.cookElapsedS).toBe(3728);
+    act(() => {
+      rs.setSystemTime(new Date("2026-09-08T12:00:00Z"));
+      mono = 110_000;
+      rs.advanceTimersByTime(1000);
+    });
+    expect(result.current.live.timer.remainingS).toBe(590);
+    expect(result.current.live.durations.cookElapsedS).toBe(3733);
+    act(() => {
+      mono = 90_000;
+      rs.advanceTimersByTime(1000);
+    });
+    expect(result.current.live.timer.current).toBe(false);
+    act(() => {
+      mono = 110_000;
+      rs.advanceTimersByTime(1000);
+    });
+    expect(result.current.live.timer.current).toBe(false);
+    act(() => handlers.onDash({ ...payload, timer: { ...payload.timer, remainingS: 480 } }));
+    expect(result.current.live.timer.current).toBe(true);
+    expect(result.current.live.timer.remainingS).toBe(480);
+  });
+
+  it("requires new data after disconnect and page resume, not just socket connect", () => {
+    rs.useFakeTimers();
+    rs.spyOn(performance, "now").mockReturnValue(100_000);
+    const { result } = renderHook(() => useLiveState());
+    act(() => { handlers.onPhase("live"); handlers.onDash(payload); });
+    act(() => { handlers.onPhase("unreachable"); handlers.onPhase("live"); });
+    expect(result.current.live.timer.current).toBe(false);
+    act(() => handlers.onDash(payload));
+    expect(result.current.live.timer.current).toBe(true);
+    rs.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    expect(result.current.live.durations.current).toBe(false);
+    act(() => handlers.onDash(payload));
+    expect(result.current.live.durations.current).toBe(false);
+    rs.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    act(() => window.dispatchEvent(new Event("pageshow")));
+    expect(result.current.live.durations.current).toBe(false);
+    act(() => handlers.onDash(payload));
+    expect(result.current.live.durations.current).toBe(true);
+  });
+
+  it("stale snapshots remain frozen until a new payload arrives", () => {
+    rs.useFakeTimers();
+    let mono = 100_000;
+    rs.spyOn(performance, "now").mockImplementation(() => mono);
+    const { result } = renderHook(() => useLiveState());
+    act(() => { handlers.onPhase("live"); handlers.onDash(payload); });
+    act(() => { mono = 130_001; rs.advanceTimersByTime(1000); });
+    expect(result.current.live.timer.current).toBe(false);
+    expect(result.current.live.timer.remainingS).toBe(600);
+    act(() => { mono = 150_000; rs.advanceTimersByTime(1000); });
+    expect(result.current.live.durations.cookElapsedS).toBe(3723);
+  });
+});
+
 
 // PUBLIC_DEMO is an import.meta.env value baked in at build time, unset in
 // this test build, so FORCE_DEMO is always false here -- only the live-socket

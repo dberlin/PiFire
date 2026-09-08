@@ -15,6 +15,7 @@ from common.persistence.control import (
     read_control,
     read_pending_control_writes,
 )
+from tests.fakes.clock import clock_stamp
 
 
 def _control():
@@ -166,14 +167,14 @@ def test_fifo_drain_serializes_live_revision_and_high_water_reads(ds, monkeypatc
     release = Event()
     apply_control_delta = control_persistence.apply_control_delta
 
-    def pause_inside_drain(control, delta):
+    def pause_inside_drain(control, delta, *, timer_now):
         entered.set()
         assert release.wait(2)
-        return apply_control_delta(control, delta)
+        return apply_control_delta(control, delta, timer_now=timer_now)
 
     monkeypatch.setattr(control_persistence, "apply_control_delta", pause_inside_drain)
     with ThreadPoolExecutor(max_workers=3) as executor:
-        drain = executor.submit(execute_control_writes)
+        drain = executor.submit(execute_control_writes, timer_now=clock_stamp())
         assert entered.wait(2)
         high_water = executor.submit(mpc_calibration_command_state)
         admission = executor.submit(

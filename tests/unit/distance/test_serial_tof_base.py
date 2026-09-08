@@ -15,7 +15,7 @@ class _FakeClock:
     def __init__(self):
         self._now = 0.0
 
-    def time(self):
+    def monotonic(self):
         return self._now
 
     def sleep(self, seconds):

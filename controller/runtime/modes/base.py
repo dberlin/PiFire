@@ -23,6 +23,7 @@ from common.learning_trajectory import TrajectoryBreakReason
 from common.modes import Mode, StatusState
 from common.process_mon import Process_Monitor
 from common.system import restart_control
+from common.timer import checkpoint_timer, parse_timer, pause_timer, restore_timer, start_timer
 from controller.runtime.heartbeat import stamp_control_heartbeat
 from controller.runtime.learning_trajectory import (
     ModeEntered,
@@ -269,10 +270,15 @@ class ControlMode:
         finally:
             self._excitation_last_read_at = None
             self.probe_complex.invalidate_control_history()
-            # Consume pre-gap intents while outputs are fenced, then replace their
-            # actuation request with Error. They must not replay on the next tick.
-            self.ctx.store.execute_control_writes()
+            # Reject old-generation timer intents before any post-gap mutation.
+            self.ctx.get_clock_domain().rotate_runtime()
+            self.ctx.hopper_cooldowns.clear()
+            self.ctx.store.execute_control_writes(timer_now=self.ctx.get_clock_domain().capture())
             self.control = self.ctx.store.read_control()
+            self.control["timer"], _ = restore_timer(self.control["timer"])
+            for item in self.control["notify_data"]:
+                if item["type"] == "timer":
+                    item["req"] = False
             self.control["manual"]["change"] = False
             self.control["manual"]["output"] = False
             self.state.manual_override = {name: 0.0 for name in self.state.manual_override}
@@ -841,12 +847,17 @@ class ControlMode:
             if control["recipe"]["step_data"]["timer"] > 0:
                 for index, item in enumerate(control["notify_data"]):
                     if item["type"] == "timer":
-                        control["notify_data"][index]["req"] = True
-                        timer_start = ctx.clock.wall_time()
-                        control["timer"]["start"] = timer_start
-                        control["timer"]["paused"] = 0
-                        control["timer"]["end"] = timer_start + (control["recipe"]["step_data"]["timer"] * 60)
-                        control["timer"]["shutdown"] = False
+                        timer = parse_timer(control["timer"])
+                        same_step = (
+                            control["recipe"].get("timer_id") == timer["timer_id"]
+                            and control["recipe"].get("timer_step") == control["recipe"]["step"]
+                        )
+                        if not same_step:
+                            timer = start_timer(control["recipe"]["step_data"]["timer"] * 60, ctx.admitted_stamp())
+                            control["recipe"]["timer_id"] = timer["timer_id"]
+                            control["recipe"]["timer_step"] = control["recipe"]["step"]
+                        control["timer"] = timer
+                        control["notify_data"][index]["req"] = timer["action_armed"]
                         control["notify_data"][index]["shutdown"] = False
                         control["notify_data"][index]["keep_warm"] = False
                         recipe_trigger_set = True
@@ -874,6 +885,7 @@ class ControlMode:
 
         # Check if user changed settings and reload
         if control["settings_update"]:
+            ctx.hopper_cooldowns.clear()
             previous_settings = self.settings
             control["settings_update"] = False
             ctx.store.write_control_snapshot(control, origin="control")
@@ -1175,13 +1187,22 @@ class ControlMode:
         if control["mode"] == Mode.RECIPE:
             if control["recipe"]["step_data"]["triggered"] and not control["recipe"]["step_data"]["pause"]:
                 if control["recipe"]["step_data"]["notify"]:
+                    control["recipe"]["step_data"]["notify"] = False
+                    ctx.store.write_control_snapshot(control, origin="control")
                     ctx.notifications.send("Recipe_Step_Message")
                 return True
             elif control["recipe"]["step_data"]["triggered"] and control["recipe"]["step_data"]["pause"]:
+                timer = parse_timer(control["timer"])
+                if timer["state"] == "running":
+                    control["timer"] = pause_timer(timer, ctx.admitted_stamp())
+                    for item in control["notify_data"]:
+                        if item["type"] == "timer":
+                            item["req"] = False
+                    ctx.store.write_control_snapshot(control, origin="control")
                 if control["recipe"]["step_data"]["notify"]:
-                    ctx.notifications.send("Recipe_Step_Message")
                     control["recipe"]["step_data"]["notify"] = False
                     ctx.store.write_control_snapshot(control, origin="control")
+                    ctx.notifications.send("Recipe_Step_Message")
                 # Continue until 'pause' variable is cleared
         return False
 
@@ -1435,7 +1456,7 @@ class ControlMode:
 
             stamp_control_heartbeat(ctx)
 
-            ctx.store.execute_control_writes()
+            ctx.store.execute_control_writes(timer_now=stamp)
             control = self._refresh_cook_identity(
                 ctx.store.read_control(),
                 now=now,
@@ -1557,6 +1578,9 @@ class ControlMode:
             control = ctx.notifications.check(
                 self.settings,
                 control,
+                now=ctx.admitted_stamp(),
+                hopper_cooldowns=ctx.hopper_cooldowns,
+                persist=ctx.store.write_control_snapshot,
                 in_data=in_data,
                 pelletdb=pelletdb,
                 grill_platform=grill_platform,
@@ -1567,6 +1591,8 @@ class ControlMode:
 
             # Send Current Status / Temperature Data to Display Device every 0.5 second
             if (now - self.state.timers.display_toggle) > 0.5:
+                control["timer"] = checkpoint_timer(parse_timer(control["timer"]), ctx.admitted_stamp())
+                ctx.store.write_control_snapshot(control, origin="control")
                 status_data = self._build_status_data(control, pelletdb, self.state.timers.start_time)
                 ctx.store.write_status(status_data)
                 self.state.timers.display_toggle = now
@@ -1610,6 +1636,20 @@ class ControlMode:
                     self.grill.fan_off()
                     self.grill.power_off()
         try:
+            control = ctx.store.read_control()
+            if failed or control["mode"] in (Mode.STOP, Mode.ERROR):
+                timer = parse_timer(control["timer"])
+                if timer["state"] == "running":
+                    control["timer"] = (
+                        restore_timer(timer)[0]
+                        if ctx.last_clock_stamp is None
+                        else pause_timer(timer, ctx.admitted_stamp(), interrupted=failed or self._clock_discontinuous)
+                    )
+                    for item in control["notify_data"]:
+                        if item["type"] == "timer":
+                            item["req"] = False
+                    ctx.store.write_control_snapshot(control, origin="control")
+                self.control = control
             if self._mode_setup_started:
                 self.teardown(self._last_valid_ptemp)
         finally:
@@ -1636,6 +1676,5 @@ class ControlMode:
                 if ctx.cook_elapsed_seconds is not None:
                     ctx.cook_elapsed_seconds += elapsed
             if self._clock_discontinuous:
-                ctx.get_clock_domain().rotate_runtime()
                 ctx.last_clock_stamp = None
             self.ctx.event_log.info(f"{self.name} mode ended.")

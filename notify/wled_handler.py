@@ -50,6 +50,7 @@ Required settings format:
 
 import logging
 import time
+from collections.abc import Callable
 
 import requests
 
@@ -80,7 +81,7 @@ class WLEDNotificationHandler:
         profile_manager (WLEDProfileManager): Manages WLED profiles
     """
 
-    def __init__(self, settings):
+    def __init__(self, settings, *, monotonic: Callable[[], float] = time.monotonic):
         """
         Initialize the WLED notification handler.
 
@@ -106,7 +107,8 @@ class WLEDNotificationHandler:
         # process entry point (control.py).
         self.logger = logging.getLogger("control")
 
-        self.last_updated = time.time()
+        self._monotonic = monotonic
+        self.last_updated = self._monotonic()
         self.last_mode = None
         self.logger.info(f"WLED Notification Handler initialized for device at {self.device_address}")
         self.config = settings["notify_services"]["wled"]
@@ -183,7 +185,7 @@ class WLEDNotificationHandler:
             self.logger.info(f"WLED preset {preset} activated successfully")
         except requests.RequestException as e:
             self.logger.error(f"Error sending notification to WLED device at {self.device_address}: {e}")
-        self.last_updated = time.time()
+        self.last_updated = self._monotonic()
 
     def send_profile_notification(self, profile_number):
         """
@@ -262,7 +264,7 @@ class WLEDNotificationHandler:
             self.logger.error(f"Error sending direct command to WLED device at {self.device_address}: {e}")
             self.logger.error(f"Failed payload: {payload}")
 
-        self.last_updated = time.time()
+        self.last_updated = self._monotonic()
 
     def send_suggested_preset(self, state, config):
         """
@@ -394,7 +396,7 @@ class WLEDNotificationHandler:
 
     def _notify_profiles(self, notifyevent, control, settings):
         """Handle notifications using profile-based control."""
-        if notifyevent == "GRILL_STATE" and self.last_updated < time.time() - self.notify_duration:
+        if notifyevent == "GRILL_STATE" and self.last_updated < self._monotonic() - self.notify_duration:
             if control is None:
                 self.logger.warning("Control data is None, cannot determine grill state.")
                 return
@@ -428,7 +430,7 @@ class WLEDNotificationHandler:
         """Handle notifications using suggested presets (direct control)."""
         suggested_config = self.config.get("suggested_config", {})
 
-        if notifyevent == "GRILL_STATE" and self.last_updated < time.time() - self.notify_duration:
+        if notifyevent == "GRILL_STATE" and self.last_updated < self._monotonic() - self.notify_duration:
             if control is None:
                 self.logger.warning("Control data is None, cannot determine grill state.")
                 return
@@ -486,7 +488,7 @@ class WLEDNotificationHandler:
     def _notify_traditional(self, notifyevent, control, settings):
         """Handle notifications using traditional preset system."""
         preset = -1
-        if notifyevent == "GRILL_STATE" and self.last_updated < time.time() - self.notify_duration:
+        if notifyevent == "GRILL_STATE" and self.last_updated < self._monotonic() - self.notify_duration:
             if control is None:
                 self.logger.warning("Control data is None, cannot determine grill state.")
                 return

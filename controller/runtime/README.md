@@ -97,11 +97,11 @@ feedback without a thermal observation. Hold forces hardware OFF before dispatch
 retires its runner, and reuses the saved terminal cutoff during teardown retries.
 It rejects subsequent ticks and manual actuation in that retired generation.
 
-The coordinated clock migration wires the shared pre-actuation guard to this hook.
-The approved boundary is 60 seconds of actual observation gap or suspend-offset
-discontinuity, not wall-clock correction; the existing 30-second process watchdog
-is separate. Pulse, shared-mode, probe and peripheral clock changes share a
-deployment gate. This pulse development unit alone does not authorize deployment.
+The shared pre-actuation guard calls this hook when an actual monotonic observation
+gap or suspend-offset increase is strictly greater than 60 seconds. Exactly 60
+seconds is admitted; wall-clock correction is not discontinuity. The independent
+30-second process watchdog remains separate. Deploy the coordinated clock,
+timer, probe, persistence, and UI contracts together.
 
 ## Shared-mode duration authority
 
@@ -123,5 +123,30 @@ normal operator restart and health-admission path.
 
 Status publishes mode elapsed/remaining, lid remaining, known cook elapsed, and
 the same acquisition stamp. Epoch `start_time` remains metadata, not countdown
-authority. Persisted timer resume and display freshness belong to the coordinated
-peripheral migration; intermediate shared-mode revisions are not deployable alone.
+authority. `common.duration_status` qualifies these snapshots against their own
+stamp and a fresh same-generation heartbeat; a new heartbeat never renews stale
+status. Browser/mobile clients extrapolate only from their local receipt clock.
+
+## User and recipe timer authority
+
+`common.timer` owns timer schema 2: UUID identity, explicit state, saved remaining
+seconds, and an identity-qualified controller checkpoint. Control-delta schema 2
+carries duration intent plus target runtime identity; countdown begins when the
+controller drains the command, not when HTTP receives it. Expiry is a once-only
+state transition, persisted with any recipe, Shutdown, or keep-warm action before
+sending the external notification.
+
+Pause freezes remaining duration. Restart or qualifying discontinuity changes a
+running timer to interrupted/disarmed and retains the last saved remainder as an
+estimate. No downtime is counted and no cooking action follows from disarming.
+Explicit resume rebinds the known remainder to the new generation. Legacy running
+epoch-only timers have unknown remaining and require a new duration; original
+payloads remain migration diagnostics. Startup discards old generic control
+intents and preserves only timer-containing envelopes for logged generation
+rejection, preventing a stale queued Startup or Hold from restarting heat.
+
+HTTP/socket timer projections expose `timerId`, `state`, `remainingS`, `current`,
+wall provenance and action options. The UI shows interrupted/unknown values;
+reaching zero on a client never issues a control action. Local watchdog, queue,
+distance, display, MQTT, Influx, WLED, and hopper-warning interval clocks are
+monotonic; calendar labels and telemetry timestamps remain wall time.

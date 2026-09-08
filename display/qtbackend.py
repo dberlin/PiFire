@@ -29,6 +29,7 @@ from PySide6.QtCore import (
 )
 
 from common.clock_domain import ClockStamp, continuity_lost, local_clock_stamp
+from common.duration_status import project_duration_status
 from common.modes import Mode
 from common.persistence.runtime import CONTROL_HEARTBEAT_STALE_AFTER, read_control_heartbeat
 from common.web_contracts.core import ThermocoupleHealthView, project_thermocouple_health_views
@@ -386,7 +387,6 @@ class PiFireBackend(QObject):
         self._fetch_fn = fetch_fn
         self._command_fn = command_fn
         self._probe_info = probe_info or {}
-        self._now = time.time
         self._monotonic = time.monotonic
         self._accent_fn = accent_fn
         self._timeout_fn = timeout_fn
@@ -395,7 +395,7 @@ class PiFireBackend(QObject):
         self._last_health_age_at = None
         self._last_health_clock_stamp: ClockStamp | None = None
         self._accent_theme = "Ember"
-        self._last_settings_check = 0.0
+        self._last_settings_check = None
         primary = self._probe_info.get("primary", {})
         self._primary_name = primary.get("name", "Primary")
         self._primary_label = primary.get("label", self._primary_name)
@@ -427,10 +427,10 @@ class PiFireBackend(QObject):
         self._auger_duty = 0
         self._fan_duty = 0
         self._food_count = len(self._probe_info.get("food", []))
-        self._cook_elapsed_text = "00:00"
+        self._cook_elapsed_text = "--:--"
         # Idle / sleep state
         self.TIMEOUT = self._timeout_fn() if self._timeout_fn is not None else 300
-        self._last_interaction = self._now()
+        self._last_interaction = self._monotonic()
         self._asleep = False
 
     def _set(self, attr, value, signal):
@@ -469,7 +469,7 @@ class PiFireBackend(QObject):
             return
         self._set("_mode", status.get("mode", Mode.STOP), self.modeChanged)
         self._set("_units", status.get("units", "F"), self.unitsChanged)
-        now = self._now()
+        now = self._monotonic()
         invalid_labels = self._health_model.invalid_labels()
         p = in_data.get("P", {})
         primary_key = next(iter(p), self._primary_label)
@@ -505,14 +505,15 @@ class PiFireBackend(QObject):
         self._set("_hopper_enabled", bool(status.get("hopper_level_enabled", False)), self.hopperChanged)
         self._set("_hopper_level", max(status.get("hopper_level", 0) or 0, 0), self.hopperChanged)
         self._food_model.update(in_data, current=current, heartbeat=heartbeat, invalid_labels=invalid_labels)
-        self._update_timer_text(status, now)
-        self._update_cook_elapsed(status, now)
+        durations = project_duration_status(status, current=current, heartbeat=heartbeat)
+        self._update_timer_text(status, durations)
+        self._update_cook_elapsed(durations)
         mode = status.get("mode", Mode.STOP)
         recipe = bool(status.get("recipe", False))
         mode_text = f"Recipe: {mode}" if recipe and mode != Mode.SHUTDOWN else mode
         self._set("_mode_text", mode_text, self.modeTextChanged)
         self._set("_p_mode_active", mode in (Mode.STARTUP, Mode.REIGNITE, Mode.SMOKE), self.statusChanged)
-        if (now - self._last_settings_check) >= 1.0:
+        if self._last_settings_check is None or (now - self._last_settings_check) >= 1.0:
             self._last_settings_check = now
             if self._accent_fn is not None:
                 self._set("_accent_theme", self._accent_fn() or "Ember", self.accentThemeChanged)
@@ -520,36 +521,34 @@ class PiFireBackend(QObject):
                 self.TIMEOUT = self._timeout_fn()
         self._update_idle(mode, now)
 
-    def _update_timer_text(self, status, now):
+    def _update_timer_text(self, status, durations):
         mode = status.get("mode", Mode.STOP)
-        duration_key = {
-            "Startup": "start_duration",
-            "Reignite": "start_duration",
-            "Prime": "prime_duration",
-            "Shutdown": "shutdown_duration",
-        }.get(mode)
         text = ""
         label = ""
-        if duration_key and status.get("start_time"):
-            remaining = int(status.get(duration_key, 0) - (now - status["start_time"]))
-            remaining = max(remaining, 0)
-            text = f"{remaining // 60:02d}:{remaining % 60:02d}"
+        remaining = None
+        if mode in (Mode.STARTUP, Mode.REIGNITE, Mode.PRIME, Mode.SHUTDOWN):
+            remaining = durations["modeRemainingS"]
             label = "Timer"
-        elif mode == Mode.HOLD and status.get("lid_open_detected") and status.get("lid_open_endtime"):
-            remaining = max(int(status["lid_open_endtime"] - now), 0)
-            text = f"{remaining // 60:02d}:{remaining % 60:02d}"
+        elif mode == Mode.HOLD and status.get("lid_open_detected"):
+            remaining = durations["lidRemainingS"]
             label = "Lid Pause"
+        if label:
+            if remaining is None:
+                text = "--:--"
+            else:
+                remaining = int(remaining)
+                text = f"{remaining // 60:02d}:{remaining % 60:02d}"
         self._set("_timer_text", text, self.timerChanged)
         self._set("_timer_label", label, self.timerChanged)
 
-    def _update_cook_elapsed(self, status, now):
-        ts = status.get("startup_timestamp", 0) or 0
-        if ts and status.get("mode", Mode.STOP) not in (Mode.STOP, Mode.MONITOR):
-            secs = max(int(now - ts), 0)
+    def _update_cook_elapsed(self, durations):
+        elapsed = durations["cookElapsedS"]
+        if elapsed is not None:
+            secs = int(elapsed)
             h, m, s = secs // 3600, (secs % 3600) // 60, secs % 60
             text = (f"{h}:" if h else "") + f"{m:02d}:{s:02d}"
         else:
-            text = "00:00"
+            text = "--:--"
         self._set("_cook_elapsed_text", text, self.timerChanged)
 
     def _update_idle(self, mode, now):
@@ -563,7 +562,7 @@ class PiFireBackend(QObject):
 
     @Slot()
     def registerInteraction(self):
-        self._last_interaction = self._now()
+        self._last_interaction = self._monotonic()
         self._set("_asleep", False, self.asleepChanged)
 
     # ---------------- Action slots ----------------

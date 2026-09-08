@@ -67,6 +67,38 @@ def test_render_current_is_deterministic():
 
 
 @requires_font
+@pytest.mark.parametrize("wall_jump", [-3600, 3600])
+def test_fixed_countdown_pixels_follow_duration_not_wall(monkeypatch, wall_jump):
+    from tests.fakes.clock import clock_stamp
+
+    clock = {"steady": 100.0, "wall": 1_800_000_000.0}
+    monkeypatch.setattr("time.time", lambda: clock["wall"])
+    monkeypatch.setattr(
+        "display._base_fixed.local_clock_stamp",
+        lambda: clock_stamp(monotonic_s=clock["steady"], wall_s=clock["wall"]),
+    )
+    monkeypatch.setattr("display._base_fixed.read_control_heartbeat", lambda: clock_stamp(monotonic_s=clock["steady"]))
+    b = make_base("display._base_320x480")
+    status = {
+        **SAMPLE_STATUS_DATA,
+        "mode": "Startup",
+        "running": True,
+        "remaining_seconds": 10,
+        "clock_stamp": clock_stamp().as_dict(),
+    }
+    initial = render(b, "_display_current", SAMPLE_IN_DATA, status)
+    clock["wall"] += wall_jump
+    assert render(b, "_display_current", SAMPLE_IN_DATA, status) == initial
+    clock["steady"] = 105
+    advanced = render(b, "_display_current", SAMPLE_IN_DATA, status)
+    assert advanced != initial
+    status["remaining_seconds"] = None
+    unknown = render(b, "_display_current", SAMPLE_IN_DATA, status)
+    status["remaining_seconds"] = 0
+    assert render(b, "_display_current", SAMPLE_IN_DATA, status) != unknown
+
+
+@requires_font
 def test_splash_and_text_render():
     b = make_base("display._base_320x480")
     assert len(render(b, "_display_splash")) == 64

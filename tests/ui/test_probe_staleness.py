@@ -190,7 +190,6 @@ def test_confirmed_invalid_health_beats_primary_last_value_even_when_health_tran
             _primary_health(state="confirmed", temperature_valid=False, outcome="stopped", current=False)
         ],
     )
-    backend._now = lambda: NOW / 1000
 
     backend.poll()
 
@@ -212,7 +211,6 @@ def test_suspected_health_retains_the_primary_numeric_reading():
             _primary_health(state="suspected", temperature_valid=True, outcome="none", current=True)
         ],
     )
-    backend._now = lambda: NOW / 1000
 
     backend.poll()
 

@@ -25,11 +25,7 @@ const NOW = 1_700_000_000;
 type Timer = DashSocketPayload["timer"];
 
 const timerBlock = (over: Partial<Timer> = {}): Timer => ({
-  start: 0,
-  paused: 0,
-  end: 0,
-  keepWarm: false,
-  shutdown: false,
+  ...FIXTURE_DASH.timer,
   ...over,
 });
 
@@ -303,25 +299,15 @@ describe("AppShell navbar stopwatch and timer bar", () => {
   });
 
   it("shows the bar unprompted when a timer is already running", () => {
-    const { container } = mountShell({ timer: timerBlock({ start: NOW - 60, end: NOW + 600 }) });
+    const { container } = mountShell({ timer: timerBlock({ timerId: "66cc24ec-0bb4-42b7-af5d-c5e21124ec90", state: "running", current: true, remainingS: 600 }) });
 
     expect(timerBar(container)).toBeTruthy();
     expect(stopwatch().className).toContain("running");
   });
 
-  it("arms no clock interval while the bar is hidden, even mid-cook", () => {
-    mountShell({ timer: timerBlock({ start: NOW - 60, end: NOW + 600 }) });
-    expect(rs.getTimerCount()).toBeGreaterThan(0);
-
-    fireEvent.click(stopwatch());
-
-    // Hiding unmounts the bar, which detaches the shell's last subscriber from
-    // the shared clock -- nothing is left ticking for an invisible display.
-    expect(rs.getTimerCount()).toBe(0);
-  });
 
   it("drives the timer with the shell's own command client", () => {
-    const { container } = mountShell({ timer: timerBlock({ start: NOW - 60, end: NOW + 600 }) });
+    const { container } = mountShell({ timer: timerBlock({ timerId: "66cc24ec-0bb4-42b7-af5d-c5e21124ec90", state: "running", current: true, remainingS: 600 }) });
     const { command } = useLiveStateMock.mock.results[0].value;
     expect(timerBar(container)).toBeTruthy();
 

@@ -54,7 +54,7 @@ PID-SP, pulse and shared-mode changes must never deploy with mixed physical axes
 
 ## Approved discontinuity and timer policy
 
-The user rejected small-gap fail-stop thresholds. The approved threshold is **60 seconds** for an actual monotonic observation gap or a BOOTTIME-minus-MONOTONIC suspend-offset increase. Wall-clock corrections alone never trigger discontinuity handling. This supersedes the draft 1-second active-loop and 0.25-second suspend proposals in the sibling plans, and the earlier illustrative 600-second discussion. Preserve the existing separate process watchdog; this migration does not change its timeout.
+The user rejected small-gap fail-stop thresholds. A discontinuity requires an actual monotonic observation gap or a BOOTTIME-minus-MONOTONIC suspend-offset **increase strictly greater than 60 seconds**; exactly 60 seconds is admitted. Wall-clock corrections alone never trigger discontinuity handling. This supersedes the draft 1-second active-loop and 0.25-second suspend proposals in the sibling plans, and the earlier illustrative 600-second discussion. Preserve the independent 30-second process watchdog; this migration does not change its timeout.
 
 A qualifying discontinuity stops fuel delivery and invalidates live control/learning history. End physical accounting at the last observed instant; never manufacture delivery during the unknown interval. Restart requires fresh health/history admission and explicit operator action.
 

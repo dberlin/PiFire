@@ -8,6 +8,7 @@ import {
   type LiveConnection,
   createLiveConnection,
   monotonicNowMs,
+  projectLiveDurations,
 } from "@pifire/core/liveConnection";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
@@ -46,14 +47,14 @@ export function receiptFreshness(result: LiveResult, now: number) {
 
 export function qualifyRetainedHealth(result: LiveResult, now: number): LiveResult {
   const { payloadAgeMs, retained } = receiptFreshness(result, now);
-  if (!result.live.thermocoupleHealth?.length) {
-    return result;
-  }
+  const projected = projectLiveDurations(
+    result.live, result.lastPayloadMonotonicMs, now, result.phase === "live",
+  );
   return {
     ...result,
     live: {
-      ...result.live,
-      thermocoupleHealth: result.live.thermocoupleHealth.map((health) => ({
+      ...projected,
+      thermocoupleHealth: result.live.thermocoupleHealth?.map((health) => ({
         ...health,
         freshness: {
           ...health.freshness,
@@ -103,6 +104,7 @@ export function useLive(host: string): LiveResult {
     setLastPayloadMonotonicMs(null);
 
     function showPhase(next: ConnectionPhase) {
+      if (next !== "live") setLastPayloadMonotonicMs(null);
       if (unreachableTimer) {
         clearTimeout(unreachableTimer);
         unreachableTimer = null;
@@ -143,7 +145,9 @@ export function useLive(host: string): LiveResult {
     if (lastPayloadMonotonicMs === null) return;
     const timer = setInterval(() => {
       const ageMs = monotonicNowMs() - lastPayloadMonotonicMs;
-      if (!Number.isFinite(ageMs) || ageMs < 0) setLastPayloadMonotonicMs(null);
+      if (!Number.isFinite(ageMs) || ageMs < 0) {
+        setLastPayloadMonotonicMs(null);
+      }
     }, 1000);
     return () => clearInterval(timer);
   }, [lastPayloadMonotonicMs]);

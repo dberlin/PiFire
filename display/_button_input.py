@@ -21,7 +21,6 @@ PiFire Display Interface Library
 """
  Imported Libraries
 """
-import time
 
 from gpiozero import Button
 
@@ -91,6 +90,6 @@ class ButtonInputMixin:
             self.display_data = None
             self.input_event = None
             self.menu_active = True
-            self.menu_time = time.time()
+            self.menu_time = self._monotonic()
             self._menu_display(command)
             self.input_counter = 0

@@ -65,7 +65,7 @@ At execution use LSP references before exported signature changes and structural
 
 ```python
 CLOCK_STAMP_SCHEMA = 1
-SUSPEND_OFFSET_TOLERANCE_S = 0.25
+CONTROL_DISCONTINUITY_SECONDS = 60.0
 
 # ClockStamp is a frozen, validated serializable value with these exact fields:
 # schema_version: int; boot_id: str | None; runtime_id: str
@@ -77,7 +77,7 @@ SUSPEND_OFFSET_TOLERANCE_S = 0.25
 # capture() -> ClockStamp
 # rotate_runtime() -> str
 # continuity_lost(previous: ClockStamp, current: ClockStamp,
-#                 *, max_active_gap_s: float | None = None) -> bool
+#                 *, max_active_gap_s: float = CONTROL_DISCONTINUITY_SECONDS) -> bool
 # stamp_age_s(stamp: ClockStamp, *, monotonic_s: float,
 #             boot_id: str | None, runtime_id: str | None,
 #             suspend_offset_s: float | None) -> float | None
@@ -98,7 +98,7 @@ def stamp_age_s(stamp, *, monotonic_s, boot_id, runtime_id, suspend_offset_s):
               stamp.suspend_offset_s, suspend_offset_s)
     if any(value is None or isinstance(value, bool) or not math.isfinite(value) for value in values):
         return None
-    if abs(suspend_offset_s - stamp.suspend_offset_s) > SUSPEND_OFFSET_TOLERANCE_S:
+    if suspend_offset_s - stamp.suspend_offset_s > CONTROL_DISCONTINUITY_SECONDS:
         return None
     age_s = monotonic_s - stamp.observed_monotonic_s
     return age_s if age_s >= 0 else None
@@ -108,8 +108,8 @@ def stamp_age_s(stamp, *, monotonic_s, boot_id, runtime_id, suspend_offset_s):
 
 - [ ] Replace heartbeat float with `ClockStamp` object serialized at the same key. Keep the wall field for provenance, throttle `_last_write` using monotonic with `None` first-write sentinel, and publish on both idle and active ticks only after the continuity hook has succeeded. Before any first current heartbeat, old reports cannot claim the new generation.
 - [ ] Change `read_control_heartbeat` to validate the object, not coerce a legacy scalar. Change `_check_control_status` to explicitly set unknown/down for missing, malformed, foreign-boot, suspended or stale heartbeat; remove optimistic “never stamped, leave previous True” behavior. Proposed UI policy: use “Control status unknown” when no verifiable stamp exists rather than claim alive. Existing boolean wire can remain false until an explicit unknown qualifier is added to the shared health view; no sticky prior true state.
-- [ ] Add `test_first_heartbeat_at_zero_is_published`, `test_backward_wall_step_does_not_suppress_heartbeat`, `test_dead_controller_expires_despite_future_wall_stamp`, `test_boot_mismatch_and_legacy_scalar_are_unknown`, and `test_resume_invalidates_before_writer_runs`. For the last case keep monotonic fixed, increase boottime by 60s, and assert heartbeat and probe stamps immediately fail freshness in readers. Restart on the same boot creates a new runtime ID and requires a real heartbeat before recovery.
-- [ ] Wire `continuity_lost` before probe/excitation/actuation in shared mode and before idle timer work. Shared-mode plan owns safe output handling, state rebuild, generation rotation and no frame/history backfill. Its proposed 1s ordinary active-loop-gap threshold is a separate review choice, not a new timeout silently imposed by this helper; preserve the existing 30s process watchdog and 15s published heartbeat thresholds.
+- [X] Publish the first heartbeat at zero; wall rollback cannot suppress it. Missing/scalar/foreign/stale heartbeat is unknown. A reader must invalidate before the writer runs when BOOTTIME-minus-MONOTONIC increases strictly greater than 60 seconds; exactly 60 seconds remains valid. Same-boot restart requires a real heartbeat with the new runtime identity.
+- [X] Wire `continuity_lost` before probe/excitation/actuation and idle timer work. Shared mode owns safe outputs, state rebuild, generation rotation and no history backfill. The approved actual monotonic observation-gap threshold is strictly greater than 60 seconds, separate from the 30-second watchdog and 15-second published-heartbeat freshness threshold.
 
 **Representative regression using the planned value type:**
 
@@ -126,7 +126,7 @@ def test_wall_regression_does_not_change_trusted_age():
     assert stamp_age_s(stamp, monotonic_s=116.0, boot_id=boot_b,
                        runtime_id=run_a, suspend_offset_s=3.0) is None
     assert stamp_age_s(stamp, monotonic_s=116.0, boot_id=boot_a,
-                       runtime_id=run_a, suspend_offset_s=63.0) is None
+                       runtime_id=run_a, suspend_offset_s=63.001) is None
 ```
 
 
@@ -427,3 +427,51 @@ uv run python scripts/exact_revision_gate.py push --bookmark massive-reworks-and
 ```
 
 The guarded wrapper must revalidate local evidence after confirming remote revision and perform the final publication check. Never hand-edit, reuse, rename or delete evidence from an earlier attempt; no direct `jj git push`, no raw Git. These listed commands have not been run for this documentation assignment.
+
+## Execution record — 2026-09-08
+
+All eight tasks are implemented or consumed from their completed prerequisite
+plans. Timer schema 2 and control-delta schema 2 migrated together across FIFO,
+store parity, runtime, API, generated contracts, web, mobile and displays.
+The shared/probe phases already supplied identity-qualified heartbeat/status
+and the strictly-greater-than-60-second discontinuity predicate; the independent
+Process_Monitor remains 30 seconds.
+
+Source review found and repaired stale generic commands surviving startup,
+retired-clock access after discontinuity, lost recipe completion on reignition,
+teardown overwriting timer disarm, and duplicate recipe notification delivery.
+Both timer and presentation reviewers finished without remaining findings.
+
+Verified: 2,032 runtime/controller/characterization tests; 2,655
+common/datastore/persistence/notification/system/distance tests; 672 UI tests
+(one platform skip); 508 learning/evidence integration tests; 214 core, 123
+mobile and 1,997 web tests. All four TS typechecks and generated-contract
+consistency checks passed. Full-suite warning output includes the deliberate
+power-action guard tests and pygame's deprecated image serialization API.
+
+The actual HTTP→FIFO→Controller.tick smoke paused a ten-second timer at three
+seconds, moved wall time backward/forward, resumed seven seconds, and observed
+one expiry. Restart retained seven saved seconds without auto-expiry.
+A subsequent >60-second gap retained the six-second checkpoint, disarmed the
+timer, entered Error and turned all fake outputs off. Chromium used the real
+API/socket/runtime with fake devices: Pause/Resume worked and a subsequent
+gap displayed “Interrupted — remaining from last checkpoint”, Error, and idle
+outputs. No physical heating hardware was used.
+
+The Task 8 evidence ledger remains the production contract: trace schema 10
+separates envelope wall `ts_ms` from monotonic solve/frame coordinates;
+trajectory observation schema 4 carries independently captured wall endpoints;
+evidence schema 6 uses durable append order for supersession. The 508-case gate
+includes rollback/newer-blocked authority and exact import/replay checks without
+weakening historical admission, seeds, digests or mutation anchors.
+
+Final checks: `prek run --all-files` passed; the clock boundary, timer,
+duration projection and process-startup regression selection passed 57 tests.
+The separate contract preflight passed 37 tests. Its command, exit status,
+stdout, stderr and SHA-256 checksums are preserved under
+`.artifacts/development-clock-checks/preflight-cW8I9F/`; this is development
+evidence, not exact-revision release evidence. Temporary smoke scripts were
+removed and local smoke services/browser sessions stopped.
+
+No release commands or push were run. Development checks do not authorize
+publication; the exact-revision wrapper remains the sole release authority.

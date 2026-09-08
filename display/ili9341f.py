@@ -169,13 +169,13 @@ class Display(DisplayBase):
 
         self.dash_object_list = []
 
-        refresh_data = 0
+        refresh_data = None
 
         """ Display Loop """
         while self.display_loop_active:
             """ Fetch display data every 200ms """
-            now = time.time()
-            if now - refresh_data > 0.2:
+            now = self._monotonic()
+            if refresh_data is None or now - refresh_data > 0.2:
                 self._fetch_data()
                 refresh_data = now
 
@@ -258,26 +258,26 @@ class Display(DisplayBase):
         self.enter_received = True
 
     def _inc_callback(self, v):
-        current_time = time.time()
+        current_time = self._monotonic()
         if self.last_direction is None or self.last_direction == "DOWN" or current_time - self.last_movement_time > 0.5:
             if not self.enter_received:
                 self.input_event = "DOWN"
                 self.input_counter += 1
             self.last_direction = "DOWN"
             self.last_movement_time = current_time
-            if time.time() - self.last_movement_time < 0.3 and self.enter_received:
+            if self._monotonic() - self.last_movement_time < 0.3 and self.enter_received:
                 self.enter_received = False
                 return  # if enter command is received during this time, execute the enter command and not the down
 
     def _dec_callback(self, v):
-        current_time = time.time()
+        current_time = self._monotonic()
         if self.last_direction is None or self.last_direction == "UP" or current_time - self.last_movement_time > 0.5:
             if not self.enter_received:
                 self.input_event = "UP"
                 self.input_counter += 1
             self.last_direction = "UP"
             self.last_movement_time = current_time
-            if time.time() - self.last_movement_time < 0.3 and self.enter_received:
+            if self._monotonic() - self.last_movement_time < 0.3 and self.enter_received:
                 self.enter_received = False
                 return  # if enter command is received during this time, execute the enter command and not the up
 

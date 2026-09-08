@@ -564,48 +564,36 @@ describe("Dashboard", () => {
     renderDashboard({ ...FIXTURE_DASH, currentMode: "Stop" });
     expect(screen.getByText("STOP")).toBeInTheDocument();
     expect(screen.getByText("Cook Time")).toBeInTheDocument();
-    // No cook running: startupTimestamp is 0, which Flask renders as "--"
-    // (dash_default.js:410). Not "00:00" -- that claimed a cook of zero length.
+    // Unknown cook provenance is not a fabricated zero-length live cook.
     expect(screen.getByText("--")).toBeInTheDocument();
   });
 
-  it("shares one whole-second clock tick with the running timer bar", () => {
+  it("changes calendar labels without advancing retained cook or timer durations", () => {
     rs.useFakeTimers();
     rs.setSystemTime(new Date(2024, 0, 1, 12, 34, 59));
-
     try {
-      const nowSeconds = Math.floor(Date.now() / 1000);
-      const timer = {
-        ...FIXTURE_DASH.timer,
-        start: nowSeconds - 10,
-        end: nowSeconds + 2,
+      const timer: DashSocketPayload["timer"] = {
+        ...FIXTURE_DASH.timer, state: "running", remainingS: 2, current: false,
       };
-      const dash = {
-        ...FIXTURE_DASH,
-        currentMode: "Hold",
-        startupTimestamp: nowSeconds - 59,
-        timer,
+      const dash: DashSocketPayload = {
+        ...FIXTURE_DASH, currentMode: "Hold", timer,
+        durations: { ...FIXTURE_DASH.durations, cookElapsedS: 59 },
       };
-
+      const command = makeCommand();
       const view = renderInQueryRouter(
-        <>
-          {dashboardAt("", dash)}
-          <TimerBar timer={timer} command={makeCommand()} />
-        </>,
+        <>{dashboardAt("", dash)}<TimerBar timer={timer} command={command} /></>,
       );
-      const headerClock = view.container.querySelector('[data-pf="clock"]');
-
-      expect(headerClock).toHaveTextContent("12:34");
+      const initialCalendarLabel = view.container.querySelector('[data-pf="clock"]')?.textContent;
       expect(screen.getByText("59s")).toBeInTheDocument();
       expect(screen.getByText("00:00:02")).toBeInTheDocument();
-      expect(rs.getTimerCount()).toBe(1);
-
-      act(() => rs.advanceTimersByTime(1_000));
-
-      expect(headerClock).toHaveTextContent("12:35");
-      expect(screen.getByText("01:00")).toBeInTheDocument();
-      expect(screen.getByText("00:00:01")).toBeInTheDocument();
-      expect(rs.getTimerCount()).toBe(1);
+      act(() => {
+        rs.setSystemTime(new Date(2024, 0, 1, 13, 34, 59));
+        rs.advanceTimersByTime(1000);
+      });
+      expect(view.container.querySelector('[data-pf="clock"]')?.textContent).not.toBe(initialCalendarLabel);
+      expect(screen.getByText("59s")).toBeInTheDocument();
+      expect(screen.getByText("00:00:02")).toBeInTheDocument();
+      expect(command.timerStop).not.toHaveBeenCalled();
     } finally {
       cleanup();
       rs.useRealTimers();
@@ -659,27 +647,22 @@ describe("Dashboard", () => {
     expect(screen.getByText("--")).toBeInTheDocument();
   });
 
-  // C3: the counter is a pure function of the CONTROLLER's startup_timestamp,
-  // so it survives a reload and two browsers watching one cook agree. It used
-  // to be seeded from `new Date()` at mount, which reported 00:00 four hours
-  // into a brisket.
-  it("counts from the controller's startup_timestamp, not from mount", () => {
-    const started = Math.floor(Date.now() / 1000) - 3723;
+  it("shows controller cook exposure, not browser mount time", () => {
     renderDashboard({
       ...FIXTURE_DASH,
       currentMode: "Hold",
-      startupTimestamp: started,
+      durations: { ...FIXTURE_DASH.durations, cookElapsedS: 3723 },
     });
     expect(screen.getByText("HOLD")).toBeInTheDocument();
     expect(screen.getByText(/^01:02:0\d$/)).toBeInTheDocument();
   });
 
   it("does not restart the counter when a fresh instance mounts mid-cook", () => {
-    const started = Math.floor(Date.now() / 1000) - 754;
+    const cookElapsedS = 754;
     const dash = {
       ...FIXTURE_DASH,
       currentMode: "Smoke",
-      startupTimestamp: started,
+      durations: { ...FIXTURE_DASH.durations, cookElapsedS },
     };
     renderDashboard(dash);
     expect(screen.getByText(/^12:3\d$/)).toBeInTheDocument();
@@ -688,15 +671,11 @@ describe("Dashboard", () => {
     expect(screen.getByText(/^12:3\d$/)).toBeInTheDocument();
   });
 
-  // Reignite deliberately does not rewrite startup_timestamp
-  // (controller/runtime/modes/reignite.py:17-18), so the elapsed time keeps
-  // running from the ORIGINAL ignition -- Flask's behaviour, reproduced.
-  it("keeps counting from the original ignition through a Reignite", () => {
-    const started = Math.floor(Date.now() / 1000) - 7;
+  it("preserves cook exposure independently of the Reignite mode elapsed", () => {
     renderDashboard({
       ...FIXTURE_DASH,
       currentMode: "Reignite",
-      startupTimestamp: started,
+      durations: { ...FIXTURE_DASH.durations, modeElapsedS: 1, cookElapsedS: 7 },
     });
     expect(screen.getByText(/^0\ds$/)).toBeInTheDocument();
   });
@@ -1061,15 +1040,12 @@ describe("Dashboard control-health recheck", () => {
 // renders INSIDE an existing box -- no new rows -- so the 1280x720 geometry is
 // unchanged whenever they are absent.
 describe("Dashboard status readouts", () => {
-  const secondsAgo = (n: number) => Math.floor(Date.now() / 1000) - n;
-  const secondsAhead = (n: number) => Math.floor(Date.now() / 1000) + n;
 
-  it("shows the time left in a timed mode, with Flask's literal wording", () => {
+  it("shows explicit remaining in a timed mode", () => {
     renderDashboard({
       ...FIXTURE_DASH,
       currentMode: "Startup",
-      startDuration: 240,
-      modeStartTime: secondsAgo(60),
+      durations: { ...FIXTURE_DASH.durations, modeRemainingS: 180, current: true },
     });
     expect(screen.getByText(/Time Left in Mode: 1(79|80)s/)).toBeInTheDocument();
   });
@@ -1084,7 +1060,7 @@ describe("Dashboard status readouts", () => {
       ...FIXTURE_DASH,
       currentMode: "Hold",
       lidOpenDetected: true,
-      lidOpenEndTime: secondsAhead(45),
+      durations: { ...FIXTURE_DASH.durations, lidRemainingS: 45, current: true },
     });
     expect(screen.getByText("LID OPEN")).toBeInTheDocument();
     expect(screen.getByText(/PID Paused 4[45]s/)).toBeInTheDocument();

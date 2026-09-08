@@ -56,16 +56,21 @@ from common.persistence.control import (
 from common.persistence.runtime import (
     write_settings_store,
 )
+from common.timer import parse_timer, remaining_seconds
+from tests.fakes.clock import clock_stamp
 
 FIXED_NOW = 1_700_000_000.0
+STAMP = clock_stamp(wall_s=FIXED_NOW)
 
 
 @pytest.fixture
-def seeded(ds):
+def seeded(ds, monkeypatch):
     """A datastore with default settings + a freshly written control blob."""
     write_settings_store(default_settings())
     control_persistence.write_control_snapshot(default_control(), origin="test-cross-writer")
     c.SqliteQueue("queue_control_write").flush()
+    monkeypatch.setattr(api_commands, "read_control_heartbeat", lambda: STAMP)
+    monkeypatch.setattr(api_commands, "local_clock_stamp", lambda: STAMP)
     return ds
 
 
@@ -106,7 +111,7 @@ def test_two_commands_in_one_cycle_both_survive_the_drain(seeded):
 
     # All three queued BEFORE any drain -- one control cycle.
     assert c.SqliteQueue("queue_control_write").length() == 3
-    control_persistence.execute_control_writes()
+    control_persistence.execute_control_writes(timer_now=STAMP)
 
     control = read_control()
     grill = _entry(control, "Grill", "probe")
@@ -122,7 +127,7 @@ def test_two_commands_in_one_cycle_survive_in_either_order(seeded):
     assert _start_timer("600", "shutdown")["result"] == "OK"
     assert _set_notify("Probe1", "target", "165")["result"] == "OK"
 
-    control_persistence.execute_control_writes()
+    control_persistence.execute_control_writes(timer_now=STAMP)
 
     control = read_control()
     assert _entry(control, "Probe1", "probe")["target"] == 165
@@ -134,7 +139,7 @@ def test_limit_writers_do_not_eat_each_other(seeded):
     assert _set_notify("Grill", "target", "203")["result"] == "OK"
     assert _set_notify("Grill", "target", "350", subcommand="limit_high")["result"] == "OK"
 
-    control_persistence.execute_control_writes()
+    control_persistence.execute_control_writes(timer_now=STAMP)
 
     control = read_control()
     assert _entry(control, "Grill", "probe")["target"] == 203
@@ -178,13 +183,13 @@ def test_post_api_control_whole_array_is_a_replace_and_says_so(seeded):
         origin="app",
     )
 
-    control_persistence.execute_control_writes()
+    control_persistence.execute_control_writes(timer_now=STAMP)
 
     control = read_control()
     assert _entry(control, "Probe2", "probe")["target"] == 145
     assert _entry(control, "Probe2", "probe")["req"] is True
     # The timer's countdown is NOT in notify_data, so the arm itself survives...
-    assert control["timer"]["end"] > 0
+    assert remaining_seconds(parse_timer(control["timer"]), STAMP) == 900
     # ...but its expiry flag, which lives in the replaced array, does not.
     assert _entry(control, "Timer", "timer")["keep_warm"] is False
 
@@ -211,7 +216,7 @@ def test_post_api_control_per_entry_edit_does_not_eat_a_concurrent_command(seede
         origin="app",
     )
 
-    control_persistence.execute_control_writes()
+    control_persistence.execute_control_writes(timer_now=STAMP)
 
     control = read_control()
     assert _entry(control, "Probe2", "probe")["target"] == 145
@@ -238,7 +243,7 @@ def test_background_full_control_write_does_not_eat_a_notify_write(seeded):
         origin="app-socketio",
     )
 
-    control_persistence.execute_control_writes()
+    control_persistence.execute_control_writes(timer_now=STAMP)
 
     control = read_control()
     assert _entry(control, "Probe3", "probe")["target"] == 180
@@ -259,7 +264,7 @@ def test_same_entry_same_field_last_writer_wins(seeded):
     """
     assert _set_notify("Grill", "target", "203")["result"] == "OK"
     assert _set_notify("Grill", "target", "225")["result"] == "OK"
-    control_persistence.execute_control_writes()
+    control_persistence.execute_control_writes(timer_now=STAMP)
     assert _entry(read_control(), "Grill", "probe")["target"] == 225
 
 
@@ -272,7 +277,7 @@ def test_a_lone_writer_still_replaces_the_array_exactly(seeded):
         control_delta(ops=[{"op": "notify.replace", "entries": control["notify_data"]}]),
         origin="app",
     )
-    control_persistence.execute_control_writes()
+    control_persistence.execute_control_writes(timer_now=STAMP)
     assert all(e["req"] is True for e in read_control()["notify_data"])
 
 
@@ -289,7 +294,7 @@ def test_writer_that_drops_entries_still_removes_them(seeded):
         control_delta(ops=[{"op": "notify.replace", "entries": kept}]),
         origin="app",
     )
-    control_persistence.execute_control_writes()
+    control_persistence.execute_control_writes(timer_now=STAMP)
     labels = {e["label"] for e in read_control()["notify_data"]}
     assert "Probe3" not in labels
     assert "Grill" in labels
@@ -302,7 +307,7 @@ def test_writer_that_adds_an_entry_still_adds_it(seeded):
         control_delta(ops=[{"op": "notify.replace", "entries": control["notify_data"]}]),
         origin="app",
     )
-    control_persistence.execute_control_writes()
+    control_persistence.execute_control_writes(timer_now=STAMP)
     assert _entry(read_control(), "Probe9", "probe")["target"] == 99
 
 
@@ -333,7 +338,7 @@ def test_two_scalar_writers_in_one_cycle_both_survive(seeded):
     assert _command("splus", "true")["result"] == "OK"
 
     assert c.SqliteQueue("queue_control_write").length() == 2
-    control_persistence.execute_control_writes()
+    control_persistence.execute_control_writes(timer_now=STAMP)
 
     control = read_control()
     assert control["primary_setpoint"] == 225
@@ -349,7 +354,7 @@ def test_three_scalar_writers_in_one_cycle_all_survive(seeded):
     assert _command("lid_open", "toggle")["result"] == "OK"
     assert _command("tuning_mode", "true")["result"] == "OK"
 
-    control_persistence.execute_control_writes()
+    control_persistence.execute_control_writes(timer_now=STAMP)
 
     control = read_control()
     assert control["duty_cycle"] == 50
@@ -369,7 +374,7 @@ def test_one_shot_request_flags_are_not_reverted_by_a_later_writer(seeded):
     assert _command("hopper", action="get")["result"] == "OK"  # -> hopper_check = True
     assert _command("splus", "true")["result"] == "OK"  # touches neither
 
-    control_persistence.execute_control_writes()
+    control_persistence.execute_control_writes(timer_now=STAMP)
 
     control = read_control()
     assert control["settings_update"] is True
@@ -386,11 +391,11 @@ def test_a_flag_write_after_a_timer_start_no_longer_destroys_the_timer(seeded):
     assert _command("timer", "start", "600")["result"] == "OK"
     assert _command("timer", "shutdown", "true")["result"] == "OK"
 
-    control_persistence.execute_control_writes()
+    control_persistence.execute_control_writes(timer_now=STAMP)
 
     control = read_control()
-    assert control["timer"]["start"] == FIXED_NOW
-    assert control["timer"]["end"] == FIXED_NOW + 600
+    assert control["timer"]["state"] == "running"
+    assert remaining_seconds(parse_timer(control["timer"]), STAMP) == 600
     assert _entry(control, "Timer", "timer")["shutdown"] is True
     assert _entry(control, "Timer", "timer")["req"] is True
 
@@ -408,7 +413,7 @@ def test_nested_object_writers_do_not_eat_each_other(seeded):
     assert _command("manual", "pwm", "40")["result"] == "OK"
     assert _command("manual", "fan", "true")["result"] == "OK"
 
-    control_persistence.execute_control_writes()
+    control_persistence.execute_control_writes(timer_now=STAMP)
 
     manual = read_control()["manual"]
     assert manual["pwm"] == 40, "the fan command reverted the pwm value"
@@ -428,7 +433,7 @@ def test_background_system_info_write_does_not_eat_a_scalar_command(seeded):
         origin="app-socketio",
     )
 
-    control_persistence.execute_control_writes()
+    control_persistence.execute_control_writes(timer_now=STAMP)
 
     control = read_control()
     assert control["primary_setpoint"] == 225
@@ -445,14 +450,14 @@ def test_two_writers_setting_the_same_scalar_last_one_wins(seeded):
     """A genuine conflict: nothing in the queue can resolve it. Unchanged."""
     assert _command("psp", "225")["result"] == "OK"
     assert _command("psp", "180")["result"] == "OK"
-    control_persistence.execute_control_writes()
+    control_persistence.execute_control_writes(timer_now=STAMP)
     assert read_control()["primary_setpoint"] == 180
 
 
 def test_a_lone_writer_still_applies_every_field_it_changed(seeded):
     """One writer per cycle: indistinguishable from the json_patch behaviour."""
     assert _command("psp", "275")["result"] == "OK"
-    control_persistence.execute_control_writes()
+    control_persistence.execute_control_writes(timer_now=STAMP)
     control = read_control()
     assert (control["primary_setpoint"], control["mode"], control["updated"]) == (275, "Hold", True)
 
@@ -464,7 +469,7 @@ def test_a_partial_patch_never_deletes_unmentioned_keys(seeded):
     ELEMENT is a deletion; dicts travel partial, so a missing KEY is silence.
     """
     control_persistence.enqueue_control_delta(control_delta(set_values={"s_plus": True}), origin="app")
-    control_persistence.execute_control_writes()
+    control_persistence.execute_control_writes(timer_now=STAMP)
     control = read_control()
     assert control["s_plus"] is True
     assert "notify_data" in control and "timer" in control and "safety" in control
@@ -475,7 +480,7 @@ def test_a_writer_may_add_a_key_the_ancestor_never_had(seeded):
         control_delta(set_values={"system": {"cpu_temp": 51.5}}),
         origin="app",
     )
-    control_persistence.execute_control_writes()
+    control_persistence.execute_control_writes(timer_now=STAMP)
     assert read_control()["system"]["cpu_temp"] == 51.5
 
 
@@ -507,20 +512,24 @@ def test_a_reset_to_the_ancestor_value_is_now_distinguishable_because_the_writer
     assert _command("timer", "start", "600")["result"] == "OK"
     assert _command("timer", "stop")["result"] == "OK"
 
-    control_persistence.execute_control_writes()
+    control_persistence.execute_control_writes(timer_now=STAMP)
 
     control = read_control()
-    assert control["timer"] == {"start": 0, "paused": 0, "end": 0, "shutdown": False}
+    assert control["timer"]["state"] == "stopped"
+    assert remaining_seconds(parse_timer(control["timer"]), STAMP) == 0
+    assert control["timer"]["action_armed"] is False
     assert _entry(control, "Timer", "timer")["req"] is False
 
     # Given a cycle of its own -- the normal case, since the control loop
     # drains every iteration -- the same pair lands identically. That equality
     # IS the invariant queued deltas exist to restore.
     assert _command("timer", "start", "600")["result"] == "OK"
-    control_persistence.execute_control_writes()
-    assert read_control()["timer"]["end"] == FIXED_NOW + 600
+    control_persistence.execute_control_writes(timer_now=STAMP)
+    assert remaining_seconds(parse_timer(read_control()["timer"]), STAMP) == 600
     assert _command("timer", "stop")["result"] == "OK"
-    control_persistence.execute_control_writes()
+    control_persistence.execute_control_writes(timer_now=STAMP)
     control = read_control()
-    assert control["timer"] == {"start": 0, "paused": 0, "end": 0, "shutdown": False}
+    assert control["timer"]["state"] == "stopped"
+    assert remaining_seconds(parse_timer(control["timer"]), STAMP) == 0
+    assert control["timer"]["action_armed"] is False
     assert _entry(control, "Timer", "timer")["req"] is False

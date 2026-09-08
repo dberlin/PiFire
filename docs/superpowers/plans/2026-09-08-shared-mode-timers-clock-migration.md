@@ -192,13 +192,13 @@ clock=self.ctx.clock,
 
 **Interfaces:** Peripheral defines `RuntimeClockDomain(clock: Clock, *, boot_id: str | None, boottime: Callable[[], float])`, `.capture() -> ClockStamp`, `.rotate_runtime() -> str`; `continuity_lost(previous: ClockStamp, current: ClockStamp, *, max_active_gap_s: float | None = None) -> bool`. `ClockStamp` carries schema 1, boot/runtime identity, wall/monotonic capture and suspend offset. Shared mode adds `_on_control_discontinuity(last_observed_monotonic: float, reason: str) -> None`; Hold overrides it using `FramedPulseRuntime.invalidate_observation_gap` from the pulse plan.
 
-- [ ] Before active-mode setup, require known boot/runtime identity and healthy platform. Before each probe/positive actuator tick, capture a stamp and apply the common continuity predicate. It rejects unknown/different identity, monotonic regression, suspend-offset change over 0.25 seconds, or a configured maximum active observation gap. On Linux `CLOCK_BOOTTIME - monotonic` detects suspend that `time.monotonic()` may exclude; do not use wall delta to detect suspend (a wall-only correction must remain harmless).
-- [ ] The proposed ordinary observation-gap bound is 1.0 second (20 nominal 50 ms loop periods), implemented as a named production constant `MAX_ACTIVE_CONTROL_GAP_S = 1.0`. This is a conservative **design approval item**, not a source-established safe threshold. Measure admitted loop latency in the authorized disconnected-platform smoke before accepting it; if rejected, revise the spec and both runtime/gap regression together. Never silently disable continuity fencing to keep a slow fixture running.
+- [X] Before active-mode setup, require known boot/runtime identity and healthy platform. Before each probe/positive actuator tick, capture a stamp and apply the common continuity predicate. It rejects unknown/different identity, monotonic regression, a suspend-offset increase strictly greater than 60 seconds, or an actual monotonic observation gap strictly greater than 60 seconds. On Linux `CLOCK_BOOTTIME - monotonic` detects suspend that `time.monotonic()` may exclude; wall-only corrections remain harmless.
+- [X] The approved production boundary is `CONTROL_DISCONTINUITY_SECONDS = 60.0` in `common/clock_domain.py`. Exactly 60 seconds is allowed. No small-gap fail-stop was approved; the independent 30-second process watchdog remains unchanged.
 
 ```python
 stamp = self.ctx.clock_domain.capture()
 if previous_stamp is not None and continuity_lost(
-    previous_stamp, stamp, max_active_gap_s=MAX_ACTIVE_CONTROL_GAP_S
+    previous_stamp, stamp
 ):
     self._on_control_discontinuity(
         previous_stamp.observed_monotonic_s, "control-clock-discontinuity"

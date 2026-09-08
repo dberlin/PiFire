@@ -30,6 +30,7 @@ from common.common import ErrorKind, create_logger  # Common Module for WebUI an
 from common.controller_model_state import ControllerModelStore
 from common.persistence.learning_trajectory import LearningTrajectoryRepository
 from common.persistence.model_evidence import read_model_evidence
+from common.timer import restore_timer
 from controller.model_learning.grey_runtime import GreyLearningProcessOwner
 from controller.runtime.clock import RealClock
 from controller.runtime.context import ControllerContext
@@ -49,7 +50,20 @@ def _initialize_runtime_state(store):
     retained_cook_id = (
         cook_id if unfinished and isinstance(cook_id, str) and bool(cook_id) and cook_id == cook_id.strip() else None
     )
-    control = store.flush_control(cook_id=retained_cook_id)
+    timer, diagnostic = restore_timer(persisted_control.get("timer"))
+    control = store.flush_control(cook_id=retained_cook_id, preserve_pending_writes=True)
+    control["timer"] = timer
+    if diagnostic is not None:
+        control["timer_migration_diagnostic"] = diagnostic
+    elif "timer_migration_diagnostic" in persisted_control:
+        control["timer_migration_diagnostic"] = persisted_control["timer_migration_diagnostic"]
+    for item in persisted_control.get("notify_data", []):
+        if item.get("type") == "timer":
+            retained = dict(item)
+            retained["req"] = False
+            control["notify_data"] = [entry for entry in control["notify_data"] if entry.get("type") != "timer"]
+            control["notify_data"].append(retained)
+    store.write_control_snapshot(control, origin="control")
     store.flush_current()
     return control
 

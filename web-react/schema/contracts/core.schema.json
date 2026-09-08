@@ -177,6 +177,9 @@
           "title": "Displaymode",
           "type": "string"
         },
+        "durations": {
+          "$ref": "#/$defs/DurationStatusPayload"
+        },
         "errors": {
           "items": {
             "type": "string"
@@ -429,6 +432,7 @@
         "cycleRatio",
         "fanDuty",
         "timer",
+        "durations",
         "outputs",
         "recipeStatus",
         "foodProbes",
@@ -478,6 +482,105 @@
         "result"
       ],
       "title": "DismissWarningsResponse",
+      "type": "object"
+    },
+    "DurationStatusPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "cookElapsedS": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "ge": 0
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cookelapseds"
+        },
+        "current": {
+          "title": "Current",
+          "type": "boolean"
+        },
+        "lidRemainingS": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "ge": 0
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Lidremainings"
+        },
+        "modeElapsedS": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "ge": 0
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Modeelapseds"
+        },
+        "modeRemainingS": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "ge": 0
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Moderemainings"
+        },
+        "running": {
+          "title": "Running",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "modeElapsedS",
+        "modeRemainingS",
+        "lidRemainingS",
+        "cookElapsedS",
+        "current",
+        "running"
+      ],
+      "title": "DurationStatusPayload",
       "type": "object"
     },
     "EmptyResponseData": {
@@ -1033,31 +1136,95 @@
     "TimerPayload": {
       "additionalProperties": false,
       "properties": {
-        "end": {
-          "title": "End",
-          "type": "integer"
+        "current": {
+          "title": "Current",
+          "type": "boolean"
         },
         "keepWarm": {
           "title": "Keepwarm",
           "type": "boolean"
         },
-        "paused": {
-          "title": "Paused",
-          "type": "integer"
+        "projectedEndWallS": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Projectedendwalls"
+        },
+        "remainingS": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "ge": 0
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Remainings"
         },
         "shutdown": {
           "title": "Shutdown",
           "type": "boolean"
         },
-        "start": {
-          "title": "Start",
-          "type": "integer"
+        "startedWallS": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Startedwalls"
+        },
+        "state": {
+          "enum": [
+            "stopped",
+            "running",
+            "paused",
+            "interrupted",
+            "expired"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "timerId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Timerid"
         }
       },
       "required": [
-        "start",
-        "paused",
-        "end",
+        "timerId",
+        "state",
+        "remainingS",
+        "current",
+        "startedWallS",
+        "projectedEndWallS",
         "keepWarm",
         "shutdown"
       ],
@@ -1096,6 +1263,7 @@
     "DashSocketPayload",
     "DismissWarningsRequest",
     "DismissWarningsResponse",
+    "DurationStatusPayload",
     "EmptyResponseData",
     "OutputPayload",
     "ProbeDataPayload",

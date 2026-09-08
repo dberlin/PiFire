@@ -6,6 +6,7 @@ import logging
 from collections.abc import Mapping
 
 from common import datastore
+from common.clock_domain import ClockStamp
 from common.common import generate_uuid
 from common.control_delta import ControlDeltaError, is_control_delta, validate_control_delta
 from common.defaults import default_control
@@ -27,10 +28,26 @@ __all__ = (
 )
 
 
-def flush_control(*, cook_id: str | None = None):
+def flush_control(*, cook_id: str | None = None, preserve_pending_writes: bool = False):
     """Reset control state while retaining only durable history-clear commands."""
-    for table in ("queue_control_write", "queue_systemo"):
+    for table in ("queue_systemo",) if preserve_pending_writes else ("queue_control_write", "queue_systemo"):
         datastore.execute_write(f"DELETE FROM {table}")
+    if preserve_pending_writes:
+        # Only generation-fenced timer envelopes survive restart for rejection
+        # logging. Generic actuation requests must not resurrect an old cook.
+        with datastore.transaction() as connection:
+            for row in connection.execute("SELECT id, value FROM queue_control_write").fetchall():
+                try:
+                    command = json.loads(row[1])
+                except ValueError, TypeError:
+                    command = None
+                ops = command.get("ops") if isinstance(command, Mapping) else None
+                timer_intent = isinstance(ops, list) and any(
+                    isinstance(op, Mapping) and isinstance(op.get("op"), str) and op["op"].startswith("timer.")
+                    for op in ops
+                )
+                if not timer_intent:
+                    connection.execute("DELETE FROM queue_control_write WHERE id=?", (row[0],))
     datastore.execute_write(
         "DELETE FROM queue_systemq WHERE json_type(value) != 'array' OR COALESCE(json_extract(value, '$[0]') != ?, 1)",
         (CLEAR_HISTORY_COMMAND,),
@@ -168,8 +185,8 @@ def queue_mpc_calibration_command(delta, command, origin):
     return True
 
 
-def execute_control_writes():
-    """Drain queued version-1 deltas FIFO, rejecting malformed persisted rows."""
+def execute_control_writes(*, timer_now: ClockStamp):
+    """Drain queued current deltas FIFO, rejecting malformed persisted rows."""
     log = logging.getLogger("control")
     while True:
         with datastore.transaction() as connection:
@@ -187,7 +204,7 @@ def execute_control_writes():
 
                 control_row = connection.execute("SELECT value FROM kv WHERE key = 'control:general'").fetchone()
                 control = json.loads(control_row[0]) if control_row is not None else default_control()
-                apply_control_delta(control, command)
+                apply_control_delta(control, command, timer_now=timer_now)
                 if control_row is None:
                     connection.execute(
                         "INSERT INTO kv(key, value) VALUES ('control:general', ?)",

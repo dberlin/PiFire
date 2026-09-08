@@ -23,6 +23,14 @@ export function demoDashAt(elapsedSec: number): DashSocketPayload {
   return {
     ...FIXTURE_DASH,
     currentMode: "Hold",
+    durations: {
+      modeElapsedS: t,
+      modeRemainingS: null,
+      lidRemainingS: null,
+      cookElapsedS: t,
+      current: true,
+      running: true,
+    },
     // The simulated grill HAS a distance sensor -- it is the thing draining the
     // hopper level below. Without this the dashboard now hides the hopper card
     // (Flask hides it when settings.modules.dist == "none"), and the demo would

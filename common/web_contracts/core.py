@@ -83,11 +83,23 @@ class ProbeDataPayload(_SparseExtensibleWireModel):
 
 
 class TimerPayload(WireModel):
-    start: int
-    paused: int
-    end: int
+    timer_id: str | None = Field(alias="timerId")
+    state: Literal["stopped", "running", "paused", "interrupted", "expired"]
+    remaining_s: FiniteNumber | None = Field(alias="remainingS", ge=0)
+    current: bool
+    started_wall_s: FiniteNumber | None = Field(alias="startedWallS")
+    projected_end_wall_s: FiniteNumber | None = Field(alias="projectedEndWallS")
     keep_warm: bool = Field(alias="keepWarm")
     shutdown: bool
+
+
+class DurationStatusPayload(WireModel):
+    mode_elapsed_s: FiniteNumber | None = Field(alias="modeElapsedS", ge=0)
+    mode_remaining_s: FiniteNumber | None = Field(alias="modeRemainingS", ge=0)
+    lid_remaining_s: FiniteNumber | None = Field(alias="lidRemainingS", ge=0)
+    cook_elapsed_s: FiniteNumber | None = Field(alias="cookElapsedS", ge=0)
+    current: bool
+    running: bool
 
 
 class OutputPayload(WireModel):
@@ -299,6 +311,7 @@ class DashSocketPayload(WireModel):
     cycle_ratio: FiniteNumber = Field(alias="cycleRatio")
     fan_duty: FiniteNumber = Field(alias="fanDuty")
     timer: TimerPayload
+    durations: DurationStatusPayload
     outputs: OutputPayload
     recipe_status: RecipeStatusPayload = Field(alias="recipeStatus")
     food_probes: list[ProbeDataPayload] = Field(alias="foodProbes")

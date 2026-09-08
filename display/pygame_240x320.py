@@ -61,7 +61,7 @@ class Display(DisplayBase):
             # This will give us a dictionary where each key has a value of 1 or 0. Where 1 is pressed and 0 is not pressed.
             keys = pygame.key.get_pressed()  # noqa: F841  # debug-scaffold
 
-            if self.display_timeout and time.time() > self.display_timeout:
+            if self.display_timeout and self._monotonic() > self.display_timeout:
                 self.display_timeout = None
 
             if self.display_command == "clear":
@@ -72,14 +72,14 @@ class Display(DisplayBase):
 
             if self.display_command == "splash":
                 self._display_splash()
-                self.display_timeout = time.time() + 3
+                self.display_timeout = self._monotonic() + 3
                 self.display_command = "clear"
                 pygame.time.delay(3000)  # Hold splash screen for 3 seconds
 
             if self.display_command == "text":
                 self._display_text()
                 self.display_command = None
-                self.display_timeout = time.time() + 10
+                self.display_timeout = self._monotonic() + 10
 
             if self.display_command == "network":
                 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -87,7 +87,7 @@ class Display(DisplayBase):
                 network_ip = s.getsockname()[0]
                 if network_ip != "":
                     self._display_network(network_ip)
-                    self.display_timeout = time.time() + 30
+                    self.display_timeout = self._monotonic() + 30
                     self.display_command = None
                 else:
                     self.display_text("No IP Found")

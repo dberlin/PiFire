@@ -45,6 +45,7 @@ import pytest
 
 import notify.mqtt_handler as MH
 from common.modes import Mode
+from controller.runtime.clock import ManualClock
 
 pytestmark = pytest.mark.filterwarnings("ignore::ResourceWarning")
 
@@ -261,7 +262,7 @@ def test_del_publishes_offline_and_tears_down_client(patched_client):
     handler = _make_handler(patched_client)
     fake = handler.client
     # Bypass the 5s connect throttle so _publish_data actually runs.
-    handler.last_conn_time = 0
+    handler.last_conn_time = None
 
     handler.__del__()
 
@@ -333,7 +334,6 @@ def test_on_connect_publishes_availability_and_restores_subscriptions(patched_cl
     reason_code = mqtt.ReasonCode(mqtt.PacketTypes.CONNACK, identifier=0)
     handler._on_connect(handler.client, None, {}, reason_code, None)
 
-    assert handler.last_conn_time == 0
     online_calls = [c for c in handler.client.publish_calls if c["payload"] == "online"]
     assert online_calls and online_calls[-1]["topic"] == "PiFireTest/availability"
     assert online_calls[-1]["qos"] == 1
@@ -381,7 +381,7 @@ def test_check_connection_throttled_immediately_after_connect(patched_client):
 def test_check_connection_reconnects_when_client_is_none(patched_client):
     handler = _make_handler(patched_client)
     handler.client = None
-    handler.last_conn_time = 0
+    handler.last_conn_time = None
 
     assert handler._check_connection() is True
     assert len(FakeMqttClient.instances) == 2  # a fresh client was constructed
@@ -391,7 +391,7 @@ def test_check_connection_reconnects_when_disconnected(patched_client):
     handler = _make_handler(patched_client)
     fake = handler.client
     fake._connected = False
-    handler.last_conn_time = 0
+    handler.last_conn_time = None
 
     assert handler._check_connection() is True
     assert handler.client is fake  # same client instance, just reconnected
@@ -415,7 +415,7 @@ def test_check_homeassistant_false_when_topic_blank(patched_client):
 
 def test_publish_data_returns_false_when_not_connected(patched_client):
     handler = _make_handler(patched_client)
-    handler.last_conn_time = __import__("time").time()  # force the throttle
+    handler.last_conn_time = handler._monotonic()  # force the throttle
     handler.client.publish_calls.clear()
 
     assert handler._publish_data(topic="t", payload="p") is False
@@ -424,7 +424,7 @@ def test_publish_data_returns_false_when_not_connected(patched_client):
 
 def test_publish_data_success_passes_through_args(patched_client):
     handler = _make_handler(patched_client)
-    handler.last_conn_time = 0  # bypass the 5s post-connect throttle
+    handler.last_conn_time = None  # no pending connection attempt
     ok = handler._publish_data(topic="foo/bar", payload="hello", qos=1, retain=True, properties="props")
     assert ok is True
     call = handler.client.publish_calls[-1]
@@ -433,7 +433,7 @@ def test_publish_data_success_passes_through_args(patched_client):
 
 def test_publish_data_conn_lost_returns_false(patched_client, caplog):
     handler = _make_handler(patched_client)
-    handler.last_conn_time = 0
+    handler.last_conn_time = None
     handler.client.publish_return = mqtt.MQTT_ERR_CONN_LOST
     with caplog.at_level("ERROR", logger="mqtt"):
         result = handler._publish_data(topic="t", payload="p")
@@ -443,7 +443,7 @@ def test_publish_data_conn_lost_returns_false(patched_client, caplog):
 
 def test_publish_data_auth_error_clears_client(patched_client, caplog):
     handler = _make_handler(patched_client)
-    handler.last_conn_time = 0
+    handler.last_conn_time = None
     handler.client.publish_return = mqtt.MQTT_ERR_AUTH
     with caplog.at_level("ERROR", logger="mqtt"):
         result = handler._publish_data(topic="t", payload="p")
@@ -454,7 +454,7 @@ def test_publish_data_auth_error_clears_client(patched_client, caplog):
 
 def test_publish_data_other_error_returns_false(patched_client, caplog):
     handler = _make_handler(patched_client)
-    handler.last_conn_time = 0
+    handler.last_conn_time = None
     handler.client.publish_return = mqtt.MQTT_ERR_NO_CONN
     with caplog.at_level("ERROR", logger="mqtt"):
         result = handler._publish_data(topic="t", payload="p")
@@ -507,7 +507,7 @@ def test_publish_autodiscover_other_error_logs(patched_client, caplog):
 
 def test_publish_devices_first_value_triggers_publish_and_autodiscover(patched_client):
     handler = _make_handler(patched_client)
-    handler.last_conn_time = 0
+    handler.last_conn_time = None
     handler._create_autodiscover = mock.Mock()
 
     handler._publish("devices", {"auger": True})
@@ -523,7 +523,7 @@ def test_publish_skips_autodiscover_when_homeassistant_disabled(patched_client):
     # (Before the `()` fix the bound method was always truthy, so this path
     # was impossible to reach.)
     handler = _make_handler(patched_client, homeassistant_autodiscovery_topic="")
-    handler.last_conn_time = 0
+    handler.last_conn_time = None
     handler._create_autodiscover = mock.Mock()
 
     handler._publish("devices", {"auger": True})
@@ -535,7 +535,7 @@ def test_publish_skips_autodiscover_when_homeassistant_disabled(patched_client):
 
 def test_publish_devices_unchanged_value_does_not_republish(patched_client):
     handler = _make_handler(patched_client)
-    handler.last_conn_time = 0
+    handler.last_conn_time = None
     handler._create_autodiscover = mock.Mock()
     handler._publish("devices", {"auger": True})
     handler.client.publish_calls.clear()
@@ -578,7 +578,7 @@ def test_publish_devices_unrecognized_sensor_is_dropped(patched_client):
 )
 def test_publish_topic_and_payload(patched_client, topic_suffix, payload):
     handler = _make_handler(patched_client)
-    handler.last_conn_time = 0
+    handler.last_conn_time = None
     handler._create_autodiscover = mock.Mock()
 
     handler._publish(topic_suffix, payload)
@@ -1008,3 +1008,42 @@ def test_notify_swallows_exception_and_logs(patched_client, caplog):
     with caplog.at_level("ERROR", logger="mqtt"):
         handler.notify("control", {"no_mode_key": True})
     assert any("Error occurred publishing device data" in r.message for r in caplog.records)
+
+
+@pytest.mark.parametrize("wall_jump", [-3600, 3600])
+def test_mqtt_retry_ignores_wall_jump(patched_client, monkeypatch, wall_jump):
+    clock = ManualClock(wall_start=1_800_000_000)
+    monkeypatch.setattr(MH.time, "time", clock.wall_time)
+    handler = MH.MqttNotificationHandler(_settings(), monotonic=clock.monotonic)
+    client = handler.client
+    assert len(client.connect_calls) == 1  # first connect is immediate at uptime zero
+    client._connected = False
+    clock.jump_wall(wall_jump)
+    clock.advance(4.9)
+    assert handler._check_connection() is False
+    assert len(client.connect_calls) == 1
+    clock.advance(0.1)
+    assert handler._check_connection() is True
+    assert len(client.connect_calls) == 2
+    handler._on_connect(client, None, {}, mqtt.ReasonCode(mqtt.PacketTypes.CONNACK, identifier=0), None)
+    assert client.publish_calls[-1]["payload"] == "online"
+    assert handler._publish_data("test/reading", "225") is True
+    assert client.publish_calls[-1]["payload"] == "225"
+
+
+def test_mqtt_connect_callback_can_clear_pending_attempt_synchronously(patched_client, monkeypatch):
+    clock = ManualClock()
+    handler = MH.MqttNotificationHandler(_settings(), monotonic=clock.monotonic)
+    client = handler.client
+    client._connected = False
+    clock.advance(5)
+    connect = client.connect
+
+    def connect_and_ack(*args, **kwargs):
+        result = connect(*args, **kwargs)
+        handler._on_connect(client, None, {}, mqtt.ReasonCode(mqtt.PacketTypes.CONNACK, identifier=0), None)
+        return result
+
+    monkeypatch.setattr(client, "connect", connect_and_ack)
+    assert handler._check_connection() is True
+    assert handler._publish_data("test/reading", "225") is True

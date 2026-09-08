@@ -34,6 +34,7 @@ from common.persistence.runtime import (
     write_status,
 )
 from display import qtquick_flex
+from tests.fakes.clock import clock_stamp
 
 
 @pytest.fixture
@@ -54,7 +55,7 @@ def dispatch_and_drain(command, value=0):
     queue_control_write -- mirroring what controller.py's loop does."""
     d = qtquick_flex.Display.for_dispatch({}, "F")
     d._dispatch_command(command, value)
-    execute_control_writes()
+    execute_control_writes(timer_now=clock_stamp())
 
 
 @pytest.mark.parametrize(

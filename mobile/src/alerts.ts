@@ -144,32 +144,12 @@ export function alertsFor(previous: DashSocketPayload | null, next: DashSocketPa
     }
   }
 
-  // Timer expiry. The control process decides a timer has expired by
-  // comparing control.timer.end against its own clock and, once it fires the
-  // timer's shutdown/keep_warm action, resets control["timer"] back to the
-  // idle shape common/defaults.py seeds it with -- start, paused and end all
-  // 0 (common/defaults.py:564). See controller/runtime/controller.py:315 and
-  // notify/notifications.py:124 for where that clock comparison and reset
-  // actually happen (NOT common/api_commands.py's _TIMER_EXPIRY_OPTIONS
-  // docstring, which only documents the expiry-flag names a URL segment
-  // accepts). A transition from an active countdown (end > 0) to that
-  // cleared state is the signal this side can observe. The id carries the
-  // specific end time, so two payloads reporting a clear for the SAME end
-  // time collapse into one id -- correct for a reconnect replaying the same
-  // cleared state, but it also means a new timer that happened to end at
-  // that exact same epoch second would collide with the old one and not
-  // re-alert. That is an accepted, exceedingly unlikely edge case, not a
-  // guard against it.
-  //
-  // Known imprecision: @pifire/core's command.ts documents timerStop() as
-  // ALSO clearing timer.end straight to 0, matching common/api_commands.py's
-  // _cmd_set_timer. A user who manually stops a
-  // running timer therefore produces the same end>0 -> end==0 transition as
-  // one that actually finished, and gets the same "Timer done" alert. There
-  // is nothing else in this payload that tells the two apart.
-  if (previous.timer.end > 0 && next.timer.end === 0) {
+  // Only an explicit controller expiry is completion. Manual stop, local zero,
+  // interruption and a replacement timer must never produce this alert.
+  if (next.timer.state === "expired" && previous.timer.state !== "expired"
+      && next.timer.timerId !== null && next.timer.timerId === previous.timer.timerId) {
     alerts.push({
-      id: `timer:${previous.timer.end}`,
+      id: `timer:${next.timer.timerId}`,
       title: "Timer done",
       body: "Your PiFire timer has finished.",
     });

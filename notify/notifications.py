@@ -19,10 +19,12 @@ import json
 import logging
 import math
 import time
+from typing import Protocol
 
 import apprise
 import requests
 
+from common.clock_domain import ClockStamp
 from common.common import create_logger
 from common.modes import Mode
 from common.persistence.control import (
@@ -32,11 +34,13 @@ from common.persistence.control import (
 from common.persistence.history import (
     read_history,
 )
+from common.persistence.protocols import JsonMapping
 from common.persistence.runtime import (
     read_pellet_db,
     read_settings,
     write_settings,
 )
+from common.timer import expire_timer, parse_timer
 
 """
 ==============================================================================
@@ -45,7 +49,23 @@ from common.persistence.runtime import (
 """
 
 
-def check_notify(settings, control, in_data=None, pelletdb=None, grill_platform=None, pid_data=None, update_eta=False):
+class SnapshotWriter(Protocol):
+    def __call__(self, control: JsonMapping, *, origin: str = "control") -> None: ...
+
+
+def check_notify(
+    settings,
+    control,
+    in_data=None,
+    pelletdb=None,
+    grill_platform=None,
+    pid_data=None,
+    update_eta=False,
+    *,
+    now: ClockStamp,
+    hopper_cooldowns: dict[tuple[str, str], float],
+    persist: SnapshotWriter | None = None,
+):
     """
     Check for any pending notifications
 
@@ -55,6 +75,13 @@ def check_notify(settings, control, in_data=None, pelletdb=None, grill_platform=
     :param pelletdb: Pellet DB
     :param grill_platform: Grill Platform
     """
+    writer = persist if persist is not None else write_control_snapshot
+    active_hoppers = {
+        (item["type"], item["label"]) for item in control["notify_data"] if item["type"] == "hopper" and item["req"]
+    }
+    for key in tuple(hopper_cooldowns):
+        if key not in active_hoppers:
+            del hopper_cooldowns[key]
     # Forward to mqtt if enabled.
     if settings["notify_services"].get("mqtt") != None and settings["notify_services"]["mqtt"]["enabled"] == True:
         _send_mqtt_notification(control, settings, pelletdb, in_data, grill_platform, pid_data)
@@ -80,6 +107,7 @@ def check_notify(settings, control, in_data=None, pelletdb=None, grill_platform=
     """ Process all registered notification items """
     for index, item in enumerate(control["notify_data"]):
         if item["req"]:
+            timer_fired = False
             if item["type"] in ["probe", "probe_limit_low", "probe_limit_high"] and in_data is not None:
                 # Update the ETA, if requested for any active probe
                 if item["type"] == "probe" and update_eta:
@@ -123,41 +151,42 @@ def check_notify(settings, control, in_data=None, pelletdb=None, grill_platform=
                     control["notify_data"][index]["triggered"] = False
 
             elif item["type"] == "timer":
-                if time.time() >= control["timer"]["end"]:
-                    send_notifications("Timer_Expired")
+                control["timer"], timer_fired = expire_timer(parse_timer(control["timer"]), now)
+                if timer_fired:
                     if control["mode"] == Mode.RECIPE and control["recipe"]["step_data"]["timer"] > 0:
                         control["recipe"]["step_data"]["triggered"] = True
-                    control["timer"]["start"] = 0
-                    control["timer"]["paused"] = 0
-                    control["timer"]["end"] = 0
                     control["notify_data"][index]["req"] = False
 
             elif item["type"] == "hopper":
-                if (time.time() - item["last_check"]) > (settings["pelletlevel"]["warning_time"] * 60) and pelletdb[
-                    "current"
-                ]["hopper_level"] <= settings["pelletlevel"]["warning_level"]:
+                key = (item["type"], item["label"])
+                last_s = hopper_cooldowns.get(key)
+                due = last_s is None or now.observed_monotonic_s - last_s > settings["pelletlevel"]["warning_time"] * 60
+                if due and pelletdb["current"]["hopper_level"] <= settings["pelletlevel"]["warning_level"]:
                     send_notifications("Pellet_Level_Low")
-                    control["notify_data"][index]["last_check"] = time.time()
+                    hopper_cooldowns[key] = now.observed_monotonic_s
+                    control["notify_data"][index]["last_check"] = now.observed_wall_s
 
             elif item["type"] == "test":
                 send_notifications("Test_Notify")
-                control["notify_data"][index]["last_check"] = time.time()
+                control["notify_data"][index]["last_check"] = now.observed_wall_s
                 control["notify_data"][index]["req"] = False
 
             """ Do Shutdown or Keep Warm if Requested """
             # "Did this entry's alert fire?" is spelled differently per type.
             # A `probe` target is one-shot: the branch above sends the alert
             # and DISARMS the entry (req=False, target=0), so a cleared `req`
-            # is what "it fired" means there -- and for `timer`/`test`, which
-            # clear `req` the same way. A limit alert is not one-shot: it stays
+            # is what "it fired" means there and for `test`. Timers require
+            # the explicit once-only expiry event, not merely disarming req.
             # armed (`req` True) for the whole cook and re-arms via `triggered`
             # when the temperature comes back into range. Gating limits on
             # `not req` -- as this did -- made the "Shutdown PiFire" checkbox
             # beside every high/low limit permanently dead. `triggered` is a
             # limit's fired flag; the `reignite` branch below already uses it.
             fired = (
-                item.get("triggered", False)
-                if item["type"] in ("probe_limit_high", "probe_limit_low")
+                timer_fired
+                if item["type"] == "timer"
+                else item.get("triggered", False)
+                if item["type"] in ("timer", "probe_limit_high", "probe_limit_low")
                 else not control["notify_data"][index]["req"]
             )
             if item["shutdown"] and control["mode"] in (Mode.REIGNITE, Mode.STARTUP, Mode.SMOKE, Mode.HOLD) and fired:
@@ -179,7 +208,9 @@ def check_notify(settings, control, in_data=None, pelletdb=None, grill_platform=
                 control["mode"] = Mode.REIGNITE
                 control["updated"] = True
 
-            write_control_snapshot(control, origin="notifications")
+            writer(control, origin="notifications")
+            if timer_fired:
+                send_notifications("Timer_Expired")
 
     return control
 
@@ -748,17 +779,21 @@ def _send_mqtt_notification(
     # update rate
 
     mode_changed = control["mode"] != mqtt.last_mode
-    current_time = time.time()
+    current_time = time.monotonic()
 
-    if pid_data and (mode_changed or current_time > mqtt.pub_times["pid"] + mqtt.pub_rate):
+    if pid_data and (
+        mode_changed or mqtt.pub_times["pid"] is None or current_time > mqtt.pub_times["pid"] + mqtt.pub_rate
+    ):
         mqtt.pub_times["pid"] = current_time
         mqtt.notify("pid", pid_data)
 
-    if pelletdb and (mode_changed or current_time > mqtt.pub_times["pellet"] + mqtt.pub_rate):
+    if pelletdb and (
+        mode_changed or mqtt.pub_times["pellet"] is None or current_time > mqtt.pub_times["pellet"] + mqtt.pub_rate
+    ):
         mqtt.pub_times["pellet"] = current_time
         mqtt.notify("pellet", pelletdb["current"])
 
-    if mode_changed or current_time > mqtt.pub_times["base"] + mqtt.pub_rate:
+    if mode_changed or mqtt.pub_times["base"] is None or current_time > mqtt.pub_times["base"] + mqtt.pub_rate:
         mqtt.pub_times["base"] = current_time
         mqtt.notify("control", control)
         mqtt.notify("system", control)

@@ -126,7 +126,9 @@ def request_transition(ctx, control, to_mode, *, kind, setpoint=_UNSET, reignite
         # next_mode() (the only natural caller) never passes them.
         #
         # Yield to any higher-priority transition already requested this cycle.
-        store.execute_control_writes()
+        if ctx.last_clock_stamp is None:
+            return control
+        store.execute_control_writes(timer_now=ctx.last_clock_stamp)
         control = store.read_control()
         if control["updated"]:
             return control

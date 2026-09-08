@@ -374,6 +374,7 @@ def _fake_control_pair(initial_mode=Mode.STOP):
     """
     from common.control_delta import apply_control_delta
     from common.defaults import default_control
+    from tests.fakes.clock import clock_stamp
 
     state = default_control()
     state["mode"] = initial_mode
@@ -384,7 +385,7 @@ def _fake_control_pair(initial_mode=Mode.STOP):
 
     def enqueue_control_delta(delta, *, origin=None):
         calls.append((dict(delta.get("set", {})), origin))
-        apply_control_delta(state, delta)
+        apply_control_delta(state, delta, timer_now=clock_stamp())
 
     return state, read_control, enqueue_control_delta, calls
 
@@ -813,6 +814,15 @@ def _make_ili9341f(monkeypatch, event_log=None, control_log=None, **config_overr
             control_log=control_log,
         )
     return mod, d
+
+
+@pytest.mark.parametrize("wall_jump", [-3600, 3600])
+def test_ili_dashboard_refresh_ignores_wall_steps(monkeypatch, wall_jump):
+    from tests.ui._driver_helpers import exercise_flex_refresh
+
+    _mod, d = _make_ili9341f(monkeypatch)
+    monkeypatch.setattr("time.sleep", lambda seconds: None)
+    exercise_flex_refresh(d, monkeypatch, _flex_status_data(mode="Hold"), wall_jump=wall_jump, run_loop=d._display_loop)
 
 
 def test_ili9341f_constructs_device_and_input(monkeypatch):

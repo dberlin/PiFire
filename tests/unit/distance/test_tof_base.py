@@ -11,7 +11,7 @@ class _FakeClock:
     """Deterministic stand-in for the `time` module as seen by
     distance._sampled_base -- the sampling loop is shared by every transport
     and lives there, so that is the module the clock is patched into.
-    `_sensing_loop` measures a read cycle's duration via time.time() to decide
+    `_sensing_loop` measures a read cycle's duration via its bound monotonic clock to decide
     whether the sensor looks stuck and needs re-initializing; a slow fake read
     advances this clock via `advance()` instead of the real one, so that
     timing-dependent behavior can be exercised without the test process
@@ -28,7 +28,7 @@ class _FakeClock:
     def __init__(self):
         self._now = 0.0
 
-    def time(self):
+    def monotonic(self):
         return self._now
 
     def sleep(self, seconds):

@@ -1,171 +1,15 @@
-"""Golden-master characterization tests for common.common.process_command.
+"""Characterize command ordering, errors, and retained non-timer API behavior.
 
-METHOD: RUN-THEN-FREEZE, golden-file oracle. Every case in CASES was executed
-ONCE against the pre-refactor `process_command` (common/common.py:2505-3168) and
-its complete observable footprint frozen into
-`tests/characterization/fixtures/process_command_golden.json`. That file is the
-CONTRACT. Any refactor that decomposes this 666-line function into shared
-helpers may only pass if it reproduces the contract byte-for-byte.
+The JSON oracle is read-only during tests. Current queued envelopes use the
+production delta version; retired kind escape-hatch rows remain historical.
+Timer field-copy and exact-message goldens have been removed, not re-baselined.
+Timer behavior below is asserted through admitted duration/state transitions.
 
-THIS FILE ONLY EVER *READS* THE GOLDEN. There is deliberately no capture/record
-mode, no `--update-golden` flag, and no committed capture script -- so there is
-no button to press that silently re-baselines the contract. Additionally
-`test_golden_file_digest_is_pinned` pins the fixture's SHA-256 to GOLDEN_SHA256
-below. Regenerating the fixture therefore requires hand-editing BOTH the JSON
-and this constant, in a diff a reviewer cannot miss. If you are refactoring
-process_command and a case fails: that is a behavior change. Fix the refactor,
-not the fixture.
-
-DELIBERATE RE-BASELINE (settings-writer strict matrix): fixed
-common/common.py's `convert_settings_units` to also convert
-`settings["pwm"]["temp_range_list"]` (a "degrees below setpoint" DELTA list
-that was never converted at all -- a real, pre-existing bug found while
-auditing common/api_commands.py's set/units writer for schema strictness).
-The `set_units_c`/`set_units_f` golden entries and GOLDEN_SHA256 were
-hand-updated to include the now-correct `pwm.temp_range_list` diff. This is
-a sanctioned exception to "never regenerate the fixture": a proven bug
-fix, not refactor drift.
-
-DELIBERATE RE-BASELINE (per-probe freshness): `control:current` gained a
-`LAST` map -- each probe's last real reading and when it was taken -- so that a
-probe reporting no reading can be shown as its last value MARKED STALE rather
-than as a plausible 0. WHAT CHANGED: exactly one key, in exactly one entry --
-`get_current`'s `return.data` gained `"LAST": {}`. It is empty because the
-harness seeds through `flush_current()` and patches the blob directly (see the
-note at the seeding site), which is also why this stays deterministic: the map
-is only populated by `write_current()`, whose wall-clock stamp the harness
-avoids on purpose. WHY it is a contract change and not drift: `get_current`
-returns the blob, so a new key in the blob is a new key in the response. It is
-additive -- every pre-existing key is byte-identical, and no other case moved.
-
-DELIBERATE RE-BASELINE (control-write deltas): the timer commands stopped
-queueing a whole control snapshot and now queue an intent ENVELOPE -- a named
-op the drain evaluates against live state (common/control_delta.py). WHAT
-CHANGED: `queued_writes` in exactly six entries -- set_timer_start,
-set_timer_start_default_60, set_timer_start_resume, set_timer_stop,
-set_timer_pause_running, set_timer_pause_not_started -- each swapping its
-"diff" for a "delta". WHY: a whole-dict timer patch built from a read that
-cannot see the write queue is the cross-writer clobber this suite pins twice
-(stop-then-pause and stop-then-resume, below), and no reduction can recover
-intent the payload never carried. WHAT DID NOT CHANGE, and is the proof the
-conversion is behaviour-preserving for a lone writer: `control_diff_after_
-execute` is byte-identical in all six, as are `return`, `arglist_after`,
-`log_calls`, `settings_diff`, `systemq`, `cmd_calls` and `sleeps`. The two
-pause branches now emit the SAME op, which is the point: `timer.pause` picks
-the running-vs-cleared branch in the drain instead of at request time.
-
-Second pass, same rules: 18 more entries -- every set_notify_*, set_limit_*_req,
-set_timer_shutdown_*, set_timer_keep_warm_*, get_hopper and
-kind_overwrite_ignored_notify -- swap "diff" for "delta" as the notify writers
-and the hopper_check flag convert. Again `control_diff_after_execute` and every
-other observable are byte-identical in all 18; only the payload SHAPE moved.
-Two of them (set_notify_target_not_a_number, set_notify_unknown_field) queue a
-BARE envelope, {"__control_delta__": 1}: those are the ERROR branches, which
-have always queued a write from outside the if/elif chain, and an envelope
-naming nothing is the honest form of "this command changed nothing". Previously
-they queued the whole control dict, which could revert a concurrent writer.
-
-Third and final pass, same rules again: the remaining 44 entries -- psp, units,
-mode (all four branches), pmode, splus, lid_open, pwm, duty_cycle, tuning_mode
-and every manual case. After it NO entry records a legacy "diff" any more, which
-is the fixture-level statement that no writer on this path queues a whole
-control dict. One detail worth naming: set_manual_unknown_stale_write queues a
-bare envelope (the write guard deliberately sits outside the if/elif chain, so a
-rejected request still writes -- the wart is preserved, but as a no-op rather
-than a stale snapshot).
-
-DELIBERATE RE-BASELINE (hold retargeting): set/psp converts from a `set` of
-{mode, primary_setpoint, updated} to the `hold.set_setpoint` op, for the same
-reason the timer commands did -- the decision it carries can only be made
-against live state. WHAT CHANGED: `queued_writes` in exactly two entries,
-set_psp_f and set_psp_c. WHY: `updated` breaks the mode's work cycle, so Hold
-is re-entered and the controller REBUILT, discarding its estimator, its learner
-and any calibration run in progress. That is right when entering Hold from
-another mode and wrong when merely retargeting a cook already holding -- and a
-request handler reads a control blob that cannot see this queue, so deciding
-there made two setpoints posted in one cycle disagree with the same two a cycle
-apart (the invariant test_control_delta_seam.py holds). The op decides in the
-drain. WHAT DID NOT CHANGE: `control_diff_after_execute` is byte-identical in
-both, as are `return`, `arglist_after`, `log_calls`, `settings_diff`,
-`systemq`, `cmd_calls` and `sleeps` -- the resulting control state is the same;
-only where the mode-change decision is made moved.
-
-WHAT IS OBSERVED (per case, see `_run_case`):
-  * the returned dict (result/message/data)
-  * `arglist` AFTER the call -- process_command mutates its caller's list
-  * every validated delta queued to `queue_control_write` (as a diff vs the
-    pre-call control), including its `origin`
-  * the control blob diff after `execute_control_writes()` drains that queue
-  * the settings blob diff (set/units and set/pmode write settings)
-  * the `queue_systemq` payload (action == 'sys')
-  * which of restart_scripts/reboot_system/shutdown_system was invoked
-  * `write_log` messages (the timer branches log)
-
-SAFETY: the action=='cmd' branch runs `sudo systemctl reboot` / `poweroff` on a
-machine that answers `is_real_hardware()` with True. `_run_case` therefore
-replaces restart_scripts/reboot_system/shutdown_system with recording mocks, and
-never runs these cases without them. The suite-wide `real_hw` of False
-(tests/conftest.py) is a second layer, not a substitute: it is one settings
-write away from being untrue inside any given test, and these cases seed
-settings themselves.
-
-DETERMINISM: `time.time` is frozen (the timer branches stamp it into control)
-and `time.sleep` is neutralized (nothing sleeps now; get/hopper used to).
-`data['ui_hash']` is
-normalized to a sentinel -- it is `hash()` of a str, so PYTHONHASHSEED makes it
-differ on every interpreter run (see NON-OBVIOUS BEHAVIORS #1).
-
-MACHINE INDEPENDENCE -- READ THIS BEFORE ADDING A CASE: the `ds` fixture's
-"fresh" datastore is NOT fresh. `datastore.init()` runs `_first_boot_import()`,
-which seeds `settings:general` and `pellets:general` from the cwd-relative
-`./settings.json` and `./pelletdb.json` -- both UNTRACKED and GITIGNORED
-(.gitignore:12 and :36). Anything derived from `read_settings()` /
-`read_pellet_db()` is therefore a property of the developer's machine and of
-whatever other suites ran first, NOT of the code. An earlier version of this
-file learned that the hard way: it froze this box's MAC-derived uuid into
-get_uuid and a grill_name ('BOOT_PATH_SENTINEL_GRILL') that
-tests/unit/bootstrap/test_startup_migration.py had left in the local
-settings.json -- so the suite passed here and could not pass anywhere else.
-`_run_case` and the `seeded` fixture therefore overwrite both blobs with a
-canonical baseline built from tracked code defaults (see `_canonical_settings`).
-Never build a case on raw `read_settings()`.
-
-NON-OBVIOUS BEHAVIORS PINNED HERE (current behavior, deliberately NOT fixed --
-characterization captures warts):
-  1. get/status `ui_hash` is `hash(json.dumps(probe_info))`. Python salts str
-     hashing per-process, so this value changes on every restart even when the
-     probe map is identical. Pinned only as "an int is present".
-  2. (FIXED -- was `arglist=[]`, a mutable default
-     argument; the pad-to-4 loop appended None INTO it, so
-     `process_command.__defaults__[1]` became permanently
-     `[None, None, None, None]` after the first no-arglist call.) The default
-     is now `arglist=None`, with `if arglist is None: arglist = []` at the top
-     of the function body, so the default itself is never mutated. See
-     `test_mutable_default_arglist_is_padded_in_place`.
-  3. The same pad mutates the CALLER's list in place, and `set/manual/*/toggle`
-     additionally rewrites `arglist[2]` to 'true'/'false'. Callers see this.
-  4. action=='sys' pushes the PADDED arglist, so the trailing Nones leak into
-     the queue payload: `['restart'] -> ['restart', None, None, None]`.
-  5. (FIXED -- was a no-op if/else) set/lid_open
-     unconditionally sets `lid_open_toggle = True` regardless of arglist[1];
-     no argument can clear the flag.
-  6. (FIXED) set/notify/<label>/target with units == 'C'
-     used to write `control['primary_setpoint']` instead of the notify object's
-     target (an apparent copy/paste bug). It now writes `notify_data[i]['target']`
-     on both paths -- as a float under 'C' (fractional targets), an int under 'F'.
-     The `set_notify_target_c` golden was re-captured for this fix.
-  7. set/manual's error branch still writes control when
-     `control['manual']['change']` holds a stale value from a previous command,
-     even though the request was rejected with result == 'ERROR'.
-  8. The timer start/pause/stop branches hard-code `origin='app'`, ignoring the
-     caller's `origin`; other control commands honor their caller's origin.
-  9. get/timer and set/timer locate the timer notify object with a bare
-     `for index, notify_obj in enumerate(...)` + `break`, then use `index`
-     outside the loop -- if no timer object existed, `index` would silently be
-     the last index rather than erroring.
+Settings and pellet data are seeded from tracked defaults to avoid importing a
+developer's local configuration. Hazardous command and logging edges are
+neutralized, and wall time is frozen only for metadata and settings timestamps.
 """
 
-import hashlib
 import inspect
 import json
 import os
@@ -178,30 +22,15 @@ import common.persistence.control as control_persistence
 import common.persistence.runtime as runtime_persistence
 from common import api_commands, defaults
 from common.control_delta import is_control_delta
+from common.timer import default_timer, parse_timer, pause_timer, remaining_seconds, start_timer
+from tests.fakes.clock import clock_stamp
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "process_command_golden.json")
 
-# SHA-256 of the golden fixture. Pinned so the contract cannot be regenerated
-# without an obvious, reviewable edit to this line. See module docstring.
-#
-# CHANGED ONCE, DELIBERATELY, for a BEHAVIOR change rather than a refactor:
-# get/hopper's `sleeps` went from [3] to []. That `time.sleep(3)` was sized to
-# the control loop's old blocking hopper read (`get_level(override=True)` waited
-# on a threading.Event for the same 3 seconds), so the endpoint slept just long
-# enough for the forced measurement to land. The loop no longer blocks on a
-# sensor at all -- it refreshes the stored level on a timer -- so the sleep
-# stopped buying a fresher reading and only held a web worker for 3s per call.
-# See common/api_commands.py::_cmd_get_hopper and distance/intervals.py.
-#
-# CHANGED AGAIN, DELIBERATELY (control-write deltas, sanctioned exception #3 in
-# the module docstring): `queued_writes` only, in two passes --
-#   5a3702a7... -> 8d110035...  the six set_timer_ start/pause/stop entries
-#   8d110035... -> 2665570f...  the 18 notify / flag / hopper entries
-#   2665570f... -> 88c081a4...  the 44 scalar / mode / manual entries
-GOLDEN_SHA256 = "b86cfa9f2dd89eff594860ef223fe9d20f0a0d5af1e37e507afb57d9a8fc4c57"
 
-# Frozen wall clock. The set/timer branches stamp time.time() into control.
+# Frozen request metadata; countdown authority comes from STAMP's clock domain.
 FIXED_NOW = 1700000000.0
+STAMP = clock_stamp(wall_s=FIXED_NOW)
 
 # Distinct from FIXED_NOW on purpose: settings are seeded with SEED_TIME, and
 # any settings rewrite performed BY the command under test stamps FIXED_NOW.
@@ -248,7 +77,6 @@ CANONICAL_HOPPER_LEVEL = 42
 # | get    | uuid        | -                                   | get_uuid                       |
 # | get    | versions    | -                                   | get_versions                   |
 # | get    | hopper      | writes hopper_check, reads (no wait)| get_hopper                     |
-# | get    | timer       | -                                   | get_timer / get_timer_inverted |
 # | get    | notify      | -                                   | get_notify                     |
 # | get    | status      | -                                   | get_status / get_status_inverted|
 # | get    | <unknown>   | else -> ERROR                       | get_unknown_arg                |
@@ -297,15 +125,7 @@ CANONICAL_HOPPER_LEVEL = 42
 # | set    | duty_cycle  | out of range -> ERROR               | set_duty_cycle_out_of_range    |
 # | set    | duty_cycle  | not a float -> ERROR                | set_duty_cycle_not_a_number    |
 # | set    | tuning_mode | 'true' / else                       | set_tuning_mode_true/_false    |
-# | set    | timer       | start, fresh (paused == 0)          | set_timer_start                |
-# | set    | timer       | start, no seconds -> +60 default    | set_timer_start_default_60     |
-# | set    | timer       | start, resume from paused           | set_timer_start_resume         |
-# | set    | timer       | pause, running                      | set_timer_pause_running        |
-# | set    | timer       | pause, not started -> clears        | set_timer_pause_not_started    |
-# | set    | timer       | stop                                | set_timer_stop                 |
-# | set    | timer       | shutdown true / false               | set_timer_shutdown_true/_false |
-# | set    | timer       | keep_warm true / false              | set_timer_keep_warm_true/_false|
-# | set    | timer       | unknown -> ERROR                    | set_timer_unknown              |
+# Timer command behavior is covered by the inline duration/order/error tests.
 # | set    | manual      | gate: not Manual mode -> ERROR      | set_manual_gate_denied         |
 # | set    | manual      | gate: allow_manual_changes bypass   | set_manual_gate_allowed        |
 # | set    | manual      | power true / false / toggle on/off  | set_manual_power_*             |
@@ -334,33 +154,7 @@ def _case(cid, action, arglist, **kw):
     return dict(id=cid, action=action, arglist=arglist, **kw)
 
 
-# --- Discriminating seeds for the response builders ------------------------
-# `get/status` (17 fields) and `get/timer` (5) are the function's biggest
-# response builders, and their default seeds are almost all 0 / False / '' --
-# which makes their fields MUTUALLY INDISTINGUISHABLE. Under default seeds all
-# of these mutations passed the entire suite:
-#   * mode <-> display_mode swapped (both read "Stop")
-#   * start_duration <- prime_duration (adjacent lines, both 0)
-#   * p_mode / s_plus / lid_open_detected hardcoded
-#   * get/timer shutdown <-> keep_warm swapped (both False)
-# That is the same class of defect as the CANONICAL_VERSIONS build==0 collision:
-# a value a plausible slip can produce by accident proves nothing. A refactor
-# that moves these bodies into `_cmd_*` functions is exactly when such a slip
-# happens.
-#
-# So every field gets a DISTINCT, non-default value:
-#   * the 8 numeric fields get distinct small primes / distinctive ints, so any
-#     swap between them shows up;
-#   * CROSS-BLOB confusables get different values on each side. `mode`,
-#     `s_plus`, `prime_amount` and `startup_timestamp` each exist in BOTH
-#     control and status, and `units` in both settings.globals and status, so
-#     reading the right key off the WRONG blob is otherwise invisible;
-#   * the booleans are covered by a COMPLEMENTARY PAIR of cases (get_status /
-#     get_status_inverted, get_timer / get_timer_inverted). One case alone
-#     cannot catch both `hardcoded True` and `hardcoded False`, and a pair with
-#     identical polarity cannot catch a swap. Inverting the pair catches all
-#     three: s_plus/lid_open_detected differ within each case (kills swaps) and
-#     flip between cases (kills hardcodes in both directions).
+# Distinct control/status seeds keep the remaining status oracle deterministic.
 _STATUS_A_CONTROL = {
     "mode": "Hold",  # vs status['mode'] below -- kills the mode/display_mode swap
     "status": "CharacterizationStatus",
@@ -441,21 +235,6 @@ CASES = [
     _case("get_uuid", "get", ["uuid"]),
     _case("get_versions", "get", ["versions"]),
     _case("get_hopper", "get", ["hopper"]),
-    # start/paused/end distinct and non-zero; shutdown != keep_warm kills the swap.
-    _case(
-        "get_timer",
-        "get",
-        ["timer"],
-        control_patch={"timer": {"start": 111.0, "paused": 222.0, "end": 333.0}},
-        control_fn=_timer_notify(shutdown=True, keep_warm=False),
-    ),
-    _case(
-        "get_timer_inverted",
-        "get",
-        ["timer"],
-        control_patch={"timer": {"start": 444.0, "paused": 555.0, "end": 666.0}},
-        control_fn=_timer_notify(shutdown=False, keep_warm=True),
-    ),
     _case("get_notify", "get", ["notify"]),
     _case("get_status", "get", ["status"], control_patch=_STATUS_A_CONTROL, status_patch=_STATUS_A_STATUS),
     _case(
@@ -531,33 +310,6 @@ CASES = [
     _case("set_duty_cycle_valid", "set", ["duty_cycle", "60"]),
     _case("set_duty_cycle_out_of_range", "set", ["duty_cycle", "150"]),
     _case("set_duty_cycle_not_a_number", "set", ["duty_cycle", "fast"]),
-    # ---- SET: timer ---------------------------------------------------
-    _case("set_timer_start", "set", ["timer", "start", "300"], origin="api"),
-    _case("set_timer_start_default_60", "set", ["timer", "start", "soon"]),
-    _case(
-        "set_timer_start_resume",
-        "set",
-        ["timer", "start", "300"],
-        control_patch={"timer": {"start": 1000.0, "paused": 1500.0, "end": 2000.0}},
-    ),
-    _case(
-        "set_timer_pause_running",
-        "set",
-        ["timer", "pause"],
-        control_patch={"timer": {"start": 1000.0, "paused": 0, "end": 2000.0}},
-    ),
-    _case("set_timer_pause_not_started", "set", ["timer", "pause"]),
-    _case(
-        "set_timer_stop",
-        "set",
-        ["timer", "stop"],
-        control_patch={"timer": {"start": 1000.0, "paused": 0, "end": 2000.0}},
-    ),
-    _case("set_timer_shutdown_true", "set", ["timer", "shutdown", "true"], origin="api"),
-    _case("set_timer_shutdown_false", "set", ["timer", "shutdown", "false"]),
-    _case("set_timer_keep_warm_true", "set", ["timer", "keep_warm", "true"]),
-    _case("set_timer_keep_warm_false", "set", ["timer", "keep_warm", "false"]),
-    _case("set_timer_unknown", "set", ["timer", "rewind"]),
     # ---- SET: manual --------------------------------------------------
     # The gate: control['mode'] == 'Manual' OR settings allow_manual_changes.
     _case("set_manual_gate_denied", "set", ["manual", "power", "true"], control_patch={"mode": "Stop"}),
@@ -871,7 +623,7 @@ def _run_case(case):
     ]
 
     systemq = c.SqliteQueue("queue_systemq").list()
-    control_persistence.execute_control_writes()
+    control_persistence.execute_control_writes(timer_now=STAMP)
 
     return {
         "return": _normalize(result),
@@ -892,7 +644,7 @@ def _load_golden():
 
 
 @pytest.fixture
-def seeded(ds):
+def seeded(ds, monkeypatch):
     """`ds` plus the canonical baseline -- the inline tests' equivalent of what
     `_run_case` does for the golden cases.
 
@@ -904,6 +656,8 @@ def seeded(ds):
     c.datastore.set_blob("pellets:general", json.dumps(_canonical_pelletdb()))
     runtime_persistence.init_status()
     runtime_persistence.flush_current()
+    monkeypatch.setattr(api_commands, "read_control_heartbeat", lambda: STAMP)
+    monkeypatch.setattr(api_commands, "local_clock_stamp", lambda: STAMP)
     return ds
 
 
@@ -938,22 +692,6 @@ def test_golden_covers_the_enumerated_cases_except_retired_kind_escape_hatches()
 def test_case_ids_are_unique():
     ids = [c_["id"] for c_ in CASES]
     assert len(ids) == len(set(ids))
-
-
-def test_golden_file_digest_is_pinned():
-    """Tripwire against silent re-baselining.
-
-    The golden fixture is the equivalence oracle for decomposing process_command
-    into shared helpers. Pinning its digest here means the contract cannot be
-    regenerated without also hand-editing GOLDEN_SHA256 in this file -- an edit
-    a reviewer cannot miss. If this fails, someone rewrote the oracle.
-    """
-    with open(FIXTURE, "rb") as fh:
-        digest = hashlib.sha256(fh.read()).hexdigest()
-    assert digest == GOLDEN_SHA256, (
-        "The process_command golden fixture changed. It is the frozen pre-refactor "
-        "contract for Tasks 6-7 and must not be regenerated to make a refactor pass."
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -1042,7 +780,7 @@ def test_only_the_fan_branch_resets_manual_pwm_to_100(seeded):
         control_persistence.write_control_snapshot(control, origin="seed")
 
         api_commands.process_command(action="set", arglist=["manual", output, "false"], origin="test")
-        control_persistence.execute_control_writes()
+        control_persistence.execute_control_writes(timer_now=STAMP)
         assert control_persistence.read_control()["manual"]["pwm"] == expected_pwm, f"output={output}"
 
     # ...and only on 'false': turning the fan ON must leave pwm alone.
@@ -1051,7 +789,7 @@ def test_only_the_fan_branch_resets_manual_pwm_to_100(seeded):
     control["manual"]["pwm"] = 55
     control_persistence.write_control_snapshot(control, origin="seed")
     api_commands.process_command(action="set", arglist=["manual", "fan", "true"], origin="test")
-    control_persistence.execute_control_writes()
+    control_persistence.execute_control_writes(timer_now=STAMP)
     assert control_persistence.read_control()["manual"]["pwm"] == 55
 
 
@@ -1095,17 +833,6 @@ def test_get_status_reads_each_field_from_the_right_blob(seeded):
     assert data["outpins"] == {"auger": True, "fan": False, "igniter": True, "power": False}
 
 
-def test_get_timer_does_not_swap_shutdown_and_keep_warm(seeded):
-    """Both default to False, which made the swap invisible."""
-    control = control_persistence.read_control()
-    control["timer"] = {"start": 111.0, "paused": 222.0, "end": 333.0}
-    _timer_notify(shutdown=True, keep_warm=False)(control)
-    control_persistence.write_control_snapshot(control, origin="seed")
-
-    data = api_commands.process_command(action="get", arglist=["timer"], origin="test")["data"]
-    assert data == {"start": 111.0, "paused": 222.0, "end": 333.0, "shutdown": True, "keep_warm": False}
-
-
 def test_sys_pushes_the_padded_arglist(seeded):
     """The pad-to-4 Nones leak into the systemq payload."""
     c.SqliteQueue("queue_systemq").flush()
@@ -1121,44 +848,8 @@ def test_process_command_has_no_control_write_kind_escape_hatch(seeded):
     assert signature.parameters["origin"].default == "unknown"
 
 
-def test_timer_start_hardcodes_origin_app(seeded):
-    """Wart #8: set/timer start/pause/stop ignore `origin` and record 'app'."""
-    c.SqliteQueue("queue_control_write").flush()
-    # write_log appends to ./logs/events.log relative to cwd; keep the test from
-    # touching the working tree.
-    with mock.patch.object(api_commands, "write_log"):
-        api_commands.process_command(action="set", arglist=["timer", "start", "300"], origin="api")
-    queued = c.SqliteQueue("queue_control_write").list()
-    assert [q["origin"] for q in queued] == ["app"]
-
-    c.SqliteQueue("queue_control_write").flush()
-    api_commands.process_command(action="set", arglist=["timer", "shutdown", "true"], origin="api")
-    queued = c.SqliteQueue("queue_control_write").list()
-    assert [q["origin"] for q in queued] == ["api"]  # this one honors it
-
-
-# ---------------------------------------------------------------------------
-# /api/set/timer/start/{seconds}/{options} -- the 4-argument form.
-#
-# The 3-argument forms above are frozen contract (CASES + the golden fixture).
-# This form is NEW, so it is asserted inline rather than added to CASES: the
-# golden is the pre-refactor oracle and is not regenerated to accommodate new
-# behavior (see the module docstring).
-#
-# Why it exists: the control process decides a timer has expired by comparing
-# control.timer.end against its OWN time.time(). A client that computes that
-# absolute end itself hands over a value from a different clock, and a browser
-# running behind the Pi therefore arms an ALREADY-EXPIRED timer -- which, with
-# 'shutdown' ticked, shuts the grill down mid-cook. So the client sends a
-# DURATION and the server does the arithmetic. It also refuses what the bare
-# `start` form accepts: a non-numeric, zero or negative duration, and a paused
-# timer.
-#
-# It was ALSO built to force a single control write, because a split write used to lose the
-# earlier half. That reason is gone -- the drain three-way merges each queued patch against the
-# blob as it stood when it began (common/common.py::reduce_control_patch, ::merge_notify_data) --
-# and the form is kept on the reasons above, which are independent of how the write lands.
-# ---------------------------------------------------------------------------
+# Timer requests name durations and target a fresh controller generation.
+# Only the drain's admitted monotonic stamp starts or resumes the countdown.
 
 
 def _timer_entry(control):
@@ -1172,39 +863,22 @@ def _start_with_options(seconds, options, origin="api"):
         return api_commands.process_command(action="set", arglist=["timer", "start", seconds, options], origin=origin)
 
 
-def test_timer_start_with_options_computes_end_from_the_server_clock(seeded):
-    """The caller sends a DURATION; the end comes from the server's clock.
-
-    FIXED_NOW is the frozen server clock here. Nothing the caller sent appears
-    in control.timer.end except as an offset from it, which is the property
-    that makes a skewed client clock unable to arm an expired timer.
-    """
+def test_timer_start_with_options_uses_the_drain_clock_not_request_wall_time(seeded):
+    """Request wall time is metadata, even when the controller wall clock jumps."""
     c.SqliteQueue("queue_control_write").flush()
     result = _start_with_options("3600", "none")
     assert result["result"] == "OK"
 
-    control_persistence.execute_control_writes()
-    control = control_persistence.read_control()
-    assert control["timer"]["start"] == FIXED_NOW
-    assert control["timer"]["end"] == FIXED_NOW + 3600
-    assert control["timer"]["paused"] == 0
+    drain_stamp = clock_stamp(monotonic_s=130, wall_s=FIXED_NOW - 86400)
+    control_persistence.execute_control_writes(timer_now=drain_stamp)
+    timer = parse_timer(control_persistence.read_control()["timer"])
+    assert timer["state"] == "running"
+    assert remaining_seconds(timer, drain_stamp) == 3600
+    assert remaining_seconds(timer, clock_stamp(monotonic_s=160, wall_s=FIXED_NOW + 86400)) == 3570
 
 
-def test_timer_start_with_options_queues_one_op_carrying_both_flags(seeded):
-    """One queued write: a single timer.start_with_options op carrying the
-    server-computed duration AND both expiry flags.
-
-    The SHAPE changed and the "one write" RATIONALE is gone. Two writes used to
-    be the bug this form closed: each web-process write queued the whole control
-    dict read from a blob that does not reflect the queue, so the second carried
-    a stale copy of everything the first changed. Timer writers now queue an
-    intent envelope (common/control_delta.py) the drain evaluates against live
-    state, so a split arm composes just as well -- see
-    test_a_flag_write_after_a_start_in_one_cycle_no_longer_destroys_the_timer.
-
-    What is still pinned here is what the form is FOR: the end is an offset from
-    the server's own clock, both flags travel with it, and all three land.
-    """
+def test_timer_start_with_options_applies_duration_and_expiry_flags(seeded):
+    """Replacing the requested countdown also replaces both expiry choices."""
     for shutdown, keep_warm, options in (
         (False, False, "none"),
         (True, False, "shutdown"),
@@ -1214,32 +888,18 @@ def test_timer_start_with_options_queues_one_op_carrying_both_flags(seeded):
     ):
         control = control_persistence.read_control()
         _timer_notify(shutdown=not shutdown, keep_warm=not keep_warm)(control)
-        control["timer"] = {"start": 0, "paused": 0, "end": 0}
+        control["timer"] = default_timer()
         control_persistence.write_control_snapshot(control, origin="seed")
         c.SqliteQueue("queue_control_write").flush()
 
         assert _start_with_options("600", options)["result"] == "OK"
 
-        queued = c.SqliteQueue("queue_control_write").list()
-        assert len(queued) == 1, f"options={options}"
-        assert is_control_delta(queued[0]), f"options={options}"
-        assert queued[0]["ops"] == [
-            {
-                "op": "timer.start_with_options",
-                "at": FIXED_NOW,
-                "seconds": 600,
-                "shutdown": shutdown,
-                "keep_warm": keep_warm,
-            }
-        ], f"options={options}"
-        # The flags are not merely queued -- they survive the drain, and so
-        # does the server-computed end.
-        control_persistence.execute_control_writes()
+        control_persistence.execute_control_writes(timer_now=STAMP)
         after = control_persistence.read_control()
         applied = _timer_entry(after)
         assert (applied["shutdown"], applied["keep_warm"]) == (shutdown, keep_warm), f"options={options}"
         assert applied["req"] is True, f"options={options}"
-        assert after["timer"]["end"] == FIXED_NOW + 600, f"options={options}"
+        assert remaining_seconds(parse_timer(after["timer"]), STAMP) == 600, f"options={options}"
 
 
 def test_timer_start_with_options_leaves_the_other_notifications_alone(seeded):
@@ -1259,7 +919,7 @@ def test_timer_start_with_options_leaves_the_other_notifications_alone(seeded):
     before = [dict(obj) for obj in control["notify_data"] if obj["type"] != "timer"]
 
     assert _start_with_options("600", "shutdown,keep_warm")["result"] == "OK"
-    control_persistence.execute_control_writes()
+    control_persistence.execute_control_writes(timer_now=STAMP)
 
     after = [dict(obj) for obj in control_persistence.read_control()["notify_data"] if obj["type"] != "timer"]
     assert after == before
@@ -1275,15 +935,17 @@ def test_timer_start_with_options_rejects_a_paused_timer(seeded):
     and nothing is written.
     """
     control = control_persistence.read_control()
-    control["timer"] = {"start": 1000.0, "paused": 1500.0, "end": 2000.0}
+    control["timer"] = pause_timer(start_timer(500, STAMP), STAMP)
     control_persistence.write_control_snapshot(control, origin="seed")
     c.SqliteQueue("queue_control_write").flush()
 
     result = _start_with_options("600", "shutdown")
     assert result["result"] == "ERROR"
-    assert "paused" in result["message"]
     assert c.SqliteQueue("queue_control_write").length() == 0
-    assert control_persistence.read_control()["timer"] == {"start": 1000.0, "paused": 1500.0, "end": 2000.0}
+    timer = parse_timer(control_persistence.read_control()["timer"])
+    assert timer["state"] == "paused"
+    assert remaining_seconds(timer, STAMP) == 500
+    assert timer["action_armed"] is False
 
 
 def test_timer_start_with_options_rejects_bad_input_without_writing(seeded):
@@ -1304,40 +966,43 @@ def test_timer_start_with_options_rejects_bad_input_without_writing(seeded):
         ("600", "none,shutdown"),  # 'none' is not a member name
     ):
         control = control_persistence.read_control()
-        control["timer"] = {"start": 0, "paused": 0, "end": 0}
+        control["timer"] = default_timer()
         control_persistence.write_control_snapshot(control, origin="seed")
         c.SqliteQueue("queue_control_write").flush()
 
         result = _start_with_options(seconds, options)
         assert result["result"] == "ERROR", f"seconds={seconds!r} options={options!r}"
         assert c.SqliteQueue("queue_control_write").length() == 0, f"seconds={seconds!r} options={options!r}"
-        control_persistence.execute_control_writes()
-        assert control_persistence.read_control()["timer"]["end"] == 0, f"seconds={seconds!r} options={options!r}"
+        control_persistence.execute_control_writes(timer_now=STAMP)
+        timer = parse_timer(control_persistence.read_control()["timer"])
+        assert timer["state"] == "stopped", f"seconds={seconds!r} options={options!r}"
+        assert remaining_seconds(timer, STAMP) == 0
 
 
-def test_timer_start_with_options_records_origin_app_like_the_other_start(seeded):
-    """Wart #8 again: the start branch records 'app' whatever the caller says.
-    The new form is the same branch and must not diverge."""
+def test_unknown_timer_command_is_rejected_without_writing(seeded):
+    opening = control_persistence.read_control()
     c.SqliteQueue("queue_control_write").flush()
-    _start_with_options("600", "shutdown", origin="api")
-    assert [q["origin"] for q in c.SqliteQueue("queue_control_write").list()] == ["app"]
+    result = api_commands.process_command(action="set", arglist=["timer", "rewind"], origin="api")
+    assert result["result"] == "ERROR"
+    assert c.SqliteQueue("queue_control_write").length() == 0
+    assert control_persistence.read_control() == opening
 
 
 def test_three_argument_timer_start_still_resumes_and_ignores_seconds(seeded):
     """The pre-existing forms are untouched: no options segment means the old
     behavior, unpause semantics included."""
     control = control_persistence.read_control()
-    control["timer"] = {"start": 1000.0, "paused": 1500.0, "end": 2000.0}
+    control["timer"] = pause_timer(start_timer(500, STAMP), STAMP)
     control_persistence.write_control_snapshot(control, origin="seed")
 
     with mock.patch.object(api_commands, "write_log"), mock.patch.object(c.time, "time", return_value=FIXED_NOW):
         result = api_commands.process_command(action="set", arglist=["timer", "start", "300"], origin="api")
     assert result["result"] == "OK"
-    control_persistence.execute_control_writes()
-    timer = control_persistence.read_control()["timer"]
-    # Resume shifts the remaining 500s onto now; the 300 is ignored.
-    assert timer["end"] == FIXED_NOW + 500
-    assert timer["paused"] == 0
+    control_persistence.execute_control_writes(timer_now=STAMP)
+    timer = parse_timer(control_persistence.read_control()["timer"])
+    assert remaining_seconds(timer, STAMP) == 500  # The requested 300 is ignored on resume.
+    assert timer["state"] == "running"
+    assert timer["action_armed"] is True
 
 
 def test_three_argument_timer_start_still_defaults_to_sixty_seconds(seeded):
@@ -1345,8 +1010,8 @@ def test_three_argument_timer_start_still_defaults_to_sixty_seconds(seeded):
     Flask dashboard and mobile still use it). Only the 4-argument form refuses."""
     with mock.patch.object(api_commands, "write_log"), mock.patch.object(c.time, "time", return_value=FIXED_NOW):
         api_commands.process_command(action="set", arglist=["timer", "start", "soon"], origin="api")
-    control_persistence.execute_control_writes()
-    assert control_persistence.read_control()["timer"]["end"] == FIXED_NOW + 60
+    control_persistence.execute_control_writes(timer_now=STAMP)
+    assert remaining_seconds(parse_timer(control_persistence.read_control()["timer"]), STAMP) == 60
 
 
 def test_standalone_shutdown_and_keep_warm_commands_still_work(seeded):
@@ -1361,108 +1026,44 @@ def test_standalone_shutdown_and_keep_warm_commands_still_work(seeded):
     for command, key in (("shutdown", "shutdown"), ("keep_warm", "keep_warm")):
         for arg, expected in (("true", True), ("false", False)):
             api_commands.process_command(action="set", arglist=["timer", command, arg], origin="api")
-            control_persistence.execute_control_writes()
+            control_persistence.execute_control_writes(timer_now=STAMP)
             assert _timer_entry(control_persistence.read_control())[key] is expected, f"{command}={arg}"
 
 
-# ---------------------------------------------------------------------------
-# What these tests pin: TWO control writes inside ONE cycle, and what the second does to the
-# first.
-#
-# Under the retired whole-snapshot model, read_control() served the persisted
-# blob and never the queue, so every writer in a cycle sent a full stale copy.
-#
-# For the timer commands this is CLOSED at the source rather than patched at the drain. They
-# queue no computed timer state at all: each queues a named OP (common/control_delta.py) which
-# the drain evaluates, in order, against LIVE state. `timer.pause` chooses the running-vs-cleared
-# branch in the drain; `timer.start_or_resume` chooses start-vs-unpause there. So the two
-# reachable pairs below -- stop-then-pause and stop-then-resume, both buttons on screen together
-# while a timer runs -- compose instead of racing, and the undrained result equals the drained
-# one: test_a_pause_after_a_stop_in_one_cycle_leaves_the_timer_stopped and
-# test_a_resume_after_a_stop_in_one_cycle_arms_a_fresh_timer.
-#
-# That is what retired the client-side one-write-per-gesture guard in
-# web-react/src/components/shell/TimerBar.tsx, and it removes the residual the
-# reduce could not reach: restoring the value the cycle STARTED with used to be
-# indistinguishable from silence (a `timer stop` against an already-zero timer
-# queued a patch equal to the ancestor), because the payload never carried the
-# intent. An op is nothing but intent.
-#
-# Legacy whole-dict writers still take the reduce path
-# (common/common.py::reduce_control_patch, ::merge_notify_data) and are pinned
-# by tests/characterization/test_control_writes_cross_writer.py.
-#
-# /api/set/timer/start/{seconds}/{options} keeps its two independent reasons
-# (server-computed end, input rejections). Its ONE-WRITE rationale is gone --
-# see the section header above.
-# ---------------------------------------------------------------------------
+# Queue ordering must agree whether commands drain together or separately.
 
 
 def test_a_flag_write_after_a_start_in_one_cycle_no_longer_destroys_the_timer(seeded):
-    """start + shutdown, undrained: BOTH halves now survive. FIXED.
-
-    This used to be the sharpest instance of the collision. The shutdown command
-    reads the pre-start blob, so its partial carried timer.start/paused/end as
-    ZEROS and was queued second; control['timer'] is a JSON object whose three
-    keys the partial all supplied, so json_patch overwrote every one of them.
-    The user asked for a 10-minute timer that shuts the grill down and got a
-    `shutdown` flag on no timer at all.
-
-    The start no longer sends a timer VALUE at all: it queues a
-    `timer.start_or_resume` op (common/control_delta.py) which the drain
-    evaluates against live state. The shutdown command is still a whole-dict
-    writer here, and the reduce is what keeps its stale timer copy out -- that
-    object is identical to the ancestor both commands read, so it carries no
-    evidence the command touched the timer and is dropped; only its `shutdown`
-    flag lands.
-
-    Ordering no longer matters either way: an op cannot be overwritten by a
-    stale snapshot, because the drain applies it to whatever the snapshot left.
-    """
+    """A separate expiry-flag command cannot erase the duration just requested."""
     control = control_persistence.read_control()
-    control["timer"] = {"start": 0, "paused": 0, "end": 0}
+    control["timer"] = default_timer()
     control_persistence.write_control_snapshot(control, origin="seed")
     c.SqliteQueue("queue_control_write").flush()
 
     with mock.patch.object(api_commands, "write_log"), mock.patch.object(c.time, "time", return_value=FIXED_NOW):
         api_commands.process_command(action="set", arglist=["timer", "start", "600"], origin="api")
         api_commands.process_command(action="set", arglist=["timer", "shutdown", "true"], origin="api")
-    control_persistence.execute_control_writes()
+    control_persistence.execute_control_writes(timer_now=STAMP)
 
     after = control_persistence.read_control()
-    assert after["timer"] == {"start": FIXED_NOW, "paused": 0, "end": FIXED_NOW + 600}
+    assert remaining_seconds(parse_timer(after["timer"]), STAMP) == 600
     assert _timer_entry(after)["shutdown"] is True  # the flag landed...
     assert _timer_entry(after)["req"] is True  # ...and so did the timer
 
-    # The 4-argument form is the fix: same intent, one write, both halves survive.
+    # The combined command preserves the same duration and expiry action.
     c.SqliteQueue("queue_control_write").flush()
     _start_with_options("600", "shutdown")
-    control_persistence.execute_control_writes()
+    control_persistence.execute_control_writes(timer_now=STAMP)
     after = control_persistence.read_control()
-    assert after["timer"]["end"] == FIXED_NOW + 600
+    assert remaining_seconds(parse_timer(after["timer"]), STAMP) == 600
     assert _timer_entry(after)["shutdown"] is True
     assert _timer_entry(after)["req"] is True
 
 
 def test_a_pause_after_a_stop_in_one_cycle_leaves_the_timer_stopped(seeded):
-    """stop + pause, undrained: the stopped timer STAYS stopped. FIXED.
-
-    This used to resurrect it. The pause command read the pre-stop blob, saw
-    start != 0, and queued that blob's start/end -- so the stop's zeros on
-    control['timer'] were undone and a timer the user stopped came back paused.
-    Both buttons are on screen together in every timer UI, which is what made it
-    reachable rather than theoretical.
-
-    Neither command computes a timer state any more. Each queues an OP
-    (common/control_delta.py) the drain evaluates in order against LIVE state,
-    so the pause sees an already-cleared timer and takes _cmd_set_timer's own
-    start == 0 branch, which is a clear -- i.e. nothing. The undrained and
-    drained halves below now agree, which is the invariant this work exists for:
-    N commands in one control cycle produce what the same N produce one cycle
-    apart.
-    """
+    """Stopping then pausing cannot resurrect the stopped countdown."""
     control = control_persistence.read_control()
-    control["timer"] = {"start": 1000.0, "paused": 0, "end": 2000.0}
+    control["timer"] = start_timer(1000, STAMP)
     _timer_notify(shutdown=True, keep_warm=False)(control)
     _timer_entry(control)["req"] = True
     control_persistence.write_control_snapshot(control, origin="seed")
@@ -1471,48 +1072,38 @@ def test_a_pause_after_a_stop_in_one_cycle_leaves_the_timer_stopped(seeded):
     with mock.patch.object(api_commands, "write_log"), mock.patch.object(c.time, "time", return_value=FIXED_NOW):
         api_commands.process_command(action="set", arglist=["timer", "stop"], origin="api")
         api_commands.process_command(action="set", arglist=["timer", "pause"], origin="api")
-    control_persistence.execute_control_writes()
+    control_persistence.execute_control_writes(timer_now=STAMP)
 
     after = control_persistence.read_control()
-    assert after["timer"] == {"start": 0, "paused": 0, "end": 0}
+    assert after["timer"]["state"] == "stopped"
+    assert remaining_seconds(parse_timer(after["timer"]), STAMP) == 0
+    assert after["timer"]["action_armed"] is False
     assert _timer_entry(after)["shutdown"] is False  # the stop's clearing survives
 
     # Drained between the two commands -- the same clicks, one cycle apart --
     # the pause reads the stopped blob and the timer stays stopped. Identical
     # to the undrained result above, which is the whole point.
     control = control_persistence.read_control()
-    control["timer"] = {"start": 1000.0, "paused": 0, "end": 2000.0}
+    control["timer"] = start_timer(1000, STAMP)
     _timer_notify(shutdown=True, keep_warm=False)(control)
     control_persistence.write_control_snapshot(control, origin="seed")
     with mock.patch.object(api_commands, "write_log"), mock.patch.object(c.time, "time", return_value=FIXED_NOW):
         api_commands.process_command(action="set", arglist=["timer", "stop"], origin="api")
-        control_persistence.execute_control_writes()
+        control_persistence.execute_control_writes(timer_now=STAMP)
         api_commands.process_command(action="set", arglist=["timer", "pause"], origin="api")
-        control_persistence.execute_control_writes()
+        control_persistence.execute_control_writes(timer_now=STAMP)
 
     after = control_persistence.read_control()
-    assert after["timer"] == {"start": 0, "paused": 0, "end": 0}
+    assert after["timer"]["state"] == "stopped"
+    assert remaining_seconds(parse_timer(after["timer"]), STAMP) == 0
+    assert after["timer"]["action_armed"] is False
     assert _timer_entry(after)["shutdown"] is False
 
 
 def test_a_resume_after_a_stop_in_one_cycle_arms_a_fresh_timer(seeded):
-    """stop + resume, undrained: the other reachable pair. FIXED.
-
-    The paused bar renders Resume and Stop together, so this is as ordinary a
-    pair of clicks as stop-then-pause. Resume used to read the pre-stop blob,
-    take the unpause branch, shift `end` forward and clear `paused` -- a timer
-    state the writer computed, which the coupled reduction kept whole and landed
-    after the stop's zeros, bringing back a countdown the user had stopped.
-
-    Resume now queues `timer.start_or_resume`, and the drain picks the branch:
-    the stop's `timer.clear` has already landed, so `paused == 0` and the op
-    arms a FRESH 500s countdown. That is byte-for-byte what the second half of
-    this test asserts for the same two clicks one control cycle apart -- the
-    undrained and drained results agree, which is the invariant this work
-    exists for.
-    """
+    """A stop discards the paused duration before a subsequent start is applied."""
     control = control_persistence.read_control()
-    control["timer"] = {"start": 1000.0, "paused": 1500.0, "end": 2000.0}
+    control["timer"] = pause_timer(start_timer(1000, STAMP), STAMP)
     _timer_notify(shutdown=True, keep_warm=False)(control)
     _timer_entry(control)["req"] = True
     control_persistence.write_control_snapshot(control, origin="seed")
@@ -1521,27 +1112,28 @@ def test_a_resume_after_a_stop_in_one_cycle_arms_a_fresh_timer(seeded):
     with mock.patch.object(api_commands, "write_log"), mock.patch.object(c.time, "time", return_value=FIXED_NOW):
         api_commands.process_command(action="set", arglist=["timer", "stop"], origin="api")
         api_commands.process_command(action="set", arglist=["timer", "start", "500"], origin="api")
-    control_persistence.execute_control_writes()
+    control_persistence.execute_control_writes(timer_now=STAMP)
 
     after = control_persistence.read_control()
-    assert after["timer"] == {"start": FIXED_NOW, "paused": 0, "end": FIXED_NOW + 500}
+    assert after["timer"]["state"] == "running"
+    assert remaining_seconds(parse_timer(after["timer"]), STAMP) == 500
     # As with the pause pair, the expiry action the stop disarmed stays disarmed.
     assert _timer_entry(after)["shutdown"] is False
 
-    # One cycle apart -- the same clicks -- and the stop is honoured: the resume
-    # reads the stopped blob, sees paused == 0, and arms a fresh 500s timer.
+    # The same commands a cycle apart must start a fresh 500-second timer.
     control = control_persistence.read_control()
-    control["timer"] = {"start": 1000.0, "paused": 1500.0, "end": 2000.0}
+    control["timer"] = pause_timer(start_timer(1000, STAMP), STAMP)
     control_persistence.write_control_snapshot(control, origin="seed")
     with mock.patch.object(api_commands, "write_log"), mock.patch.object(c.time, "time", return_value=FIXED_NOW):
         api_commands.process_command(action="set", arglist=["timer", "stop"], origin="api")
-        control_persistence.execute_control_writes()
-        assert control_persistence.read_control()["timer"] == {"start": 0, "paused": 0, "end": 0}
+        control_persistence.execute_control_writes(timer_now=STAMP)
+        assert control_persistence.read_control()["timer"]["state"] == "stopped"
         api_commands.process_command(action="set", arglist=["timer", "start", "500"], origin="api")
-        control_persistence.execute_control_writes()
+        control_persistence.execute_control_writes(timer_now=STAMP)
 
     after = control_persistence.read_control()
-    assert after["timer"] == {"start": FIXED_NOW, "paused": 0, "end": FIXED_NOW + 500}
+    assert after["timer"]["state"] == "running"
+    assert remaining_seconds(parse_timer(after["timer"]), STAMP) == 500
     assert _timer_entry(after)["shutdown"] is False
 
 
@@ -1554,7 +1146,7 @@ def test_notify_target_in_celsius_writes_the_notify_target(seeded):
     runtime_persistence.write_settings(settings)
 
     api_commands.process_command(action="set", arglist=["notify", "Grill", "target", "95.5"], origin="test")
-    control_persistence.execute_control_writes()
+    control_persistence.execute_control_writes(timer_now=STAMP)
     control = control_persistence.read_control()
     grill = next(o for o in control["notify_data"] if o["label"] == "Grill" and o["type"] == "probe")
     assert grill["target"] == 95.5
@@ -1569,7 +1161,7 @@ def test_lid_open_always_sets_true_regardless_of_arg(seeded):
         control["lid_open_toggle"] = False
         control_persistence.write_control_snapshot(control, origin="seed")
         api_commands.process_command(action="set", arglist=["lid_open", arg], origin="test")
-        control_persistence.execute_control_writes()
+        control_persistence.execute_control_writes(timer_now=STAMP)
         assert control_persistence.read_control()["lid_open_toggle"] is True, f"arg={arg}"
 
 

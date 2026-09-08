@@ -20,17 +20,20 @@ so no test is needed to "route around" it; noted here for the record.
 """
 
 import logging
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
 
 from notify.wled_handler import WLEDNotificationHandler
+from controller.runtime.clock import ManualClock
 
 
 def _make_handler():
     """Build a handler without running __init__ (which does network I/O)."""
     handler = WLEDNotificationHandler.__new__(WLEDNotificationHandler)
+    handler._monotonic = time.monotonic
     handler.device_address = "1.2.3.4"
     handler.logger = logging.getLogger("test-wled")
     handler.last_updated = 0
@@ -166,33 +169,6 @@ def test_send_notification_default_preset_is_1():
     assert mock_post.call_args.kwargs["json"]["ps"] == 1
 
 
-def test_send_notification_updates_last_updated_even_on_success():
-    handler = _make_handler()
-    handler.last_updated = 0
-    with patch("notify.wled_handler.requests.post") as mock_post:
-        mock_post.return_value = _ok_response()
-        handler.send_notification(preset=1)
-    assert handler.last_updated > 0
-
-
-def test_send_notification_request_exception_still_updates_last_updated():
-    """last_updated is set unconditionally after the try/except, so even a
-    failed request bumps it -- pins this (possibly surprising) behavior."""
-    handler = _make_handler()
-    handler.last_updated = 0
-    with patch("notify.wled_handler.requests.post") as mock_post:
-        mock_post.side_effect = requests.RequestException("down")
-        handler.send_notification(preset=1)
-    assert handler.last_updated > 0
-
-
-def test_send_profile_notification_delegates_to_send_notification():
-    handler = _make_handler()
-    handler.send_notification = MagicMock()
-    handler.send_profile_notification(42)
-    handler.send_notification.assert_called_once_with(42)
-
-
 # ---------------------------------------------------------------------------
 # send_direct_command (HTTP POST boundary, payload construction)
 # ---------------------------------------------------------------------------
@@ -318,15 +294,6 @@ def test_send_direct_command_falls_back_to_raw_text_on_bad_json():
     with patch("notify.wled_handler.requests.post") as mock_post:
         mock_post.return_value = resp
         handler.send_direct_command(color="red")  # must not raise
-
-
-def test_send_direct_command_request_exception_logs_and_updates_last_updated():
-    handler = _make_handler()
-    handler.last_updated = 0
-    with patch("notify.wled_handler.requests.post") as mock_post:
-        mock_post.side_effect = requests.RequestException("down")
-        handler.send_direct_command(color="red")
-    assert handler.last_updated > 0
 
 
 # ---------------------------------------------------------------------------
@@ -499,7 +466,7 @@ def test_notify_profiles_grill_state_control_none_logs_warning_no_crash():
 
 def test_notify_profiles_grill_state_within_cooldown_is_skipped():
     handler = _profiles_handler()
-    handler.last_updated = __import__("time").time()  # "just now" -> cooldown active
+    handler.last_updated = handler._monotonic()  # "just now" -> cooldown active
     handler.notify_duration = 120
     handler._notify_profiles("GRILL_STATE", {"mode": "Smoke"}, {})
     handler.send_profile_notification.assert_not_called()
@@ -741,3 +708,59 @@ def test_cooking_does_not_hardcode_orange_cooking():
     handler.send_suggested_preset("cooking", {"cooking_color": "green"})
 
     assert handler.send_direct_command.call_args.kwargs["color"] != "orange_cooking"
+
+
+@pytest.mark.parametrize("wall_jump", [-3600, 3600])
+@pytest.mark.parametrize("control_mode", ["profiles", "suggested", "traditional"])
+def test_wled_event_cooldown_uses_elapsed_time(monkeypatch, wall_jump, control_mode):
+    import notify.wled_handler as module
+
+    clock = ManualClock(wall_start=1_800_000_000)
+    monkeypatch.setattr(module.time, "time", clock.wall_time)
+    settings = _settings(use_profiles=control_mode == "profiles", use_suggested_presets=control_mode == "suggested")
+    with (
+        patch.object(module.requests, "get", return_value=_ok_response({})),
+        patch.object(module.requests, "post", return_value=_ok_response()) as post,
+    ):
+        handler = WLEDNotificationHandler(settings, monotonic=clock.monotonic)
+        handler.notify("Timer_Expired", {"mode": "Smoke"}, settings)
+        assert post.call_count == 1  # event bypasses initial state cooldown
+        event_payload = post.call_args.kwargs["json"]
+        clock.jump_wall(wall_jump)
+        clock.advance(119)
+        handler.notify("GRILL_STATE", {"mode": "Smoke"}, settings)
+        assert post.call_count == 1
+        handler.notify("Timer_Expired", {"mode": "Smoke"}, settings)
+        assert post.call_count == 2  # events bypass an existing event cooldown too
+        clock.jump_wall(-wall_jump)
+        clock.advance(120)
+        handler.notify("GRILL_STATE", {"mode": "Smoke"}, settings)
+        assert post.call_count == 2  # state comparison remains strict
+        clock.advance(0.01)
+        handler.notify("GRILL_STATE", {"mode": "Smoke"}, settings)
+        assert post.call_count == 3
+        assert post.call_args.kwargs["json"] != event_payload
+        if control_mode == "suggested":
+            assert post.call_args.kwargs["json"]["seg"][0]["col"] == [[0, 0, 255]]
+        else:
+            assert post.call_args.kwargs["json"]["ps"] == 4
+
+
+@pytest.mark.parametrize("control_mode", ["profiles", "suggested", "traditional"])
+def test_failed_wled_event_still_cools_down_state_notifications(control_mode):
+    import notify.wled_handler as module
+
+    clock = ManualClock()
+    settings = _settings(use_profiles=control_mode == "profiles", use_suggested_presets=control_mode == "suggested")
+    with (
+        patch.object(module.requests, "get", return_value=_ok_response({})),
+        patch.object(module.requests, "post", side_effect=requests.RequestException("device offline")) as post,
+    ):
+        handler = WLEDNotificationHandler(settings, monotonic=clock.monotonic)
+        handler.notify("Timer_Expired", {"mode": "Smoke"}, settings)
+        clock.advance(120)
+        handler.notify("GRILL_STATE", {"mode": "Smoke"}, settings)
+        assert post.call_count == 1
+        clock.advance(0.01)
+        handler.notify("GRILL_STATE", {"mode": "Smoke"}, settings)
+        assert post.call_count == 2

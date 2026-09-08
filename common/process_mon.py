@@ -26,6 +26,7 @@ Description: This class object can be generated to both generate heartbeats
 import logging
 import threading
 import time
+from collections.abc import Callable
 
 from common.common import create_logger, log_path
 from common.modes import Mode
@@ -41,7 +42,7 @@ from notify.notifications import send_notifications
 
 
 class Process_Monitor:
-    def __init__(self, process, on_timeout, timeout=5):
+    def __init__(self, process, on_timeout, timeout=5, *, monotonic: Callable[[], float] = time.monotonic):
         self.process = process  # name of the process to monitor
         self.timeout = timeout  # time in seconds to wait before logging an error and running the recovery
         #  A callable, not an argv list. This took `["supervisorctl", "restart",
@@ -52,7 +53,8 @@ class Process_Monitor:
         #  it because the command lived here rather than in common/system.py.
         self.on_timeout = on_timeout
 
-        self.last_heartbeat = time.time()
+        self._monotonic = monotonic
+        self.last_heartbeat = self._monotonic()
         self.active = False
         self.kill = False
 
@@ -83,7 +85,7 @@ class Process_Monitor:
         self.process_thread.start()
 
     def heartbeat(self):
-        self.last_heartbeat = time.time()
+        self.last_heartbeat = self._monotonic()
 
     def start_monitor(self):
         self.active = True
@@ -106,7 +108,7 @@ class Process_Monitor:
     def _heartbeat_check(self):
         while True:
             while self.active:
-                now = time.time()
+                now = self._monotonic()
                 if now - self.last_heartbeat > self.timeout:
                     # Set control process critical error flag
                     control = read_control()

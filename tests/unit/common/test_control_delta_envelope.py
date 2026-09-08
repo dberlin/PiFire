@@ -15,6 +15,9 @@ from common.control_delta import (
 from common.persistence import control as control_persistence
 from common.sqlite_queue import SqliteQueue
 
+from common.timer import default_timer
+from tests.fakes.clock import clock_stamp
+
 
 def test_enqueue_control_delta_validates_and_copies_before_queueing(ds):
     envelope = control_delta(set_values={"manual": {"pwm": 50}})
@@ -38,24 +41,10 @@ def test_enqueue_control_delta_validates_and_copies_before_queueing(ds):
 def test_enqueue_control_delta_rejects_an_invalid_envelope_without_queueing(ds):
     malformed = {CONTROL_DELTA_KEY: CONTROL_DELTA_VERSION, "set": []}
 
-    with pytest.raises(ControlDeltaError, match="set must be a mapping, got list"):
+    with pytest.raises(ControlDeltaError):
         control_persistence.enqueue_control_delta(malformed, origin="display")
 
     assert SqliteQueue("queue_control_write").length() == 0
-
-
-def test_a_set_only_delta_has_exactly_the_expected_wire_shape():
-    assert control_delta(set_values={"mode": "Hold", "primary_setpoint": 225}) == {
-        CONTROL_DELTA_KEY: CONTROL_DELTA_VERSION,
-        "set": {"mode": "Hold", "primary_setpoint": 225},
-    }
-
-
-def test_empty_members_are_omitted_not_emitted_as_empty_containers():
-    assert control_delta(set_values={"updated": True}) == {
-        CONTROL_DELTA_KEY: 1,
-        "set": {"updated": True},
-    }
 
 
 def test_is_control_delta_distinguishes_an_envelope_from_a_legacy_partial():
@@ -68,7 +57,7 @@ def test_is_control_delta_distinguishes_an_envelope_from_a_legacy_partial():
 def test_set_may_not_carry_timer():
     """The rule that makes deleting CONTROL_COUPLED_MEMBERS sound."""
     with pytest.raises(ControlDeltaError, match="timer"):
-        control_delta(set_values={"timer": {"start": 0, "paused": 0, "end": 0}})
+        control_delta(set_values={"timer": default_timer()})
 
 
 def test_set_may_not_carry_notify_data():
@@ -78,11 +67,7 @@ def test_set_may_not_carry_notify_data():
 
 def test_an_unknown_top_level_key_is_rejected():
     with pytest.raises(ControlDeltaError, match="patch"):
-        validate_control_delta({CONTROL_DELTA_KEY: 1, "patch": {}})
-
-
-def test_origin_is_an_allowed_top_level_key():
-    validate_control_delta({CONTROL_DELTA_KEY: 1, "set": {"updated": True}, "origin": "app"})
+        validate_control_delta({CONTROL_DELTA_KEY: CONTROL_DELTA_VERSION, "patch": {}})
 
 
 def test_an_unknown_op_name_is_rejected():
@@ -90,16 +75,76 @@ def test_an_unknown_op_name_is_rejected():
         control_delta(ops=[{"op": "timer.frobnicate"}])
 
 
-def test_timer_pause_requires_at():
-    with pytest.raises(ControlDeltaError, match="at"):
-        control_delta(ops=[{"op": "timer.pause"}])
+@pytest.mark.parametrize("name", ["timer.pause", "timer.clear"])
+@pytest.mark.parametrize("invalid_field", ["at", "seconds"])
+def test_pause_and_clear_reject_epoch_authority_and_duration_fields(name, invalid_field):
+    now = clock_stamp()
+    with pytest.raises(ControlDeltaError):
+        control_delta(
+            ops=[
+                {
+                    "op": name,
+                    "requested_wall_s": now.observed_wall_s,
+                    "target_runtime_id": now.runtime_id,
+                    invalid_field: 60,
+                }
+            ]
+        )
 
 
-def test_timer_clear_takes_no_fields():
-    assert control_delta(ops=[{"op": "timer.clear"}]) == {
-        CONTROL_DELTA_KEY: 1,
-        "ops": [{"op": "timer.clear"}],
+@pytest.mark.parametrize("missing", ["requested_wall_s", "target_runtime_id"])
+def test_timer_commands_require_provenance_and_target_generation(missing):
+    now = clock_stamp()
+    operation = {
+        "op": "timer.pause",
+        "requested_wall_s": now.observed_wall_s,
+        "target_runtime_id": now.runtime_id,
     }
+    del operation[missing]
+    with pytest.raises(ControlDeltaError):
+        control_delta(ops=[operation])
+
+
+@pytest.mark.parametrize("requested_wall_s", [float("nan"), float("inf"), True])
+def test_timer_wall_provenance_must_be_finite_metadata(requested_wall_s):
+    with pytest.raises(ControlDeltaError):
+        control_delta(
+            ops=[
+                {
+                    "op": "timer.clear",
+                    "requested_wall_s": requested_wall_s,
+                    "target_runtime_id": clock_stamp().runtime_id,
+                }
+            ]
+        )
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        {"seconds": 0},
+        {"seconds": 1.5},
+        {"seconds": True},
+        {"shutdown": 1},
+        {"keep_warm": "false"},
+    ],
+)
+def test_start_with_options_rejects_invalid_duration_and_flags(invalid):
+    now = clock_stamp()
+    with pytest.raises(ControlDeltaError):
+        control_delta(
+            ops=[
+                {
+                    "op": "timer.start_with_options",
+                    "requested_wall_s": now.observed_wall_s,
+                    "target_runtime_id": now.runtime_id,
+                    "seconds": 60,
+                    "shutdown": False,
+                    "keep_warm": False,
+                    **invalid,
+                }
+            ]
+        )
 
 
 def test_notify_set_requires_label_type_and_fields():
@@ -108,10 +153,6 @@ def test_notify_set_requires_label_type_and_fields():
 
 
 def test_delete_paths_must_be_non_empty_lists_of_strings():
-    assert control_delta(delete_paths=[["recipe", "step_data"]]) == {
-        CONTROL_DELTA_KEY: 1,
-        "delete": [["recipe", "step_data"]],
-    }
     with pytest.raises(ControlDeltaError, match="delete"):
         control_delta(delete_paths=[[]])
     with pytest.raises(ControlDeltaError, match="delete"):

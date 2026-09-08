@@ -625,7 +625,8 @@ def test_input_number_simple_animate_cycle_clears_input_after_two_frames():
 # ---------------------------------------------------------------------------
 
 
-def test_timer_status_active_countdown_long_label_truncated():
+@pytest.mark.parametrize("seconds", [None, 90])
+def test_timer_status_keeps_unknown_duration_visible(seconds):
     obj = TimerStatus(
         "timer",
         {
@@ -637,12 +638,17 @@ def test_timer_status_active_countdown_long_label_truncated():
             "fg_color": (255, 255, 255, 255),
             "bg_color": (0, 0, 0, 255),
             "label": "A Very Long Timer Label",
-            "data": {"seconds": 90},
+            "data": {"seconds": seconds},
             "touch_areas": [],
         },
         BG(),
     )
-    assert obj.get_object_canvas().size == (400, 200)
+    visible = obj.get_object_canvas()
+    assert visible.getbbox() is not None
+    data = obj.get_object_data()
+    data["data"]["seconds"] = 0
+    obj.update_object_data(data)
+    assert obj.get_object_canvas().getbbox() is None
 
 
 # ---------------------------------------------------------------------------

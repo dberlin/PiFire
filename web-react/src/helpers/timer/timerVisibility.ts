@@ -17,37 +17,17 @@ export interface TimerVisibility {
   toggle: () => void;
 }
 
-/**
- * Hidden by default, revealed by the stopwatch button -- and revealed on its
- * own whenever a timer starts.
- *
- * That last rule is Flask's (`timer.js:150-157`): the poller compares the
- * incoming `start` against the last one it saw and slides the bar down when
- * they differ, so a timer started from another browser, the on-device display
- * or a recipe step surfaces itself instead of ticking away invisibly. The same
- * comparison covers a page load onto an already-running cook, because the last
- * seen value starts at 0.
- *
- * `timerStart` is `LiveState["timer"].start`: 0 when no timer is set,
- * otherwise the epoch second the timer was started at.
- */
-export function useTimerVisibility(timerStart: number): TimerVisibility {
+/** Reveal a newly accepted timer, independent of its wall-clock labels. */
+export function useTimerVisibility(timerId: string | null): TimerVisibility {
   const [visible, setVisible] = useState(false);
-  // Deliberately 0 rather than the current `timerStart`, so mounting while a
-  // timer is already running counts as a change and reveals the bar.
-  const [seenStart, setSeenStart] = useState(0);
+  const [seenId, setSeenId] = useState<string | null>(null);
 
   // Adjusted synchronously during render (React's recommended pattern for
   // reacting to changed props) rather than in an effect -- see
   // dashboard/SetpointEntry.tsx for the same shape.
-  if (seenStart !== timerStart) {
-    setSeenStart(timerStart);
-    // Only a timer appearing reveals the bar. Flask reveals on any change of
-    // `start`, which means clearing a timer also slides the bar down onto an
-    // empty "--:--:--"; that is a side effect of its `!=` test, not something
-    // the user asked for, so a timer ending leaves the bar exactly as the user
-    // last left it.
-    if (timerStart !== 0) setVisible(true);
+  if (seenId !== timerId) {
+    setSeenId(timerId);
+    if (timerId !== null) setVisible(true);
   }
 
   const toggle = useCallback(() => setVisible((showing) => !showing), []);

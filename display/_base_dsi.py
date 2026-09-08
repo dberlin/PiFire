@@ -24,7 +24,6 @@ PiFire Display Interface Library
  Imported Libraries
 """
 import multiprocessing
-import time
 from pathlib import Path
 
 import pygame
@@ -119,13 +118,13 @@ class Display(DisplayBase):
 
         self.dash_object_list = []
 
-        refresh_data = 0
+        refresh_data = None
 
         """ Display Loop """
         while self.display_loop_active:
             """ Fetch display data every 200ms """
-            now = time.time()
-            if now - refresh_data > 0.2:
+            now = self._monotonic()
+            if refresh_data is None or now - refresh_data > 0.2:
                 self._fetch_data()
                 refresh_data = now
 

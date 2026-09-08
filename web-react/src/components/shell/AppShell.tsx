@@ -40,10 +40,8 @@ export function AppShell() {
       ),
     [live.thermocoupleHealth],
   );
-  const { visible, toggle } = useTimerVisibility(live.timer.start);
-  // Same derivation the bar makes; the navbar only needs the yes/no, so it is
-  // computed at render rather than lifted out of deriveTimer's richer result.
-  const timerRunning = live.timer.start !== 0 && live.timer.paused === 0;
+  const { visible, toggle } = useTimerVisibility(live.timer.timerId);
+  const timerRunning = live.timer.state === "running" && live.timer.current;
 
   // uiHash moves when set_probe_map() runs anywhere -- another client, the
   // wizard, discovery -- and that rebuilds settings the React app already

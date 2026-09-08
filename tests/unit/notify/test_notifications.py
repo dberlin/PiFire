@@ -42,6 +42,8 @@ import pytest
 
 import notify.notifications as N
 from common.modes import Mode
+from common.timer import default_timer, start_timer, checkpoint_timer, pause_timer, restore_timer, resume_timer
+from tests.fakes.clock import clock_stamp
 
 
 @pytest.fixture(autouse=True)
@@ -465,7 +467,7 @@ def test_send_influxdb_notification_constructs_and_caches_handler(monkeypatch):
 def _mqtt_fake_handler():
     handler = MagicMock()
     handler.last_mode = Mode.STARTUP
-    handler.pub_times = {"pid": 0, "pellet": 0, "base": 0}
+    handler.pub_times = {"pid": None, "pellet": None, "base": None}
     handler.pub_rate = 30
     return handler
 
@@ -519,7 +521,7 @@ def test_send_mqtt_notification_mode_change_publishes_pid_pellet_control_devices
 
 def test_send_mqtt_notification_unchanged_mode_within_pub_rate_skips_base_publish(monkeypatch):
     fake_handler = _mqtt_fake_handler()
-    now = N.time.time()
+    now = N.time.monotonic()
     fake_handler.pub_times = {"pid": now, "pellet": now, "base": now}
     monkeypatch.setattr("notify.mqtt_handler.MqttNotificationHandler", MagicMock(return_value=fake_handler))
     settings = {"notify_services": {"mqtt": {"broker": "b", "enabled": True}}}
@@ -768,7 +770,7 @@ def _cn_control(notify_data=None, mode=Mode.SMOKE):
         "mode": mode,
         "notify_data": notify_data or [],
         "recipe": {"step_data": {"trigger_temps": {}, "triggered": False, "timer": 0, "message": ""}},
-        "timer": {"start": 0, "paused": 0, "end": 0},
+        "timer": default_timer(),
         "safety": {},
         "updated": False,
         "primary_setpoint": 0,
@@ -787,7 +789,9 @@ def test_check_notify_forwards_to_mqtt_when_enabled(monkeypatch):
     mqtt_mock = MagicMock()
     monkeypatch.setattr(N, "_send_mqtt_notification", mqtt_mock)
 
-    result = N.check_notify(settings, control)  # no pelletdb/grill_platform -> early return after mqtt
+    result = N.check_notify(
+        settings, control, now=clock_stamp(), hopper_cooldowns={}
+    )  # no pelletdb/grill_platform -> early return after mqtt
 
     mqtt_mock.assert_called_once_with(control, settings, None, None, None, None)
     assert result is None  # early-return path returns None implicitly
@@ -801,7 +805,7 @@ def test_check_notify_early_returns_without_pelletdb_or_grill_platform(monkeypat
     monkeypatch.setattr(N, "_send_influxdb_notification", influx_mock)
     monkeypatch.setattr(N, "_send_wled_notification", wled_mock)
 
-    N.check_notify(settings, control, pelletdb=None, grill_platform=None)
+    N.check_notify(settings, control, pelletdb=None, grill_platform=None, now=clock_stamp(), hopper_cooldowns={})
 
     influx_mock.assert_not_called()
     wled_mock.assert_not_called()
@@ -815,7 +819,9 @@ def test_check_notify_forwards_to_influxdb_and_wled_when_configured(monkeypatch)
     monkeypatch.setattr(N, "_send_influxdb_notification", influx_mock)
     monkeypatch.setattr(N, "_send_wled_notification", wled_mock)
 
-    N.check_notify(settings, control, pelletdb={"current": {}}, grill_platform=MagicMock())
+    N.check_notify(
+        settings, control, pelletdb={"current": {}}, grill_platform=MagicMock(), now=clock_stamp(), hopper_cooldowns={}
+    )
 
     influx_mock.assert_called_once()
     wled_mock.assert_called_once()
@@ -841,7 +847,15 @@ def test_check_notify_probe_condition_met_sends_and_clears_request(monkeypatch):
         "notify_targets": {"Probe1": 200},
     }
 
-    result = N.check_notify(settings, control, in_data=in_data, pelletdb={"current": {}}, grill_platform=MagicMock())
+    result = N.check_notify(
+        settings,
+        control,
+        in_data=in_data,
+        pelletdb={"current": {}},
+        grill_platform=MagicMock(),
+        now=clock_stamp(),
+        hopper_cooldowns={},
+    )
 
     send_mock.assert_called_once_with("Probe_Temp_Achieved", label="Probe1", target=200)
     assert result["notify_data"][0]["req"] is False
@@ -866,7 +880,15 @@ def test_check_notify_probe_recipe_mode_sets_step_triggered(monkeypatch):
 
     in_data = {"probe_history": {"F": {"Probe1": 205}}, "notify_targets": {"Probe1": 200}}
 
-    result = N.check_notify(settings, control, in_data=in_data, pelletdb={"current": {}}, grill_platform=MagicMock())
+    result = N.check_notify(
+        settings,
+        control,
+        in_data=in_data,
+        pelletdb={"current": {}},
+        grill_platform=MagicMock(),
+        now=clock_stamp(),
+        hopper_cooldowns={},
+    )
 
     assert result["recipe"]["step_data"]["triggered"] is True
 
@@ -891,7 +913,15 @@ def test_check_notify_probe_recipe_mode_trigger_temp_not_positive_leaves_untrigg
 
     in_data = {"probe_history": {"F": {"Probe1": 205}}, "notify_targets": {"Probe1": 200}}
 
-    result = N.check_notify(settings, control, in_data=in_data, pelletdb={"current": {}}, grill_platform=MagicMock())
+    result = N.check_notify(
+        settings,
+        control,
+        in_data=in_data,
+        pelletdb={"current": {}},
+        grill_platform=MagicMock(),
+        now=clock_stamp(),
+        hopper_cooldowns={},
+    )
 
     assert result["recipe"]["step_data"]["triggered"] is False
 
@@ -913,7 +943,15 @@ def test_check_notify_probe_limit_high_triggers_alarm_once(monkeypatch):
     _patch_check_notify_deps(monkeypatch, send_notifications_mock=send_mock)
     in_data = {"probe_history": {"F": {"Grill": 310}}, "notify_targets": {}}
 
-    result = N.check_notify(settings, control, in_data=in_data, pelletdb={"current": {}}, grill_platform=MagicMock())
+    result = N.check_notify(
+        settings,
+        control,
+        in_data=in_data,
+        pelletdb={"current": {}},
+        grill_platform=MagicMock(),
+        now=clock_stamp(),
+        hopper_cooldowns={},
+    )
 
     send_mock.assert_called_once_with("Probe_Temp_Limit_Alarm", label="Grill", target=300)
     assert result["notify_data"][0]["triggered"] is True
@@ -936,7 +974,15 @@ def test_check_notify_probe_limit_condition_clears_when_back_in_range(monkeypatc
     _patch_check_notify_deps(monkeypatch, send_notifications_mock=send_mock)
     in_data = {"probe_history": {"F": {"Grill": 250}}, "notify_targets": {}}  # back in range
 
-    result = N.check_notify(settings, control, in_data=in_data, pelletdb={"current": {}}, grill_platform=MagicMock())
+    result = N.check_notify(
+        settings,
+        control,
+        in_data=in_data,
+        pelletdb={"current": {}},
+        grill_platform=MagicMock(),
+        now=clock_stamp(),
+        hopper_cooldowns={},
+    )
 
     send_mock.assert_not_called()
     assert result["notify_data"][0]["triggered"] is False
@@ -974,7 +1020,15 @@ def test_check_notify_limit_shutdown_fires_when_the_limit_is_crossed(monkeypatch
     _patch_check_notify_deps(monkeypatch)
     in_data = {"probe_history": {"F": {"Grill": temp}}, "notify_targets": {}}
 
-    result = N.check_notify(settings, control, in_data=in_data, pelletdb={"current": {}}, grill_platform=MagicMock())
+    result = N.check_notify(
+        settings,
+        control,
+        in_data=in_data,
+        pelletdb={"current": {}},
+        grill_platform=MagicMock(),
+        now=clock_stamp(),
+        hopper_cooldowns={},
+    )
 
     assert result["mode"] == Mode.SHUTDOWN
     assert result["updated"] is True
@@ -993,7 +1047,15 @@ def test_check_notify_limit_shutdown_does_not_fire_while_in_range(monkeypatch):
     _patch_check_notify_deps(monkeypatch)
     in_data = {"probe_history": {"F": {"Grill": 250}}, "notify_targets": {}}
 
-    result = N.check_notify(settings, control, in_data=in_data, pelletdb={"current": {}}, grill_platform=MagicMock())
+    result = N.check_notify(
+        settings,
+        control,
+        in_data=in_data,
+        pelletdb={"current": {}},
+        grill_platform=MagicMock(),
+        now=clock_stamp(),
+        hopper_cooldowns={},
+    )
 
     assert result["mode"] == Mode.HOLD
     assert result["notify_data"][0]["shutdown"] is True
@@ -1015,6 +1077,8 @@ def test_check_notify_limit_shutdown_re_arms_after_the_temperature_returns(monke
         in_data={"probe_history": {"F": {"Grill": 310}}, "notify_targets": {}},
         pelletdb={"current": {}},
         grill_platform=MagicMock(),
+        now=clock_stamp(),
+        hopper_cooldowns={},
     )
     assert control["mode"] == Mode.SHUTDOWN
 
@@ -1026,6 +1090,8 @@ def test_check_notify_limit_shutdown_re_arms_after_the_temperature_returns(monke
         in_data={"probe_history": {"F": {"Grill": 250}}, "notify_targets": {}},
         pelletdb={"current": {}},
         grill_platform=MagicMock(),
+        now=clock_stamp(),
+        hopper_cooldowns={},
     )
     assert result["notify_data"][0]["triggered"] is False
     assert result["notify_data"][0]["req"] is True
@@ -1050,7 +1116,15 @@ def test_check_notify_probe_shutdown_still_waits_for_the_target(monkeypatch):
     _patch_check_notify_deps(monkeypatch)
     in_data = {"probe_history": {"F": {"Probe1": 150}}, "notify_targets": {"Probe1": 200}}
 
-    result = N.check_notify(settings, control, in_data=in_data, pelletdb={"current": {}}, grill_platform=MagicMock())
+    result = N.check_notify(
+        settings,
+        control,
+        in_data=in_data,
+        pelletdb={"current": {}},
+        grill_platform=MagicMock(),
+        now=clock_stamp(),
+        hopper_cooldowns={},
+    )
 
     assert result["mode"] == Mode.HOLD
     assert result["notify_data"][0]["shutdown"] is True
@@ -1076,7 +1150,14 @@ def test_check_notify_probe_update_eta_writes_computed_eta(monkeypatch):
     in_data = {"probe_history": {"F": {"Probe1": 124}}, "notify_targets": {}}
 
     result = N.check_notify(
-        settings, control, in_data=in_data, pelletdb={"current": {}}, grill_platform=MagicMock(), update_eta=True
+        settings,
+        control,
+        in_data=in_data,
+        pelletdb={"current": {}},
+        grill_platform=MagicMock(),
+        update_eta=True,
+        now=clock_stamp(),
+        hopper_cooldowns={},
     )
 
     assert result["notify_data"][0]["eta"] == 123
@@ -1111,7 +1192,14 @@ def test_check_notify_probe_update_eta_reads_p_key_when_f_key_absent(monkeypatch
     in_data = {"probe_history": {"F": {"Probe1": 124}}, "notify_targets": {}}
 
     result = N.check_notify(
-        settings, control, in_data=in_data, pelletdb={"current": {}}, grill_platform=MagicMock(), update_eta=True
+        settings,
+        control,
+        in_data=in_data,
+        pelletdb={"current": {}},
+        grill_platform=MagicMock(),
+        update_eta=True,
+        now=clock_stamp(),
+        hopper_cooldowns={},
     )
 
     assert captured["temperatures"] == [100 + i for i in range(25)]
@@ -1122,14 +1210,16 @@ def test_check_notify_timer_expired_sends_and_resets_timer(monkeypatch):
     settings = _cn_settings()
     item = {"req": True, "type": "timer", "shutdown": False, "keep_warm": False}
     control = _cn_control(notify_data=[item])
-    control["timer"] = {"start": 111, "paused": 0, "end": 1}  # end already in the past
+    control["timer"] = start_timer(10, clock_stamp(monotonic_s=90))
     send_mock = MagicMock()
     _patch_check_notify_deps(monkeypatch, send_notifications_mock=send_mock)
 
-    result = N.check_notify(settings, control, pelletdb={"current": {}}, grill_platform=MagicMock())
+    result = N.check_notify(
+        settings, control, pelletdb={"current": {}}, grill_platform=MagicMock(), now=clock_stamp(), hopper_cooldowns={}
+    )
 
     send_mock.assert_called_once_with("Timer_Expired")
-    assert result["timer"] == {"start": 0, "paused": 0, "end": 0}
+    assert result["timer"]["state"] == "expired"
     assert result["notify_data"][0]["req"] is False
 
 
@@ -1137,11 +1227,13 @@ def test_check_notify_timer_recipe_mode_sets_step_triggered(monkeypatch):
     settings = _cn_settings()
     item = {"req": True, "type": "timer", "shutdown": False, "keep_warm": False}
     control = _cn_control(notify_data=[item], mode=Mode.RECIPE)
-    control["timer"] = {"start": 1, "paused": 0, "end": 1}
+    control["timer"] = start_timer(10, clock_stamp(monotonic_s=90))
     control["recipe"]["step_data"]["timer"] = 60
     _patch_check_notify_deps(monkeypatch)
 
-    result = N.check_notify(settings, control, pelletdb={"current": {}}, grill_platform=MagicMock())
+    result = N.check_notify(
+        settings, control, pelletdb={"current": {}}, grill_platform=MagicMock(), now=clock_stamp(), hopper_cooldowns={}
+    )
 
     assert result["recipe"]["step_data"]["triggered"] is True
 
@@ -1150,11 +1242,13 @@ def test_check_notify_timer_not_yet_expired_does_not_fire(monkeypatch):
     settings = _cn_settings()
     item = {"req": True, "type": "timer", "shutdown": False, "keep_warm": False}
     control = _cn_control(notify_data=[item])
-    control["timer"] = {"start": 0, "paused": 0, "end": N.time.time() + 3600}  # far future
+    control["timer"] = start_timer(3600, clock_stamp())
     send_mock = MagicMock()
     _patch_check_notify_deps(monkeypatch, send_notifications_mock=send_mock)
 
-    N.check_notify(settings, control, pelletdb={"current": {}}, grill_platform=MagicMock())
+    N.check_notify(
+        settings, control, pelletdb={"current": {}}, grill_platform=MagicMock(), now=clock_stamp(), hopper_cooldowns={}
+    )
 
     send_mock.assert_not_called()
 
@@ -1164,23 +1258,32 @@ def test_check_notify_timer_recipe_mode_timer_not_positive_leaves_untriggered(mo
     settings = _cn_settings()
     item = {"req": True, "type": "timer", "shutdown": False, "keep_warm": False}
     control = _cn_control(notify_data=[item], mode=Mode.RECIPE)
-    control["timer"] = {"start": 1, "paused": 0, "end": 1}
+    control["timer"] = start_timer(10, clock_stamp(monotonic_s=90))
     control["recipe"]["step_data"]["timer"] = 0
     _patch_check_notify_deps(monkeypatch)
 
-    result = N.check_notify(settings, control, pelletdb={"current": {}}, grill_platform=MagicMock())
+    result = N.check_notify(
+        settings, control, pelletdb={"current": {}}, grill_platform=MagicMock(), now=clock_stamp(), hopper_cooldowns={}
+    )
 
     assert result["recipe"]["step_data"]["triggered"] is False
 
 
 def test_check_notify_hopper_low_sends_and_updates_last_check(monkeypatch):
     settings = _cn_settings()
-    item = {"req": True, "type": "hopper", "last_check": 0, "shutdown": False, "keep_warm": False}
+    item = {"req": True, "type": "hopper", "label": "Hopper", "last_check": 0, "shutdown": False, "keep_warm": False}
     control = _cn_control(notify_data=[item])
     send_mock = MagicMock()
     _patch_check_notify_deps(monkeypatch, send_notifications_mock=send_mock)
 
-    result = N.check_notify(settings, control, pelletdb={"current": {"hopper_level": 10}}, grill_platform=MagicMock())
+    result = N.check_notify(
+        settings,
+        control,
+        pelletdb={"current": {"hopper_level": 10}},
+        grill_platform=MagicMock(),
+        now=clock_stamp(),
+        hopper_cooldowns={},
+    )
 
     send_mock.assert_called_once_with("Pellet_Level_Low")
     assert result["notify_data"][0]["last_check"] > 0
@@ -1188,24 +1291,38 @@ def test_check_notify_hopper_low_sends_and_updates_last_check(monkeypatch):
 
 def test_check_notify_hopper_within_warning_window_does_not_recheck(monkeypatch):
     settings = _cn_settings()
-    item = {"req": True, "type": "hopper", "last_check": N.time.time(), "shutdown": False, "keep_warm": False}
+    item = {"req": True, "type": "hopper", "label": "Hopper", "last_check": 9e9, "shutdown": False, "keep_warm": False}
     control = _cn_control(notify_data=[item])
     send_mock = MagicMock()
     _patch_check_notify_deps(monkeypatch, send_notifications_mock=send_mock)
 
-    N.check_notify(settings, control, pelletdb={"current": {"hopper_level": 10}}, grill_platform=MagicMock())
+    N.check_notify(
+        settings,
+        control,
+        pelletdb={"current": {"hopper_level": 10}},
+        grill_platform=MagicMock(),
+        now=clock_stamp(),
+        hopper_cooldowns={("hopper", "Hopper"): 90.0},
+    )
 
     send_mock.assert_not_called()
 
 
 def test_check_notify_hopper_above_warning_level_does_not_fire(monkeypatch):
     settings = _cn_settings()
-    item = {"req": True, "type": "hopper", "last_check": 0, "shutdown": False, "keep_warm": False}
+    item = {"req": True, "type": "hopper", "label": "Hopper", "last_check": 0, "shutdown": False, "keep_warm": False}
     control = _cn_control(notify_data=[item])
     send_mock = MagicMock()
     _patch_check_notify_deps(monkeypatch, send_notifications_mock=send_mock)
 
-    N.check_notify(settings, control, pelletdb={"current": {"hopper_level": 90}}, grill_platform=MagicMock())
+    N.check_notify(
+        settings,
+        control,
+        pelletdb={"current": {"hopper_level": 90}},
+        grill_platform=MagicMock(),
+        now=clock_stamp(),
+        hopper_cooldowns={},
+    )
 
     send_mock.assert_not_called()
 
@@ -1217,7 +1334,9 @@ def test_check_notify_test_type_sends_and_clears_request(monkeypatch):
     send_mock = MagicMock()
     _patch_check_notify_deps(monkeypatch, send_notifications_mock=send_mock)
 
-    result = N.check_notify(settings, control, pelletdb={"current": {}}, grill_platform=MagicMock())
+    result = N.check_notify(
+        settings, control, pelletdb={"current": {}}, grill_platform=MagicMock(), now=clock_stamp(), hopper_cooldowns={}
+    )
 
     send_mock.assert_called_once_with("Test_Notify")
     assert result["notify_data"][0]["req"] is False
@@ -1231,7 +1350,9 @@ def test_check_notify_item_not_requested_is_skipped(monkeypatch):
     write_mock = MagicMock()
     _patch_check_notify_deps(monkeypatch, write_control_snapshot_mock=write_mock, send_notifications_mock=send_mock)
 
-    N.check_notify(settings, control, pelletdb={"current": {}}, grill_platform=MagicMock())
+    N.check_notify(
+        settings, control, pelletdb={"current": {}}, grill_platform=MagicMock(), now=clock_stamp(), hopper_cooldowns={}
+    )
 
     send_mock.assert_not_called()
     write_mock.assert_not_called()  # the whole item body, including its snapshot, is skipped
@@ -1246,7 +1367,9 @@ def test_check_notify_shutdown_flag_transitions_mode_to_shutdown(monkeypatch):
     control = _cn_control(notify_data=[item], mode=Mode.HOLD)
     _patch_check_notify_deps(monkeypatch)
 
-    result = N.check_notify(settings, control, pelletdb={"current": {}}, grill_platform=MagicMock())
+    result = N.check_notify(
+        settings, control, pelletdb={"current": {}}, grill_platform=MagicMock(), now=clock_stamp(), hopper_cooldowns={}
+    )
 
     assert result["mode"] == Mode.SHUTDOWN
     assert result["updated"] is True
@@ -1261,7 +1384,9 @@ def test_check_notify_keep_warm_flag_transitions_mode_and_setpoint(monkeypatch):
     control = _cn_control(notify_data=[item], mode=Mode.SMOKE)
     _patch_check_notify_deps(monkeypatch)
 
-    result = N.check_notify(settings, control, pelletdb={"current": {}}, grill_platform=MagicMock())
+    result = N.check_notify(
+        settings, control, pelletdb={"current": {}}, grill_platform=MagicMock(), now=clock_stamp(), hopper_cooldowns={}
+    )
 
     assert result["mode"] == Mode.HOLD
     assert result["primary_setpoint"] == 170
@@ -1277,7 +1402,9 @@ def test_check_notify_reignite_flag_transitions_mode_and_saves_laststate(monkeyp
     control = _cn_control(notify_data=[item], mode=Mode.HOLD)
     _patch_check_notify_deps(monkeypatch)
 
-    result = N.check_notify(settings, control, pelletdb={"current": {}}, grill_platform=MagicMock())
+    result = N.check_notify(
+        settings, control, pelletdb={"current": {}}, grill_platform=MagicMock(), now=clock_stamp(), hopper_cooldowns={}
+    )
 
     assert result["mode"] == Mode.REIGNITE
     assert result["safety"]["reignitelaststate"] == Mode.HOLD
@@ -1291,6 +1418,172 @@ def test_check_notify_writes_control_after_each_processed_item(monkeypatch):
     write_mock = MagicMock()
     _patch_check_notify_deps(monkeypatch, write_control_snapshot_mock=write_mock)
 
-    N.check_notify(settings, control, pelletdb={"current": {}}, grill_platform=MagicMock())
+    N.check_notify(
+        settings, control, pelletdb={"current": {}}, grill_platform=MagicMock(), now=clock_stamp(), hopper_cooldowns={}
+    )
 
     write_mock.assert_called_once_with(control, origin="notifications")
+
+
+@pytest.mark.parametrize(
+    "mode,shutdown,keep_warm,expected_mode",
+    [
+        (Mode.RECIPE, False, False, Mode.RECIPE),
+        (Mode.HOLD, True, False, Mode.SHUTDOWN),
+        (Mode.SMOKE, False, True, Mode.HOLD),
+    ],
+)
+def test_duration_expiry_actions_are_persisted_once(monkeypatch, mode, shutdown, keep_warm, expected_mode):
+    from controller.runtime.store import InMemoryStore
+
+    item = {"req": True, "type": "timer", "label": "Timer", "shutdown": shutdown, "keep_warm": keep_warm}
+    control = _cn_control([item], mode=mode)
+    control["recipe"]["step_data"]["timer"] = 1
+    control["timer"] = start_timer(10, clock_stamp())
+    store = InMemoryStore(control=control)
+    events = []
+
+    def emit(event):
+        persisted = store.read_control()
+        assert persisted["timer"]["state"] == "expired"
+        assert persisted["mode"] == expected_mode
+        events.append(event)
+
+    monkeypatch.setattr(N, "send_notifications", emit)
+    for elapsed, wall in [(3, 1.0), (9.9, 9e9), (10, 1.0), (11, 9e9)]:
+        control = N.check_notify(
+            _cn_settings(),
+            store.read_control(),
+            pelletdb={"current": {}},
+            grill_platform=MagicMock(),
+            now=clock_stamp(monotonic_s=100 + elapsed, wall_s=wall),
+            hopper_cooldowns={},
+            persist=store.write_control_snapshot,
+        )
+    assert events == ["Timer_Expired"]
+    assert control["mode"] == expected_mode
+    assert control["recipe"]["step_data"]["triggered"] is (mode == Mode.RECIPE)
+    if keep_warm:
+        assert control["primary_setpoint"] == 165
+    assert control["notify_data"][0]["req"] is False
+
+
+def test_interruption_is_not_expiry_and_explicit_resume_uses_checkpoint(monkeypatch):
+    item = {"req": True, "type": "timer", "label": "Timer", "shutdown": True, "keep_warm": False}
+    control = _cn_control([item], mode=Mode.HOLD)
+    checkpoint = checkpoint_timer(start_timer(10, clock_stamp()), clock_stamp(monotonic_s=103))
+    control["timer"], _ = restore_timer(checkpoint)
+    events = []
+    monkeypatch.setattr(N, "send_notifications", events.append)
+    monkeypatch.setattr(N, "write_control_snapshot", MagicMock())
+    restarted = clock_stamp(monotonic_s=1000, runtime_id="01b4a094-8a2c-4780-915d-081f5a850a97")
+    N.check_notify(
+        _cn_settings(),
+        control,
+        pelletdb={"current": {}},
+        grill_platform=MagicMock(),
+        now=restarted,
+        hopper_cooldowns={},
+    )
+    assert events == []
+    assert control["mode"] == Mode.HOLD
+    assert control["timer"]["remaining_s"] == 7
+    control["timer"] = resume_timer(control["timer"], restarted)
+    N.check_notify(
+        _cn_settings(),
+        control,
+        pelletdb={"current": {}},
+        grill_platform=MagicMock(),
+        now=clock_stamp(monotonic_s=1007, runtime_id=restarted.runtime_id),
+        hopper_cooldowns={},
+    )
+    assert events == ["Timer_Expired"]
+    assert control["mode"] == Mode.SHUTDOWN
+
+
+def test_suspend_disarm_retains_known_remaining_without_action(monkeypatch):
+    item = {"req": False, "type": "timer", "label": "Timer", "shutdown": True, "keep_warm": False}
+    control = _cn_control([item], mode=Mode.HOLD)
+    checkpoint = checkpoint_timer(start_timer(10, clock_stamp()), clock_stamp(monotonic_s=103))
+    resumed_clock = clock_stamp(monotonic_s=104, suspend_offset_s=63)
+    control["timer"] = pause_timer(checkpoint, resumed_clock, interrupted=True)
+    events = []
+    monkeypatch.setattr(N, "send_notifications", events.append)
+    N.check_notify(
+        _cn_settings(),
+        control,
+        pelletdb={"current": {}},
+        grill_platform=MagicMock(),
+        now=resumed_clock,
+        hopper_cooldowns={},
+    )
+    assert control["timer"]["remaining_s"] == 7
+    assert control["mode"] == Mode.HOLD
+    assert not events
+
+
+def test_hopper_restart_warns_once_then_cools_down_despite_wall_steps(monkeypatch):
+    item = {"req": True, "type": "hopper", "label": "Hopper", "last_check": 9e9, "shutdown": False, "keep_warm": False}
+    control = _cn_control([item])
+    cooldowns = {}
+    events = []
+    monkeypatch.setattr(N, "send_notifications", events.append)
+    monkeypatch.setattr(N, "write_control_snapshot", MagicMock())
+    for elapsed, wall in [(0, 1), (1, 9e9), (1200, 1)]:
+        N.check_notify(
+            _cn_settings(),
+            control,
+            pelletdb={"current": {"hopper_level": 10}},
+            grill_platform=MagicMock(),
+            now=clock_stamp(monotonic_s=100 + elapsed, wall_s=wall),
+            hopper_cooldowns=cooldowns,
+        )
+    assert events == ["Pellet_Level_Low"]
+    N.check_notify(
+        _cn_settings(),
+        control,
+        pelletdb={"current": {"hopper_level": 10}},
+        grill_platform=MagicMock(),
+        now=clock_stamp(monotonic_s=1300.1, wall_s=2),
+        hopper_cooldowns=cooldowns,
+    )
+    assert events == ["Pellet_Level_Low", "Pellet_Level_Low"]
+    assert control["notify_data"][0]["last_check"] == 2
+    control["notify_data"] = []
+    N.check_notify(
+        _cn_settings(),
+        control,
+        pelletdb={"current": {"hopper_level": 10}},
+        grill_platform=MagicMock(),
+        now=clock_stamp(monotonic_s=1301),
+        hopper_cooldowns=cooldowns,
+    )
+    assert cooldowns == {}
+
+
+def test_mqtt_periodic_publication_ignores_wall_steps_and_mode_change_bypasses(monkeypatch):
+    handler = _mqtt_fake_handler()
+    handler.last_mode = Mode.HOLD
+    N.mqtt = handler
+    steady = [0.0]
+    wall = [1_800_000_000.0]
+    monkeypatch.setattr(N.time, "monotonic", lambda: steady[0])
+    monkeypatch.setattr(N.time, "time", lambda: wall[0])
+    control = {"mode": Mode.HOLD}
+
+    def publish():
+        N._send_mqtt_notification(control, {}, pelletdb={"current": {"hopper_level": 50}}, pid_data={"PB": 1})
+
+    publish()
+    first = handler.notify.call_count
+    for changed_wall in (1, 9e9):
+        steady[0] = 29.9
+        wall[0] = changed_wall
+        publish()
+        assert handler.notify.call_count == first
+    steady[0] = 30.1
+    publish()
+    assert handler.notify.call_count == first * 2
+    control["mode"] = Mode.SMOKE
+    publish()
+    assert handler.notify.call_count == first * 3

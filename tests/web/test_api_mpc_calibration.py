@@ -1,5 +1,7 @@
 import pytest
 
+from tests.fakes.clock import clock_stamp
+
 from common.modes import Mode
 from common.persistence.control import (
     execute_control_writes,
@@ -50,7 +52,7 @@ def test_json_post_dispatches_the_validated_calibration_command(client):
     assert response.status_code == 201
     assert response.get_json()["data"]["mpc_calibration"] == command
     assert "mpc_calibration" not in read_control()
-    execute_control_writes()
+    execute_control_writes(timer_now=clock_stamp())
     assert read_control()["mpc_calibration"] == command
 
 
@@ -59,7 +61,7 @@ def test_json_post_rejects_invalid_body_without_queuing_a_control_change(client)
 
     assert response.status_code == 422
     assert response.get_json()["result"] == "ERROR"
-    execute_control_writes()
+    execute_control_writes(timer_now=clock_stamp())
     assert "mpc_calibration" not in read_control()
 
 
@@ -68,7 +70,7 @@ def test_path_arguments_cannot_transport_a_calibration_object(client):
 
     assert response.status_code == 400
     assert response.get_json()["result"] == "ERROR"
-    execute_control_writes()
+    execute_control_writes(timer_now=clock_stamp())
     assert "mpc_calibration" not in read_control()
 
 
@@ -85,7 +87,7 @@ def test_drain_keeps_the_first_newest_queued_command_when_older_and_conflicting_
     assert conflict.get_json()["message"] == "MPC calibration revision must exceed 4"
 
     assert "mpc_calibration" not in read_control()
-    execute_control_writes()
+    execute_control_writes(timer_now=clock_stamp())
     assert read_control()["mpc_calibration"] == first
 
 
@@ -101,7 +103,7 @@ def test_start_is_refused_when_nothing_will_consume_what_calibration_records(cli
 
     assert response.status_code == 400
     assert "Online Model Adaptation" in response.get_json()["message"]
-    execute_control_writes()
+    execute_control_writes(timer_now=clock_stamp())
     assert "mpc_calibration" not in read_control()
 
 
@@ -127,7 +129,7 @@ def test_retargeting_an_active_hold_does_not_ask_the_control_loop_to_rebuild(cli
     write_control_snapshot(control, origin="test")
 
     assert client.get("/api/set/psp/275").status_code == 201
-    execute_control_writes()
+    execute_control_writes(timer_now=clock_stamp())
 
     control = read_control()
     assert control["primary_setpoint"] == 275
@@ -142,7 +144,7 @@ def test_entering_hold_from_another_mode_still_asks_for_the_mode_change(client):
     write_control_snapshot(control, origin="test")
 
     assert client.get("/api/set/psp/225").status_code == 201
-    execute_control_writes()
+    execute_control_writes(timer_now=clock_stamp())
 
     control = read_control()
     assert control["mode"] == Mode.HOLD

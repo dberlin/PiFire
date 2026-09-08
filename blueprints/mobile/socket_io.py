@@ -39,6 +39,7 @@ from common.common import (
     ErrorKind,
     flush_events_records,
 )
+from common.duration_status import project_duration_status
 from common.persistence.control import (
     read_control,
 )
@@ -59,6 +60,7 @@ from common.persistence.runtime import (
     seed_settings_store,
     write_connected_user,
 )
+from common.timer_projection import project_timer_status
 from common.web_contracts.core import (
     DashSocketPayload,
     PelletSocketPayload,
@@ -297,6 +299,8 @@ def _get_dash_data(settings, pelletdb):
     timer_notify_data = _get_timer_notify_data(notify_data)
     food_probes = _get_probe_data("Food", settings, current, probe_device_info, notify_data)
     primary_probe = _get_probe_data("Primary", settings, current, probe_device_info, notify_data)[0]
+    reader_stamp = local_clock_stamp()
+    heartbeat = read_control_heartbeat()
 
     dash_data = {
         "uuid": settings["server_info"]["uuid"],
@@ -354,13 +358,8 @@ def _get_dash_data(settings, pelletdb):
         # two describe nothing the grill is doing.
         "cycleRatio": status.get("cycle_ratio", 0) or 0,
         "fanDuty": status.get("fan_duty", 0) or 0,
-        "timer": {
-            "start": math.trunc(control["timer"]["start"]),
-            "paused": math.trunc(control["timer"]["paused"]),
-            "end": math.trunc(control["timer"]["end"]),
-            "keepWarm": timer_notify_data["keep_warm"],
-            "shutdown": timer_notify_data["shutdown"],
-        },
+        "timer": project_timer_status(control["timer"], timer_notify_data, current=reader_stamp, heartbeat=heartbeat),
+        "durations": project_duration_status(status, current=reader_stamp, heartbeat=heartbeat),
         "outputs": {
             "fan": status["outpins"]["fan"],
             "auger": status["outpins"]["auger"],

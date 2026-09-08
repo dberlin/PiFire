@@ -24,6 +24,9 @@ import qrcode
 from PIL import Image, ImageDraw, ImageFont
 
 from common.control_delta import control_delta
+from common.clock_domain import local_clock_stamp
+from common.duration_status import project_duration_status
+from common.persistence.runtime import read_control_heartbeat
 from common.modes import Mode
 from common.persistence.control import enqueue_control_delta, read_control
 from common.system import reboot_system, shutdown_system
@@ -50,6 +53,7 @@ class _DisplayBase:
         self, dev_pins, buttonslevel="HIGH", rotation=0, units="F", config=None, *, event_log=None, control_log=None
     ):
         config = {} if config is None else config
+        self._monotonic = time.monotonic
         # Init Global Variables and Constants
         self.dev_pins = dev_pins
         self.buttonslevel = buttonslevel
@@ -265,7 +269,7 @@ class _DisplayBase:
                 self._event_detect()
                 if self.menu_active:
                     time.sleep(self.loop_delay)
-            if self.display_timeout and time.time() > self.display_timeout:
+            if self.display_timeout and self._monotonic() > self.display_timeout:
                 self.display_timeout = None
                 if not self.display_active:
                     self.display_command = "clear"
@@ -279,7 +283,7 @@ class _DisplayBase:
                 continue
             if self.display_command == "splash":
                 self._display_splash()
-                self.display_timeout = time.time() + 3
+                self.display_timeout = self._monotonic() + 3
                 self.display_command = "clear"
                 self.monitor_display = False
                 time.sleep(3)  # Hold splash screen for 3 seconds
@@ -288,7 +292,7 @@ class _DisplayBase:
                 self._display_text()
                 self.display_command = None
                 self.monitor_display = False
-                self.display_timeout = time.time() + 10
+                self.display_timeout = self._monotonic() + 10
                 time.sleep(self.loop_delay)
                 continue
             if self.display_command == "network":
@@ -302,7 +306,7 @@ class _DisplayBase:
 
                 if network_ip != "":
                     self._display_network(network_ip)
-                    self.display_timeout = time.time() + 30
+                    self.display_timeout = self._monotonic() + 30
                     self.display_command = None
                 else:
                     self.display_text("No IP Found")
@@ -311,7 +315,7 @@ class _DisplayBase:
                 continue
             if self.input_enabled:
                 if self.menu_active and not self.display_timeout:
-                    if time.time() - self.menu_time > 5:
+                    if self._monotonic() - self.menu_time > 5:
                         self.menu_active = False
                         self.menu["current"]["mode"] = "none"
                         self.menu["current"]["option"] = 0
@@ -1005,15 +1009,11 @@ class _DisplayBase:
 
         # Display Countdown for Startup / Reignite / Shutdown / Prime
         if status_data["mode"] in [Mode.STARTUP, Mode.REIGNITE, Mode.SHUTDOWN, Mode.PRIME]:
-            if status_data["mode"] in [Mode.STARTUP, Mode.REIGNITE]:
-                duration = status_data["start_duration"]
-            elif status_data["mode"] in [Mode.PRIME]:
-                duration = status_data["prime_duration"]
-            else:
-                duration = status_data["shutdown_duration"]
-
-            countdown = max(0, int(duration - (time.time() - status_data["start_time"])))
-            text = f"{countdown}s"
+            durations = project_duration_status(
+                status_data, current=local_clock_stamp(), heartbeat=read_control_heartbeat()
+            )
+            countdown = durations["modeRemainingS"]
+            text = "--" if countdown is None else f"{int(countdown)}s"
             label_canvas = self._draw_text(
                 text, self.primary_font, 26, (0, 200, 0), rect=True, outline_color=(0, 200, 0), fill_color=(0, 0, 0)
             )
@@ -1025,8 +1025,11 @@ class _DisplayBase:
 
         # Lid open detection timer display
         if status_data["mode"] in [Mode.HOLD] and status_data["lid_open_detected"]:
-            duration = max(0, int(status_data["lid_open_endtime"] - time.time()))
-            text = f"Lid Pause {duration}s"
+            durations = project_duration_status(
+                status_data, current=local_clock_stamp(), heartbeat=read_control_heartbeat()
+            )
+            duration = durations["lidRemainingS"]
+            text = "Lid Pause --" if duration is None else f"Lid Pause {int(duration)}s"
             label_canvas = self._draw_text(
                 text, self.primary_font, 18, (0, 200, 0), rect=True, outline_color=(0, 200, 0), fill_color=(0, 0, 0)
             )

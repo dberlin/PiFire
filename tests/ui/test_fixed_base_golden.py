@@ -19,15 +19,8 @@ build and installed fonts and will differ on another machine; they are
 only valid where these golden tests actually run rather than skip, and
 must never be recaptured there.
 
-Determinism note on time-based branches: `_display_current` computes
-countdown/lid-pause text from `time.time() - status_data["start_time"]`
-(or `status_data["lid_open_endtime"] - time.time()`) with no mock available
-in the harness. We pin `start_time` / `lid_open_endtime` to 0 (the Unix
-epoch), which is always so far in the past that the elapsed time exceeds
-any duration used here -- the code's own `> 0 else 0` clamp then always
-renders "0s" / "Lid Pause 0s", regardless of when the suite runs. This
-keeps the branch exercised (the text draws, the layout code runs) while
-keeping the hash stable across capture-time and any later verification run.
+Countdown fixtures contain explicit frozen zero-duration snapshots. This keeps
+the existing "0s" / "Lid Pause 0s" pixels deterministic without clock subtraction.
 """
 
 import json
@@ -88,8 +81,7 @@ ST_STARTUP = {
     "hopper_level": 80,
     "p_mode": 2,
     "units": "F",
-    "start_duration": 60,
-    "start_time": 0,
+    "remaining_seconds": 0,
 }
 
 ST_SMOKE = {
@@ -117,7 +109,7 @@ ST_HOLD = {
     "p_mode": 0,
     "units": "F",
     "lid_open_detected": True,
-    "lid_open_endtime": 0,
+    "lid_open_remaining_seconds": 0,
 }
 
 ST_PRIME = {
@@ -131,8 +123,7 @@ ST_PRIME = {
     "hopper_level": 80,
     "p_mode": 0,
     "units": "F",
-    "prime_duration": 30,
-    "start_time": 0,
+    "remaining_seconds": 0,
 }
 
 ST_REIGNITE = {
@@ -146,8 +137,7 @@ ST_REIGNITE = {
     "hopper_level": 80,
     "p_mode": 3,
     "units": "F",
-    "start_duration": 45,
-    "start_time": 0,
+    "remaining_seconds": 0,
 }
 
 ST_SHUTDOWN = {
@@ -161,8 +151,7 @@ ST_SHUTDOWN = {
     "hopper_level": 80,
     "p_mode": 0,
     "units": "F",
-    "shutdown_duration": 90,
-    "start_time": 0,
+    "remaining_seconds": 0,
 }
 
 # Cross-cuts, all on top of the canonical Smoke state.

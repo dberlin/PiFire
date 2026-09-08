@@ -7,6 +7,45 @@ export type ConnectionPhase = "connecting" | "live" | "unreachable" | "demo";
 /** Process-local receipt time; never persist or compare with producer clocks. */
 export const monotonicNowMs = (): number => performance.now();
 
+export const DURATION_RECEIPT_MAX_AGE_MS = 30_000;
+
+/** Project only local receipt elapsed, never server or browser wall endpoints.
+ * Invalid receipts display the last reported snapshot, explicitly not current. */
+export function projectLiveDurations(
+  payload: DashSocketPayload,
+  receivedMonotonicMs: number | null,
+  nowMonotonicMs: number,
+  connected: boolean,
+): DashSocketPayload {
+  const ageMs = receivedMonotonicMs === null ? NaN : nowMonotonicMs - receivedMonotonicMs;
+  const receiptCurrent = connected && Number.isFinite(ageMs) && ageMs >= 0
+    && ageMs <= DURATION_RECEIPT_MAX_AGE_MS;
+  const elapsedS = receiptCurrent ? ageMs / 1000 : 0;
+  const timer = payload.timer;
+  const durations = payload.durations;
+  const advanceDurations = durations.current && durations.running;
+  const elapsed = (value: number | null) =>
+    value === null ? null : value + (advanceDurations ? elapsedS : 0);
+  const remaining = (value: number | null, advancing: boolean) =>
+    value === null ? null : Math.max(0, value - (advancing ? elapsedS : 0));
+  return {
+    ...payload,
+    timer: {
+      ...timer,
+      current: timer.current && receiptCurrent,
+      remainingS: remaining(timer.remainingS, timer.current && timer.state === "running"),
+    },
+    durations: {
+      ...durations,
+      current: durations.current && receiptCurrent,
+      modeElapsedS: elapsed(durations.modeElapsedS),
+      cookElapsedS: elapsed(durations.cookElapsedS),
+      modeRemainingS: remaining(durations.modeRemainingS, advanceDurations),
+      lidRemainingS: remaining(durations.lidRemainingS, advanceDurations),
+    },
+  };
+}
+
 /** Minimal shape createLiveConnection needs from a socket. socket.io-client's
  *  `Socket` satisfies this structurally; tests inject a fake one instead of
  *  opening a real connection. */

@@ -103,6 +103,58 @@ def instantiate(mod, **overrides):
         return mod.Display(**kwargs)
 
 
+def exercise_flex_refresh(driver, monkeypatch, status, *, wall_jump, run_loop):
+    """Drive the real fetch/render loop against independently advancing clocks."""
+    clock = {"steady": 0.0, "wall": 1_800_000_000.0}
+    samples = iter((0.19, 0.2, 0.201, 0.4, 0.402))
+    frames = []
+    driver.in_data = {}
+    driver.last_in_data = {
+        "P": {"Grill": 0},
+        "F": {"Probe1": 0},
+        "AUX": {},
+        "NT": {"Grill": 0, "Probe1": 0},
+        "PSP": 225,
+    }
+    driver.status_data = dict(status)
+    driver.last_status_data = dict(status)
+    temperature = 200
+
+    def read_current():
+        nonlocal temperature
+        temperature += 1
+        return {
+            "P": {"Grill": temperature},
+            "F": {"Probe1": 100},
+            "AUX": {},
+            "NT": {"Grill": 0, "Probe1": 0},
+            "PSP": 225,
+        }
+
+    monkeypatch.setattr(driver, "_monotonic", lambda: clock["steady"])
+    monkeypatch.setattr("time.time", lambda: clock["wall"])
+    monkeypatch.setattr("display._base_flex.read_current", read_current)
+    monkeypatch.setattr("display._base_flex.read_status", lambda: status)
+    render = driver._display_loop_render_step
+
+    def render_frame():
+        render()
+        gauge = driver.display_object_list[driver.dash_map["primary_gauge"]]
+        frames.append((gauge.get_object_data()["temps"][0], gauge.get_object_canvas().tobytes()))
+        clock["wall"] += wall_jump
+        next_time = next(samples, None)
+        if next_time is None:
+            driver.display_loop_active = False
+        else:
+            clock["steady"] = next_time
+
+    monkeypatch.setattr(driver, "_display_loop_render_step", render_frame)
+    run_loop()
+    assert [temperature for temperature, _ in frames] == [201, 201, 201, 202, 202, 203]
+    assert frames[2][1] != frames[3][1]
+    assert frames[4][1] != frames[5][1]
+
+
 class RecordingLogger:
     """Substitutable stand-in for a stdlib logger, recording (level, message)
     per call so a test can assert *which* of a driver's two loggers a message

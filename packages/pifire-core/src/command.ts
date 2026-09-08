@@ -27,28 +27,13 @@ export interface CommandClient {
     grams: number,
     next?: NonNullable<PrimeCommandRequest["next_mode"]>,
   ): Promise<CommandResult>;
-  // NOTE (see common/api_commands.py _cmd_set_timer):
-  //  - timerStart is ALSO the unpause command: when control.timer.paused != 0
-  //    the backend ignores `seconds` and just shifts the existing end time.
-  //  - timerPause CLEARS the whole timer (and the shutdown/keep_warm flags)
-  //    when the timer was never started (timer.start == 0).
-  //  - timerStop clears the timer AND resets shutdown/keep_warm to False. Do
-  //    NOT "restore" them afterwards with timerShutdown/timerKeepWarm: nothing
-  //    needs restoring -- the next arm carries both flags itself -- and a
-  //    standalone flag write only arms an expiry action on a stopped timer.
-  //  - A non-numeric `seconds` makes the backend silently substitute 60s.
-  //  - Each of these is ONE control write, and two of them in one control cycle
-  //    compose. They queue an intent OP the drain evaluates against live state
-  //    rather than a timer value computed from a read that cannot see the
-  //    queue (common/control_delta.py), so stop-then-pause leaves the timer
-  //    stopped instead of resurrecting the countdown
-  //    (tests/characterization/test_control_delta_seam.py::
-  //    test_stop_then_pause_in_one_cycle_leaves_the_timer_stopped). TimerBar
-  //    used to guard its buttons against that pair; it no longer needs to.
+  // Timer commands carry duration intent, admitted in FIFO order by the
+  // controller's current clock generation. Start explicitly resumes a paused
+  // or interrupted timer with known remaining; stop disarms and clears options.
   timerStart(seconds: number): Promise<CommandResult>;
   // Arms a NEW timer for a DURATION, together with its expiry flags, in a
   // single request -- see the block above createCommand for the two properties
-  // that buys (a server-computed end, and rejections the bare form does not
+  // that buys (controller-owned duration, and rejections the bare form does not
   // make). Unlike timerStart this one does NOT unpause: the server rejects a
   // paused timer rather than silently ignoring the duration. Resuming is still
   // timerStart(), which carries no flags.
@@ -126,14 +111,9 @@ async function post(baseUrl: string, segments: (string | number)[]): Promise<Com
 // Two properties this shape buys, neither of which the obvious alternative
 // (read control, patch it, write it back) does:
 //
-//  1. The DURATION travels, never an absolute end time. The control process
-//     decides a timer has expired by comparing control.timer.end against its
-//     OWN time.time(), so an end computed here would be a value from a
-//     different clock -- a browser running behind the Pi would arm an
-//     already-expired timer, and an expired timer with "Shutdown Grill" ticked
-//     shuts the grill down mid-cook. The server does the arithmetic instead,
-//     which also removes the need to learn the server's clock from a response
-//     header (Date is not CORS-safelisted, so cross-origin it is unreadable).
+//  1. Only a DURATION travels. The controller admits it at queue drain and
+//     measures active seconds on its own identity-qualified monotonic clock.
+//     Client clocks and wall projections cannot arm or expire cooking actions.
 //
 //  2. The server validates what the bare `start` form does not: a non-numeric
 //     duration is rejected rather than silently substituted with 60s, zero and

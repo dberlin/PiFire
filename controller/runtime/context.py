@@ -54,6 +54,12 @@ class ControllerContext:
     last_clock_stamp: ClockStamp | None = None
     cook_id: str | None = None
     cook_elapsed_seconds: float | None = None
+    hopper_cooldowns: dict[tuple[str, str], float] = field(default_factory=dict)
+
+    def admitted_stamp(self) -> ClockStamp:
+        if self.last_clock_stamp is None:
+            raise RuntimeError("Timer operations require an admitted control tick")
+        return self.last_clock_stamp
 
     def get_clock_domain(self) -> RuntimeClockDomain:
         if self.clock_domain is None:

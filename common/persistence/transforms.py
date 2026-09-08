@@ -90,6 +90,8 @@ def apply_control_delta(
     control: dict[str, JsonValue],
     delta: Mapping[str, JsonValue],
     log=None,
+    *,
+    timer_now: ClockStamp,
 ) -> dict[str, JsonValue]:
     """Apply the canonical control-delta transform through the shared entry point."""
-    return _apply_control_delta(control, delta, log)
+    return _apply_control_delta(control, delta, log, timer_now=timer_now)

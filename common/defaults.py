@@ -21,6 +21,7 @@ from common.common import generate_uuid, read_generic_json, read_updater_manifes
 from common.modes import Mode, StatusState
 from common.settings_schema import SETTINGS_SCHEMA_VERSION
 from common.web_contracts.control import PELLETDB_SCHEMA_VERSION
+from common.timer import default_timer
 
 # Set of default colors for charts.  Contains list of tuples (primary color, secondary color).
 COLOR_LIST = [
@@ -565,7 +566,7 @@ def default_control():
 
     control["notify_data"] = default_notify(settings)
 
-    control["timer"] = {"start": 0, "paused": 0, "end": 0, "shutdown": False}
+    control["timer"] = default_timer()
 
     control["manual"] = {"change": False, "pwm": 100}
 

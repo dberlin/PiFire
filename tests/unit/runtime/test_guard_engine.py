@@ -10,6 +10,7 @@ writes nothing on no match.
 
 import controller.runtime.transitions as transitions_mod
 from controller.runtime.transitions import Edge, evaluate_phase
+from tests.fakes.clock import clock_stamp
 
 
 class _FakeDisplay:
@@ -26,7 +27,7 @@ class _FakeStore:
         self.writes = []
         self._display = _FakeDisplay()
 
-    def execute_control_writes(self):
+    def execute_control_writes(self, *, timer_now):
         pass
 
     def read_control(self):
@@ -52,6 +53,7 @@ class _FakeCtx:
     def __init__(self, store, notifier):
         self.store = store
         self.notifications = notifier
+        self.last_clock_stamp = clock_stamp()
 
 
 class _FakeMode:

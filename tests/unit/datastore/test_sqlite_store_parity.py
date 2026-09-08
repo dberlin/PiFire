@@ -3,9 +3,11 @@ import json
 
 import pytest
 
-from common.clock_domain import CLOCK_STAMP_SCHEMA, ClockStamp
 from common.persistence import runtime as runtime_persistence
 from common import datastore
+from common.control_delta import CONTROL_DELTA_VERSION
+from common.timer import remaining_seconds, start_timer
+from tests.fakes.clock import clock_stamp
 
 
 @pytest.fixture
@@ -82,7 +84,7 @@ def test_control_delta_fifo_and_snapshot_bypass_parity(store):
         st.write_control_snapshot({"mode": "Startup", "primary_setpoint": 150}, origin="control")
         assert st.read_control() == {"mode": "Startup", "primary_setpoint": 150}
 
-        st.execute_control_writes()
+        st.execute_control_writes(timer_now=clock_stamp())
         assert st.read_control() == {"mode": "Startup", "primary_setpoint": 275}
 
 
@@ -104,18 +106,18 @@ def test_control_writers_copy_their_callers_inputs_on_both_stores(store):
         manual["pwm"] = 100
 
         assert st.read_control()["manual"]["pwm"] == 50
-        st.execute_control_writes()
+        st.execute_control_writes(timer_now=clock_stamp())
         assert st.read_control()["manual"]["pwm"] == 60
 
 
 @pytest.mark.parametrize(
-    ("payload", "reason"),
+    "payload",
     [
-        ({"__control_delta__": 1, "set": []}, "set must be a mapping, got list"),
-        ({"mode": "Startup"}, "unversioned legacy control write"),
+        {"__control_delta__": CONTROL_DELTA_VERSION, "set": []},
+        {"mode": "Startup"},
     ],
 )
-def test_invalid_queued_control_rows_are_rejected_and_dequeued_with_store_parity(store, caplog, payload, reason):
+def test_invalid_queued_control_rows_are_rejected_and_dequeued_with_store_parity(store, caplog, payload):
     from common.sqlite_queue import SqliteQueue
     from controller.runtime.store import InMemoryStore
 
@@ -130,7 +132,7 @@ def test_invalid_queued_control_rows_are_rejected_and_dequeued_with_store_parity
             st._write_queue.append(queued)
 
         with caplog.at_level("ERROR", logger="control"):
-            st.execute_control_writes()
+            st.execute_control_writes(timer_now=clock_stamp())
 
         assert st.read_control() == {"mode": "Stop", "primary_setpoint": 100}
         if st is store:
@@ -138,9 +140,55 @@ def test_invalid_queued_control_rows_are_rejected_and_dequeued_with_store_parity
         else:
             assert not st._write_queue
 
-    matching = [record.getMessage() for record in caplog.records if reason in record.getMessage()]
-    assert len(matching) == len(stores)
-    assert all("origin='persisted-writer'" in message for message in matching)
+    assert sum(record.levelname == "ERROR" for record in caplog.records) == len(stores)
+
+
+def test_restart_discards_generic_intent_and_rejects_retained_old_timer_generation_on_both_stores(store, caplog):
+    from common.control_delta import control_delta
+    from common.sqlite_queue import SqliteQueue
+    from controller.runtime.store import InMemoryStore
+
+    old = clock_stamp()
+    current = clock_stamp(runtime_id="962c8912-46d2-4784-90af-7d8ea1c0d878", monotonic_s=150.0)
+    for st in (store, InMemoryStore()):
+        caplog.clear()
+        st.enqueue_control_delta(control_delta(set_values={"mode": "Startup", "updated": True}), origin="old-startup")
+        st.enqueue_control_delta(
+            control_delta(
+                set_values={"mode": "Hold", "primary_setpoint": 225},
+                ops=[
+                    {
+                        "op": "timer.start_with_options",
+                        "requested_wall_s": old.observed_wall_s,
+                        "target_runtime_id": old.runtime_id,
+                        "seconds": 300,
+                        "shutdown": True,
+                        "keep_warm": False,
+                    }
+                ],
+            ),
+            origin="old-timer",
+        )
+
+        st.flush_control(preserve_pending_writes=True)
+        pending = SqliteQueue("queue_control_write").list() if st is store else list(st._write_queue)
+        assert [row["origin"] for row in pending] == ["old-timer"]
+
+        with caplog.at_level("ERROR", logger="control"):
+            st.execute_control_writes(timer_now=current)
+
+        control = st.read_control()
+        assert control["mode"] == "Stop"
+        assert control["primary_setpoint"] == 0
+        assert control["timer"]["state"] == "stopped"
+        assert remaining_seconds(control["timer"], current) == 0
+        assert control["timer"]["action_armed"] is False
+        assert all(not entry["req"] for entry in control["notify_data"] if entry["type"] == "timer")
+        assert any(record.levelname == "ERROR" for record in caplog.records)
+        if st is store:
+            assert SqliteQueue("queue_control_write").length() == 0
+        else:
+            assert not st._write_queue
 
 
 def test_sqlite_update_metrics_amend_last_parity(store):
@@ -219,7 +267,7 @@ def test_delta_envelope_parity_between_sqlite_and_in_memory(store):
     base = {
         "mode": "Stop",
         "primary_setpoint": 0,
-        "timer": {"start": 1000.0, "paused": 0, "end": 2000.0},
+        "timer": start_timer(1000, clock_stamp()),
         "notify_data": [
             {"label": "Grill", "type": "probe", "req": False, "target": 0},
             {"label": "Timer", "type": "timer", "req": True, "shutdown": True, "keep_warm": False},
@@ -228,7 +276,11 @@ def test_delta_envelope_parity_between_sqlite_and_in_memory(store):
     envelope = control_delta(
         set_values={"mode": "Hold", "primary_setpoint": 225},
         ops=[
-            {"op": "timer.clear"},
+            {
+                "op": "timer.clear",
+                "requested_wall_s": clock_stamp().observed_wall_s,
+                "target_runtime_id": clock_stamp().runtime_id,
+            },
             {"op": "notify.set", "label": "Grill", "type": "probe", "fields": {"target": 203}},
         ],
     )
@@ -237,14 +289,19 @@ def test_delta_envelope_parity_between_sqlite_and_in_memory(store):
     for st in (store, InMemoryStore()):
         st.write_control_snapshot(copy.deepcopy(base), origin="seed")
         st.enqueue_control_delta(envelope, origin="parity")
-        st.execute_control_writes()
+        st.execute_control_writes(timer_now=clock_stamp())
         results.append(st.read_control())
 
-    assert results[0] == results[1]
-    assert results[0]["mode"] == "Hold"
-    assert results[0]["timer"] == {"start": 0, "paused": 0, "end": 0}
-    assert results[0]["notify_data"][0]["target"] == 203
-    assert "origin" not in results[0]
+    for result in results:
+        assert result["mode"] == "Hold"
+        assert result["primary_setpoint"] == 225
+        assert result["timer"]["state"] == "stopped"
+        assert remaining_seconds(result["timer"], clock_stamp()) == 0
+        assert result["timer"]["action_armed"] is False
+        assert result["notify_data"][0]["target"] == 203
+        assert result["notify_data"][1]["req"] is False
+        assert result["notify_data"][1]["shutdown"] is False
+        assert "origin" not in result
 
 
 _PARITY_PROBE_INFO = [
@@ -327,22 +384,8 @@ def test_missing_reading_retains_acquisition_stamp_across_wall_rollback_on_both_
 
     settings = _settings_with_probe_map(store)
     runtime_persistence.write_settings(settings)
-    first_stamp = ClockStamp(
-        CLOCK_STAMP_SCHEMA,
-        "11111111-1111-4111-8111-111111111111",
-        "22222222-2222-4222-8222-222222222222",
-        100.0,
-        1_800_000_000.0,
-        0.0,
-    )
-    next_stamp = ClockStamp(
-        CLOCK_STAMP_SCHEMA,
-        first_stamp.boot_id,
-        first_stamp.runtime_id,
-        120.0,
-        1_799_996_400.0,
-        0.0,
-    )
+    first_stamp = clock_stamp(suspend_offset_s=0.0)
+    next_stamp = clock_stamp(monotonic_s=120.0, wall_s=1_799_996_400.0, suspend_offset_s=0.0)
     # Serialization occurs much later; it must not replace acquisition time.
     monkeypatch.setattr(runtime_persistence.time, "time", lambda: 1_900_000_000.0)
     missing = copy.deepcopy(_PARITY_IN_DATA)

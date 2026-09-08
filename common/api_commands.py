@@ -17,6 +17,7 @@ import math
 import time
 
 from common import server_revision
+from common.clock_domain import heartbeat_runtime_id, local_clock_stamp
 from common.common import (
     MODE_MAP,
     convert_settings_units,
@@ -34,6 +35,8 @@ from common.persistence.control import (
     read_control,
 )
 from common.persistence.runtime import (
+    CONTROL_HEARTBEAT_STALE_AFTER,
+    read_control_heartbeat,
     read_current,
     read_current_snapshot,
     read_pellet_db,
@@ -43,6 +46,8 @@ from common.persistence.runtime import (
 )
 from common.sqlite_queue import SqliteQueue
 from common.system import reboot_system, restart_scripts, shutdown_system
+from common.timer import parse_timer
+from common.timer_projection import project_timer_status
 
 
 def _write_control_delta(delta, origin):
@@ -171,28 +176,15 @@ def _cmd_get_hopper(data, control, settings, arglist, origin):
 
 
 def _cmd_get_timer(data, control, settings, arglist, origin):
-    """
-    Get Timer Data
-    /api/get/timer
-
-    Returns:
-    {
-        'start' : control['timer']['start'],
-        'paused' : control['timer']['paused'],
-        'end' : control['timer']['end'],
-        'shutdown' : control['notify_data'][]['shutdown'],
-        'keep_warm' : control['notify_data'][]['keep_warm'],
-    }
-    """
-    data["data"]["start"] = control["timer"]["start"]
-    data["data"]["paused"] = control["timer"]["paused"]
-    data["data"]["end"] = control["timer"]["end"]
-    """ Get index of timer object """
-    for index, notify_obj in enumerate(control["notify_data"]):
-        if notify_obj["type"] == "timer":
+    """Return the shared timer projection; clients never infer epoch durations."""
+    options = {"shutdown": False, "keep_warm": False}
+    for item in control["notify_data"]:
+        if item["type"] == "timer":
+            options = {"shutdown": bool(item["shutdown"]), "keep_warm": bool(item["keep_warm"])}
             break
-    data["data"]["shutdown"] = control["notify_data"][index]["shutdown"]
-    data["data"]["keep_warm"] = control["notify_data"][index]["keep_warm"]
+    data["data"] = project_timer_status(
+        control["timer"], options, current=local_clock_stamp(), heartbeat=read_control_heartbeat()
+    ).model_dump(mode="json", by_alias=True)
 
 
 def _cmd_get_notify(data, control, settings, arglist, origin):
@@ -727,41 +719,8 @@ def _parse_timer_expiry_options(spec):
     return {name: name in tokens for name in _TIMER_EXPIRY_OPTIONS}
 
 
-def _timer_start_with_options(data, control, arglist, index, now):
-    """
-    Arm a NEW timer for a DURATION, with both expiry flags.
-
-    /api/set/timer/start/{seconds}/{options}
-
-    The client sends how LONG the timer should run; this function computes the
-    absolute end from the server's own clock. That is the whole point of the
-    form: the control process decides a timer has expired by comparing
-    control.timer.end against its own time.time(), so an end computed on a
-    client whose clock runs behind the Pi's arms an already-expired timer -- and
-    an expired timer with 'shutdown' set shuts the grill down mid-cook.
-
-    The form's ONE-WRITE rationale is gone, at both ends. It used to be
-    load-bearing that both flags and the countdown travelled on one control
-    dict: splitting them across requests meant the last write of a control
-    cycle silently undid the earlier ones. Timer writers now queue an OP
-    evaluated at drain time against live state (common/control_delta.py), so
-    two timer gestures in one cycle compose instead of racing and nothing is
-    won by bundling them.
-
-    Two independent reasons keep the endpoint:
-      * the server clock, above -- nothing about the queued-write path changes it;
-      * the input rejections below (non-numeric / zero / negative duration, and
-        a paused timer), which are request-time answers a queue cannot give.
-
-    Deliberately does NOT unpause. The bare `start` form is also the resume
-    command and ignores its seconds argument when the timer is paused; doing
-    that here would silently discard the duration the caller asked for, which is
-    the same "asked for X, got Y" failure this form exists to close. A paused
-    timer is rejected: resume it with /api/set/timer/start/{seconds}, or clear
-    it with /api/set/timer/stop first.
-
-    Rejections write nothing.
-    """
+def _timer_start_with_options(data, control, arglist, index, now, runtime_id):
+    """Request a new duration and expiry options; controller drain starts it."""
     options = _parse_timer_expiry_options(arglist[3])
     if options is None:
         data["result"] = "ERROR"
@@ -780,18 +739,20 @@ def _timer_start_with_options(data, control, arglist, index, now):
         data["message"] = f"Timer duration [{arglist[2]}] must be a number of seconds greater than zero."
         return
 
-    if control["timer"]["paused"] != 0:
+    timer = parse_timer(control["timer"])
+    if timer["state"] == "paused" or (timer["state"] == "interrupted" and timer["remaining_s"] is not None):
         data["result"] = "ERROR"
         data["message"] = "Timer is paused. Resume or stop it before starting a new timer."
         return
 
-    write_log("Timer started.  Ends at: " + epoch_to_time(now + seconds))
+    write_log(f"Timer duration requested: {seconds} seconds.")
     enqueue_control_delta(
         control_delta(
             ops=[
                 {
                     "op": "timer.start_with_options",
-                    "at": now,
+                    "requested_wall_s": now,
+                    "target_runtime_id": runtime_id,
                     "seconds": seconds,
                     "shutdown": options["shutdown"],
                     "keep_warm": options["keep_warm"],
@@ -802,13 +763,6 @@ def _timer_start_with_options(data, control, arglist, index, now):
     )
 
 
-# NOTE: the log line is still computed HERE, from this request's (possibly
-# stale) read, while the STATE change is computed in the drain from live state.
-# They can disagree: two timer commands in one control cycle can log "Timer
-# unpaused" and then correctly take the start branch. That is deliberate --
-# moving the logging into the drain would move it into a different PROCESS and
-# flip `log_calls` in six golden entries, for a diagnostic line. The drain logs
-# the op it actually applied at DEBUG (common/control_delta.py).
 def _cmd_set_timer(data, control, settings, arglist, origin):
     """
     Timer Control
@@ -830,38 +784,46 @@ def _cmd_set_timer(data, control, settings, arglist, origin):
             break
     """ Get timestamp """
     now = time.time()
+    runtime_id = None
+    if arglist[1] in ("start", "pause", "stop"):
+        runtime_id = heartbeat_runtime_id(
+            read_control_heartbeat(), current=local_clock_stamp(), stale_after_s=CONTROL_HEARTBEAT_STALE_AFTER
+        )
+        if runtime_id is None:
+            data["result"] = "ERROR"
+            data["message"] = "Timer command requires a current controller heartbeat."
+            return
 
     if arglist[1] == "start" and arglist[3] is not None:
-        """ The 4-argument form: server-computed end + both expiry flags. Kept
-            separate from the 3-argument form below, which other clients (the
-            Flask dashboard, mobile) still use and which doubles as the unpause
-            command. """
-        _timer_start_with_options(data, control, arglist, index, now)
+        _timer_start_with_options(data, control, arglist, index, now, runtime_id)
     elif arglist[1] == "start":
         seconds = int(float(arglist[2])) if is_float(arglist[2]) else None
-        # The BRANCH is not decided here. `start` is also the unpause command and
-        # which one it is depends on control["timer"]["paused"] -- a value this
-        # read_control() cannot see the queue behind. The drain decides, against
-        # live state; the clock still comes from here, as `at`.
-        if control["timer"]["paused"] == 0:
-            write_log("Timer started.  Ends at: " + epoch_to_time(now + (seconds if seconds is not None else 60)))
-        else:
-            write_log(
-                "Timer unpaused.  Ends at: "
-                + epoch_to_time((control["timer"]["end"] - control["timer"]["paused"]) + now)
-            )
+        write_log(f"Timer start/resume requested: {seconds if seconds is not None else 60} seconds.")
         enqueue_control_delta(
-            control_delta(ops=[{"op": "timer.start_or_resume", "at": now, "seconds": seconds}]), origin="app"
+            control_delta(
+                ops=[
+                    {
+                        "op": "timer.start_or_resume",
+                        "requested_wall_s": now,
+                        "target_runtime_id": runtime_id,
+                        "seconds": seconds,
+                    }
+                ]
+            ),
+            origin="app",
         )
     elif arglist[1] == "pause":
-        if control["timer"]["start"] != 0:
-            write_log("Timer paused.")
-        else:
-            write_log("Timer cleared.")
-        enqueue_control_delta(control_delta(ops=[{"op": "timer.pause", "at": now}]), origin="app")
+        write_log("Timer pause requested.")
+        enqueue_control_delta(
+            control_delta(ops=[{"op": "timer.pause", "requested_wall_s": now, "target_runtime_id": runtime_id}]),
+            origin="app",
+        )
     elif arglist[1] == "stop":
         write_log("Timer stopped.")
-        enqueue_control_delta(control_delta(ops=[{"op": "timer.clear"}]), origin="app")
+        enqueue_control_delta(
+            control_delta(ops=[{"op": "timer.clear", "requested_wall_s": now, "target_runtime_id": runtime_id}]),
+            origin="app",
+        )
     elif arglist[1] in ("shutdown", "keep_warm"):
         enqueue_control_delta(
             control_delta(

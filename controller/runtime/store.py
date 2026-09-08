@@ -87,7 +87,7 @@ class InMemoryStore:
         self._control["cook_id"] = cook_id
         return cook_id
 
-    def flush_control(self, *, cook_id=None):
+    def flush_control(self, *, cook_id=None, preserve_pending_writes: bool = False):
         # Mirror control_persistence.flush_control: reset transient control
         # state while retaining only accepted durable history clears.
         clear_commands = [
@@ -99,7 +99,19 @@ class InMemoryStore:
         ]
         self._control = default_control()
         self._control["cook_id"] = cook_id
-        self._write_queue.clear()
+        if not preserve_pending_writes:
+            self._write_queue.clear()
+        else:
+            self._write_queue = deque(
+                command
+                for command in self._write_queue
+                if isinstance(command, Mapping)
+                and isinstance(command.get("ops"), list)
+                and any(
+                    isinstance(op, Mapping) and isinstance(op.get("op"), str) and op["op"].startswith("timer.")
+                    for op in command["ops"]
+                )
+            )
         self._systemq.flush()
         for command in clear_commands:
             self._systemq.push(command)
@@ -116,7 +128,7 @@ class InMemoryStore:
         payload["origin"] = origin
         self._write_queue.append(payload)
 
-    def execute_control_writes(self):
+    def execute_control_writes(self, *, timer_now: ClockStamp):
         log = logging.getLogger("control")
         while self._write_queue:
             command = self._write_queue.popleft()
@@ -126,7 +138,7 @@ class InMemoryStore:
                     raise ControlDeltaError("unversioned legacy control write")
                 validate_control_delta(command)
                 updated = copy.deepcopy(self._control)
-                apply_control_delta(updated, command)
+                apply_control_delta(updated, command, timer_now=timer_now)
                 self._control = updated
             except (ControlDeltaError, TypeError, ValueError, KeyError, IndexError, AttributeError) as error:
                 log.error(
@@ -345,8 +357,8 @@ class SqliteStore:
     def ensure_cook_id(self, *, preferred=None):
         return control_persistence.ensure_cook_id(preferred=preferred)
 
-    def flush_control(self, *, cook_id=None):
-        return control_persistence.flush_control(cook_id=cook_id)
+    def flush_control(self, *, cook_id=None, preserve_pending_writes: bool = False):
+        return control_persistence.flush_control(cook_id=cook_id, preserve_pending_writes=preserve_pending_writes)
 
     def write_control_snapshot(self, control, *, origin="control"):
         control_persistence.write_control_snapshot(control, origin=origin)
@@ -354,8 +366,8 @@ class SqliteStore:
     def enqueue_control_delta(self, delta, *, origin="control"):
         control_persistence.enqueue_control_delta(delta, origin=origin)
 
-    def execute_control_writes(self):
-        control_persistence.execute_control_writes()
+    def execute_control_writes(self, *, timer_now: ClockStamp):
+        return control_persistence.execute_control_writes(timer_now=timer_now)
 
     def read_settings(self):
         return runtime_persistence.read_settings()

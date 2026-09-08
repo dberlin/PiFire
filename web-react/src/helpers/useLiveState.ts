@@ -4,7 +4,13 @@ import type { DashSocketPayload } from "@pifire/core/contracts/core";
 import { deriveControlAlive } from "@pifire/core/dashboard/health";
 import { demoDashAt } from "@pifire/core/demoData";
 import { FIXTURE_DASH } from "@pifire/core/fixture";
-import { type ConnectionPhase, createLiveConnection } from "@pifire/core/liveConnection";
+import {
+  type ConnectionPhase,
+  createLiveConnection,
+  DURATION_RECEIPT_MAX_AGE_MS,
+  monotonicNowMs,
+  projectLiveDurations,
+} from "@pifire/core/liveConnection";
 import { useEffect, useMemo, useState } from "react";
 
 export type { ConnectionPhase };
@@ -33,22 +39,55 @@ export function useLiveState(): LiveStateResult {
   const [live, setLive] = useState<DashSocketPayload>(FIXTURE_DASH);
   const [phase, setPhase] = useState<ConnectionPhase>(FORCE_DEMO ? "demo" : "connecting");
   const [pellets, setPellets] = useState<PelletSocketPayload["pellets"] | null>(null);
+  const [receivedMonotonicMs, setReceivedMonotonicMs] = useState<number | null>(null);
+  const [nowMonotonicMs, setNowMonotonicMs] = useState(monotonicNowMs);
 
   useEffect(() => {
     if (FORCE_DEMO) {
-      const start = Date.now();
-      const tick = () => setLive(demoDashAt((Date.now() - start) / 1000));
+      const start = monotonicNowMs();
+      const tick = () => setLive(demoDashAt((monotonicNowMs() - start) / 1000));
       tick();
       const id = window.setInterval(tick, 1000);
       return () => window.clearInterval(id);
     }
     const connection = createLiveConnection(TARGET_URL, {
-      onDash: setLive,
+      onDash: (payload) => {
+        if (document.visibilityState === "hidden") return;
+        const now = monotonicNowMs();
+        setLive(payload);
+        setReceivedMonotonicMs(now);
+        setNowMonotonicMs(now);
+      },
       onPellets: setPellets,
-      onPhase: setPhase,
+      onPhase: (next) => {
+        if (next !== "live") setReceivedMonotonicMs(null);
+        setPhase(next);
+      },
     });
-    return () => connection.close();
+    const invalidate = () => setReceivedMonotonicMs(null);
+    document.addEventListener("visibilitychange", invalidate);
+    window.addEventListener("pagehide", invalidate);
+    window.addEventListener("pageshow", invalidate);
+    return () => {
+      document.removeEventListener("visibilitychange", invalidate);
+      window.removeEventListener("pagehide", invalidate);
+      window.removeEventListener("pageshow", invalidate);
+      connection.close();
+    };
   }, []);
+
+  useEffect(() => {
+    if (FORCE_DEMO || receivedMonotonicMs === null) return;
+    const id = window.setInterval(() => {
+      const now = monotonicNowMs();
+      const ageMs = now - receivedMonotonicMs;
+      if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > DURATION_RECEIPT_MAX_AGE_MS) {
+        setReceivedMonotonicMs(null);
+      }
+      setNowMonotonicMs(now);
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [receivedMonotonicMs]);
 
   const command = useMemo(() => createCommand(TARGET_URL), []);
   const controlAlive = phase === "demo" ? true : deriveControlAlive(live);
@@ -59,7 +98,9 @@ export function useLiveState(): LiveStateResult {
   // backend truthfully, so fall back to the proxy's target rather than to a
   // hardcoded 5000 that lies in any workspace running its own backend.
   return {
-    live,
+    live: FORCE_DEMO ? live : projectLiveDurations(
+      live, receivedMonotonicMs, nowMonotonicMs, phase === "live",
+    ),
     phase,
     controlAlive,
     targetUrl: TARGET_URL || import.meta.env.PUBLIC_PIFIRE_TARGET || "http://localhost:5000",

@@ -1,114 +1,56 @@
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
 import { FIXTURE_DASH } from "@pifire/core/fixture";
+import { projectLiveDurations } from "@pifire/core/liveConnection";
 import { describe, expect, it } from "@rstest/core";
+import { lidCountdown, modeCountdown, recipeLabel } from "../../../../src/helpers/dashboard/countdowns";
 
-import {
-  lidCountdown,
-  modeCountdown,
-  recipeLabel,
-} from "../../../../src/helpers/dashboard/countdowns";
-
-const NOW = 1_700_000_000;
-
-const at = (over: Partial<DashSocketPayload> = {}): DashSocketPayload => ({
+const dash: DashSocketPayload = {
   ...FIXTURE_DASH,
-  ...over,
+  currentMode: "Startup",
+  durations: { modeElapsedS: 60, modeRemainingS: 180, lidRemainingS: null, cookElapsedS: 3723, current: true, running: true },
+};
+
+it("uses explicit remaining and cook exposure, regardless of wall provenance", () => {
+  for (const wall of [1_800_000_000, 1_800_003_600, 1_799_996_400]) {
+    const payload = { ...dash, modeStartTime: wall, startupTimestamp: wall - 100 };
+    const projected = projectLiveDurations(payload, 100_000, 105_000, true);
+    expect(modeCountdown(projected)).toBe(175);
+    expect(projected.durations.cookElapsedS).toBe(3728);
+  }
 });
 
-const inRecipe = (over: Partial<DashSocketPayload> = {}): DashSocketPayload =>
-  at({ recipeStatus: { ...FIXTURE_DASH.recipeStatus, recipeMode: true }, ...over });
-
-describe("modeCountdown", () => {
-  it("counts Startup and Reignite down against startDuration", () => {
-    const dash = at({ currentMode: "Startup", startDuration: 240, modeStartTime: NOW - 60 });
-    expect(modeCountdown(dash, NOW)).toBe(180);
-    expect(modeCountdown({ ...dash, currentMode: "Reignite" }, NOW)).toBe(180);
-  });
-
-  it("counts Prime down against primeDuration", () => {
-    expect(
-      modeCountdown(at({ currentMode: "Prime", primeDuration: 30, modeStartTime: NOW - 8 }), NOW),
-    ).toBe(22);
-  });
-
-  it("counts Shutdown down against shutdownDuration", () => {
-    expect(
-      modeCountdown(
-        at({ currentMode: "Shutdown", shutdownDuration: 240, modeStartTime: NOW - 200 }),
-        NOW,
-      ),
-    ).toBe(40);
-  });
-
-  it("is null in every other mode", () => {
-    for (const mode of ["Hold", "Smoke", "Monitor", "Stop", "Manual", "Error", ""]) {
-      expect(modeCountdown(at({ currentMode: mode, startDuration: 240 }), NOW)).toBeNull();
-    }
-  });
-
-  it("clamps at zero and never goes negative", () => {
-    expect(
-      modeCountdown(at({ currentMode: "Prime", primeDuration: 30, modeStartTime: NOW - 900 }), NOW),
-    ).toBe(0);
-  });
-
-  it("is null during a recipe even when the step's sub-mode is timed", () => {
-    // Flask keys the arithmetic off control["mode"], which reads "Recipe" for
-    // the whole run (dash_default.js:349). The inputs are not published
-    // per-step, so a per-step number would be invented.
-    expect(
-      modeCountdown(
-        inRecipe({ currentMode: "Startup", displayMode: "Startup", startDuration: 240 }),
-        NOW,
-      ),
-    ).toBeNull();
-  });
+it("retains unknown durations and freezes stale or inactive snapshots", () => {
+  expect(modeCountdown(FIXTURE_DASH)).toBeNull();
+  expect(modeCountdown(projectLiveDurations(dash, 100_000, 131_000, true))).toBe(180);
+  expect(modeCountdown(projectLiveDurations({ ...dash, durations: { ...dash.durations, current: false } }, 100_000, 105_000, true))).toBe(180);
+  expect(modeCountdown(projectLiveDurations({ ...dash, durations: { ...dash.durations, running: false } }, 100_000, 105_000, true))).toBe(180);
 });
 
-describe("lidCountdown", () => {
-  it("counts down to lidOpenEndTime while a lid is open in Hold", () => {
-    expect(
-      lidCountdown(
-        at({ currentMode: "Hold", lidOpenDetected: true, lidOpenEndTime: NOW + 45 }),
-        NOW,
-      ),
-    ).toBe(45);
-  });
-
-  it("clamps at zero", () => {
-    expect(
-      lidCountdown(
-        at({ currentMode: "Hold", lidOpenDetected: true, lidOpenEndTime: NOW - 5 }),
-        NOW,
-      ),
-    ).toBe(0);
-  });
-
-  it("is null when no lid is detected open", () => {
-    expect(
-      lidCountdown(
-        at({ currentMode: "Hold", lidOpenDetected: false, lidOpenEndTime: NOW + 45 }),
-        NOW,
-      ),
-    ).toBeNull();
-  });
-
-  it("is null outside Hold, where lid detection does not run", () => {
-    expect(
-      lidCountdown(
-        at({ currentMode: "Smoke", lidOpenDetected: true, lidOpenEndTime: NOW + 45 }),
-        NOW,
-      ),
-    ).toBeNull();
-  });
+it("preserves cook elapsed when the mode changes and reanchors fresh snapshots", () => {
+  const next = { ...dash, currentMode: "Reignite", durations: { ...dash.durations, modeElapsedS: 0, modeRemainingS: 240, cookElapsedS: 4000 } };
+  const projected = projectLiveDurations(next, 140_000, 142_000, true);
+  expect(projected.durations.modeElapsedS).toBe(2);
+  expect(projected.durations.cookElapsedS).toBe(4002);
+  expect(modeCountdown(projected)).toBe(238);
 });
 
-describe("recipeLabel", () => {
-  it("names the running step's sub-mode", () => {
-    expect(recipeLabel(inRecipe({ displayMode: "Hold" }))).toBe("Recipe | Hold");
-  });
+it("bounds a local countdown at zero without changing mode", () => {
+  const projected = projectLiveDurations({ ...dash, durations: { ...dash.durations, modeRemainingS: 2 } }, 100_000, 110_000, true);
+  expect(modeCountdown(projected)).toBe(0);
+  expect(projected.currentMode).toBe("Startup");
+});
 
-  it("is null when no recipe is running", () => {
-    expect(recipeLabel(at({ currentMode: "Hold", displayMode: "Hold" }))).toBeNull();
+describe("lid and recipe readouts", () => {
+  it("shows explicit lid remaining only for open lid in Hold", () => {
+    const open = { ...dash, currentMode: "Hold", lidOpenDetected: true, durations: { ...dash.durations, lidRemainingS: 45 } };
+    expect(lidCountdown(projectLiveDurations(open, 100_000, 105_000, true))).toBe(40);
+    expect(lidCountdown({ ...open, lidOpenDetected: false })).toBeNull();
+    expect(lidCountdown({ ...open, currentMode: "Smoke" })).toBeNull();
+  });
+  it("keeps the recipe submode label and suppresses the outer mode countdown", () => {
+    const recipe = { ...dash, displayMode: "Hold", recipeStatus: { ...dash.recipeStatus, recipeMode: true } };
+    expect(recipeLabel(recipe)).toBe("Recipe | Hold");
+    expect(modeCountdown(recipe)).toBeNull();
+    expect(recipeLabel(dash)).toBeNull();
   });
 });

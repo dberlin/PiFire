@@ -7,6 +7,7 @@ display pushes. Asserts the resulting persisted control VALUES + side effects
 
 import controller.runtime.transitions as transitions_mod
 from controller.runtime.transitions import TransitionError, request_transition
+from tests.fakes.clock import clock_stamp
 
 
 class _FakeDisplay:
@@ -24,7 +25,7 @@ class _FakeStore:
         self.flushed = 0
         self._display = _FakeDisplay()
 
-    def execute_control_writes(self):
+    def execute_control_writes(self, *, timer_now):
         self.flushed += 1
 
     def read_control(self):
@@ -50,6 +51,7 @@ class _FakeCtx:
     def __init__(self, store, notifier):
         self.store = store
         self.notifications = notifier
+        self.last_clock_stamp = clock_stamp()
 
 
 def _ctx(control):

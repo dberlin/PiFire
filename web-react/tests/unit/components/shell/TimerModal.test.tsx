@@ -10,9 +10,12 @@ const OK: CommandResult = { ok: true, message: "" };
 type Timer = DashSocketPayload["timer"];
 
 const timer = (over: Partial<Timer> = {}): Timer => ({
-  start: 0,
-  paused: 0,
-  end: 0,
+  timerId: null,
+  state: "stopped",
+  remainingS: 0,
+  current: false,
+  startedWallS: null,
+  projectedEndWallS: null,
   keepWarm: false,
   shutdown: false,
   ...over,
@@ -216,14 +219,8 @@ describe("TimerModal", () => {
 // queue model. Writers now state what they changed (common/control_delta.py), so
 // a split write would survive.
 //
-// The form is kept, and this pin with it, for reasons independent of that
-// change. It carries a DURATION: the control process compares control.timer.end
-// against its OWN time.time(), so the end must be computed from that same clock
-// -- a browser running behind the Pi would otherwise arm an already-expired
-// timer, and an expired timer with "Shutdown Grill" ticked shuts the grill down
-// mid-cook. Nothing in this request is a timestamp, so nothing can skew. The
-// form also refuses a zero, negative or non-numeric duration and a paused
-// timer, where the bare start command substitutes 60s or silently unpauses.
+// The duration is accepted against the controller's current monotonic domain;
+// neither browser epochs nor projected wall end labels establish deadlines.
 //
 // So "how many requests did this submission produce" is still the property
 // worth pinning: one gesture, one request, one write, no client-computed clock.

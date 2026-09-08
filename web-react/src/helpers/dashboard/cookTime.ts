@@ -1,26 +1,8 @@
-// Elapsed cook time, derived from the CONTROLLER's clock rather than from when
-// this browser happened to mount.
-//
-// startup_timestamp is epoch seconds, set once at ignition
-// (controller/runtime/modes/startup.py:120), deliberately NOT rewritten by
-// Reignite (controller/runtime/modes/reignite.py:17-18), zeroed when the cook
-// ends (controller/runtime/controller.py:405,428), and math.trunc'd onto the
-// wire (blueprints/mobile/socket_io.py:234). Flask has always read exactly this
-// field (dash_default.js:400-412).
+import type { DashSocketPayload } from "@pifire/core/contracts/core";
 
-/**
- * Seconds since ignition, or null when no cook is running.
- *
- * Both arguments are epoch SECONDS. `nowSeconds` is the browser's clock and
- * `startupTimestamp` is the Pi's, so a browser running behind the Pi produces a
- * negative difference; clamping is enough here because nothing is armed from
- * this value (contrast the timer, where the skew forced the arithmetic
- * server-side -- see helpers/command.ts).
- */
-export function cookElapsed(startupTimestamp: number, nowSeconds: number): number | null {
-  if (startupTimestamp === 0) return null;
-  const elapsed = Math.floor(nowSeconds) - Math.floor(startupTimestamp);
-  return elapsed < 0 ? 0 : elapsed;
+/** Cook exposure is independent of mode transitions and wall provenance. */
+export function cookElapsed(durations: DashSocketPayload["durations"]): number | null {
+  return durations.cookElapsedS === null ? null : Math.max(0, Math.floor(durations.cookElapsedS));
 }
 
 /**

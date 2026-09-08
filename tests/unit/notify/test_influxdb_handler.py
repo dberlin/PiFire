@@ -32,7 +32,7 @@ behavior:
      (notify/notifications.py:534-538), so the elapsed time was essentially
      always < 1s -- the very first metrics point after every startup/handler
      re-creation was silently swallowed by the debounce, not just throttled.
-     Fixed by seeding ``last_updated = 0``. See
+     Fixed by seeding ``last_updated = None``. See
      ``test_notify_first_call_after_construction_is_not_dropped_fixed``.
 
   2. **Buffered points were lost on write failure, not retried**
@@ -61,11 +61,12 @@ behavior:
 """
 
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 
 import pytest
 
 import notify.influxdb_handler as IH
+from controller.runtime.clock import ManualClock
 
 # ---------------------------------------------------------------------------
 # Fake InfluxDB client -- the mocked network boundary
@@ -312,8 +313,9 @@ def _handler():
     last_updated pushed into the past so the 1s debounce doesn't interfere
     unless a test wants it to."""
     handler = IH.InfluxNotificationHandler.__new__(IH.InfluxNotificationHandler)
+    handler._monotonic = time.monotonic
     handler.queue = []
-    handler.last_updated = time.time() - 10
+    handler.last_updated = time.monotonic() - 10
     return handler
 
 
@@ -440,30 +442,48 @@ def test_notify_one_food_probe_does_not_crash_fixed():
     assert p._fields["Probe2SetPoint"] == 0.0
 
 
-def test_notify_updates_last_updated_after_queuing():
-    handler = _handler()
-    before = handler.last_updated
-    handler.notify("EVT", {}, _settings(), {"current": {"hopper_level": 10}}, _in_data(), None)
-    assert handler.last_updated > before
-
-
 def test_notify_debounced_within_one_second():
     handler = _handler()
-    handler.last_updated = time.time()  # "just updated" -- inside the 1s window
+    handler.last_updated = time.monotonic()  # "just updated" -- inside the 1s window
     handler.notify("EVT", {}, _settings(), {"current": {"hopper_level": 10}}, _in_data(), None)
     assert handler.queue == []  # debounced: nothing queued, no crash despite in_data being valid
 
 
 def test_notify_first_call_after_construction_is_not_dropped_fixed(monkeypatch):
-    """FIXED LATENT BUG #1: __init__ used to set last_updated=time.time()
-    (not 0), so a notify() called immediately after construction -- exactly
-    the sequence notify/notifications.py:_send_influxdb_notification uses
-    (construct handler, then notify() in the same call) -- was swallowed by
-    the debounce and never queued. Now last_updated is seeded to 0, so the
-    first notify() after construction always clears the 1s debounce check."""
+    """The first point must be queued even at monotonic uptime zero."""
     monkeypatch.setattr(IH.threading, "Thread", FakeThread)
-    handler = IH.InfluxNotificationHandler(_settings())
+    handler = IH.InfluxNotificationHandler(_settings(), monotonic=lambda: 0.0)
 
     handler.notify("EVT", {}, _settings(), {"current": {"hopper_level": 10}}, _in_data(), None)
 
     assert len(handler.queue) == 1  # the first point is no longer silently lost
+
+
+@pytest.mark.parametrize("wall_jump", [-3600, 3600])
+def test_influx_wall_timestamp_changes_but_throttle_does_not(monkeypatch, wall_jump):
+    clock = ManualClock(wall_start=1_800_000_000)
+    monkeypatch.setattr(IH.threading, "Thread", FakeThread)
+    monkeypatch.setattr(IH.time, "time", clock.wall_time)
+
+    class WallDateTime:
+        @staticmethod
+        def now(tz):
+            return datetime.fromtimestamp(clock.wall_time(), tz)
+
+    monkeypatch.setattr(IH, "datetime", WallDateTime)
+    handler = IH.InfluxNotificationHandler(_settings(), monotonic=clock.monotonic)
+    settings = _settings()
+    pelletdb = {"current": {"hopper_level": 10}}
+    handler.notify("GRILL_STATE", {}, settings, pelletdb, _in_data(), None)
+    assert len(handler.queue) == 1
+    first_wall = handler.queue[0]._time
+    clock.jump_wall(wall_jump)
+    clock.advance(0.99)
+    handler.notify("Timer_Expired", {}, settings, pelletdb, _in_data(), None)
+    assert len(handler.queue) == 1  # events retain the existing throttle policy
+    clock.advance(0.01)
+    handler.notify("Timer_Expired", {}, settings, pelletdb, _in_data(), None)
+    assert len(handler.queue) == 2
+    assert handler.queue[1]._fields["Event"] == "Timer_Expired"
+    assert handler.queue[1]._time == datetime.fromtimestamp(clock.wall_time(), UTC)
+    assert (handler.queue[1]._time - first_wall).total_seconds() == wall_jump + 1

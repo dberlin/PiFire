@@ -21,7 +21,7 @@ import os
 import random
 import time
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from enum import Enum
 from logging.handlers import RotatingFileHandler
 
@@ -595,11 +595,12 @@ def _is_output_for(entry, requested):
 _SYSTEM_OUTPUT_POLL_INTERVAL = 0.025
 
 
-def get_system_command_output(requested="supported_commands", timeout=1):
+def get_system_command_output(
+    requested="supported_commands", timeout=1, *, monotonic: Callable[[], float] = time.monotonic
+):
     """Wait (up to `timeout` seconds) for the control process's answer to `requested`.
 
-    `queue_systemo` is shared by every consumer: dash_page and
-    socket_io._check_control_status poll for "check_alive", get_supported_cmds
+    `queue_systemo` is shared by system-command routes, get_supported_cmds
     for "supported_commands", common/system.py's system-info gather for
     check_wifi_quality/check_throttled/check_cpu_temp/network_info/
     hardware_info, and the wizard for "scan_bluetooth".
@@ -620,8 +621,8 @@ def get_system_command_output(requested="supported_commands", timeout=1):
     answered by making it slower.
     """
     system_output = SqliteQueue("queue_systemo")
-    endtime = timeout + time.time()
-    while time.time() < endtime:
+    endtime = timeout + monotonic()
+    while monotonic() < endtime:
         # Peek before touching anything: when our answer has not arrived yet
         # (the common case while waiting) the queue is left completely
         # undisturbed, rather than being churned pop-by-pop every iteration.

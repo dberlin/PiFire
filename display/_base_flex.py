@@ -24,6 +24,7 @@ from PIL import Image, ImageFilter
 
 from common.common import display_sleep_timeout, read_generic_json
 from common.control_delta import control_delta
+from common.duration_status import project_duration_status
 from common.modes import Mode
 from common.persistence.control import (
     enqueue_control_delta,
@@ -99,6 +100,7 @@ class DisplayBase:
         self, dev_pins, buttonslevel="HIGH", rotation=0, units="F", config=None, *, event_log=None, control_log=None
     ):
         config = {} if config is None else config
+        self._monotonic = time.monotonic
         # Init Global Variables and Constants
         self.config = config
 
@@ -555,55 +557,32 @@ class DisplayBase:
         return left, right
 
     @staticmethod
-    def _timer_seconds_and_label(status_data, now):
-        """Mirrors the countdown computation used by the legacy 'timer' dash
-        branch (Prime/Startup/Reignite/Shutdown countdown, or Hold lid-open
-        pause countdown). Returns (seconds, label); seconds is 0 and label is
-        '' when no countdown is active."""
+    def _timer_seconds_and_label(status_data, durations):
+        """Return the admitted countdown snapshot, retaining unknown values."""
         mode = status_data.get("mode", Mode.STOP)
         if mode in (Mode.PRIME, Mode.STARTUP, Mode.REIGNITE, Mode.SHUTDOWN):
-            if mode in (Mode.STARTUP, Mode.REIGNITE):
-                duration = status_data.get("start_duration", 0)
-            elif mode == Mode.PRIME:
-                duration = status_data.get("prime_duration", 0)
-            else:
-                duration = status_data.get("shutdown_duration", 0)
-            countdown = int(duration - (now - status_data.get("start_time", now)))
-            return max(countdown, 0), "Timer"
-        elif mode == Mode.HOLD and status_data.get("lid_open_detected"):
-            countdown = int(status_data.get("lid_open_endtime", now) - now)
-            return max(countdown, 0), "Lid Pause"
+            seconds = durations["modeRemainingS"]
+            return None if seconds is None else int(seconds), "Timer"
+        if mode == Mode.HOLD and status_data.get("lid_open_detected"):
+            seconds = durations["lidRemainingS"]
+            return None if seconds is None else int(seconds), "Lid Pause"
         return 0, ""
 
     @staticmethod
-    def _cook_time_data(status_data, now):
-        """Returns {'label':..., 'value':...} for the cook_time object:
-        the active countdown (mm:ss) when a timer is running, else the
-        elapsed cook time (H:MM:SS) computed from startup_timestamp, mirroring
-        display/qtbackend.py's _update_timer_text/_update_cook_elapsed.
-
-        NOTE: the not-yet-built 1280x720 bespoke layout has not yet defined
-        the FlexObject type/contract for the 'cook_time' object name. This
-        shape (data.label/data.value) matches the duty_pill contract as the
-        closest existing analog; if that layout instead reuses the 'timer'
-        type (TimerStatus), that widget reads top-level 'label' and
-        data['seconds'] rather than data['value'], so _update_dash_objects
-        also mirrors 'label' at the top level for compatibility. This should
-        be revisited once that layout lands.
-        """
-        seconds, label = DisplayBase._timer_seconds_and_label(status_data, now)
-        if seconds > 0:
-            value = f"{seconds // 60:02d}:{seconds % 60:02d}"
+    def _cook_time_data(status_data, durations):
+        """Render current or retained durations; wall metadata is not a clock."""
+        seconds, label = DisplayBase._timer_seconds_and_label(status_data, durations)
+        if label:
+            value = "--:--" if seconds is None else f"{seconds // 60:02d}:{seconds % 60:02d}"
             return {"label": label, "value": value}
 
-        timestamp = status_data.get("startup_timestamp", 0) or 0
-        mode = status_data.get("mode", Mode.STOP)
-        if timestamp and mode not in (Mode.STOP, Mode.MONITOR):
-            elapsed = max(int(now - timestamp), 0)
+        elapsed = durations["cookElapsedS"]
+        if elapsed is None:
+            value = "--:--"
+        else:
+            elapsed = int(elapsed)
             hours, minutes, secs = elapsed // 3600, (elapsed % 3600) // 60, elapsed % 60
             value = (f"{hours}:" if hours else "") + f"{minutes:02d}:{secs:02d}"
-        else:
-            value = "00:00"
         return {"label": "COOK TIME", "value": value}
 
     def _build_dash_map(self):
@@ -650,7 +629,7 @@ class DisplayBase:
         if self.status_data["mode"] not in [Mode.STOP]:
             self.display_timeout = None
         else:
-            self.display_timeout = time.time() + self.TIMEOUT
+            self.display_timeout = self._monotonic() + self.TIMEOUT
 
         self._update_mode_bar()
         self._update_control_panel()
@@ -892,30 +871,16 @@ class DisplayBase:
 
     def _update_timer(self):
         """Update Timer Output"""
-        if self.status_data["mode"] in [Mode.PRIME, Mode.STARTUP, Mode.REIGNITE, Mode.SHUTDOWN]:
-            if self.status_data["mode"] in [Mode.STARTUP, Mode.REIGNITE]:
-                duration = self.status_data["start_duration"]
-            elif self.status_data["mode"] in [Mode.PRIME]:
-                duration = self.status_data["prime_duration"]
-            else:
-                duration = self.status_data["shutdown_duration"]
-
-            countdown = max(0, int(duration - (time.time() - self.status_data["start_time"])))
-            self._set_timer_object(countdown, "Timer")
-
-        elif self.status_data["mode"] in [Mode.HOLD] and self.status_data["lid_open_detected"]:
-            """ In Hold Mode, use timer for lid open detection """
-            countdown = max(0, int(self.status_data["lid_open_endtime"] - time.time()))
-            self._set_timer_object(countdown, "Lid Pause")
-
-        else:
-            """ Clear the timer in other modes. """
-            self._set_timer_object(0, None)
+        durations = project_duration_status(
+            self.status_data, current=local_clock_stamp(), heartbeat=read_control_heartbeat()
+        )
+        countdown, label = self._timer_seconds_and_label(self.status_data, durations)
+        self._set_timer_object(countdown, label or None)
 
     def _set_timer_object(self, countdown, label):
         if "timer" in self.dash_map:
             object_data = self.display_object_list[self.dash_map["timer"]].get_object_data()
-            if countdown != object_data["data"]["seconds"]:
+            if countdown != object_data["data"]["seconds"] or (label is not None and label != object_data.get("label")):
                 object_data["data"]["seconds"] = countdown
                 if label is not None:
                     object_data["label"] = label
@@ -925,7 +890,10 @@ class DisplayBase:
         """Update Cook Time (ember dash) - active countdown, else elapsed cook time"""
         if "cook_time" in self.dash_map:
             object_data = self.display_object_list[self.dash_map["cook_time"]].get_object_data()
-            new_data = self._cook_time_data(self.status_data, time.time())
+            durations = project_duration_status(
+                self.status_data, current=local_clock_stamp(), heartbeat=read_control_heartbeat()
+            )
+            new_data = self._cook_time_data(self.status_data, durations)
             if object_data.get("data") != new_data:
                 object_data.setdefault("data", {})
                 object_data["data"]["label"] = new_data["label"]
@@ -1071,7 +1039,7 @@ class DisplayBase:
         simply calls this once per iteration.
         """
         if self.display_active != None:
-            if self.display_timeout and time.time() > self.display_timeout:
+            if self.display_timeout and self._monotonic() > self.display_timeout:
                 self.display_timeout = None
                 self.display_active = None
                 self.display_init = True
@@ -1159,7 +1127,7 @@ class DisplayBase:
         self.command = None
         if user_input:
             if self.display_timeout is not None:
-                self.display_timeout = time.time() + self.TIMEOUT
+                self.display_timeout = self._monotonic() + self.TIMEOUT
             if user_input not in ["UP", "DOWN", "ENTER", "TOUCH"]:
                 self.input_event = None
                 self.touch_pos = (0, 0)
@@ -1183,7 +1151,7 @@ class DisplayBase:
         self._wake_display()
         self.display_active = "home" if self.HOME_ENABLED else "dash"
         self.display_init = True
-        self.display_timeout = time.time() + self.TIMEOUT
+        self.display_timeout = self._monotonic() + self.TIMEOUT
 
     def _process_button(self):
         """
@@ -1419,7 +1387,7 @@ class DisplayBase:
             self._zero_dash_data()
             self.display_active = "dash"
             self.display_init = True
-            self.display_timeout = time.time() + self.TIMEOUT
+            self.display_timeout = self._monotonic() + self.TIMEOUT
 
         if "splus" in self.command:
             toggle = not self.last_status_data.get("s_plus", False)
