@@ -152,18 +152,61 @@ def test_get_cannot_reach_it(hazard):
 # ---------------------------------------------------------------------------
 
 
-def test_factory_reset_restores_defaults_and_restarts(hazard):
+def test_factory_reset_restores_defaults_and_restarts(hazard, caplog):
+    from common.control_delta import control_delta
     from common.persistence.runtime import read_settings, write_settings
+    from common.timer import start_timer
+    from control import _initialize_runtime_state
+    from controller.runtime.store import SqliteStore
+    from tests.fakes.clock import clock_stamp
 
     settings = read_settings()
     settings["globals"]["grill_name"] = "Not A Default"
     write_settings(settings)
+
+    store = SqliteStore()
+    old_stamp = clock_stamp()
+    control = store.read_control()
+    control["timer"] = start_timer(600.0, old_stamp)
+    store.write_control_snapshot(control, origin="test")
+    store.enqueue_control_delta(
+        control_delta(
+            ops=[
+                {
+                    "op": "timer.start_with_options",
+                    "requested_wall_s": old_stamp.observed_wall_s,
+                    "target_runtime_id": old_stamp.runtime_id,
+                    "seconds": 600,
+                    "shutdown": True,
+                    "keep_warm": False,
+                }
+            ]
+        ),
+        origin="test-before-reset",
+    )
 
     resp = hazard["client"].post("/api/admin/factory-reset", json={})
     assert resp.status_code == 200
     assert read_settings()["globals"]["grill_name"] != "Not A Default"
     assert [c[0] for c in hazard["calls"]] == ["restart_scripts"]
     assert_nothing_hazardous_ran(hazard)
+
+    # The old controller may drain the reset intent before restart. It must
+    # accept that intent, without reviving the timer queued before the reset.
+    store.execute_control_writes(timer_now=old_stamp)
+    reset = store.read_control()
+    assert reset["timer"]["state"] == "stopped"
+    assert reset["timer"]["action_armed"] is False
+    assert not any(item["req"] for item in reset["notify_data"] if item["type"] == "timer")
+    assert "rejected queued control write" not in caplog.text
+
+    _initialize_runtime_state(store)
+    fresh_stamp = clock_stamp(runtime_id="01b4a094-8a2c-4780-915d-081f5a850a97")
+    store.execute_control_writes(timer_now=fresh_stamp)
+    restarted = store.read_control()
+    assert restarted["mode"] == "Stop"
+    assert restarted["timer"]["state"] == "stopped"
+    assert restarted["timer"]["action_armed"] is False
 
 
 @pytest.mark.parametrize("body", ["null", "false", "0", '""', "[]", "{"])

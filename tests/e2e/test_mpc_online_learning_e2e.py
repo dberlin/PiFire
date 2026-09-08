@@ -1447,6 +1447,8 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
     expected_migrated_v6 = dict(legacy_source)
     for obsolete_key in _OBSOLETE_V6_SCORES:
         expected_migrated_v6.pop(obsolete_key)
+    # Historical records have no independently captured wall endpoints.
+    expected_migrated_v6.update(wall_start_ms=None, wall_end_ms=None)
     migrated_v6 = json.loads(legacy_records[0].to_db_row().payload)
     assert migrated_v6 == expected_migrated_v6
     assert _OBSOLETE_V6_SCORES.isdisjoint(migrated_v6)
@@ -1587,6 +1589,9 @@ def test_restored_v6_checkpoint_rebinds_exact_passive_candidate_provenance(ds) -
                 description="the exact cumulative passive grey fit",
             ),
         )
+        # Fit completion precedes durable candidate installation. Join that
+        # lifecycle boundary before replaying the fixed next observation.
+        core.poll_learning_off_path()
         for following_row in following_rows:
             _drive_exact_passive_frame(
                 row=following_row,

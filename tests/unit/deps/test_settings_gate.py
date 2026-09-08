@@ -63,7 +63,7 @@ def test_a_malformed_settings_tree_is_not_the_availability_gates_problem(monkeyp
 
 
 class _PidCore:
-    def __init__(self, *_args, logger=None):
+    def __init__(self, *_args, logger=None, clock=None):
         self.target = None
 
     def set_target(self, target):
@@ -91,8 +91,16 @@ def test_native_construction_failure_falls_back_to_pid_with_guidance_without_rew
     banners = []
 
     class BrokenMpc:
-        def __init__(self, *_args, logger=None):
-            raise RuntimeError(f"native ABI mismatch. Run {REBUILD}")
+        def __init__(
+            self,
+            *_args,
+            logger=None,
+            trajectory_repository=None,
+            fit_partition_digest=None,
+            activation_persistence=None,
+            grey_learning_process=None,
+        ):
+            raise RuntimeError(f"{detail}. Run {REBUILD}")
 
     modules = {
         "controller.mpc": SimpleNamespace(Controller=BrokenMpc),

@@ -181,8 +181,8 @@ def admin_system():
 def admin_factory_reset():
     """Reset settings, control, history and the pellet database to defaults.
 
-    Mirrors _admin_setting_factorydefaults step for step. Two of those steps
-    look redundant and are not:
+    Preserve the reset sequence from the retired admin handler. Two steps
+    that look redundant are not:
 
       * clear_pellet_db() -- pre-SQLite, `os.system("rm pelletdb.json")` WAS how
         a factory reset cleared pellets. Removing that dead rm preserved the
@@ -190,8 +190,11 @@ def admin_factory_reset():
         Clearing them is a ruling, not an oversight.
       * the control reseed after flush_control() -- flush already wrote
         default_control(), and this restates it as named intent so a write
-        queued alongside cannot clobber it. timer and notify_data are stated as
-        ops because they are only expressible that way.
+        queued alongside cannot clobber it. notify_data is stated as an op
+        because it is only expressible that way. flush_control() already
+        resets the timer and discards pending timer commands; do not queue a
+        timer command after clearing the controller heartbeat, or target a
+        generation that the imminent restart will retire.
     """
     _, invalid = validate_json(EmptyOperationRequest)
     if invalid:
@@ -214,7 +217,7 @@ def admin_factory_reset():
     enqueue_control_delta(
         control_delta(
             set_values=control,
-            ops=[{"op": "timer.clear"}, {"op": "notify.replace", "entries": notify_entries}],
+            ops=[{"op": "notify.replace", "entries": notify_entries}],
         ),
         origin="api-admin",
     )

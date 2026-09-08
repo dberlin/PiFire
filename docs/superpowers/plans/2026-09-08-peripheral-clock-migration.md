@@ -473,5 +473,16 @@ stdout, stderr and SHA-256 checksums are preserved under
 evidence, not exact-revision release evidence. Temporary smoke scripts were
 removed and local smoke services/browser sessions stopped.
 
-No release commands or push were run. Development checks do not authorize
-publication; the exact-revision wrapper remains the sole release authority.
+At migration handoff, no release commands or push had run. Development checks
+do not authorize publication; the exact-revision wrapper remains the sole
+release authority.
+
+The subsequently authorized release gate exposed an obsolete factory-reset
+`timer.clear` envelope and two stale test contracts. Factory reset now relies
+on `flush_control()` to clear timers and pending commands, without inventing a
+post-flush runtime generation. Its regression verifies reset and fresh-runtime
+replay leave the timer stopped and disarmed. Native-fallback doubles accept
+current constructor dependencies. Historical trace comparison preserves the
+literal source and expects unknown wall endpoints; fixed-frame replay joins
+the real fit lifecycle before submitting the next observation. The focused
+40-test selection passed five consecutive runs without relaxed assertions.
