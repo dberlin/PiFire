@@ -105,6 +105,41 @@ MPC calibration likewise selects typed SQLite cook/session records through
 specific cook or session and database path for calibration rather than copying
 or exporting trace rows.
 
+#### Passive learning and temporary fit failures
+
+Collecting observations, fitting a candidate, and activating a model are separate
+states. A warm-up or numerical fit rejection retains the corpus and leaves the
+incumbent model in use; it does not stop collection. Passive fitting retries when
+new admitted frame evidence is available, including when bounded retention replaces
+older observations without increasing the total count. Repeated requests over an
+unchanged frame prefix do not repeat the same failed fit. A later completed fit
+replaces the previous fit error in the learning report.
+
+The fitter uses a fixed set of warmed observations throughout optimization.
+Its delay search is bounded by the available history, so a trial cannot improve
+its score merely by excluding more observations. Candidate/incumbent comparison
+still uses their common warmed support and the existing effective-duration,
+excitation, and identifiability requirements. `segment-warmup-incomplete` describes
+insufficient initial history for scoring, not an unfinished final interval when
+Stop is pressed. `warmup-mask-unstable` in older reports describes a rejected fit
+whose scoring window changed during optimization; it does not by itself mean that
+the collector stopped. Storage or corpus-integrity failures remain distinct from
+these recoverable fitting conditions.
+
+#### Physical timing and retained readings
+
+Mode deadlines start at actuator setup, after preflight. Clearing cook history
+rotates history/metric origins without extending Prime, Startup, Reignite, or
+Shutdown. Frame evidence retains the temperature's acquisition timestamp through
+solver work and teardown; a retained temperature never acquires a newer timestamp
+from a failed read.
+
+Clients mark retained durations and temperatures as last reported/last known.
+Returning from a hidden or suspended client requires a new receipt before timing
+is current again. An ordinary acquisition gap resets probe filter history without
+discarding an independently fresh cloud receipt; genuine clock discontinuities
+also invalidate the device clock domain.
+
 
 ### User Configuration, Registering the Controller
 

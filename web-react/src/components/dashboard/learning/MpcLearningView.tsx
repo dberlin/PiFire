@@ -46,7 +46,7 @@ const LEARNING_STATUS_COPY: Record<ModelEvidenceStatus, string> = {
   active: "The learned model is active.",
   fallback: "MPC reverted to the last safe model.",
   error:
-    "Learning is stopped until the reported problem is resolved. MPC control may still be active.",
+    "Learning reported a problem. A failed fit does not by itself mean data collection has stopped.",
 };
 
 const LEARNING_ISSUES: Readonly<Record<string, LearningIssueCopy>> = {
@@ -78,6 +78,18 @@ const LEARNING_ISSUES: Readonly<Record<string, LearningIssueCopy>> = {
     summary:
       "Some collected cooking time is still warming the thermal model and cannot be scored yet.",
     action: "Continue normal cooking; masked warm-up evidence is never treated as a measurement.",
+  },
+  "segment-warmup-incomplete": {
+    summary:
+      "The fit did not have enough continuous history to complete the thermal model's warm-up.",
+    action:
+      "The active model is unchanged. Continue normal cooking; saved evidence is retained for later fits.",
+  },
+  "warmup-mask-unstable": {
+    summary:
+      "The candidate fit was rejected because its warm-up scoring window changed during optimization.",
+    action:
+      "The active model is unchanged. This is a fitting failure, not evidence that collection stopped. Export diagnostics if it repeats.",
   },
   "pooled-regression": {
     summary: "The new model fits the collected cooks worse than the active model.",
@@ -129,8 +141,11 @@ const LEARNING_ISSUES: Readonly<Record<string, LearningIssueCopy>> = {
 };
 
 function learningIssue(code: string): LearningIssueCopy {
+  const issueCode = code.startsWith("segment-warmup-incomplete:")
+    ? "segment-warmup-incomplete"
+    : code;
   return (
-    LEARNING_ISSUES[code] ?? {
+    LEARNING_ISSUES[issueCode] ?? {
       summary: "Learning reported a condition this version cannot explain.",
       action: "Export diagnostics and include the technical code below.",
     }
@@ -618,9 +633,13 @@ function ActiveMpcLearningView({
               <p className="break-all font-mono text-xs">
                 Fit corpus: {report.fit.fit_corpus_digest ?? "none"}
               </p>
-              <p className={report.fit.error ? "text-danger" : "text-probe-label"}>
-                Fit error: {report.fit.error ?? "none"}
-              </p>
+              {report.fit.error ? (
+                <div className="text-danger">
+                  <LearningIssue code={report.fit.error} />
+                </div>
+              ) : (
+                <p className="text-probe-label">Fit error: none</p>
+              )}
             </div>
           </section>
 

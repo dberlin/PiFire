@@ -23,12 +23,12 @@ import time
 import qrcode
 from PIL import Image, ImageDraw, ImageFont
 
-from common.control_delta import control_delta
 from common.clock_domain import local_clock_stamp
+from common.control_delta import control_delta
 from common.duration_status import project_duration_status
-from common.persistence.runtime import read_control_heartbeat
 from common.modes import Mode
 from common.persistence.control import enqueue_control_delta, read_control
+from common.persistence.runtime import read_control_heartbeat
 from common.system import reboot_system, shutdown_system
 from display._loggers import resolve_loggers
 
@@ -1022,6 +1022,10 @@ class _DisplayBase:
                 5 if self._SQUARE else int((self.HEIGHT // 2) - 120),
             )
             img.paste(label_canvas, coords, label_canvas)
+            if countdown is not None and not durations["current"]:
+                qualifier = self._draw_text("Last reported", self.primary_font, 12, (0, 200, 0))
+                position = ((self.WIDTH - qualifier.width) // 2, coords[1] + label_canvas.height + 1)
+                img.paste(qualifier, position, qualifier)
 
         # Lid open detection timer display
         if status_data["mode"] in [Mode.HOLD] and status_data["lid_open_detected"]:
@@ -1030,9 +1034,24 @@ class _DisplayBase:
             )
             duration = durations["lidRemainingS"]
             text = "Lid Pause --" if duration is None else f"Lid Pause {int(duration)}s"
-            label_canvas = self._draw_text(
-                text, self.primary_font, 18, (0, 200, 0), rect=True, outline_color=(0, 200, 0), fill_color=(0, 0, 0)
-            )
+            if duration is not None and not durations["current"]:
+                # Fit both lines inside the original badge height, above the setpoint.
+                value = self._draw_text(text, self.primary_font, 13, (0, 200, 0))
+                qualifier = self._draw_text("Last reported", self.primary_font, 11, (0, 200, 0))
+                badge_size = (max(value.width, qualifier.width) + 12, value.height + qualifier.height + 7)
+                label_canvas = Image.new("RGBA", badge_size)
+                ImageDraw.Draw(label_canvas).rounded_rectangle(
+                    (0, 0, badge_size[0] - 1, badge_size[1] - 1),
+                    radius=8,
+                    outline=(0, 200, 0),
+                    fill=(0, 0, 0),
+                )
+                label_canvas.paste(value, ((badge_size[0] - value.width) // 2, 3), value)
+                label_canvas.paste(qualifier, ((badge_size[0] - qualifier.width) // 2, value.height + 4), qualifier)
+            else:
+                label_canvas = self._draw_text(
+                    text, self.primary_font, 18, (0, 200, 0), rect=True, outline_color=(0, 200, 0), fill_color=(0, 0, 0)
+                )
             coords = (
                 int((self.WIDTH // 2) - (label_canvas.width // 2)),
                 5 if self._SQUARE else int((self.HEIGHT // 2) - 120),

@@ -1,15 +1,13 @@
 import { type CommandClient, createCommand } from "@pifire/core/command";
 import type { PelletSocketPayload } from "@pifire/core/contracts/control";
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
-import { deriveControlAlive } from "@pifire/core/dashboard/health";
 import { demoDashAt } from "@pifire/core/demoData";
 import { FIXTURE_DASH } from "@pifire/core/fixture";
 import {
   type ConnectionPhase,
   createLiveConnection,
-  DURATION_RECEIPT_MAX_AGE_MS,
   monotonicNowMs,
-  projectLiveDurations,
+  projectLiveSnapshot,
 } from "@pifire/core/liveConnection";
 import { useEffect, useMemo, useState } from "react";
 
@@ -50,12 +48,14 @@ export function useLiveState(): LiveStateResult {
       const id = window.setInterval(tick, 1000);
       return () => window.clearInterval(id);
     }
+    let active = document.visibilityState !== "hidden";
     const connection = createLiveConnection(TARGET_URL, {
       onDash: (payload) => {
-        if (document.visibilityState === "hidden") return;
+        // The server deduplicates unchanged frames, including terminal errors.
+        // Keep hidden snapshots, but never give them a current receipt.
         const now = monotonicNowMs();
         setLive(payload);
-        setReceivedMonotonicMs(now);
+        setReceivedMonotonicMs(active && document.visibilityState !== "hidden" ? now : null);
         setNowMonotonicMs(now);
       },
       onPellets: setPellets,
@@ -64,33 +64,50 @@ export function useLiveState(): LiveStateResult {
         setPhase(next);
       },
     });
-    const invalidate = () => setReceivedMonotonicMs(null);
-    document.addEventListener("visibilitychange", invalidate);
-    window.addEventListener("pagehide", invalidate);
-    window.addEventListener("pageshow", invalidate);
+    const suspend = () => {
+      active = false;
+      setReceivedMonotonicMs(null);
+    };
+    const resume = () => {
+      if (active || document.visibilityState === "hidden") return;
+      active = true;
+      setReceivedMonotonicMs(null);
+      connection.reconnect();
+    };
+    const visibilityChanged = () => {
+      if (document.visibilityState === "hidden") suspend();
+      else resume();
+    };
+    document.addEventListener("visibilitychange", visibilityChanged);
+    window.addEventListener("pagehide", suspend);
+    window.addEventListener("pageshow", resume);
     return () => {
-      document.removeEventListener("visibilitychange", invalidate);
-      window.removeEventListener("pagehide", invalidate);
-      window.removeEventListener("pageshow", invalidate);
+      document.removeEventListener("visibilitychange", visibilityChanged);
+      window.removeEventListener("pagehide", suspend);
+      window.removeEventListener("pageshow", resume);
       connection.close();
     };
   }, []);
 
   useEffect(() => {
     if (FORCE_DEMO || receivedMonotonicMs === null) return;
+    let previousNow = receivedMonotonicMs;
     const id = window.setInterval(() => {
       const now = monotonicNowMs();
-      const ageMs = now - receivedMonotonicMs;
-      if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > DURATION_RECEIPT_MAX_AGE_MS) {
+      // Expired receipts still provide honest ages. A reset clock does not.
+      if (!Number.isFinite(now) || now < previousNow) {
         setReceivedMonotonicMs(null);
       }
+      previousNow = now;
       setNowMonotonicMs(now);
     }, 1000);
     return () => window.clearInterval(id);
   }, [receivedMonotonicMs]);
 
   const command = useMemo(() => createCommand(TARGET_URL), []);
-  const controlAlive = phase === "demo" ? true : deriveControlAlive(live);
+  const projected = FORCE_DEMO
+    ? { live, controlAlive: true }
+    : projectLiveSnapshot(live, receivedMonotonicMs, nowMonotonicMs, phase === "live");
 
   // `targetUrl` is for DISPLAY (ConnectionStatus), not for fetching -- the
   // fetch base is TARGET_URL, which is empty in dev on purpose so requests stay
@@ -98,11 +115,9 @@ export function useLiveState(): LiveStateResult {
   // backend truthfully, so fall back to the proxy's target rather than to a
   // hardcoded 5000 that lies in any workspace running its own backend.
   return {
-    live: FORCE_DEMO ? live : projectLiveDurations(
-      live, receivedMonotonicMs, nowMonotonicMs, phase === "live",
-    ),
+    live: projected.live,
     phase,
-    controlAlive,
+    controlAlive: phase === "demo" || projected.controlAlive,
     targetUrl: TARGET_URL || import.meta.env.PUBLIC_PIFIRE_TARGET || "http://localhost:5000",
     command,
     pellets,

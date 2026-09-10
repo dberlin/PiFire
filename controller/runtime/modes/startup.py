@@ -101,11 +101,8 @@ class StartupMode(ControlMode):
         """Startup writes control['startup_timestamp'] at the start of the run.
         Overridden as a no-op by ReigniteMode (which doesn't reset it).
 
-        NOTE: this runs from setup_safety(), which `ControlMode.run()` calls
-        BEFORE it sets self.state.timers.start_time (that happens later in the
-        shared pre-loop). We therefore capture ctx.clock.wall_time() here
-        rather than reading self.state.timers.start_time (which is still its 0.0
-        default at this point)."""
+        This wall timestamp records completion of the initial safety checks;
+        physical mode duration starts at the admitted pre-setup boundary."""
         self.control["startup_timestamp"] = self.ctx.clock.wall_time()
         self.ctx.store.write_control_snapshot(self.control, origin="control")
 
@@ -160,6 +157,6 @@ class StartupMode(ControlMode):
 
         return bool(exit_temp != 0 and ptemp >= exit_temp)
 
-    def teardown(self, ptemp):
+    def teardown(self, ptemp, *, acquired_at_s: float | None = None):
         self.control["safety"]["afterstarttemp"] = ptemp
         self.ctx.store.write_control_snapshot(self.control, origin="control")

@@ -28,6 +28,7 @@ def _sample(
     *,
     temperature: float | None = 212.0,
     role_generation: int = 7,
+    acquired_at_s: float | None = 20.0,
 ) -> FramedPulseSample:
     return FramedPulseSample(
         temperature=temperature,
@@ -35,6 +36,7 @@ def _sample(
         ambient_c=20.0,
         units="F",
         role_generation=role_generation,
+        acquired_at_s=acquired_at_s,
     )
 
 
@@ -478,7 +480,7 @@ def test_live_regime_completed_frames_are_continuous_repository_observations() -
     observations = [
         completion.observation
         for tick in _LIVE_TICKS_S
-        for completion in runtime.advance(tick, False, sample=_sample()).completions
+        for completion in runtime.advance(tick, False, sample=_sample(acquired_at_s=tick)).completions
         if completion.observation is not None
     ]
 
@@ -494,15 +496,47 @@ def test_live_regime_completed_frames_are_continuous_repository_observations() -
         assert observation.continuous is True
 
 
+@pytest.mark.parametrize("acquired_at_s, continuous", [(9.9, False), (10.05, True), (None, False)])
+@pytest.mark.parametrize("reset", [False, True])
+def test_frame_boundary_uses_acquisition_not_scheduler_time(acquired_at_s, continuous, reset):
+    controller = cast(PulseControllerState, ControllerState())
+    runtime = FramedPulseRuntime()
+    runtime.configure(
+        ActuationMode.FRAMED_PULSE,
+        controller=controller,
+        timing=AugerTiming(pulse_s=2, frame_s=10),
+        now=0.0,
+    )
+    controller.pulse_result_revision = 1
+    controller.pulse_requested_duty = 0.0
+    controller.pulse_combustion_load = 0.3
+    runtime.advance(0.0, False, sample=_sample(acquired_at_s=0.0))
+    sample = _sample(acquired_at_s=acquired_at_s)
+    if reset:
+        result = runtime.reset(
+            PulseResetReason.MODE_CHANGE,
+            10.1,
+            InhibitReason.NONE,
+            actual_auger_on=False,
+            sample=sample,
+            terminal_feedback=True,
+        )
+    else:
+        result = runtime.advance(10.1, False, sample=sample)
+    observation = result.completions[0].observation
+    assert observation is not None
+    assert observation.frame_end_s == 10.0
+    assert observation.continuous is continuous
+
+
 def test_a_sample_taken_before_the_frame_ended_is_discontinuous() -> None:
     runtime, controller = _live_regime_runtime()
     _latch_controller_frame(runtime, controller)
 
     completion = runtime.complete_frame(
         _frame(),
-        sample=_sample(),
+        sample=_sample(acquired_at_s=19.5),
         inhibit=InhibitReason.NONE,
-        sample_at_s=19.5,
     )
 
     assert completion.observation is not None
@@ -515,9 +549,8 @@ def test_a_sample_a_whole_frame_late_is_discontinuous() -> None:
 
     completion = runtime.complete_frame(
         _frame(),
-        sample=_sample(),
+        sample=_sample(acquired_at_s=40.0),
         inhibit=InhibitReason.NONE,
-        sample_at_s=40.0,
     )
 
     assert completion.observation is not None

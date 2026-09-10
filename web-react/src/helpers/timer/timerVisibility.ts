@@ -8,6 +8,7 @@
 // screen after a reload whenever there is a live timer to look at, so
 // persisting a stale choice would only fight that rule.
 
+import type { DashSocketPayload } from "@pifire/core/contracts/core";
 import { useCallback, useState } from "react";
 
 export interface TimerVisibility {
@@ -17,17 +18,25 @@ export interface TimerVisibility {
   toggle: () => void;
 }
 
-/** Reveal a newly accepted timer, independent of its wall-clock labels. */
-export function useTimerVisibility(timerId: string | null): TimerVisibility {
+/** Reveal active timers without treating stopped/default identities as activity. */
+export function useTimerVisibility({
+  timerId,
+  state,
+}: Pick<DashSocketPayload["timer"], "timerId" | "state">): TimerVisibility {
   const [visible, setVisible] = useState(false);
-  const [seenId, setSeenId] = useState<string | null>(null);
+  // undefined means no active timer has been seen; null is a real observation
+  // of an active timer whose identity could not be recovered.
+  const [seenId, setSeenId] = useState<string | null | undefined>(undefined);
+  const active = state === "running" || state === "paused" || state === "interrupted";
 
   // Adjusted synchronously during render (React's recommended pattern for
   // reacting to changed props) rather than in an effect -- see
   // dashboard/SetpointEntry.tsx for the same shape.
-  if (seenId !== timerId) {
+  // Terminal snapshots do not replace the last active identity: a reset UUID
+  // must neither reveal the bar nor erase dismissal of that same active timer.
+  if (active && seenId !== timerId) {
     setSeenId(timerId);
-    if (timerId !== null) setVisible(true);
+    setVisible(true);
   }
 
   const toggle = useCallback(() => setVisible((showing) => !showing), []);

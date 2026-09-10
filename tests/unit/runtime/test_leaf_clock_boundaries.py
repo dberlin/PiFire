@@ -58,4 +58,4 @@ def test_timed_leaf_release_and_epoch_provenance_ignore_wall_jumps(mode_type: ty
     finally:
         grill.auger_off()
         grill.igniter_off()
-        mode.teardown(100.0)
+        mode.teardown(100.0, acquired_at_s=None)

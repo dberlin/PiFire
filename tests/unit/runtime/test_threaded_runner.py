@@ -34,7 +34,6 @@ from common.model_evidence import (
 from common.mpc_learning import MPC_FORECAST_HORIZONS
 from common.persistence.model_evidence import ModelActivationState, append_model_evidence
 from controller.applied_output import AppliedOutput, OutputSource
-from controller.runtime.clock import ManualClock
 from controller.base import ControllerLearningDiagnostics
 from controller.model_learning.activation import (
     ActivationPhase,
@@ -44,6 +43,7 @@ from controller.model_learning.contracts import ActivationPolicy, CandidateOrigi
 from controller.model_learning.evaluation import CompletedForecastOrigin, ForecastOrigin
 from controller.mpc import Controller as MpcController
 from controller.mpc_config import DEFAULT_MPC_CONFIG as MPC_DEFAULTS
+from controller.runtime.clock import ManualClock
 from controller.runtime.control_trace_session import ControlTraceSession, TraceSessionContext
 from controller.runtime.model_persistence import (
     DurableActivationReceipt,
@@ -1002,7 +1002,7 @@ def test_hold_waits_for_real_threaded_completed_first_solve(
         assert reported[0].source is OutputSource.SEED
     finally:
         core.solve_release.set()
-        hold.teardown(110.0)
+        hold.teardown(110.0, acquired_at_s=None)
 
 
 def test_threaded_runner_never_exposes_core_internals_before_first_result():
@@ -1121,7 +1121,7 @@ def test_hold_teardown_stops_threaded_runner(hold_cycle):
 
     try:
         hold.setup()
-        hold.teardown(70.0)
+        hold.teardown(70.0, acquired_at_s=None)
         assert not thread.is_alive()
     finally:
         runner.stop()

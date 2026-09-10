@@ -99,6 +99,38 @@ def test_fixed_countdown_pixels_follow_duration_not_wall(monkeypatch, wall_jump)
 
 
 @requires_font
+@pytest.mark.parametrize("module", ["display._base_240x240", "display._base_240x320", "display._base_320x480"])
+@pytest.mark.parametrize("mode", ["Startup", "Hold"])
+def test_fixed_retained_duration_is_visibly_qualified(monkeypatch, module, mode):
+    snapshot = {"current": True, "modeRemainingS": 0, "lidRemainingS": 0}
+    monkeypatch.setattr("display._base_fixed.project_duration_status", lambda *args, **kwargs: snapshot)
+    monkeypatch.setattr("display._base_fixed.read_control_heartbeat", lambda: None)
+    base = make_base(module)
+    status = {**SAMPLE_STATUS_DATA, "mode": mode, "lid_open_detected": True}
+    current = render(base, "_display_current", SAMPLE_IN_DATA, status)
+    current_setpoint_pixels = {
+        index
+        for index, pixel in enumerate(base._captured.convert("RGB").get_flattened_data())
+        if pixel[0] < 100 and pixel[1] > 100 and pixel[2] > 100
+    }
+    snapshot["current"] = False
+    retained = render(base, "_display_current", SAMPLE_IN_DATA, status)
+    assert retained != current
+    if mode == "Hold":
+        retained_setpoint_pixels = {
+            index
+            for index, pixel in enumerate(base._captured.convert("RGB").get_flattened_data())
+            if pixel[0] < 100 and pixel[1] > 100 and pixel[2] > 100
+        }
+        assert current_setpoint_pixels
+        # A smaller badge may reveal more of the setpoint, but cannot obscure it.
+        assert current_setpoint_pixels <= retained_setpoint_pixels
+    snapshot.update(modeRemainingS=None, lidRemainingS=None)
+    unknown = render(base, "_display_current", SAMPLE_IN_DATA, status)
+    assert unknown != retained
+
+
+@requires_font
 def test_splash_and_text_render():
     b = make_base("display._base_320x480")
     assert len(render(b, "_display_splash")) == 64

@@ -98,6 +98,7 @@ class _HoldTickContext:
     wall_time: float
     monotonic_s: float
     ptemp: float
+    acquired_at_s: float | None
     output_status: _HoldOutputStatus
     trace: ControlTraceSession | None
     active_calibration_reset: bool
@@ -190,6 +191,7 @@ class _HoldTeardownState:
     wall_time: float | None = None
     monotonic_s: float | None = None
     ptemp: float | None = None
+    acquired_at_s: float | None = None
     auger_on: bool = False
     prior_output_source: OutputSource | None = None
     advance_dispatch: _FramedDispatchState | None = None
@@ -243,6 +245,7 @@ class HoldMode(ControlMode):
     _runner_configuration_revision: int = 0
     _framed_pulse: FramedPulseRuntime | None = None
     _last_ptemp: float | None = None
+    _last_ptemp_monotonic_s: float | None = None
     _hold_learning: HoldLearningRuntime | None = None
     _teardown: _HoldTeardownState
     _last_solve_monotonic_s: float = 0.0
@@ -301,7 +304,7 @@ class HoldMode(ControlMode):
         generation = source.get("role_generation", 0)
         return generation if isinstance(generation, int) and not isinstance(generation, bool) and generation >= 0 else 0
 
-    def _framed_sample(self, ptemp: float | None) -> FramedPulseSample:
+    def _framed_sample(self, ptemp: float | None, *, acquired_at_s: float | None) -> FramedPulseSample:
         control = self.control
         if control is None:
             raise RuntimeError("Hold framed pulse runtime requires control state")
@@ -317,6 +320,7 @@ class HoldMode(ControlMode):
             ambient_c=ambient_c,
             units=str(units),
             role_generation=self._model_role_generation(self._runner_status()),
+            acquired_at_s=acquired_at_s,
         )
 
     def _record_framed_delivery(self, delivered_delta_s: float) -> None:
@@ -495,7 +499,7 @@ class HoldMode(ControlMode):
             monotonic_s,
             inhibit,
             actual_auger_on=self.grill.get_output_status()["auger"],
-            sample=self._framed_sample(ptemp),
+            sample=self._framed_sample(ptemp, acquired_at_s=self._last_ptemp_monotonic_s),
             terminal_feedback=terminal_feedback,
             report_feedback=report_feedback,
             cancellation_reason=cancellation_reason,
@@ -851,6 +855,7 @@ class HoldMode(ControlMode):
         self._reachability_advisory_key = None
         self._framed_pulse = FramedPulseRuntime(wall_clock_ms=lambda: int(self.ctx.clock.wall_time() * 1_000))
         self._last_ptemp = None
+        self._last_ptemp_monotonic_s = None
         self._last_target = None
         self._estimator_seeded = False
         self._estimator_seed_status = None
@@ -993,9 +998,8 @@ class HoldMode(ControlMode):
             + str(self.state.cycle.ratio)
         )
 
-        # Initialize the cycle start time to now. `ControlMode.run()` has not yet
-        # set self.state.timers.start_time (that happens after setup_safety,
-        # later in the shared pre-loop).
+        # The controller cadence starts after its own setup, independently of
+        # the physical mode origin captured before setup begins.
         self.state.controller.cycle_start = self.ctx.clock.monotonic()
         self._last_solve_monotonic_s = self.ctx.clock.monotonic()
         self._seed_output_start_time = max(
@@ -1830,6 +1834,7 @@ class HoldMode(ControlMode):
         ctx = self.ctx
         control = self.control
         self._last_ptemp = float(ptemp)
+        self._last_ptemp_monotonic_s = self._last_probe_monotonic_s
         runner_adopted = False
         runner_revision = getattr(self._runner, "configuration_revision", lambda: 0)()
         if runner_revision != self._runner_configuration_revision:
@@ -1910,6 +1915,7 @@ class HoldMode(ControlMode):
             wall_time=self.ctx.clock.wall_time(),
             monotonic_s=now,
             ptemp=ptemp,
+            acquired_at_s=self._last_probe_monotonic_s,
             output_status=self._hold_output_status(current_output_status),
             trace=trace,
             active_calibration_reset=active_calibration_reset,
@@ -2263,7 +2269,7 @@ class HoldMode(ControlMode):
         result = runtime.advance(
             observed_at_s,
             context.output_status.auger,
-            sample=self._framed_sample(context.ptemp),
+            sample=self._framed_sample(context.ptemp, acquired_at_s=context.acquired_at_s),
             prior_output_source=prior_output_source,
         )
         return _HoldFramedPulse(
@@ -2511,7 +2517,7 @@ class HoldMode(ControlMode):
             self._manual_seed_output_start_time = None
             for name in self.state.manual_override:
                 self.state.manual_override[name] = 0
-        self.teardown(None)
+        self.teardown(None, acquired_at_s=None)
 
     def _apply_manual_overrides(self, control, now, current_output_status):
         if self._teardown.discontinuity_reason is not None:
@@ -2709,7 +2715,7 @@ class HoldMode(ControlMode):
             }
         return status
 
-    def teardown(self, ptemp):
+    def teardown(self, ptemp, *, acquired_at_s: float | None = None):
         teardown = self._teardown
         if teardown.phase >= _TeardownPhase.FINISHED:
             return
@@ -2720,6 +2726,7 @@ class HoldMode(ControlMode):
                 self.ctx.clock.monotonic() if self._terminal_monotonic_s is None else self._terminal_monotonic_s
             )
             teardown.ptemp = ptemp
+            teardown.acquired_at_s = acquired_at_s
         now = teardown.wall_time
         monotonic_s = teardown.monotonic_s
         assert monotonic_s is not None
@@ -2758,7 +2765,7 @@ class HoldMode(ControlMode):
                         result=runtime.advance(
                             monotonic_s,
                             teardown.auger_on,
-                            sample=self._framed_sample(teardown.ptemp),
+                            sample=self._framed_sample(teardown.ptemp, acquired_at_s=teardown.acquired_at_s),
                             prior_output_source=(teardown.prior_output_source),
                         ),
                         record_terminal_trace=False,
@@ -2787,7 +2794,9 @@ class HoldMode(ControlMode):
                 if reset_dispatch is None:
                     if teardown.discontinuity_reason is not None:
                         reset_dispatch = _FramedDispatchState(
-                            result=runtime.invalidate_observation_gap(sample=self._framed_sample(None)),
+                            result=runtime.invalidate_observation_gap(
+                                sample=self._framed_sample(None, acquired_at_s=None)
+                            ),
                             record_terminal_trace=True,
                             scheduler_reset=(
                                 PulseResetReason.SAFETY,
@@ -2814,7 +2823,7 @@ class HoldMode(ControlMode):
                                 monotonic_s,
                                 InhibitReason.SAFETY,
                                 actual_auger_on=self.grill.get_output_status()["auger"],
-                                sample=self._framed_sample(teardown.ptemp),
+                                sample=self._framed_sample(teardown.ptemp, acquired_at_s=teardown.acquired_at_s),
                                 terminal_feedback=True,
                                 feedback_source=source,
                                 prior_output_source=prior_output_source,

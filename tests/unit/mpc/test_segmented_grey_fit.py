@@ -498,94 +498,110 @@ def test_all_warming_segments_fail_with_typed_insufficient_warmup(
     assert result.detail == "segment-warmup-incomplete:warming-first"
 
 
-def test_candidate_dependent_masks_keep_optimizer_residual_dimension_fixed(
+def test_an_all_masked_delay_trial_cannot_beat_a_supported_imperfect_fit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     initial = _config(theta=25.0)
     segment = _segment(
-        "fixed-dimension",
+        "fixed-support",
         "cook-mask",
         config=initial,
         sequence_start=0,
-        scored_load=(0.1, 0.8, 0.2, 0.7, 0.3, 0.6, 0.4, 0.9),
+        scored_load=tuple((0.1, 0.8, 0.2, 0.7)[index % 4] for index in range(50)),
         pre_roll_load=(),
         initial_load=0.5,
-        errors_c=(1.0,) * 8,
+        errors_c=(1.0,) * 50,
     )
-    lengths: list[int] = []
+    objectives: list[tuple[float, float]] = []
 
     def probing(residual: Any, x0: Any, *args: Any, **kwargs: Any) -> SimpleNamespace:
-        short = np.asarray(x0, dtype=float).copy()
-        long = short.copy()
-        theta_index = FITTED_PARAMETERS.index("theta")
-        short[theta_index] = math.log(25.0)
-        long[theta_index] = math.log(50.0)
-        lengths.extend((len(residual(short)), len(residual(long))))
-        return SimpleNamespace(x=short, status=1, nfev=2, success=True)
+        supported = np.asarray(x0, dtype=float).copy()
+        unsupported = supported.copy()
+        unsupported[FITTED_PARAMETERS.index("theta")] = math.log(1200.0)
+        objectives.append((float(np.sum(residual(supported) ** 2)), float(np.sum(residual(unsupported) ** 2))))
+        return SimpleNamespace(x=supported, status=1, nfev=2, success=True)
 
     monkeypatch.setattr(optimize, "least_squares", probing)
     result = fit_segmented_grey(_job((segment,), initial))
 
     assert isinstance(result, GreyFitSuccess)
-    assert lengths == [8, 8, 8, 8]
-    assert result.optimizer_residual_count == 8
+    assert all(unsupported > supported > 0.0 for supported, unsupported in objectives)
+    assert result.sample_count >= 30
 
 
-def test_final_masks_are_frozen_for_exactly_one_polish_fit(monkeypatch: pytest.MonkeyPatch) -> None:
-    config = _config(theta=40.0)
+@pytest.mark.parametrize("initial_theta", [35.0, 150.0])
+def test_noisy_mixed_duration_segments_fit_without_mask_fixed_point_perfection(initial_theta: float) -> None:
+    truth = _config(C_c=1250.0, K_Q=510.0, theta=75.0)
+    incumbent = _config(C_c=1000.0, K_Q=450.0, theta=initial_theta)
+    rng = np.random.default_rng(712)
+    segments = tuple(
+        _segment(
+            f"noisy-{index}",
+            f"cook-{index}",
+            config=truth,
+            sequence_start=index * 200,
+            scored_load=tuple(float(value) for value in rng.choice((0.1, 0.3, 0.7, 0.9), size=count)),
+            pre_roll_load=(0.2, 0.8, 0.4, 0.6, 0.3, 0.7),
+            anchor_c=65.0 + index * 45.0,
+            errors_c=tuple(float(value) for value in rng.normal(0.0, 0.15, size=count)),
+        )
+        for index, count in enumerate((110, 105, 8))
+    )
+
+    result = fit_segmented_grey(_job(segments, incumbent))
+
+    assert isinstance(result, GreyFitSuccess), result
+    assert result.config.C_c == pytest.approx(truth.C_c, rel=0.1)
+    assert result.config.K_Q == pytest.approx(truth.K_Q, rel=0.1)
+    assert result.config.theta == pytest.approx(truth.theta, rel=0.15)
+    assert result.sample_count >= 30
+    assert result.rmse_c < 0.3
+    assert result.rejection_reasons == ()
+    for segment, mask in zip(segments, result.effective_masks, strict=True):
+        expected = _oracle_effective_mask(segment, result.config.theta) & _oracle_effective_mask(
+            segment, incumbent.theta
+        )
+        assert np.array_equal(mask, expected)
+
+
+def test_partial_preroll_duration_limits_theta_without_inventing_effective_time() -> None:
+    truth = _config(theta=26.0)
+    incumbent = _config(theta=25.0)
     segment = _segment(
-        "polish",
-        "cook-polish",
+        "partial-preroll",
+        "cook-partial",
+        config=truth,
+        sequence_start=0,
+        scored_load=tuple((0.1, 0.9, 0.3, 0.7)[index % 4] for index in range(30)),
+        pre_roll_load=(0.4, 0.2, 0.8, 0.3),
+    )
+    segment = replace(segment, pre_roll_duration_s=(15.0, 20.0, 20.0, 20.0))
+    segment = replace(segment, scored_temperature_c=_oracle_prediction(segment, truth))
+
+    result = fit_segmented_grey(_job((segment,), incumbent))
+
+    assert isinstance(result, GreyFitSuccess), result
+    assert result.config.theta == 25.0
+    assert result.sample_count == 30
+    assert result.metrics.pooled.sample_count * fitting.FIT_CADENCE_S == 600.0
+
+
+def test_fractional_millisecond_preroll_preserves_the_full_supported_duration() -> None:
+    config = _config(theta=25.0)
+    segment = _segment(
+        "fractional-preroll",
+        "cook-fractional",
         config=config,
         sequence_start=0,
-        scored_load=(0.1, 0.8, 0.2, 0.7, 0.3, 0.6, 0.4, 0.9),
-        pre_roll_load=(),
-        initial_load=0.5,
-        errors_c=(1.0,) * 8,
+        scored_load=tuple((0.1, 0.9, 0.3, 0.7)[index % 4] for index in range(30)),
+        pre_roll_load=(0.4,) * 5,
     )
-    optimizer_calls = 0
-    polish_nonzero: list[tuple[int, ...]] = []
+    segment = replace(segment, pre_roll_duration_s=(16.002, 20.0, 20.0, 20.0, 20.0))
 
-    def probing(residual: Any, _x0: Any, *args: Any, **kwargs: Any) -> SimpleNamespace:
-        nonlocal optimizer_calls
-        optimizer_calls += 1
-        base = _optimizer_point(config)
-        if optimizer_calls == 2:
-            probe = base.copy()
-            probe[FITTED_PARAMETERS.index("theta")] = math.log(25.0)
-            polish_nonzero.append(tuple(int(index) for index in np.flatnonzero(np.abs(residual(probe)) > 1e-12)))
-        return SimpleNamespace(x=base, status=1, nfev=1, success=True)
+    masks, ceiling = fitting._fit_support(_job((segment,), config))
 
-    monkeypatch.setattr(optimize, "least_squares", probing)
-    result = fit_segmented_grey(_job((segment,), config))
-
-    assert isinstance(result, GreyFitSuccess)
-    assert optimizer_calls == 2
-    assert polish_nonzero == [(6, 7)]
-    assert tuple(result.effective_masks[0]) == (False, False, False, False, False, False, True, True)
-
-
-def test_polish_mask_boundary_crossing_rejects_exact_warmup_mask_unstable_reason(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    initial = _config(theta=39.0)
-    crossed = _config(theta=41.0)
-    segment = _segment(
-        "unstable",
-        "cook-unstable",
-        config=initial,
-        sequence_start=0,
-        scored_load=(0.1, 0.8, 0.2, 0.7, 0.3, 0.6, 0.4, 0.9),
-        pre_roll_load=(),
-        initial_load=0.5,
-        errors_c=(1.0,) * 8,
-    )
-    _pin_optimizer(monkeypatch, initial, crossed)
-
-    result = fit_segmented_grey(_job((segment,), initial))
-
-    assert isinstance(result, GreyFitError)
-    assert result.detail == "warmup-mask-unstable"
+    assert float(np.sum(segment.scored_duration_s[masks[0]])) == 600.0
+    assert 3.0 * ceiling <= float(np.sum(segment.pre_roll_duration_s))
 
 
 def test_candidate_and_incumbent_metrics_use_one_common_conservative_mask(
@@ -635,11 +651,11 @@ def test_candidate_theta_controls_the_exact_pooled_duration_boundary(
         initial_load=0.4,
     )
     monkeypatch.setattr(fitting, "_score_identifiability", lambda _columns, _masks: 0.8)
-    _pin_optimizer(monkeypatch, candidate, candidate)
 
-    longer_warmup = fit_segmented_grey(_job((segment,), incumbent))
+    longer_warmup = fitting.compare_segmented_grey(
+        _job((segment,), incumbent), candidate=candidate, incumbent=incumbent
+    )
 
-    assert isinstance(longer_warmup, GreyFitSuccess)
     assert longer_warmup.metrics.pooled.sample_count == 29
     assert longer_warmup.rejection_reasons == ("minimum-effective-duration",)
 
@@ -652,11 +668,11 @@ def test_candidate_theta_controls_the_exact_pooled_duration_boundary(
         pre_roll_load=(),
         initial_load=0.4,
     )
-    _pin_optimizer(monkeypatch, incumbent, incumbent)
 
-    exact_boundary = fit_segmented_grey(_job((exact_segment,), incumbent))
+    exact_boundary = fitting.compare_segmented_grey(
+        _job((exact_segment,), incumbent), candidate=incumbent, incumbent=incumbent
+    )
 
-    assert isinstance(exact_boundary, GreyFitSuccess)
     assert exact_boundary.metrics.pooled.sample_count == 30
     assert exact_boundary.rejection_reasons == ()
 

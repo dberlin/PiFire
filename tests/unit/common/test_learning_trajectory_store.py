@@ -1783,6 +1783,33 @@ def test_terminal_fit_manifests_use_repository_visible_deterministic_bound(
     assert repository.replay_fit(f"terminal-fit-{limit + 2:04d}").identity == snapshot.identity
 
 
+def test_recovery_after_wall_rollback_retains_newly_interrupted_fit_manifest(
+    repository: LearningTrajectoryRepository,
+    database_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wall_ms = _WALL_EPOCH_MS
+    monkeypatch.setattr("common.persistence.learning_trajectory._now_ms", lambda: wall_ms)
+    segment = _segment("rollback-fit-retention", scored_count=1)
+    _finalize_segment(repository, segment)
+    snapshot = repository.snapshot_fit_corpus(segment.fit_partition_digest)
+    for index in range(repository.terminal_fit_run_limit):
+        request_id = f"completed-before-restart-{index:04d}"
+        repository.record_fit_request(snapshot, _lineage(snapshot, request_id, status="running"))
+        repository.complete_fit(request_id, candidate_digest=None, error="fit rejected")
+    repository.record_fit_request(snapshot, _lineage(snapshot, "interrupted-after-rollback", status="running"))
+
+    wall_ms -= 60_000
+    restarted = LearningTrajectoryRepository(str(database_path))
+    report = restarted.recover_open_segments(now_ms=wall_ms)
+
+    assert report.interrupted_fit_request_ids == ("interrupted-after-rollback",)
+    assert restarted.replay_fit("interrupted-after-rollback").identity == snapshot.identity
+    assert restarted.replay_fit("completed-before-restart-0001").identity == snapshot.identity
+    with pytest.raises(FitCorpusEvictedError, match="corpus-evicted"):
+        restarted.replay_fit("completed-before-restart-0000")
+
+
 def test_older_frame_payload_schema_is_explicitly_non_scoreable(
     database_path: Path,
 ) -> None:

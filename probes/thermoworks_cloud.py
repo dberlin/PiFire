@@ -233,6 +233,7 @@ class ReadProbes(ProbeInterface):
         self.device.stop()
 
     def invalidate_clock_domain(self) -> None:
+        super().invalidate_clock_domain()
         self.device.invalidate_cache()
 
     def read_all_ports(self, output_data):

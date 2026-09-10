@@ -62,7 +62,7 @@ def test_hold_without_a_controller_remains_safe_and_reports_no_pulse(
     hold._on_safety_event("temperature_guard", 1.0)
     status_after_event = hold.status_fragment()
     output_after_event = hold.grill.get_output_status()
-    hold.teardown(200.0)
+    hold.teardown(200.0, acquired_at_s=None)
 
     assert "pulse" not in status_after_event
     assert output_after_event["auger"] is False

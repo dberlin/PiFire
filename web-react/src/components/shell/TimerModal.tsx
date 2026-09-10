@@ -37,6 +37,8 @@ export function TimerModal({
     timer.shutdown ? "shutdown" : timer.keepWarm ? "keepWarm" : "none",
   );
   const [rejected, setRejected] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [commandError, setCommandError] = useState<string | null>(null);
 
   const ids = useId();
   const hoursId = `${ids}-hours`;
@@ -51,6 +53,7 @@ export function TimerModal({
   if (rejected && seconds > 0) setRejected(false);
 
   async function submit() {
+    if (busy) return;
     // A zero duration must never be sent. The backend refuses one on this form
     // (a timer that is already expired when armed fires its expiry action at
     // once), so this is only about complaining where the user can see it.
@@ -66,11 +69,18 @@ export function TimerModal({
     // plus this form's refusal of a zero/negative/non-numeric duration and of a
     // paused timer, is why it is used rather than the bare start command plus
     // two flag writes. See helpers/command.ts timerStartWithOptions.
-    await command.timerStartWithOptions(seconds, {
-      shutdown: action === "shutdown",
-      keepWarm: action === "keepWarm",
-    });
-    onClose();
+    setBusy(true);
+    setCommandError(null);
+    try {
+      const result = await command.timerStartWithOptions(seconds, {
+        shutdown: action === "shutdown",
+        keepWarm: action === "keepWarm",
+      });
+      if (result.ok) onClose();
+      else setCommandError(result.message || "The grill did not accept the timer start.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -135,13 +145,18 @@ export function TimerModal({
               Set a duration longer than zero before starting the timer.
             </p>
           ) : null}
+          {commandError ? (
+            <p className="pf-timer-error" role="alert">
+              {commandError}
+            </p>
+          ) : null}
         </div>
         <div className="pf-modal-actions">
           <button type="button" className="pf-modal-btn" onClick={onClose}>
             Cancel
           </button>
-          <button type="button" className="pf-modal-btn accent" onClick={submit}>
-            Start
+          <button type="button" className="pf-modal-btn accent" onClick={submit} disabled={busy}>
+            {busy ? "Starting…" : "Start"}
           </button>
         </div>
       </div>

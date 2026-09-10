@@ -38,32 +38,33 @@ export interface ControlHealth {
 }
 
 /**
- * Control-process liveness with a manual override.
- *
- * `alive` is computed at render (`controlAlive || override`) rather than mirrored
- * into an effect, so there is no setState-in-useEffect for derived state.
- *
- * The override deliberately persists across later frames that still say false:
- * a live probe that just succeeded is better evidence than a poll result that
- * may be up to 30 seconds old. It is sticky in the other direction, though --
- * a control process that dies again after a successful recheck will not flip
- * `alive` back within this mount. That is acceptable because the underlying
- * signal now self-heals both ways, so the override exists only to close the
- * one-poll-interval gap, and `stale` still reports the raw payload verdict for
- * anything that wants it.
+ * A manual check can supersede the poll verdict in the snapshot it checked,
+ * not a later authoritative packet. Socket decoding supplies a new errors
+ * array per packet; local display projections preserve that array's identity.
+ * Capturing it at request start also prevents a late response from overriding
+ * a newer packet (or another API target).
  */
-export function useControlHealth(controlAlive: boolean, apiBase: string): ControlHealth {
-  const [override, setOverride] = useState(false);
+export function useControlHealth(
+  controlAlive: boolean,
+  apiBase: string,
+  snapshotErrors: readonly string[],
+): ControlHealth {
+  const [override, setOverride] = useState<{
+    errors: readonly string[];
+    apiBase: string;
+  } | null>(null);
   const [rechecking, setRechecking] = useState(false);
 
   const recheck = async () => {
     setRechecking(true);
     try {
-      if (await recheckControl(apiBase)) setOverride(true);
+      const alive = await recheckControl(apiBase);
+      setOverride(alive ? { errors: snapshotErrors, apiBase } : null);
     } finally {
       setRechecking(false);
     }
   };
 
-  return { alive: controlAlive || override, stale: !controlAlive, recheck, rechecking };
+  const overrideCurrent = override?.errors === snapshotErrors && override.apiBase === apiBase;
+  return { alive: controlAlive || overrideCurrent, stale: !controlAlive, recheck, rechecking };
 }

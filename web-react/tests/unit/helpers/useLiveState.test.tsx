@@ -1,9 +1,10 @@
 import type { PelletDbSchema } from "@pifire/core/contracts/control";
 import type { DashSocketPayload } from "@pifire/core/contracts/core";
+import { deriveView } from "@pifire/core/dashboard/deriveView";
+import { FIXTURE_DASH } from "@pifire/core/fixture";
 import type { ConnectionPhase, LiveConnectionHandlers } from "@pifire/core/liveConnection";
 import * as actualConnection from "@pifire/core/liveConnection" with { rstest: "importActual" };
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { FIXTURE_DASH } from "@pifire/core/fixture";
 import { act, renderHook } from "@testing-library/react";
 
 const PELLET_DB: PelletDbSchema = {
@@ -69,7 +70,31 @@ describe("duration receipts", () => {
   const payload: DashSocketPayload = {
     ...FIXTURE_DASH,
     timer: { ...FIXTURE_DASH.timer, state: "running", remainingS: 600, current: true },
-    durations: { ...FIXTURE_DASH.durations, cookElapsedS: 3723, modeRemainingS: 180, current: true, running: true },
+    durations: {
+      ...FIXTURE_DASH.durations,
+      cookElapsedS: 3723,
+      modeRemainingS: 180,
+      current: true,
+      running: true,
+    },
+    primaryProbe: {
+      ...FIXTURE_DASH.primaryProbe,
+      temp: 226,
+      status: { lastTemp: 226, lastReadingAge: 2 },
+    },
+    thermocoupleHealth: [
+      {
+        device: "mcp9601",
+        port: "TC0",
+        label: FIXTURE_DASH.primaryProbe.label,
+        displayName: "Grill",
+        role: "Primary",
+        outcome: "none",
+        detector: { source: "software", policy: "observe" },
+        report: { state: "healthy", faults: [], evidence: [], temperatureValid: true, detail: {} },
+        freshness: { current: true, lastReportedAgeS: 2, reason: "current" },
+      },
+    ],
   };
 
   it("ticks independently of wall jumps, invalidates resets, and reanchors only on new payload", () => {
@@ -100,6 +125,9 @@ describe("duration receipts", () => {
       rs.advanceTimersByTime(1000);
     });
     expect(result.current.live.timer.current).toBe(false);
+    expect(result.current.controlAlive).toBe(false);
+    expect(result.current.live.thermocoupleHealth?.[0]?.freshness.current).toBe(false);
+    expect(deriveView(result.current.live).stale).toBe("Last known");
     act(() => {
       mono = 110_000;
       rs.advanceTimersByTime(1000);
@@ -107,6 +135,8 @@ describe("duration receipts", () => {
     expect(result.current.live.timer.current).toBe(false);
     act(() => handlers.onDash({ ...payload, timer: { ...payload.timer, remainingS: 480 } }));
     expect(result.current.live.timer.current).toBe(true);
+    expect(result.current.controlAlive).toBe(true);
+    expect(result.current.live.thermocoupleHealth?.[0]?.freshness.current).toBe(true);
     expect(result.current.live.timer.remainingS).toBe(480);
   });
 
@@ -114,8 +144,14 @@ describe("duration receipts", () => {
     rs.useFakeTimers();
     rs.spyOn(performance, "now").mockReturnValue(100_000);
     const { result } = renderHook(() => useLiveState());
-    act(() => { handlers.onPhase("live"); handlers.onDash(payload); });
-    act(() => { handlers.onPhase("unreachable"); handlers.onPhase("live"); });
+    act(() => {
+      handlers.onPhase("live");
+      handlers.onDash(payload);
+    });
+    act(() => {
+      handlers.onPhase("unreachable");
+      handlers.onPhase("live");
+    });
     expect(result.current.live.timer.current).toBe(false);
     act(() => handlers.onDash(payload));
     expect(result.current.live.timer.current).toBe(true);
@@ -131,20 +167,67 @@ describe("duration receipts", () => {
     expect(result.current.live.durations.current).toBe(true);
   });
 
+  it("retains a hidden terminal control-down frame and reconciles foreground without another packet", () => {
+    rs.useFakeTimers();
+    rs.spyOn(performance, "now").mockReturnValue(100_000);
+    const { result } = renderHook(() => useLiveState());
+    act(() => {
+      handlers.onPhase("live");
+      handlers.onDash(payload);
+    });
+    expect(result.current.controlAlive).toBe(true);
+    rs.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    const stopped = {
+      ...payload,
+      currentMode: "Stop",
+      errors: ["The control process did not respond to a request and may be stopped."],
+    };
+    act(() => handlers.onDash(stopped));
+    rs.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    act(() => handlers.onPhase("live"));
+    expect(result.current.live.currentMode).toBe("Stop");
+    expect(result.current.live.errors).toEqual(stopped.errors);
+    expect(result.current.controlAlive).toBe(false);
+    expect(result.current.live.durations.current).toBe(false);
+    expect(result.current.live.thermocoupleHealth?.[0]?.freshness.current).toBe(false);
+    expect(reconnectMock).toHaveBeenCalledTimes(1);
+    act(() => handlers.onDash(payload));
+    expect(result.current.controlAlive).toBe(true);
+    expect(result.current.live.thermocoupleHealth?.[0]?.freshness.current).toBe(true);
+  });
+
   it("stale snapshots remain frozen until a new payload arrives", () => {
     rs.useFakeTimers();
     let mono = 100_000;
     rs.spyOn(performance, "now").mockImplementation(() => mono);
     const { result } = renderHook(() => useLiveState());
-    act(() => { handlers.onPhase("live"); handlers.onDash(payload); });
-    act(() => { mono = 130_001; rs.advanceTimersByTime(1000); });
+    act(() => {
+      handlers.onPhase("live");
+      handlers.onDash(payload);
+    });
+    act(() => {
+      mono = 130_001;
+      rs.advanceTimersByTime(1000);
+    });
     expect(result.current.live.timer.current).toBe(false);
     expect(result.current.live.timer.remainingS).toBe(600);
-    act(() => { mono = 150_000; rs.advanceTimersByTime(1000); });
+    expect(result.current.controlAlive).toBe(false);
+    expect(result.current.live.errors).toEqual([]);
+    const freshness = result.current.live.thermocoupleHealth?.[0]?.freshness;
+    expect(freshness?.current).toBe(false);
+    expect(freshness?.reason).toBe("retained");
+    expect(freshness?.lastReportedAgeS).toBeCloseTo(32.001, 6);
+    expect(deriveView(result.current.live).tempInt).toBe(226);
+    expect(deriveView(result.current.live).stale).not.toBeNull();
+    act(() => {
+      mono = 150_000;
+      rs.advanceTimersByTime(1000);
+    });
     expect(result.current.live.durations.cookElapsedS).toBe(3723);
   });
 });
-
 
 // PUBLIC_DEMO is an import.meta.env value baked in at build time, unset in
 // this test build, so FORCE_DEMO is always false here -- only the live-socket

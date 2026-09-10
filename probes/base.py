@@ -441,8 +441,14 @@ class ProbeInterface:
     def get_thermocouple_samples(self) -> Mapping[str, ThermocoupleJunctionSample]:
         return {}
 
+    def invalidate_acquisition_history(self) -> None:
+        """Discard filter history without revoking independently acquired receipts."""
+        for kalman in self.port_filters.values():
+            kalman.reset()
+
     def invalidate_clock_domain(self) -> None:
         """Discard device-local timing authority after a runtime generation change."""
+        self.invalidate_acquisition_history()
 
     def get_device_info(self):
         status = self.device.get_status()

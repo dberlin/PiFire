@@ -621,12 +621,12 @@ def test_input_number_simple_animate_cycle_clears_input_after_two_frames():
 
 
 # ---------------------------------------------------------------------------
-# TimerStatus ("timer") - active (seconds > 0) branch
+# TimerStatus ("timer") - visibility follows activity, not remaining seconds
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("seconds", [None, 90])
-def test_timer_status_keeps_unknown_duration_visible(seconds):
+@pytest.mark.parametrize("seconds", [None, 0, 90])
+def test_timer_status_keeps_active_zero_and_unknown_duration_visible(seconds):
     obj = TimerStatus(
         "timer",
         {
@@ -637,8 +637,8 @@ def test_timer_status_keeps_unknown_duration_visible(seconds):
             "animation_enabled": False,
             "fg_color": (255, 255, 255, 255),
             "bg_color": (0, 0, 0, 255),
-            "label": "A Very Long Timer Label",
-            "data": {"seconds": seconds},
+            "label": "Timer",
+            "data": {"seconds": seconds, "active": True},
             "touch_areas": [],
         },
         BG(),
@@ -646,7 +646,7 @@ def test_timer_status_keeps_unknown_duration_visible(seconds):
     visible = obj.get_object_canvas()
     assert visible.getbbox() is not None
     data = obj.get_object_data()
-    data["data"]["seconds"] = 0
+    data["data"]["active"] = False
     obj.update_object_data(data)
     assert obj.get_object_canvas().getbbox() is None
 

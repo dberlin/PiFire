@@ -1,5 +1,7 @@
+import pytest
 from PIL import Image
 
+from display._base_flex import DisplayBase
 from display.flexobject import CookTimeBar, resolve_accent
 
 
@@ -59,3 +61,27 @@ def test_cook_time_bar_lid_pause_alert_renders_red():
     assert alert.size == (490, 40)
     assert _min_dist_to(alert, red) < 30, "lid-pause bar should contain the red alert color"
     assert _min_dist_to(normal, red) > _min_dist_to(alert, red), "normal bar should be less red than the alert bar"
+
+
+@pytest.mark.parametrize(
+    ("status", "snapshot"),
+    [
+        ({"mode": "Startup"}, {"modeRemainingS": 0}),
+        ({"mode": "Hold", "lid_open_detected": True}, {"lidRemainingS": 0}),
+        ({"mode": "Hold"}, {"cookElapsedS": 5415}),
+    ],
+)
+def test_retained_bar_qualifier_changes_label_not_value_pixels(status, snapshot):
+    background = Image.new("RGBA", (260, 40))
+    current = CookTimeBar(
+        "cook_time_bar",
+        _obj(size=[260, 40], data=DisplayBase._cook_time_data(status, {**snapshot, "current": True})),
+        background,
+    ).get_object_canvas()
+    retained = CookTimeBar(
+        "cook_time_bar",
+        _obj(size=[260, 40], data=DisplayBase._cook_time_data(status, {**snapshot, "current": False})),
+        background,
+    ).get_object_canvas()
+    assert current.crop((15, 5, 140, 35)).tobytes() != retained.crop((15, 5, 140, 35)).tobytes()
+    assert current.crop((150, 5, 245, 35)).tobytes() == retained.crop((150, 5, 245, 35)).tobytes()

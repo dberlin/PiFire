@@ -428,6 +428,7 @@ class PiFireBackend(QObject):
         self._fan_duty = 0
         self._food_count = len(self._probe_info.get("food", []))
         self._cook_elapsed_text = "--:--"
+        self._cook_elapsed_label = "COOK TIME"
         # Idle / sleep state
         self.TIMEOUT = self._timeout_fn() if self._timeout_fn is not None else 300
         self._last_interaction = self._monotonic()
@@ -538,6 +539,8 @@ class PiFireBackend(QObject):
             else:
                 remaining = int(remaining)
                 text = f"{remaining // 60:02d}:{remaining % 60:02d}"
+                if not durations["current"]:
+                    label += "\nLast reported"
         self._set("_timer_text", text, self.timerChanged)
         self._set("_timer_label", label, self.timerChanged)
 
@@ -550,6 +553,10 @@ class PiFireBackend(QObject):
         else:
             text = "--:--"
         self._set("_cook_elapsed_text", text, self.timerChanged)
+        label = "COOK TIME"
+        if elapsed is not None and not durations["current"]:
+            label += "\nLast reported"
+        self._set("_cook_elapsed_label", label, self.timerChanged)
 
     def _update_idle(self, mode, now):
         # The screen never sleeps during an active cook; in Stop it sleeps after
@@ -751,6 +758,10 @@ class PiFireBackend(QObject):
     @Property(str, notify=timerChanged)
     def cookElapsedText(self):
         return self._cook_elapsed_text
+
+    @Property(str, notify=timerChanged)
+    def cookElapsedLabel(self):
+        return self._cook_elapsed_label
 
     @Property(bool, notify=statusChanged)
     def smokePlus(self):

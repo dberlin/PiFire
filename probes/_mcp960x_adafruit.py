@@ -127,7 +127,8 @@ class MCP960xProbe(ProbeInterface):
 
         return self.output_data
 
-    def invalidate_clock_domain(self) -> None:
+    def invalidate_acquisition_history(self) -> None:
+        super().invalidate_acquisition_history()
         self._hardware_fault_latch.cancel_clean_recovery()
         self._thermocouple_samples.clear()
 

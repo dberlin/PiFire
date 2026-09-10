@@ -410,7 +410,10 @@ def test_secondary_fault_recovers_after_sixty_consecutive_clean_seconds(
 
 
 @pytest.mark.parametrize("primary", [True, False])
-def test_clock_invalidation_retains_fault_and_requires_new_auxiliary_clean_interval(probe, monkeypatch, primary):
+@pytest.mark.parametrize("reset_method", ["invalidate_clock_domain", "invalidate_acquisition_history"])
+def test_clock_invalidation_retains_fault_and_requires_new_auxiliary_clean_interval(
+    probe, monkeypatch, primary, reset_method
+):
     obj = _configured_probe(probe, primary=primary, detection="True", status=0x10, temp_c=100.0)
     shared = sys.modules["probes._mcp960x_adafruit"]
     clock = {"now": 0.0}
@@ -422,7 +425,7 @@ def test_clock_invalidation_retains_fault_and_requires_new_auxiliary_clean_inter
         clock["now"] = now
         assert obj.read_all_ports({})[group]["Grill"] is None
 
-    obj.invalidate_clock_domain()
+    getattr(obj, reset_method)()
     assert obj.get_thermocouple_samples() == {}
     for now in (1_000.0, 1_059.0):
         clock["now"] = now
@@ -436,6 +439,21 @@ def test_clock_invalidation_retains_fault_and_requires_new_auxiliary_clean_inter
     else:
         assert value == 212.0
         assert obj.get_thermocouple_health()["Grill"].state is ThermocoupleHealthState.HEALTHY
+
+
+@pytest.mark.parametrize("reset_method", ["invalidate_clock_domain", "invalidate_acquisition_history"])
+def test_mcp_invalidation_admits_first_genuine_temperature_after_warmed_filter(probe, monkeypatch, reset_method):
+    obj = _configured_probe(probe, primary=True, detection="False", status=0, temp_c=(250.0 - 32.0) * 5.0 / 9.0)
+    clock = {"now": 0.0}
+    monkeypatch.setattr("probes.kalman.time.monotonic", lambda: clock["now"])
+    for now in range(12):
+        clock["now"] = float(now)
+        assert obj.apply_filters(obj.read_all_ports({}))["primary"]["Grill"] == 250.0
+    getattr(obj, reset_method)()
+    obj.device.sensor.temp_c = 260.0
+    for now in range(200, 205):
+        clock["now"] = float(now)
+        assert obj.apply_filters(obj.read_all_ports({}))["primary"]["Grill"] == 500.0
 
 
 @pytest.mark.parametrize(

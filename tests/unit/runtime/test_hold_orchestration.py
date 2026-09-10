@@ -394,7 +394,7 @@ def test_activation_lifecycle_evidence_keeps_fifo_ahead_of_checkpoint_and_trace_
     assert persistence.evidence_batches == [(first, second)]
 
     hold.ctx.clock.advance(3.0 - hold.ctx.clock.monotonic())
-    hold.teardown(200.0)
+    hold.teardown(200.0, acquired_at_s=None)
     _assert_relative_order(
         events,
         [evidence, "persistence:barrier", "runner:finish", "trace:close"],
@@ -439,10 +439,10 @@ def test_teardown_orders_cleanup_and_owns_each_resource_at_most_once(hold_cycle,
 
     if propagates:
         with pytest.raises(RuntimeError, match="runner stop-and-retain failed"):
-            hold.teardown(200.0)
+            hold.teardown(200.0, acquired_at_s=None)
     else:
-        hold.teardown(200.0)
-    hold.teardown(200.0)
+        hold.teardown(200.0, acquired_at_s=None)
+    hold.teardown(200.0, acquired_at_s=None)
 
     terminal = next(
         event for event in events if isinstance(event, tuple) and event[0] == "runner:observation" and event[3] is True
@@ -542,9 +542,9 @@ def test_teardown_retry_completes_cleanup_after_pre_cleanup_failure(hold_cycle, 
     _record_hardware(monkeypatch, events, hold.grill)
 
     with pytest.raises(RuntimeError, match="transient advance failure"):
-        hold.teardown(200.0)
-    hold.teardown(200.0)
-    hold.teardown(200.0)
+        hold.teardown(200.0, acquired_at_s=None)
+    hold.teardown(200.0, acquired_at_s=None)
+    hold.teardown(200.0, acquired_at_s=None)
     _assert_hardware_off_first(events)
 
     assert events.count("trace:close") == 1
@@ -614,9 +614,9 @@ def test_teardown_retry_resumes_delivery_after_scheduler_advance(
         RuntimeError,
         match="transient observation delivery failure",
     ):
-        hold.teardown(200.0)
-    hold.teardown(200.0)
-    hold.teardown(200.0)
+        hold.teardown(200.0, acquired_at_s=None)
+    hold.teardown(200.0, acquired_at_s=None)
+    hold.teardown(200.0, acquired_at_s=None)
     _assert_hardware_off_first(events)
 
     assert calls == {"advance": 1, "feedback": 1, "reset": 1}
@@ -685,9 +685,9 @@ def test_teardown_retry_reprepares_feedback_without_repeating_advance(
         RuntimeError,
         match="transient feedback preparation failure",
     ):
-        hold.teardown(200.0)
-    hold.teardown(200.0)
-    hold.teardown(200.0)
+        hold.teardown(200.0, acquired_at_s=None)
+    hold.teardown(200.0, acquired_at_s=None)
+    hold.teardown(200.0, acquired_at_s=None)
     _assert_hardware_off_first(events)
 
     assert calls == {"advance": 1, "feedback": 2, "reset": 1}
@@ -749,9 +749,9 @@ def test_teardown_retry_reuses_prepared_feedback_after_dispatch_failure(
         RuntimeError,
         match="transient feedback dispatch failure",
     ):
-        hold.teardown(200.0)
-    hold.teardown(200.0)
-    hold.teardown(200.0)
+        hold.teardown(200.0, acquired_at_s=None)
+    hold.teardown(200.0, acquired_at_s=None)
+    hold.teardown(200.0, acquired_at_s=None)
     _assert_hardware_off_first(events)
 
     assert calls == {
@@ -807,9 +807,9 @@ def test_teardown_retry_latches_first_timestamp_and_temperature(
         RuntimeError,
         match="transient feedback preparation failure",
     ):
-        hold.teardown(200.0)
+        hold.teardown(200.0, acquired_at_s=None)
     hold.ctx.clock.advance(10.0)
-    hold.teardown(500.0)
+    hold.teardown(500.0, acquired_at_s=None)
     _assert_hardware_off_first(events)
 
     assert feedback_times == [3.0, 3.0]
@@ -873,12 +873,12 @@ def test_wall_jump_during_teardown_keeps_one_terminal_interval(hold_cycle, monke
         if discontinuity:
             hold._on_control_discontinuity(22.0, "observation-gap")
         else:
-            hold.teardown(200.0)
+            hold.teardown(200.0, acquired_at_s=None)
     hold.ctx.clock.advance(120.0)
     hold.ctx.clock.jump_wall(7200.0)
     publication_ms = round(hold.ctx.clock.wall_time() * 1000)
-    hold.teardown(500.0)
-    hold.teardown(500.0)
+    hold.teardown(500.0, acquired_at_s=None)
+    hold.teardown(500.0, acquired_at_s=None)
 
     _assert_hardware_off_first(events)
     assert hold.state.metrics["augerontime"] == pytest.approx(2.0)
@@ -921,7 +921,7 @@ def test_repeated_setup_starts_a_fresh_teardown_transaction(
     hold.ctx.clock.advance(2.0 - hold.ctx.clock.monotonic())
     hold.on_tick(2.0, 200.0, hold.grill.get_output_status())
     hold.ctx.clock.advance(3.0 - hold.ctx.clock.monotonic())
-    hold.teardown(200.0)
+    hold.teardown(200.0, acquired_at_s=None)
 
     hold.setup()
     second_runtime = hold._framed_pulse
@@ -933,7 +933,7 @@ def test_repeated_setup_starts_a_fresh_teardown_transaction(
     hold.on_tick(6.0, 300.0, hold.grill.get_output_status())
     hold.ctx.clock.advance(7.0 - hold.ctx.clock.monotonic())
     hold.grill.igniter_on()
-    hold.teardown(300.0)
+    hold.teardown(300.0, acquired_at_s=None)
 
     assert second_runtime is not first_runtime
     assert runner.stop_and_retain_calls == 2
@@ -977,8 +977,8 @@ def test_early_hardware_setup_failure_closes_created_trace_and_outputs(
     events.clear()
     _record_hardware(monkeypatch, events, hold.grill)
 
-    hold.teardown(200.0)
-    hold.teardown(200.0)
+    hold.teardown(200.0, acquired_at_s=None)
+    hold.teardown(200.0, acquired_at_s=None)
     _assert_hardware_off_first(events)
 
     assert trace.status.closed is True
@@ -1027,8 +1027,8 @@ def test_factory_failure_after_persistence_creation_closes_all_created_owners(
     events.clear()
     _record_hardware(monkeypatch, events, hold.grill)
 
-    hold.teardown(200.0)
-    hold.teardown(200.0)
+    hold.teardown(200.0, acquired_at_s=None)
+    hold.teardown(200.0, acquired_at_s=None)
     _assert_hardware_off_first(events)
     _assert_relative_order(
         events,
@@ -1066,8 +1066,8 @@ def test_runner_revision_failure_before_learning_closes_every_created_owner(
     events.clear()
     _record_hardware(monkeypatch, events, hold.grill)
 
-    hold.teardown(200.0)
-    hold.teardown(200.0)
+    hold.teardown(200.0, acquired_at_s=None)
+    hold.teardown(200.0, acquired_at_s=None)
     _assert_hardware_off_first(events)
     _assert_relative_order(
         events,
@@ -1155,8 +1155,8 @@ def test_partial_setup_cleanup_attempts_every_owner_once_after_boundary_failure(
 
     events.clear()
     _record_hardware(monkeypatch, events, hold.grill)
-    hold.teardown(200.0)
-    hold.teardown(200.0)
+    hold.teardown(200.0, acquired_at_s=None)
+    hold.teardown(200.0, acquired_at_s=None)
     _assert_hardware_off_first(events)
     _assert_relative_order(
         events,
@@ -1200,8 +1200,8 @@ def test_partial_setup_failures_still_close_the_runner_once(hold_cycle, monkeypa
     events.clear()
     _record_hardware(monkeypatch, events, hold.grill)
 
-    hold.teardown(200.0)
-    hold.teardown(200.0)
+    hold.teardown(200.0, acquired_at_s=None)
+    hold.teardown(200.0, acquired_at_s=None)
     _assert_hardware_off_first(events)
     _assert_relative_order(
         events,

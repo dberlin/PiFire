@@ -11,6 +11,7 @@ from common.control_trace import (
     TraceEventKind,
 )
 from controller.applied_output import FrameFeedbackDisposition
+from controller.mpc_allocator import allocate
 from controller.runtime.clock import ManualClock
 from controller.runtime.framed_pulse import FramedPulseRuntime
 from controller.runtime.logic.pulse import PulseFrameResult, PulseResetReason
@@ -47,7 +48,7 @@ def test_lid_pause_release_uses_monotonic_deadline_and_distinct_epoch_metadata(h
     runner = FakeControllerRunner(period=9999.0)
     hold = hold_cycle(runner, clock=clock, cycle_data_extra={"LidOpenPauseTime": 30})
     hold.setup()
-    request.addfinalizer(lambda: hold.teardown(200.0))
+    request.addfinalizer(lambda: hold.teardown(200.0, acquired_at_s=None))
     hold.control["lid_open_toggle"] = True
     hold.on_tick(clock.monotonic(), 200.0, _status(hold))
     epoch_estimate = hold.status_fragment()["lid_open_endtime"]
@@ -80,7 +81,7 @@ def test_manual_auger_release_ignores_wall_jumps(hold_cycle, request, jump):
     runner = FakeControllerRunner(period=9999.0)
     hold = hold_cycle(runner, clock=clock)
     hold.setup()
-    request.addfinalizer(lambda: hold.teardown(200.0))
+    request.addfinalizer(lambda: hold.teardown(200.0, acquired_at_s=None))
     hold.settings["safety"]["allow_manual_changes"] = True
     hold.settings["safety"]["manual_override_time"] = 10.0
     hold.control["manual"].update(change="auger", output=True)
@@ -116,7 +117,7 @@ def test_terminal_manual_source_uses_latched_physical_cutoff(hold_cycle):
     clock.advance(100.0)
     clock.jump_wall(-3600.0)
     runner.applied.clear()
-    hold.teardown(200.0)
+    hold.teardown(200.0, acquired_at_s=None)
     assert _status(hold)["auger"] is False
     assert runner.applied[-1].timestamp == 15.0
     assert runner.applied[-1].source is OutputSource.MANUAL_OVERRIDE
@@ -152,6 +153,59 @@ def test_blocking_solve_cannot_backfill_frames_before_gap_retirement(hold_cycle,
     assert runner.stops == 1
 
 
+@pytest.mark.parametrize("acquired_at_s, continuous", [(21.9, False), (22.05, True)])
+def test_solve_crossing_frame_edge_preserves_probe_acquisition(hold_cycle, monkeypatch, acquired_at_s, continuous):
+    clock = ManualClock(wall_start=1_800_000_000.0)
+    allocation = allocate(0.3, u_max=1.0, fan_min_pct=0.0, fan_max_pct=100.0, enable_fan=False)
+    runner = FakeControllerRunner(period=1.0).script(
+        [replace(_output(revision, 0.3), allocation=allocation) for revision in (1, 2)]
+    )
+    hold = hold_cycle(runner, clock=clock)
+    hold.setup()
+    clock.advance(2.0)
+    hold.on_tick(2.0, 200.0, _status(hold))
+    clock.advance(acquired_at_s - clock.monotonic())
+    latest = runner.latest
+
+    def delayed_latest():
+        clock.advance(22.1 - clock.monotonic())
+        return latest()
+
+    monkeypatch.setattr(runner, "latest", delayed_latest)
+    hold.on_tick(acquired_at_s, 201.0, _status(hold), acquired_at_s=acquired_at_s)
+
+    assert len(runner.observations) == 1
+    assert runner.observations[0].frame_end_s == 22.0
+    assert runner.observations[0].continuous is continuous
+    hold.teardown(201.0, acquired_at_s=None)
+
+
+def test_missing_probe_cannot_retimestamp_retained_temperature_at_teardown(hold_cycle):
+    clock = ManualClock(wall_start=1_800_000_000.0, monotonic_start=98.0)
+    allocation = allocate(0.3, u_max=1.0, fan_min_pct=0.0, fan_max_pct=100.0, enable_fan=False)
+    runner = FakeControllerRunner(period=1.0).script(
+        [replace(_output(revision, 0.3), allocation=allocation) for revision in (1, 2)]
+    )
+    hold = hold_cycle(runner, clock=clock)
+    hold.setup()
+    hold._mode_setup_started = True
+    clock.advance(2.0)
+    hold.on_tick(100.0, 200.0, _status(hold))
+    clock.advance(19.9)
+    hold.on_tick(119.9, 200.0, _status(hold))
+    hold.probe_complex.script([None])
+    clock.advance(0.15)
+    sensor_data, _ = hold._read_probes_with_excitation()
+    assert sensor_data["primary"]["Grill"] is None
+
+    hold._finish_cycle(failed=True)
+
+    completed = [observation for observation in runner.observations if observation.frame_end_s == 120.0]
+    assert len(completed) == 1
+    assert completed[0].continuous is False
+    assert not _status(hold)["auger"]
+
+
 def _trace(mode):
     trace = mode._control_trace
     assert trace is not None
@@ -178,7 +232,7 @@ def _advance_runtime(mode, now, actual_auger_on, *, ptemp=None, apply_transition
     result = _runtime(mode).advance(
         now,
         actual_auger_on,
-        sample=mode._framed_sample(ptemp),
+        sample=mode._framed_sample(ptemp, acquired_at_s=now),
         prior_output_source=_trace(mode).applied_state.output_source,
     )
     transition = result.decision.transition
@@ -198,7 +252,7 @@ def _reset_runtime(mode, reason, now, inhibit, *, ptemp=None, terminal_feedback=
         now,
         inhibit,
         actual_auger_on=mode.grill.get_output_status()["auger"],
-        sample=mode._framed_sample(ptemp),
+        sample=mode._framed_sample(ptemp, acquired_at_s=now),
         terminal_feedback=terminal_feedback,
         prior_output_source=_trace(mode).applied_state.output_source,
     )
@@ -212,7 +266,7 @@ def _observe_runtime(mode, frame, *, ptemp, inhibit):
     runtime.latch(mode._model_role_generation(mode._runner_status()))
     completion = runtime.complete_frame(
         frame,
-        sample=mode._framed_sample(ptemp),
+        sample=mode._framed_sample(ptemp, acquired_at_s=frame.ended_at_s),
         inhibit=inhibit,
     )
     if completion.observation is not None:
@@ -468,7 +522,7 @@ def test_safety_manual_lid_and_teardown_reset_credit(hold_cycle):
     assert hold.grill.get_output_status()["auger"] is False
 
     hold.ctx.clock.advance(24.0 - hold.ctx.clock.monotonic())
-    hold.teardown(200.0)
+    hold.teardown(200.0, acquired_at_s=None)
     assert runner.stops == 1
 
 
@@ -699,7 +753,7 @@ def test_teardown_reports_final_observed_pulse_delivery_before_reset(hold_cycle)
     _advance_runtime(hold, 0.0, True)
     hold.ctx.clock.advance(2.0)
 
-    hold.teardown(200.0)
+    hold.teardown(200.0, acquired_at_s=None)
 
     assert any(applied.requested == 0.1 and applied.ratio == 1.0 for applied in runner.applied)
 
@@ -730,7 +784,7 @@ def test_teardown_turns_auger_off_before_dispatching_final_frame_progress(hold_c
     monkeypatch.setattr(hold.grill, "auger_off", record_auger_off)
     monkeypatch.setattr(runner, "set_output", record_output)
 
-    hold.teardown(200.0)
+    hold.teardown(200.0, acquired_at_s=None)
 
     feedback_index = next(
         index for index, event in enumerate(events) if isinstance(event, tuple) and event[0] == "feedback"
@@ -770,9 +824,9 @@ def test_discontinuity_teardown_never_extends_last_observation(hold_cycle, monke
     hold.ctx.clock.advance(120.0)
     hold._on_control_discontinuity(21.0, "observation-gap")
     hold.ctx.clock.advance(120.0)
-    hold.teardown(500.0)
+    hold.teardown(500.0, acquired_at_s=None)
     hold.ctx.clock.advance(120.0)
-    hold.teardown(500.0)
+    hold.teardown(500.0, acquired_at_s=None)
 
     assert _status(hold)["auger"] is False
     assert _status(hold)["igniter"] is False

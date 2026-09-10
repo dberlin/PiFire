@@ -758,6 +758,7 @@ def _reset_shortened_observation() -> FrameObservation:
         ambient_c=20.0,
         units="F",
         role_generation=0,
+        acquired_at_s=0.0,
     )
     runtime.advance(0.0, True, sample=sample)
     runtime.advance(3.0, True, sample=sample)

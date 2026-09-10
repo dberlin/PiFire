@@ -103,6 +103,9 @@ class _Device:
     def invalidate_clock_domain(self):
         pass
 
+    def invalidate_acquisition_history(self):
+        pass
+
 
 class _RecordingEngine:
     created = 0

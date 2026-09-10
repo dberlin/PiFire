@@ -13,7 +13,7 @@ import pytest
 
 from common import datastore
 from common.control_trace import AllocationClampReason, TraceEventKind
-from common.learning_trajectory import LearningTrajectorySegment
+from common.learning_trajectory import LearningTrajectorySegment, TrajectoryBreakReason
 from common.model_evidence import (
     MODEL_EVIDENCE_SCHEMA_VERSION,
     AllocationEvidence,
@@ -35,10 +35,13 @@ from controller.model_learning.evaluation import (
     EvaluationDecision,
 )
 from controller.model_learning.grey_runtime import GreyLearningProcessOwner
+from controller.model_learning.report import build_learning_report
 from controller.mpc_model import EstimatorSeed
 from controller.runtime.model_fitting import (
     CandidatePair,
+    FitErrorCode,
     FitSubmission,
+    GreyFitError,
     GreyFitJob,
     GreyLearningOrchestrator,
     LiveLearningIdentity,
@@ -674,6 +677,152 @@ def test_effective_duration_rejection_defers_optimizer_until_deficit_can_close(
     assert len(worker.jobs) == 2
     harness.runtime.close()
     harness.activation.close()
+
+
+def test_duration_deficit_retries_when_retention_replaces_its_original_support(tmp_path, monkeypatch) -> None:
+    from common.persistence import learning_trajectory
+
+    monkeypatch.setattr(learning_trajectory, "_MAX_SCORED_ROWS", 30)
+    repository, partition = _duration_deficit_corpus(tmp_path)
+    harness = _duration_retry_harness(repository, lambda: partition)
+    worker = _EffectiveDurationDeficitWorker.instances[-1]
+    try:
+        _install_duration_retry_watermark(harness)
+        _finalize_segment(
+            repository,
+            _segment(
+                "new-duration-support",
+                epoch_ms=2_000_000_000_000,
+                start_sequence=100,
+                pre_roll_count=0,
+                scored_count=30,
+            ),
+        )
+        assert harness.runtime.request_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+        harness.runtime.poll_learning_off_path()
+        assert len(worker.jobs) == 2
+        assert sum(item.scored_count for item in worker.jobs[-1].request.fit_corpus.slices) == 30
+    finally:
+        harness.runtime.close()
+        harness.activation.close()
+
+
+@pytest.mark.parametrize("detail", ("warmup-mask-unstable", "segment-warmup-incomplete:duration-deficit"))
+@pytest.mark.parametrize("replace_at_capacity", (False, True))
+def test_failed_fit_retries_only_with_new_evidence_and_clears_old_failure(
+    ds, tmp_path, monkeypatch, detail, replace_at_capacity
+) -> None:
+    class RecoveringWorker(_CorpusWorker):
+        def receive(self, *, timeout_s: float):
+            del timeout_s
+            job = self.job
+            self.job = None
+            if job is None:
+                raise TimeoutError
+            outcome = (
+                GreyFitError(
+                    request=job.request,
+                    code=FitErrorCode.FIT_EXCEPTION,
+                    error_type="InsufficientWarmup",
+                    detail=detail,
+                )
+                if len(self.jobs) == 1
+                else replace(_fit_success(job), rejection_reasons=("identifiability",))
+            )
+            return SimpleNamespace(request=job.request, outcome=outcome)
+
+    if replace_at_capacity:
+        from common.persistence import learning_trajectory
+
+        monkeypatch.setattr(learning_trajectory, "_MAX_SCORED_ROWS", 30)
+    repository = LearningTrajectoryRepository(str(tmp_path / "fit-recovery.sqlite"))
+    segment = _segment("duration-deficit", pre_roll_count=0, scored_count=30)
+    cursor = repository.begin_segment(segment)
+    partition = segment.fit_partition_digest
+    harness = _harness(
+        trajectory_repository=repository,
+        fit_partition_digest=lambda: partition,
+        fit_worker_factory=RecoveringWorker,
+        learning_enabled=True,
+    )
+    harness.runtime._learning.trigger_config = TriggerConfig(
+        min_input_variance=0.0,
+        min_input_levels=1,
+        min_temperature_span_c=0.0,
+        min_identifiability=0.0,
+    )
+    worker = RecoveringWorker.instances[-1]
+    incumbent = harness.activation.active_pair
+    before = repository.snapshot_fit_corpus(partition).identity
+
+    def report():
+        return build_learning_report(
+            evidence=harness.persistence.evidence,
+            activation_state=None,
+            live_status={"status": "collecting"},
+            calibration_command_high_water=0,
+        ).as_dict()
+
+    try:
+        assert harness.runtime.request_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+        harness.runtime.poll_learning_off_path()
+        failed, _ = harness.runtime.poll_learning_off_path()
+        assert failed.blockers == ("fit-error",)
+        assert report()["fit"]["error"] == detail
+        assert repository.snapshot_fit_corpus(partition).identity == before
+        assert harness.runtime.learning_status()["failure"] is None
+
+        assert harness.runtime.request_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+        harness.runtime.poll_learning_off_path()
+        assert len(worker.jobs) == 1
+
+        repository.finalize(cursor, TrajectoryBreakReason.STOP)
+        finalized = repository.snapshot_fit_corpus(partition).identity
+        assert finalized.slices[0].prefix_digest == before.slices[0].prefix_digest
+        assert finalized.slices[0].segment_content_digest != before.slices[0].segment_content_digest
+        assert harness.runtime.request_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+        harness.runtime.poll_learning_off_path()
+        assert len(worker.jobs) == 1
+
+        if replace_at_capacity:
+            _finalize_segment(
+                repository,
+                _segment(
+                    "capacity-replacement",
+                    epoch_ms=2_000_000_000_000,
+                    start_sequence=100,
+                    pre_roll_count=0,
+                    scored_count=30,
+                ),
+            )
+            replacement = repository.snapshot_fit_corpus(partition).identity
+            assert replacement.slices != before.slices
+            assert sum(item.scored_count for item in replacement.slices) == sum(
+                item.scored_count for item in before.slices
+            )
+        else:
+            _append_duration_frame(repository, 1)
+        assert harness.runtime.request_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+        harness.runtime.poll_learning_off_path()
+        recovered, _ = harness.runtime.poll_learning_off_path()
+        assert len(worker.jobs) == 2
+        assert recovered.blockers == ("identifiability",)
+        current = report()
+        assert current["fit"]["status"] == "succeeded"
+        assert current["fit"]["error"] is None
+        assert detail not in current["errors"]
+        assert current["status"] == "collecting"
+        retained = repository.snapshot_fit_corpus(partition).identity.slices
+        if not replace_at_capacity:
+            assert all(
+                any(item.segment_id == old.segment_id and item.prefix_digest == old.prefix_digest for item in retained)
+                for old in before.slices
+            )
+        assert harness.activation.active_pair is incumbent
+        assert incumbent.authorized and not incumbent.closed
+    finally:
+        harness.runtime.close()
+        harness.activation.close()
 
 
 @pytest.mark.parametrize(

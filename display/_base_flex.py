@@ -22,6 +22,7 @@ import time
 import requests
 from PIL import Image, ImageFilter
 
+from common.clock_domain import local_clock_stamp
 from common.common import display_sleep_timeout, read_generic_json
 from common.control_delta import control_delta
 from common.duration_status import project_duration_status
@@ -31,6 +32,7 @@ from common.persistence.control import (
     read_control,
 )
 from common.persistence.runtime import (
+    read_control_heartbeat,
     read_current,
     read_settings,
     read_status,
@@ -71,8 +73,6 @@ from display.flexobject import (
     TimerStatus,  # noqa: F401  # dynamic-dispatch
     resolve_accent,
 )
-from common.clock_domain import local_clock_stamp
-from common.persistence.runtime import read_control_heartbeat
 from display.staleness import last_reading_age_s, resolve_reading
 
 """
@@ -562,11 +562,15 @@ class DisplayBase:
         mode = status_data.get("mode", Mode.STOP)
         if mode in (Mode.PRIME, Mode.STARTUP, Mode.REIGNITE, Mode.SHUTDOWN):
             seconds = durations["modeRemainingS"]
-            return None if seconds is None else int(seconds), "Timer"
-        if mode == Mode.HOLD and status_data.get("lid_open_detected"):
+            label = "Timer"
+        elif mode == Mode.HOLD and status_data.get("lid_open_detected"):
             seconds = durations["lidRemainingS"]
-            return None if seconds is None else int(seconds), "Lid Pause"
-        return 0, ""
+            label = "Lid Pause"
+        else:
+            return 0, ""
+        if seconds is not None and not durations["current"]:
+            label += "\nLast reported"
+        return None if seconds is None else int(seconds), label
 
     @staticmethod
     def _cook_time_data(status_data, durations):
@@ -583,7 +587,10 @@ class DisplayBase:
             elapsed = int(elapsed)
             hours, minutes, secs = elapsed // 3600, (elapsed % 3600) // 60, elapsed % 60
             value = (f"{hours}:" if hours else "") + f"{minutes:02d}:{secs:02d}"
-        return {"label": "COOK TIME", "value": value}
+        label = "COOK TIME"
+        if elapsed is not None and not durations["current"]:
+            label += "\nLast reported"
+        return {"label": label, "value": value}
 
     def _build_dash_map(self):
         """Setup dash object mapping"""
@@ -875,15 +882,15 @@ class DisplayBase:
             self.status_data, current=local_clock_stamp(), heartbeat=read_control_heartbeat()
         )
         countdown, label = self._timer_seconds_and_label(self.status_data, durations)
-        self._set_timer_object(countdown, label or None)
+        self._set_timer_object(countdown, label, active=bool(label))
 
-    def _set_timer_object(self, countdown, label):
+    def _set_timer_object(self, countdown, label, *, active):
         if "timer" in self.dash_map:
             object_data = self.display_object_list[self.dash_map["timer"]].get_object_data()
-            if countdown != object_data["data"]["seconds"] or (label is not None and label != object_data.get("label")):
-                object_data["data"]["seconds"] = countdown
-                if label is not None:
-                    object_data["label"] = label
+            data = {"seconds": countdown, "active": active}
+            if data != object_data["data"] or label != object_data.get("label"):
+                object_data["data"] = data
+                object_data["label"] = label
                 self.display_object_list[self.dash_map["timer"]].update_object_data(object_data)
 
     def _update_cook_time(self):

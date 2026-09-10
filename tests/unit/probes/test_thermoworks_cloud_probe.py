@@ -1,11 +1,15 @@
 import asyncio
 import importlib
+import logging
 import sys
 import time
 import types
 from datetime import UTC, datetime, timedelta
 
 import pytest
+
+from common.clock_domain import RuntimeClockDomain
+from probes.main import ProbesMain
 
 
 def _install_fake_thermoworks_cloud(monkeypatch):
@@ -122,6 +126,7 @@ def cloud_poll(monkeypatch):
     class Clock:
         monotonic_s = 100.0
         wall = datetime(2026, 9, 8, tzinfo=UTC)
+        suspend_offset_s = 0.0
 
         def monotonic(self) -> float:
             return self.monotonic_s
@@ -180,6 +185,8 @@ def cloud_poll(monkeypatch):
 
     reader = probe.ReadProbes.__new__(probe.ReadProbes)
     reader.device = device
+    reader.logger = logging.getLogger("control")
+    reader.device_info = {"device": "cloud"}
     reader.units = "C"
     reader.num_probes = 1
     reader.port_map = {"TWC0": "Grill"}
@@ -187,6 +194,16 @@ def cloud_poll(monkeypatch):
     reader.food_ports = []
     reader.aux_ports = []
     reader.output_data = {"primary": {"Grill": None}, "food": {}, "aux": {}, "tr": {}}
+    reader._build_ports()
+    monkeypatch.setattr("probes.kalman.time.monotonic", clock.monotonic)
+    domain = RuntimeClockDomain(
+        monotonic=clock.monotonic,
+        wall_time=lambda: clock.wall.timestamp(),
+        boot_id="00000000-0000-0000-0000-000000000001",
+        boottime=lambda: clock.monotonic_s + clock.suspend_offset_s,
+    )
+    main = ProbesMain({"probe_devices": [], "probe_info": []}, "C", clock_domain=domain)
+    main.probe_device_list = [reader]
     return types.SimpleNamespace(
         probe=probe,
         device=device,
@@ -194,6 +211,8 @@ def cloud_poll(monkeypatch):
         client=client,
         poll=poll,
         reader=reader,
+        main=main,
+        domain=domain,
     )
 
 
@@ -274,6 +293,54 @@ def test_clock_invalidation_discards_cached_and_inflight_receipts(cloud_poll):
     cloud_poll.client.before_response = None
     cloud_poll.poll()
     assert cloud_poll.device.get_channel_celsius(1) == 100.0
+
+
+def test_idle_acquisition_gap_preserves_fresh_cloud_receipt_but_resets_old_filter(cloud_poll):
+    cloud_poll.client.response = types.SimpleNamespace(value=250.0, units="C")
+    for now in range(89, 101):
+        cloud_poll.clock.monotonic_s = float(now)
+        cloud_poll.poll()
+        assert cloud_poll.main.read_probes()["primary"]["Grill"] == 250.0
+
+    # The background poller continues while the control probe loop is stopped.
+    cloud_poll.clock.monotonic_s = 199.0
+    cloud_poll.client.response = types.SimpleNamespace(value=500.0, units="C")
+    cloud_poll.poll()
+    cloud_poll.clock.monotonic_s = 200.0
+    assert cloud_poll.main.read_probes()["primary"]["Grill"] == 500.0
+    assert cloud_poll.device.get_channel_celsius(1) == 500.0
+    cloud_poll.clock.monotonic_s = 229.001
+    assert cloud_poll.main.read_probes()["primary"]["Grill"] is None
+
+
+@pytest.mark.parametrize("discontinuity", ["runtime", "boot", "suspend", "monotonic"])
+def test_probe_discontinuity_fences_inflight_cloud_response_and_resets_filter(cloud_poll, discontinuity):
+    cloud_poll.client.response = types.SimpleNamespace(value=250.0, units="C")
+    for now in range(89, 101):
+        cloud_poll.clock.monotonic_s = float(now)
+        cloud_poll.poll()
+        assert cloud_poll.main.read_probes()["primary"]["Grill"] == 250.0
+
+    def cross_boundary():
+        if discontinuity == "runtime":
+            cloud_poll.domain.rotate_runtime()
+        elif discontinuity == "boot":
+            cloud_poll.domain.boot_id = "00000000-0000-0000-0000-000000000002"
+        elif discontinuity == "suspend":
+            cloud_poll.clock.suspend_offset_s += 61.0
+        else:
+            cloud_poll.clock.monotonic_s = 99.0
+        assert cloud_poll.main.read_probes()["primary"]["Grill"] is None
+
+    cloud_poll.client.before_response = cross_boundary
+    cloud_poll.poll()
+    assert cloud_poll.device.get_channel_celsius(1) is None
+    cloud_poll.client.before_response = None
+    cloud_poll.client.response = types.SimpleNamespace(value=500.0, units="C")
+    cloud_poll.poll()
+    for _ in range(5):
+        cloud_poll.clock.monotonic_s += 1.0
+        assert cloud_poll.main.read_probes()["primary"]["Grill"] == 500.0
 
 
 @pytest.mark.parametrize("action", ["stop", "start"])

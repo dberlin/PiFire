@@ -49,7 +49,7 @@ class PrimeMode(ControlMode):
     def status_fragment(self) -> dict:
         return {"prime_duration": self.state.prime.duration, "prime_amount": self.state.prime.amount}
 
-    def teardown(self, ptemp):
+    def teardown(self, ptemp, *, acquired_at_s: float | None = None):
         self.grill.fan_off()
         self.grill.power_off()
         self.ctx.event_log.debug("Fan OFF, Power OFF")

@@ -97,6 +97,8 @@ def test_duration_display_uses_live_status_age_and_freezes_stale_snapshot(monkey
     b._monotonic = lambda: clock["steady"]
     b.poll()
     assert (b.timerText, b.cookElapsedText) == ("00:10", "02:05")
+    assert "reported" not in b.timerLabel.lower()
+    assert "reported" not in b.cookElapsedLabel.lower()
     clock["wall"] += wall_jump
     clock["steady"] = 105
     b.poll()
@@ -108,6 +110,8 @@ def test_duration_display_uses_live_status_age_and_freezes_stale_snapshot(monkey
     clock["steady"] = 116
     b.poll()
     assert (b.timerText, b.cookElapsedText) == ("00:10", "02:05")
+    assert "reported" in b.timerLabel.lower()
+    assert "reported" in b.cookElapsedLabel.lower()
     status.update(
         mode="Hold",
         remaining_seconds=None,
@@ -116,6 +120,7 @@ def test_duration_display_uses_live_status_age_and_freezes_stale_snapshot(monkey
     )
     b.poll()
     assert (b.timerText, b.cookElapsedText) == ("", "02:21")
+    assert "reported" not in b.cookElapsedLabel.lower()
 
 
 @pytest.mark.parametrize("wall_jump", [-3600, 3600])
@@ -247,7 +252,8 @@ def test_hold_lid_open_countdown_timer():
     b = make_backend({"P": {"Grill": 225}, "F": {}, "AUX": {}, "PSP": 250, "NT": {}}, status)
     b.poll()
     assert b.timerText == "01:05"
-    assert b.timerLabel == "Lid Pause"
+    assert b.timerLabel.startswith("Lid Pause")
+    assert "reported" in b.timerLabel.lower()
 
 
 def test_sleep_wake_state_machine():

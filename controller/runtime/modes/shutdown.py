@@ -20,7 +20,7 @@ class ShutdownMode(ControlMode):
     def should_exit(self, now, ptemp) -> bool:
         return (now - self.state.timers.start_time) > self.settings["shutdown"]["shutdown_duration"]
 
-    def teardown(self, ptemp):
+    def teardown(self, ptemp, *, acquired_at_s: float | None = None):
         self.grill.fan_off()
         self.grill.power_off()
         self.ctx.event_log.debug("Fan OFF, Power OFF")

@@ -92,6 +92,8 @@ def main() -> int:
         mode.state.metrics = {"id": "smoke-acados-hold"}
 
         for _ in range(45):
+            # This smoke supplies a new synthetic thermal sample at each tick.
+            mode._last_probe_monotonic_s = context.clock.monotonic()
             mode.on_tick(context.clock.monotonic(), 180.0, grill.get_output_status())
             context.clock.sleep(1.0)
 
@@ -103,7 +105,7 @@ def main() -> int:
         if "applied_combustion_load" not in controller_status:
             raise RuntimeError("acados solve/applied-output feedback did not reach the controller")
 
-        mode.teardown(180.0)
+        mode.teardown(180.0, acquired_at_s=None)
         torn_down = True
         checkpoint = model_store.load("mpc")
         if checkpoint is None:
@@ -120,7 +122,7 @@ def main() -> int:
     finally:
         runner_module.build_runner = original_build_runner
         if mode is not None and not torn_down:
-            mode.teardown(180.0)
+            mode.teardown(180.0, acquired_at_s=None)
 
 
 if __name__ == "__main__":

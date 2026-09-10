@@ -67,9 +67,18 @@ def _build_layout_dict():
         ),
         _flex_base(
             "cook_time",
-            "timer",
-            data={"seconds": 0},
+            "cook_time_bar",
+            data={"label": "COOK TIME", "value": "--:--"},
             label="COOK TIME",
+            fg_color=(255, 255, 255, 255),
+            bg_color=(0, 0, 0, 255),
+        ),
+        _flex_base(
+            "timer",
+            "timer",
+            size=(100, 50),
+            data={"seconds": 0, "active": False},
+            label="Timer",
             fg_color=(255, 255, 255, 255),
             bg_color=(0, 0, 0, 255),
         ),
@@ -283,7 +292,7 @@ def test_update_dash_cook_time_elapsed_when_no_active_timer(tmp_path):
     display._update_dash_objects()
 
     cook_time = _obj_data(display, "cook_time")
-    assert cook_time["data"]["label"] == "COOK TIME"
+    assert "reported" in cook_time["data"]["label"].lower()
     assert cook_time["data"]["value"] == "02:05"
 
 
@@ -327,6 +336,29 @@ def test_flex_cook_display_ages_current_snapshot_without_wall_arithmetic(tmp_pat
     clock["steady"] = 116
     display._update_dash_objects()
     assert _obj_data(display, "cook_time")["data"]["value"] == "02:05"
+    assert "reported" in _obj_data(display, "cook_time")["data"]["label"].lower()
+
+
+def test_flex_timer_activity_survives_zero_and_clears_on_mode_exit(tmp_path, monkeypatch):
+    snapshot = {"current": True, "modeRemainingS": 0}
+    monkeypatch.setattr("display._base_flex.project_duration_status", lambda *args, **kwargs: snapshot)
+    monkeypatch.setattr("display._base_flex.read_control_heartbeat", lambda: None)
+    display = _make_display(tmp_path, status_data=_status_data(mode="Startup"))
+    timer = display.display_object_list[display.dash_map["timer"]]
+    display._update_timer()
+    assert timer.get_object_canvas().getbbox() is not None
+    snapshot["current"] = False
+    display._update_timer()
+    assert "reported" in timer.get_object_data()["label"].lower()
+    snapshot["modeRemainingS"] = None
+    display._update_timer()
+    unknown = timer.get_object_canvas().tobytes()
+    snapshot["modeRemainingS"] = 0
+    display._update_timer()
+    assert timer.get_object_canvas().tobytes() != unknown
+    display.status_data["mode"] = "Stop"
+    display._update_timer()
+    assert timer.get_object_canvas().getbbox() is None
 
 
 def test_hopper_vertical_hidden_when_disabled(tmp_path):
@@ -450,7 +482,10 @@ def test_duty_pills_smoke_plus_on_highlights():
     ],
 )
 def test_cook_time_data_renders_snapshot(status, snapshot, label, value):
-    assert DisplayBase._cook_time_data(status, snapshot) == {"label": label, "value": value}
+    assert DisplayBase._cook_time_data(status, {**snapshot, "current": True}) == {"label": label, "value": value}
+    retained = DisplayBase._cook_time_data(status, {**snapshot, "current": False})
+    assert retained["value"] == value
+    assert ("reported" in retained["label"].lower()) is (value != "--:--")
 
 
 def _probe_card_data(display, card="probe_card_0"):

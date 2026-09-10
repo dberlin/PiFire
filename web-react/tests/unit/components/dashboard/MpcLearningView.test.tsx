@@ -618,6 +618,36 @@ describe("MpcLearningView", () => {
     expect(readiness).toHaveTextContent("Technical code: minimum-effective-duration");
   });
 
+  it.each([
+    ["warmup-mask-unstable", /fit.*warm-up.*changed/i],
+    ["segment-warmup-incomplete:segment-cook-7-hold-1", /enough.*history.*warm-up/i],
+  ])(
+    "explains the failed fit %s without claiming collection stopped",
+    async (code, explanation) => {
+      fetchMock.mockResolvedValue(
+        jsonResponse({
+          ...REPORT,
+          status: "error",
+          candidate: null,
+          evaluation: null,
+          fit: { ...REPORT.fit, status: "failed", error: code },
+          errors: [code],
+          failure: null,
+        }),
+      );
+      renderPanel();
+      await openPanel();
+
+      const fit = screen.getByRole("heading", { name: "Fit request" }).closest("section");
+      expect(fit).toHaveTextContent(explanation);
+      expect(fit).toHaveTextContent(`Technical code: ${code}`);
+      expect(screen.getByRole("alert")).toHaveTextContent(explanation);
+      expect(screen.queryByText(/condition this version cannot explain/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/learning is stopped/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/terminal learning failure/i)).not.toBeInTheDocument();
+    },
+  );
+
   it("explains pooled regression before its technical rejection code", async () => {
     fetchMock.mockResolvedValue(
       jsonResponse({

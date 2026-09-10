@@ -44,6 +44,8 @@ describe("recheckControl", () => {
 });
 
 describe("useControlHealth", () => {
+  const downErrors = ["The control process did not respond to a request and may be stopped."];
+  const healthyErrors: string[] = [];
   afterEach(() => {
     rs.unstubAllGlobals();
   });
@@ -55,32 +57,57 @@ describe("useControlHealth", () => {
   });
 
   it("is alive and not stale when the payload says the control process is up", () => {
-    const { result } = renderHook(() => useControlHealth(true, ""));
+    const { result } = renderHook(() => useControlHealth(true, "", healthyErrors));
     expect(result.current.alive).toBe(true);
     expect(result.current.stale).toBe(false);
     expect(result.current.rechecking).toBe(false);
   });
 
-  it("is not alive and is stale when the payload carries the sticky error", () => {
-    const { result } = renderHook(() => useControlHealth(false, ""));
+  it("is not alive and is stale when the current payload reports control down", () => {
+    const { result } = renderHook(() => useControlHealth(false, "", downErrors));
     expect(result.current.alive).toBe(false);
     expect(result.current.stale).toBe(true);
   });
 
-  it("believes a successful recheck over the payload, and keeps believing it", async () => {
-    const { result, rerender } = renderHook(({ live }) => useControlHealth(live, ""), {
-      initialProps: { live: false },
+  it("keeps a successful recheck through local renders but expires it on the next authoritative snapshot", async () => {
+    const { result, rerender } = renderHook(({ errors }) => useControlHealth(false, "", errors), {
+      initialProps: { errors: downErrors },
     });
     await act(async () => {
       await result.current.recheck();
     });
     expect(result.current.alive).toBe(true);
-    // The errors blob NEVER clears without a control.py restart, so the next
-    // frame still says false. A live probe that just succeeded is better
-    // evidence than a blob written up to 30s ago that nothing can clear.
-    rerender({ live: false });
-    expect(result.current.alive).toBe(true);
     expect(result.current.stale).toBe(true);
+    rerender({ errors: downErrors });
+    expect(result.current.alive).toBe(true);
+    rerender({ errors: [...downErrors] });
+    expect(result.current.alive).toBe(false);
+    expect(result.current.stale).toBe(true);
+  });
+
+  it("does not let an in-flight successful recheck override a newer control-down snapshot", async () => {
+    let resolveFetch!: (value: unknown) => void;
+    const promise = new Promise<unknown>((resolve) => {
+      resolveFetch = resolve;
+    });
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(() => promise),
+    );
+    const { result, rerender } = renderHook(({ errors }) => useControlHealth(false, "", errors), {
+      initialProps: { errors: downErrors },
+    });
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.recheck();
+    });
+    rerender({ errors: [...downErrors] });
+    await act(async () => {
+      resolveFetch({ ok: true, json: async () => ({ result: "OK" }) });
+      await pending;
+    });
+    expect(result.current.alive).toBe(false);
+    expect(result.current.rechecking).toBe(false);
   });
 
   it("stays not-alive when the recheck fails", async () => {
@@ -88,7 +115,7 @@ describe("useControlHealth", () => {
       "fetch",
       rs.fn(async () => ({ ok: true, json: async () => ({ result: "ERROR" }) })),
     );
-    const { result } = renderHook(() => useControlHealth(false, ""));
+    const { result } = renderHook(() => useControlHealth(false, "", downErrors));
     await act(async () => {
       await result.current.recheck();
     });

@@ -153,7 +153,7 @@ def test_stop_corpus_fit_gate_follows_identification_not_online_adaptation(
         persistence=persistence,
     )
 
-    result = hold.teardown(225.0)
+    result = hold.teardown(225.0, acquired_at_s=None)
 
     assert runner.fit_requests == ([CandidateOrigin.PASSIVE_ONLINE] if scheduled else [])
     assert runner.legacy_refits == 0
@@ -176,8 +176,8 @@ def test_stop_finalizes_and_barriers_before_submit_then_closes_without_adoption(
         persistence=persistence,
     )
 
-    hold.teardown(225.0)
-    hold.teardown(225.0)
+    hold.teardown(225.0, acquired_at_s=None)
+    hold.teardown(225.0, acquired_at_s=None)
 
     assert events == [
         "stop",
@@ -209,7 +209,7 @@ def test_pid_sp_stop_uses_same_finalize_barrier_then_offpath_fit_contract(
         controller="pid_sp",
     )
 
-    hold.teardown(225.0)
+    hold.teardown(225.0, acquired_at_s=None)
 
     assert events == [
         "stop",
@@ -238,7 +238,7 @@ def test_pid_sp_disabled_stop_records_terminal_without_fit_or_evidence_loss(
         controller="pid_sp",
     )
 
-    hold.teardown(225.0)
+    hold.teardown(225.0, acquired_at_s=None)
 
     assert events == [
         "stop",
@@ -269,7 +269,7 @@ def test_pid_sp_stop_barrier_failure_records_terminal_without_fit_submission(
         controller="pid_sp",
     )
 
-    hold.teardown(225.0)
+    hold.teardown(225.0, acquired_at_s=None)
 
     assert events == [
         "stop",
@@ -316,7 +316,7 @@ def test_stop_fit_waits_for_trajectory_publication_and_quarantine_barrier(
         trajectory_barrier,
     )
 
-    hold.teardown(225.0)
+    hold.teardown(225.0, acquired_at_s=None)
 
     assert "trajectory-barrier" in events
     assert runner.fit_requests == []
@@ -450,7 +450,7 @@ def test_stop_fit_submission_failure_is_learning_only_and_teardown_still_closes(
         persistence=persistence,
     )
 
-    hold.teardown(225.0)
+    hold.teardown(225.0, acquired_at_s=None)
 
     assert runner.get_model_snapshot() == authority
     assert events[-1] == "close"

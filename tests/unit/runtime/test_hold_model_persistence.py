@@ -154,8 +154,8 @@ def test_hold_stop_barriers_shared_persistence_without_closing_it(hold_cycle) ->
     hold.setup()
 
     hold.ctx.clock.advance(400.0)
-    hold.teardown(200.0)
-    hold.teardown(200.0)
+    hold.teardown(200.0, acquired_at_s=None)
+    hold.teardown(200.0, acquired_at_s=None)
 
     assert hold._persistence_worker is worker
     assert worker.barrier_calls == [2.0, 2.0]
@@ -173,7 +173,7 @@ def test_consecutive_holds_share_exact_process_worker_and_repository(hold_cycle)
     assert first._hold_learning._persistence is worker
     assert first._hold_learning._trajectory_repository is repository
     first.ctx.clock.advance(400.0)
-    first.teardown(200.0)
+    first.teardown(200.0, acquired_at_s=None)
 
     second = hold_cycle(FakeControllerRunner(period=0.0), controller="pid_sp")
     second.control["cook_id"] = "cook-b"
@@ -183,7 +183,7 @@ def test_consecutive_holds_share_exact_process_worker_and_repository(hold_cycle)
     assert second._hold_learning._persistence is worker
     assert second._hold_learning._trajectory_repository is repository
     second.ctx.clock.advance(400.0)
-    second.teardown(200.0)
+    second.teardown(200.0, acquired_at_s=None)
 
     assert first._persistence_worker is second._persistence_worker is worker
     assert first.ctx.trajectory_repository is second.ctx.trajectory_repository is repository
@@ -204,7 +204,7 @@ def test_compatible_corpus_survives_hold_teardown_and_repository_reopen(
     _inject_process_persistence(first, worker, first_repository)
     first.setup()
     first.ctx.clock.advance(400.0)
-    first.teardown(200.0)
+    first.teardown(200.0, acquired_at_s=None)
 
     reopened = LearningTrajectoryRepository(str(database_path))
     second_segment = _segment("second-cook", epoch_ms=200_000, scored_count=2)
@@ -213,7 +213,7 @@ def test_compatible_corpus_survives_hold_teardown_and_repository_reopen(
     _inject_process_persistence(second, worker, reopened)
     second.setup()
     second.ctx.clock.advance(400.0)
-    second.teardown(200.0)
+    second.teardown(200.0, acquired_at_s=None)
 
     snapshot = reopened.snapshot_fit_corpus(first_segment.fit_partition_digest)
     assert tuple(item.segment_id for item in snapshot.identity.slices) == (
@@ -258,7 +258,7 @@ def test_persistence_failure_cannot_change_hold_actuator_outcome(hold_cycle) -> 
             tick_checkpoints = deepcopy(worker.checkpoints)
         finally:
             hold.ctx.clock.advance(400.0)
-            hold.teardown(200.0)
+            hold.teardown(200.0, acquired_at_s=None)
         return {
             "evidence_available": evidence_available,
             "final_evidence_available": learning.evidence_available,
@@ -679,7 +679,7 @@ def test_per_tick_saves_the_controller_snapshot(hold_cycle):
         hold.on_tick(now=100.0, ptemp=200.0, current_output_status=_off())
     finally:
         hold.ctx.clock.advance(400.0)
-        hold.teardown(200.0)
+        hold.teardown(200.0, acquired_at_s=None)
     assert store.saves == [("pid_sp", {"revision": 1, "K": 700.0})]
 
 
@@ -701,7 +701,7 @@ def test_checkpoint_persistence_failure_disables_hold_learning(hold_cycle):
         assert not learning.submit_online_checkpoint({"revision": 2})
     finally:
         hold.ctx.clock.advance(400.0)
-        hold.teardown(200.0)
+        hold.teardown(200.0, acquired_at_s=None)
 
 
 def test_checkpoint_writer_does_not_block_hold_or_teardown_and_finishes_latest_snapshot(hold_cycle):
@@ -795,7 +795,7 @@ def test_checkpoint_writer_does_not_block_hold_or_teardown_and_finishes_latest_s
 
         def teardown():
             try:
-                hold.teardown(200.0)
+                hold.teardown(200.0, acquired_at_s=None)
             except BaseException as error:
                 teardown_errors.append(error)
             finally:
@@ -818,7 +818,7 @@ def test_checkpoint_writer_does_not_block_hold_or_teardown_and_finishes_latest_s
         if teardown_thread is None:
             if not teardown_clock_advanced:
                 hold.ctx.clock.advance(400.0)
-            hold.teardown(200.0)
+            hold.teardown(200.0, acquired_at_s=None)
         else:
             teardown_thread.join(timeout=1.0)
         assert worker.close(timeout=5.0)
@@ -857,7 +857,7 @@ def test_framed_ticks_persist_only_advancing_model_revisions(hold_cycle):
         hold.on_tick(now=122.0, ptemp=200.0, current_output_status=_off())
     finally:
         hold.ctx.clock.advance(400.0)
-        hold.teardown(200.0)
+        hold.teardown(200.0, acquired_at_s=None)
 
     persisted_revisions = [record["models"]["mpc"]["revision"] for record in writes]
     assert persisted_revisions
@@ -878,7 +878,7 @@ def test_framed_ticks_leave_malformed_snapshots_to_the_model_store(hold_cycle):
         hold.on_tick(now=100.0, ptemp=200.0, current_output_status=_off())
     finally:
         hold.ctx.clock.advance(400.0)
-        hold.teardown(200.0)
+        hold.teardown(200.0, acquired_at_s=None)
 
     assert writes == []
 
@@ -922,7 +922,7 @@ def test_setup_wires_the_default_store_through_ctx_store(hold_cycle):
         hold.on_tick(now=100.0, ptemp=200.0, current_output_status=_off())
     finally:
         hold.ctx.clock.advance(400.0)
-        hold.teardown(200.0)
+        hold.teardown(200.0, acquired_at_s=None)
     saved = hold.ctx.store.read_generic_key("controller_model_state")
     assert saved["models"]["pid_sp"] == {"revision": 1, "K": 700.0}
 
@@ -1783,7 +1783,7 @@ def test_real_hold_sqlite_runner_recovery_converges_every_crash_boundary(
     finally:
         restart_gate.open()
         hold.ctx.clock.advance(400.0)
-        hold.teardown(225.0)
+        hold.teardown(225.0, acquired_at_s=None)
         runner.stop()
         assert restart_worker.close(timeout=1.0)
     handles = (

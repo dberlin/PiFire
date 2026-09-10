@@ -174,7 +174,8 @@
         "button_list": [],
         "button_value": [],
         "data": {
-          "seconds": 0
+          "seconds": 0,
+          "active": false
         },
         "touch_areas": []
       },
@@ -764,7 +765,8 @@
         "button_list": [],
         "button_value": [],
         "data": {
-          "seconds": 0
+          "seconds": 0,
+          "active": false
         },
         "touch_areas": []
       },

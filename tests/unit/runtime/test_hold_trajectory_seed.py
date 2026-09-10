@@ -781,7 +781,7 @@ def test_hold_rejects_evidence_without_durable_cook_identity(
         assert status.gap is True
         assert status.last_error == "control-trace-session-unavailable"
     finally:
-        hold.teardown(110.0)
+        hold.teardown(110.0, acquired_at_s=None)
 
 
 def test_hold_rejects_an_incomplete_mpc_seed_source(hold_cycle) -> None:
@@ -800,7 +800,7 @@ def test_hold_rejects_an_incomplete_mpc_seed_source(hold_cycle) -> None:
             hold.ctx.clock.advance(10.0 - hold.ctx.clock.monotonic())
             hold.on_tick(10.0, 110.0, hold.grill.get_output_status())
     finally:
-        hold.teardown(110.0)
+        hold.teardown(110.0, acquired_at_s=None)
 
 
 def test_hold_accepts_none_mpc_seed_source_as_cold_start(hold_cycle) -> None:
@@ -816,7 +816,7 @@ def test_hold_accepts_none_mpc_seed_source_as_cold_start(hold_cycle) -> None:
         assert len(runner.seeds) == 1
         assert runner.seeds[0].status == "absent"
     finally:
-        hold.teardown(110.0)
+        hold.teardown(110.0, acquired_at_s=None)
 
 
 def test_sync_runner_forwards_seed_before_target_and_first_solve() -> None:
@@ -877,7 +877,7 @@ def test_hold_seeds_before_first_submit_solve_or_controller_output(
         assert seed_source.calls[0]["n_delay"] == DEFAULT_MPC_CONFIG["n_delay"]
         assert seed_source.calls[0]["at_ms"] == 9_000
     finally:
-        hold.teardown(110.0)
+        hold.teardown(110.0, acquired_at_s=None)
 
 
 def test_controller_update_adoption_reuses_valid_trajectory_for_reseed(
@@ -913,7 +913,7 @@ def test_controller_update_adoption_reuses_valid_trajectory_for_reseed(
         assert len(seed_source.calls) == 2
         assert hold._estimator_seed_status == "exact"
     finally:
-        hold.teardown(110.0)
+        hold.teardown(110.0, acquired_at_s=None)
 
 
 def test_pid_to_mpc_controller_update_uses_valid_trajectory_seed(
@@ -944,7 +944,7 @@ def test_pid_to_mpc_controller_update_uses_valid_trajectory_seed(
         assert len(seed_source.calls) == 1
         assert hold._estimator_seed_status == "exact"
     finally:
-        hold.teardown(110.0)
+        hold.teardown(110.0, acquired_at_s=None)
 
 
 def test_pid_to_mpc_controller_update_rejects_incomplete_trajectory_before_trace(
@@ -967,7 +967,7 @@ def test_pid_to_mpc_controller_update_rejects_incomplete_trajectory_before_trace
             hold.ctx.clock.advance(20.0 - hold.ctx.clock.monotonic())
             hold.on_tick(20.0, 110.0, hold.grill.get_output_status())
     finally:
-        hold.teardown(110.0)
+        hold.teardown(110.0, acquired_at_s=None)
 
 
 def test_first_seeded_tick_bypasses_normal_controller_cadence(hold_cycle) -> None:
@@ -989,7 +989,7 @@ def test_first_seeded_tick_bypasses_normal_controller_cadence(hold_cycle) -> Non
         assert "runner:submit" in events
         assert "runner:solve" in events
     finally:
-        hold.teardown(110.0)
+        hold.teardown(110.0, acquired_at_s=None)
 
 
 def test_first_solve_remains_pending_until_runner_has_completed_result(
@@ -1027,7 +1027,7 @@ def test_first_solve_remains_pending_until_runner_has_completed_result(
         assert not hold._first_solve_pending
         assert runner.applied[0].source.value == "seed"
     finally:
-        hold.teardown(110.0)
+        hold.teardown(110.0, acquired_at_s=None)
 
 
 @pytest.mark.parametrize("seed_status", ("absent", "uncertain"))
@@ -1063,7 +1063,7 @@ def test_cold_seed_keeps_active_incumbent_control_and_warms_learning(
         assert hold._hold_learning is not None
         assert hold._hold_learning.seed_warmup_remaining == 8
     finally:
-        hold.teardown(110.0)
+        hold.teardown(110.0, acquired_at_s=None)
 
 
 def test_seed_application_failure_uses_cold_control_but_keeps_evidence_failed_closed(
@@ -1096,7 +1096,7 @@ def test_seed_application_failure_uses_cold_control_but_keeps_evidence_failed_cl
         hold._hold_learning.set_seed_warmup_remaining(0)
         assert not hold._hold_learning.evidence_available
     finally:
-        hold.teardown(110.0)
+        hold.teardown(110.0, acquired_at_s=None)
 
 
 def test_cold_start_seed_failure_keeps_learning_evidence_failed_closed(
@@ -1125,7 +1125,7 @@ def test_cold_start_seed_failure_keeps_learning_evidence_failed_closed(
         assert hold._hold_learning is not None
         assert not hold._hold_learning.evidence_available
     finally:
-        hold.teardown(110.0)
+        hold.teardown(110.0, acquired_at_s=None)
 
 
 def test_estimator_seed_is_deterministic_recursively_immutable_and_digest_shaped() -> None:

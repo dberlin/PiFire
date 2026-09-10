@@ -1,5 +1,5 @@
 import threading
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from queue import Queue
 from typing import cast
 
@@ -70,7 +70,7 @@ def _hold_delivery(hold_cycle, jump):
     applied = list(runner.applied)
     delivered = hold.state.metrics.get("augerontime", 0.0)
     solves = runner._i
-    hold.teardown(225.0)
+    hold.teardown(225.0, acquired_at_s=None)
     return observations, applied, delivered, solves
 
 
@@ -150,7 +150,7 @@ def test_hold_factory_pid_sp_shares_injected_frame_and_predictor_axis(hold_cycle
             ]
             return physical_frames, physical_solves, hold.state.metrics.get("augerontime", 0.0), frames, solves
         finally:
-            hold.teardown(226.0)
+            hold.teardown(226.0, acquired_at_s=None)
 
     baseline = run(0.0)
     changed = run(jump)
@@ -267,7 +267,7 @@ def _pulse(clock):
     state.pulse_requested_duty = 0.5
     state.pulse_combustion_load = 0.5
     state.pulse_baseline_combustion_load = 0.5
-    sample = FramedPulseSample(225.0, 225.0, 20.0, "F", 0)
+    sample = FramedPulseSample(225.0, 225.0, 20.0, "F", 0, acquired_at_s=clock.monotonic())
     runtime.advance(clock.monotonic(), False, sample=sample)
     return runtime, sample
 
@@ -331,6 +331,9 @@ def test_pid_sp_update_target_and_predictor_use_frame_axis(jump):
             clock.advance(1.0)
             if second == 10:
                 clock.jump_wall(wall_jump)
+            # This fixture supplies a fresh thermal observation at each tick,
+            # not the setup sample retained for forty seconds.
+            sample = replace(sample, acquired_at_s=clock.monotonic())
             result = runtime.advance(clock.monotonic(), actual_on, sample=sample)
             actual_on = result.decision.command_on
             for completion in result.completions:

@@ -99,7 +99,7 @@ def test_a_mode_logs_through_the_injected_context_logger():
     mode.control = ctx.store.read_control()
 
     mode.setup()
-    mode.teardown(120)
+    mode.teardown(120, acquired_at_s=None)
 
     assert recorder.calls == [
         ("debug", "Power OFF, Fan OFF, Igniter OFF, Auger OFF"),

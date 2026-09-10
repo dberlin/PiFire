@@ -1664,7 +1664,7 @@ class LearningTrajectoryRepository:
                     "UPDATE learning_fit_run SET status='interrupted',"
                     "candidate_digest=NULL,result_error=NULL,completed_ms=? "
                     f"WHERE request_id IN ({placeholders})",
-                    (now_ms, *interrupted_ids),
+                    (max(now_ms, self._next_fit_timestamp(connection)), *interrupted_ids),
                 )
                 for request_id in interrupted_ids:
                     self._update_manifest_result(

@@ -19,10 +19,10 @@ Rectangle {
 		Text {
 			id: cookTimeLabel
 			objectName: "cookTimeLabel"
-			text: backend.timerText.length > 0 ? backend.timerLabel : "COOK TIME"
+			text: backend.timerText.length > 0 ? backend.timerLabel : backend.cookElapsedLabel
 			font.family: Theme.sans
 			font.pixelSize: bar.compact ? 11 : 12
-			font.letterSpacing: 2
+			font.letterSpacing: text.indexOf("\n") >= 0 ? 0 : 2
 			color: Theme.label
 		}
 

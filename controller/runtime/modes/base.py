@@ -154,7 +154,8 @@ class ControlMode:
         condition (default False -- rely on the universal breaks).
       - status_fragment() -> dict: extra fields merged into status_data at
         publish time (default {}).
-      - teardown(ptemp): mode-specific cleanup after the loop ends.
+      - teardown(ptemp, *, acquired_at_s=None): cleanup with the retained
+        temperature's acquisition instant, or explicitly unavailable provenance.
     """
 
     name: Mode | str = ""
@@ -182,6 +183,11 @@ class ControlMode:
         self._metrics_stamped: bool = False
         self._cycle_finished: bool = False
         self._last_valid_ptemp: float | None = None
+        self._last_valid_ptemp_monotonic_s: float | None = None
+        self._last_probe_monotonic_s: float | None = None
+        self._metric_start_monotonic_s: float | None = None
+        # History may rotate during a physical mode; these are not deadlines.
+        self._metric_start_wall_s: float | None = None
         self._auger_observed_at: float | None = None
         self._auger_observed_on: bool = False
 
@@ -227,7 +233,7 @@ class ControlMode:
     def status_fragment(self) -> dict:
         return {}
 
-    def teardown(self, ptemp):
+    def teardown(self, ptemp, *, acquired_at_s: float | None = None):
         pass
 
     def _on_auger_on(self, now):
@@ -586,9 +592,13 @@ class ControlMode:
         return control
 
     def _stamp_mode_metric(self, control, pelletdb) -> None:
+        if self._metric_start_monotonic_s is None:
+            self._metric_start_monotonic_s = self.state.timers.start_time
+            self._metric_start_wall_s = self.state.timers.start_wall_time
+        assert self._metric_start_wall_s is not None
         self.ctx.store.append_metric()
         self.state.metrics = self.ctx.store.read_metrics()
-        self.state.metrics["starttime"] = self.state.timers.start_wall_time * 1000
+        self.state.metrics["starttime"] = self._metric_start_wall_s * 1000
         self.state.metrics["elapsed_seconds"] = 0.0
         self.state.metrics["delivery_complete"] = True
         self._metrics_stamped = True
@@ -612,11 +622,10 @@ class ControlMode:
         self.control = control
         self.ctx.cook_id = cook_id
         self.ctx.cook_elapsed_seconds = 0.0
-        self.state.timers.start_time = now
-        self.state.timers.start_wall_time = self.ctx.clock.wall_time()
+        self._metric_start_monotonic_s = now
+        self._metric_start_wall_s = self.ctx.clock.wall_time()
         self._auger_observed_at = now
         self._stamp_mode_metric(control, self.ctx.store.read_pellet_db())
-        self.state.timers.auger_toggle = now
         if self._valid_cook_id(previous_cook_id) and previous_cook_id != cook_id:
             self._emit_trajectory_boundary(
                 TrajectoryBreakReason.HISTORY_CLEARED,
@@ -1145,7 +1154,10 @@ class ControlMode:
         status_data["remaining_seconds"] = None if duration is None else max(0.0, duration - elapsed)
         status_data["lid_open_remaining_seconds"] = 0.0
         status_data["cook_elapsed_seconds"] = (
-            None if self.ctx.cook_elapsed_seconds is None else self.ctx.cook_elapsed_seconds + elapsed
+            None
+            if self.ctx.cook_elapsed_seconds is None
+            else self.ctx.cook_elapsed_seconds
+            + max(0.0, now - (start_time if self._metric_start_monotonic_s is None else self._metric_start_monotonic_s))
         )
         status_data["clock_stamp"] = None if stamp is None else stamp.as_dict()
         status_data["running"] = not self._cycle_finished and not self._clock_discontinuous
@@ -1229,12 +1241,15 @@ class ControlMode:
             primary_setpoint_c=primary_setpoint_c,
             delivered_heat_on_s=delivered_heat_on_s,
         )
+        self._last_probe_monotonic_s = None
         sensor_data = self.probe_complex.read_probes(
             excitation=excitation,
             monotonic_s=now,
             wall_s=self.ctx.clock.wall_time(),
             clock_domain=self.ctx.get_clock_domain(),
         )
+        stamp = self.probe_complex.last_clock_stamp
+        self._last_probe_monotonic_s = None if stamp is None else stamp.observed_monotonic_s
         self.ctx.store.write_generic_key(
             "probe_device_info",
             self.probe_complex.get_device_info(),
@@ -1304,9 +1319,6 @@ class ControlMode:
         stamp = self._admit_clock()
         if stamp is None:
             return ()
-        start_time = stamp.observed_monotonic_s
-        self.state.timers.start_time = start_time
-        self.state.timers.start_wall_time = stamp.observed_wall_s
 
         # Pre-Loop Setup Recipe Triggers
         self._setup_recipe_triggers(control)
@@ -1344,6 +1356,9 @@ class ControlMode:
             preflight_wall_ms,
         )
         self._last_valid_ptemp = preflight_ptemp if isinstance(preflight_ptemp, (int, float)) else None
+        self._last_valid_ptemp_monotonic_s = (
+            self._last_probe_monotonic_s if self._last_valid_ptemp is not None else None
+        )
         if self._process_thermocouple_health(preflight_data):
             grill_platform.fan_off()
             grill_platform.power_off()
@@ -1363,10 +1378,16 @@ class ControlMode:
             self.ctx.event_log.error("Primary thermocouple fault blocked mode setup.")
             return ()
 
-        if self._admit_clock() is None:
+        stamp = self._admit_clock()
+        if stamp is None:
             return ()
 
         # ---- mode-specific pre-loop setup ----
+        # Preflight cannot consume a physical actuator window. Setup itself and
+        # subsequent safety/probe work do: outputs can already be energized.
+        start_time = stamp.observed_monotonic_s
+        self.state.timers.start_time = start_time
+        self.state.timers.start_wall_time = stamp.observed_wall_s
         self._mode_setup_started = True
         self.setup()
         stamp = self._admit_clock()
@@ -1411,6 +1432,7 @@ class ControlMode:
         else:
             if isinstance(ptemp, (int, float)):
                 self._last_valid_ptemp = ptemp
+                self._last_valid_ptemp_monotonic_s = self._last_probe_monotonic_s
             status = self.setup_safety(ptemp)
 
         # Apply Smart Start Settings if Enabled (default; Startup/Reignite/Smoke
@@ -1527,6 +1549,7 @@ class ControlMode:
                 break
             if isinstance(ptemp, (int, float)):
                 self._last_valid_ptemp = ptemp
+                self._last_valid_ptemp_monotonic_s = self._last_probe_monotonic_s
             # Manual outputs are fenced behind the fresh primary health check.
             self._apply_manual_overrides(control, now, current_output_status)
 
@@ -1651,7 +1674,10 @@ class ControlMode:
                     ctx.store.write_control_snapshot(control, origin="control")
                 self.control = control
             if self._mode_setup_started:
-                self.teardown(self._last_valid_ptemp)
+                self.teardown(
+                    self._last_valid_ptemp,
+                    acquired_at_s=self._last_valid_ptemp_monotonic_s,
+                )
         finally:
             self._cycle_finished = True
             cutoff = self._terminal_monotonic_s
@@ -1662,7 +1688,8 @@ class ControlMode:
                     int(ctx.clock.wall_time() * 1000),
                 )
             if self._metrics_stamped and cutoff is not None:
-                elapsed = max(0.0, cutoff - self.state.timers.start_time)
+                assert self._metric_start_monotonic_s is not None
+                elapsed = max(0.0, cutoff - self._metric_start_monotonic_s)
                 self.state.metrics["elapsed_seconds"] = elapsed
                 self.state.metrics["delivery_complete"] = not self._clock_discontinuous
                 self.state.metrics["endtime"] = ctx.clock.wall_time() * 1000

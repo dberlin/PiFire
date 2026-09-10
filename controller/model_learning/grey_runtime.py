@@ -167,7 +167,9 @@ class _FitRetryWatermark:
     incumbent_digest: str
     incumbent_generation: int
     through_corpus_revision: int
-    required_observed_duration_s: float
+    through_slices: tuple[FitCorpusSlice, ...]
+    required_observed_duration_s: float | None
+    blocker: str
 
 
 def _corpus_observed_duration_s(identity: FitCorpusIdentity) -> float:
@@ -1088,18 +1090,38 @@ class GreyLearningRuntime:
             ):
                 self._fit_retry_watermark = None
                 retry_watermark = None
+            # An old duration deficit only predicts append-only growth. Once
+            # retention removes its source segments, new support needs a new fit.
+            retained_segment_ids = {item.segment_id for item in snapshot.identity.slices}
             retry_is_premature = (
                 retry_watermark is not None
                 and origin is CandidateOrigin.PASSIVE_ONLINE
                 and not intent.replace_owned_prepared
-                and snapshot.identity.corpus_revision >= retry_watermark.through_corpus_revision
-                and observed_duration_s < retry_watermark.required_observed_duration_s
+                and (
+                    # Prefixes cover frame inputs; retained segment identity fixes
+                    # the Hold anchor. Finalization metadata is not new evidence.
+                    len(snapshot.identity.slices) == len(retry_watermark.through_slices)
+                    and all(
+                        current.segment_id == previous.segment_id
+                        and current.through_ordinal == previous.through_ordinal
+                        and current.prefix_digest == previous.prefix_digest
+                        and current.pre_roll_count == previous.pre_roll_count
+                        and current.scored_count == previous.scored_count
+                        for current, previous in zip(
+                            snapshot.identity.slices, retry_watermark.through_slices, strict=True
+                        )
+                    )
+                    or retry_watermark.required_observed_duration_s is not None
+                    and all(item.segment_id in retained_segment_ids for item in retry_watermark.through_slices)
+                    and snapshot.identity.corpus_revision >= retry_watermark.through_corpus_revision
+                    and observed_duration_s < retry_watermark.required_observed_duration_s
+                )
             )
         if retry_is_premature:
             self._terminalize_not_ready_corpus_fit(
                 intent,
                 origin,
-                "minimum-effective-duration",
+                retry_watermark.blocker,
             )
             return None
 
@@ -1176,7 +1198,10 @@ class GreyLearningRuntime:
                 )
             if submission is not FitSubmission.ACCEPTED:
                 raise RuntimeError("fitting worker was busy")
-            if retry_watermark is not None and observed_duration_s >= retry_watermark.required_observed_duration_s:
+            if retry_watermark is not None and (
+                retry_watermark.required_observed_duration_s is None
+                or observed_duration_s >= retry_watermark.required_observed_duration_s
+            ):
                 with self._learning_lock:
                     if self._fit_retry_watermark is retry_watermark:
                         self._fit_retry_watermark = None
@@ -2433,29 +2458,40 @@ class GreyLearningRuntime:
         if not learning_is_current:
             return delivery, None
 
-        if delivered_preparation is not None:
+        if delivered_preparation is not None and delivered_preparation.accepted:
             with self._learning_lock:
                 self._fit_retry_watermark = None
         elif (
             isinstance(terminal_request, FitRequest)
             and terminal_request.origin is CandidateOrigin.PASSIVE_ONLINE
-            and isinstance(outcome, GreyFitSuccess)
+            and isinstance(outcome, (GreyFitSuccess, GreyFitError))
             and not stale_reasons
-            and delivery_blockers == ("minimum-effective-duration",)
+            and (delivery_blockers or delivered_preparation is not None and not delivered_preparation.accepted)
         ):
-            effective_duration_s = outcome.sample_count * FIT_CADENCE_S
-            deficit_s = learning.trigger_config.min_effective_duration_s - effective_duration_s
-            current_observed_duration_s = _corpus_observed_duration_s(terminal_request.fit_corpus)
-            required_observed_duration_s = (
-                current_observed_duration_s + math.ceil(deficit_s / FIT_CADENCE_S) * FIT_CADENCE_S
-            )
+            # A numerical/evidence rejection does not disable collection. Retry
+            # after changed admitted slices, not a metadata revision or wall time.
+            # Counts need not grow: bounded retention can replace older evidence.
+            # The exact duration deficit remains the stronger warmup watermark.
+            required_observed_duration_s = None
+            blocker = outcome.detail if isinstance(outcome, GreyFitError) else ", ".join(delivery_blockers)
+            if isinstance(outcome, GreyFitSuccess) and delivery_blockers == ("minimum-effective-duration",):
+                effective_duration_s = outcome.sample_count * FIT_CADENCE_S
+                deficit_s = learning.trigger_config.min_effective_duration_s - effective_duration_s
+                current_observed_duration_s = _corpus_observed_duration_s(terminal_request.fit_corpus)
+                required_observed_duration_s = (
+                    current_observed_duration_s + math.ceil(deficit_s / FIT_CADENCE_S) * FIT_CADENCE_S
+                )
+            if not blocker:
+                blocker = ", ".join(delivered_preparation.blockers)
             with self._learning_lock:
                 self._fit_retry_watermark = _FitRetryWatermark(
                     fit_partition_digest=(terminal_request.fit_corpus.fit_partition_digest),
                     incumbent_digest=terminal_request.parent_incumbent_digest,
                     incumbent_generation=(terminal_request.parent_incumbent_generation),
                     through_corpus_revision=(terminal_request.fit_corpus.corpus_revision),
+                    through_slices=terminal_request.fit_corpus.slices,
                     required_observed_duration_s=(required_observed_duration_s),
+                    blocker=blocker,
                 )
 
         if delivery is not None and delivered_preparation is not None and delivered_preparation.accepted:

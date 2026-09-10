@@ -103,6 +103,25 @@ def test_init_classifies_ports_and_builds_structures():
     assert obj.probe_profiles["P1"]["Vs"] == pytest.approx(3.28)  # default voltage_ref
 
 
+@pytest.mark.parametrize("reset_method", ["invalidate_clock_domain", "invalidate_acquisition_history"])
+def test_history_invalidation_admits_first_new_temperature_on_every_port(monkeypatch, reset_method):
+    obj = _make_probe(
+        [_probe("P1", "Primary1", "Primary"), _probe("P2", "Food1", "Food"), _probe("P3", "Aux1", "Aux")],
+        _device_info(["P1", "P2", "P3"]),
+    )
+    clock = {"now": 0.0}
+    monkeypatch.setattr("probes.kalman.time.monotonic", lambda: clock["now"])
+    for now in range(12):
+        clock["now"] = float(now)
+        obj.apply_filters({"primary": {"Primary1": 250.0}, "food": {"Food1": 250.0}, "aux": {"Aux1": 250.0}})
+
+    getattr(obj, reset_method)()
+    for now in range(200, 205):
+        clock["now"] = float(now)
+        output = obj.apply_filters({"primary": {"Primary1": 500.0}, "food": {"Food1": 500.0}, "aux": {"Aux1": 500.0}})
+        assert output == {"primary": {"Primary1": 500.0}, "food": {"Food1": 500.0}, "aux": {"Aux1": 500.0}}
+
+
 def test_init_transient_defaults_false_when_key_absent():
     device_info = _device_info(["P1"])
     probe_info = [_probe("P1", "Primary1", "Primary")]

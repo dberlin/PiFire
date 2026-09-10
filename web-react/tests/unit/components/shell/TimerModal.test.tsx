@@ -3,6 +3,7 @@ import type { DashSocketPayload } from "@pifire/core/contracts/core";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
+import { TimerBar } from "../../../../src/components/shell/TimerBar";
 import { TimerModal } from "../../../../src/components/shell/TimerModal";
 
 const OK: CommandResult = { ok: true, message: "" };
@@ -309,5 +310,75 @@ describe("TimerModal over the real command client", () => {
     });
     expect(requests).toEqual([]);
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("keeps a rejected start visible with its inputs and permits a successful retry", async () => {
+    let accept = false;
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async (url: string) => {
+        requests.push({ url, init: undefined });
+        return {
+          ok: true,
+          headers: new Headers(),
+          json: async () => ({
+            result: accept ? "OK" : "ERROR",
+            message: accept ? "" : "Timer cannot start while paused",
+          }),
+        };
+      }),
+    );
+    render(<TimerBar timer={timer()} command={createCommand("")} />);
+    fireEvent.click(screen.getByRole("button", { name: "Start timer" }));
+    fireEvent.change(hours(), { target: { value: "1" } });
+    fireEvent.change(minutes(), { target: { value: "15" } });
+    fireEvent.click(screen.getByLabelText("Start Keep Warm"));
+    fireEvent.click(startButton());
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent("Timer cannot start while paused"),
+    );
+    expect(screen.getByRole("dialog", { name: "Set Timer" })).toBeInTheDocument();
+    expect(hours().value).toBe("1");
+    expect(minutes().value).toBe("15");
+    expect(screen.getByLabelText("Start Keep Warm")).toBeChecked();
+    expect(startButton()).not.toBeDisabled();
+
+    accept = true;
+    fireEvent.click(startButton());
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(requests.map(({ url }) => url)).toEqual([
+      "/api/set/timer/start/4500/keep_warm",
+      "/api/set/timer/start/4500/keep_warm",
+    ]);
+  });
+
+  it("allows only one pending start and closes only after acceptance", async () => {
+    let resolve!: (value: Response) => void;
+    rs.stubGlobal(
+      "fetch",
+      rs.fn((url: string) => {
+        requests.push({ url, init: undefined });
+        return new Promise<Response>((done) => {
+          resolve = done;
+        });
+      }),
+    );
+    render(<TimerBar timer={timer()} command={createCommand("")} />);
+    fireEvent.click(screen.getByRole("button", { name: "Start timer" }));
+    fireEvent.change(minutes(), { target: { value: "5" } });
+    const submit = startButton();
+    fireEvent.click(submit);
+    fireEvent.click(submit);
+    expect(submit).toBeDisabled();
+    expect(screen.getByRole("dialog", { name: "Set Timer" })).toBeInTheDocument();
+    expect(requests).toHaveLength(1);
+
+    resolve(
+      new Response(JSON.stringify({ result: "OK", message: "" }), {
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 });

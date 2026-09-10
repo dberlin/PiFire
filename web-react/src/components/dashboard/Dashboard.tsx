@@ -88,7 +88,10 @@ export function Dashboard({
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const nowSeconds = useWallNow(true);
-  const health = useControlHealth(controlAlive, apiBase);
+  const health = useControlHealth(controlAlive, apiBase, dash.errors);
+  // A successful control recheck is not a new probe/transport observation.
+  const retained = dash.primaryProbe.status.readingCurrent === false;
+  const controlCurrent = health.alive && !retained;
   const { data: settings } = useSettings(apiBase);
   const configuredAmbient = settings?.controller?.config?.mpc?.T_amb;
   const mpcConfig = {
@@ -209,20 +212,24 @@ export function Dashboard({
                   "--pf-status-color":
                     phase === "demo"
                       ? "var(--label)"
-                      : health.alive
+                      : controlCurrent
                         ? "var(--ok)"
                         : "var(--danger)",
                 } as CSSProperties
               }
             >
-              {phase === "demo" ? "DEMO" : health.alive ? "LIVE" : "CTRL OFFLINE"}
+              {phase === "demo"
+                ? "DEMO"
+                : retained
+                  ? "LAST REPORTED"
+                  : controlCurrent
+                    ? "LIVE"
+                    : "CTRL OFFLINE"}
             </span>
-            {/* The offline signal is a blob nothing can clear (see
-                helpers/dashboard/controlHealth.ts), so offer to ask the control
-                process directly rather than leaving the user staring at a
-                verdict from up to 30 seconds ago. Not rendered in demo mode:
-                there is no backend to ask. */}
-            {!health.alive && phase !== "demo" && (
+            {/* A current packet can carry a control poll verdict up to 30s
+                old. Recheck that verdict, but do not imply it refreshes a
+                retained dashboard snapshot. */}
+            {!controlCurrent && !retained && phase !== "demo" && (
               <button className="pf-toggle" onClick={health.recheck} disabled={health.rechecking}>
                 Recheck
               </button>
@@ -307,11 +314,21 @@ export function Dashboard({
                       integer is injected there. Rendered as a second line in
                       this card's existing label column so the 52px row keeps
                       its height. */}
-                  {(modeLeft !== null || (!dash.recipeStatus?.recipeMode && ["Startup", "Reignite", "Prime", "Shutdown"].includes(dash.currentMode))) && (
-                    <span className="pf-dash-modeleft">Time Left in Mode: {modeLeft === null ? "--" : `${modeLeft}s`}{!dash.durations.current ? " (last reported)" : ""}</span>
+                  {(modeLeft !== null ||
+                    (!dash.recipeStatus?.recipeMode &&
+                      ["Startup", "Reignite", "Prime", "Shutdown"].includes(dash.currentMode))) && (
+                    <span className="pf-dash-modeleft">
+                      Time Left in Mode: {modeLeft === null ? "--" : `${modeLeft}s`}
+                      {!dash.durations.current ? " (last reported)" : ""}
+                    </span>
                   )}
                 </div>
-                <span className="pf-dash-cookval" title={dash.durations.current ? "Cook elapsed" : "Last reported cook elapsed"}>{cookTime}</span>
+                <span
+                  className="pf-dash-cookval"
+                  title={dash.durations.current ? "Cook elapsed" : "Last reported cook elapsed"}
+                >
+                  {cookTime}
+                </span>
               </div>
               {/* The primary probe gets a bell too: the Flask dashboard renders
                   the notify modal for probe_status['P'] as well as ['F']
@@ -333,7 +350,10 @@ export function Dashboard({
                   {/* Flask: "Lid Open Detected: PID Paused Ns"
                       (dash_default.js:397). Two lines inside the SAME 210x52
                       box -- the box is not widened. */}
-                  <span className="pf-dash-lid-sub">PID Paused {lidLeft === null ? "--" : `${lidLeft}s`}{!dash.durations.current ? " (last reported)" : ""}</span>
+                  <span className="pf-dash-lid-sub">
+                    PID Paused {lidLeft === null ? "--" : `${lidLeft}s`}
+                    {!dash.durations.current ? " (last reported)" : ""}
+                  </span>
                 </div>
               )}
             </div>
@@ -341,7 +361,7 @@ export function Dashboard({
             <ControlButtons
               dash={dash}
               command={command}
-              disabled={!health.alive}
+              disabled={!controlCurrent}
               apiBase={apiBase}
             />
           </div>

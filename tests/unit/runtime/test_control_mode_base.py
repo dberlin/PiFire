@@ -19,8 +19,8 @@ from common.clock_domain import RuntimeClockDomain
 from common.control_delta import control_delta
 from controller.runtime.clock import ManualClock
 from controller.runtime.context import ControllerContext, Devices
-from controller.runtime.modes.prime import PrimeMode
 from controller.runtime.modes.base import ControlMode
+from controller.runtime.modes.prime import PrimeMode
 from controller.runtime.modes.startup import StartupMode
 from controller.runtime.state import WorkCycleState
 from controller.runtime.store import InMemoryStore
@@ -73,7 +73,7 @@ class _RecordingMode(ControlMode):
         # Bound the loop to exactly one iteration.
         return True
 
-    def teardown(self, ptemp):
+    def teardown(self, ptemp, *, acquired_at_s=None):
         self.calls.append("teardown")
         self.teardown_ptemps.append(ptemp)
 
@@ -1068,7 +1068,7 @@ def test_real_loop_delivery_and_elapsed_ignore_wall_corrections(monkeypatch, wal
     assert metrics["endtime"] == pytest.approx((1_800_000_003.0 + wall_jump) * 1000)
 
 
-def test_history_clear_publishes_the_same_duration_origin_as_terminal_metrics(monkeypatch):
+def test_history_clear_preserves_physical_elapsed_but_restarts_cook_metrics(monkeypatch):
     ctx, clock = _physical_context()
     monkeypatch.setattr(clock, "sleep", lambda _seconds: clock.advance(1.0))
     mode = _FuelMode(ctx, WorkCycleState())
@@ -1081,9 +1081,63 @@ def test_history_clear_publishes_the_same_duration_origin_as_terminal_metrics(mo
 
     monkeypatch.setattr(mode, "on_tick", clear_during_tick)
     mode.run()
-    assert ctx.store.read_status()["elapsed_seconds"] == 2.0
+    assert ctx.store.read_status()["elapsed_seconds"] == 3.0
     assert ctx.store.read_status()["cook_elapsed_seconds"] == 2.0
     assert ctx.store.read_metrics()["elapsed_seconds"] == 2.0
+    assert ctx.store.read_status()["start_time"] == 1_800_000_000.0
+    assert ctx.store.read_metrics()["starttime"] == 1_800_000_001_000.0
+    assert ctx.store.read_metrics()["augerontime"] == 2.0
+
+
+def test_history_clear_mid_prime_does_not_extend_actuator_deadline(monkeypatch):
+    ctx, clock = _physical_context()
+    control = ctx.store.read_control()
+    control.update(mode="Prime", prime_amount=5 * ctx.store.read_settings()["globals"]["augerrate"])
+    ctx.store.write_control_snapshot(control, origin="test")
+    monkeypatch.setattr(clock, "sleep", lambda _seconds: clock.advance(1.0))
+    mode = PrimeMode(ctx, WorkCycleState())
+    tick = mode.on_tick
+
+    def clear_during_tick(now, ptemp, outputs):
+        tick(now, ptemp, outputs)
+        if now == 12.0:
+            mode._handle_history_clear(now=now)
+
+    monkeypatch.setattr(mode, "on_tick", clear_during_tick)
+    mode.run()
+
+    assert clock.monotonic() == 16.0
+    assert ctx.store.read_status()["elapsed_seconds"] == 6.0
+    assert ctx.store.read_status()["remaining_seconds"] == 0.0
+    assert ctx.store.read_status()["cook_elapsed_seconds"] == 4.0
+    assert ctx.store.read_metrics()["elapsed_seconds"] == 4.0
+    assert not mode.grill.get_output_status()["auger"]
+
+
+def test_delayed_preflight_does_not_consume_prime_actuator_window(monkeypatch):
+    ctx, clock = _physical_context()
+    control = ctx.store.read_control()
+    control.update(mode="Prime", prime_amount=5 * ctx.store.read_settings()["globals"]["augerrate"])
+    ctx.store.write_control_snapshot(control, origin="test")
+    monkeypatch.setattr(clock, "sleep", lambda _seconds: clock.advance(1.0))
+    probes = ctx.devices.probe_complex
+    read_probes = probes.read_probes
+
+    def delayed_preflight(**kwargs):
+        result = read_probes(**kwargs)
+        if len(probes.read_calls) == 1:
+            clock.advance(4.0)
+        return result
+
+    monkeypatch.setattr(probes, "read_probes", delayed_preflight)
+    mode = PrimeMode(ctx, WorkCycleState())
+    mode.run()
+
+    assert clock.monotonic() == 20.0
+    assert ctx.store.read_status()["start_time"] == 1_800_000_004.0
+    assert ctx.store.read_metrics()["elapsed_seconds"] == 6.0
+    assert ctx.store.read_metrics()["augerontime"] == pytest.approx(6.0)
+    assert not mode.grill.get_output_status()["auger"]
 
 
 def test_blocking_control_flags_retire_before_another_probe_read(monkeypatch):

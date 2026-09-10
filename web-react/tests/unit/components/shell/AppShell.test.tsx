@@ -278,14 +278,18 @@ describe("AppShell live-state context", () => {
 // wiring by hand before AppShell existed. Now that the real shell owns the
 // composition these drive it directly.
 describe("AppShell navbar stopwatch and timer bar", () => {
-  it("hides the bar until the stopwatch is pressed", () => {
-    const { container } = mountShell();
+  it("keeps the backend stopped UUID hidden until the stopwatch opens the start form", () => {
+    const { container } = mountShell({
+      timer: timerBlock({ state: "stopped", timerId: "00000000-0000-0000-0000-000000000000" }),
+    });
     expect(timerBar(container)).toBeNull();
 
     fireEvent.click(stopwatch());
 
     expect(timerBar(container)).toBeTruthy();
     expect(stopwatch().getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Start timer" }));
+    expect(screen.getByRole("dialog", { name: "Set Timer" })).toBeInTheDocument();
   });
 
   it("hides the bar again on a second press", () => {
@@ -299,15 +303,63 @@ describe("AppShell navbar stopwatch and timer bar", () => {
   });
 
   it("shows the bar unprompted when a timer is already running", () => {
-    const { container } = mountShell({ timer: timerBlock({ timerId: "66cc24ec-0bb4-42b7-af5d-c5e21124ec90", state: "running", current: true, remainingS: 600 }) });
+    const { container } = mountShell({
+      timer: timerBlock({
+        timerId: "66cc24ec-0bb4-42b7-af5d-c5e21124ec90",
+        state: "running",
+        current: true,
+        remainingS: 600,
+      }),
+    });
 
     expect(timerBar(container)).toBeTruthy();
     expect(stopwatch().className).toContain("running");
   });
 
+  it("reveals an interrupted timer even when its identity and remaining duration are unknown", () => {
+    const { container } = mountShell({
+      timer: timerBlock({ state: "interrupted", timerId: null, remainingS: null, current: false }),
+    });
+    expect(timerBar(container)).toBeTruthy();
+    expect(screen.getByRole("status")).toHaveTextContent(/interrupted/i);
+    expect(screen.getByRole("button", { name: "Start timer" })).toBeInTheDocument();
+  });
+
+  it("does not reopen a dismissed timer for stop or expiry, but reveals a new active timer", () => {
+    const renderFrame = frameRenderer(new QueryClient());
+    const active = timerBlock({
+      timerId: "66cc24ec-0bb4-42b7-af5d-c5e21124ec90",
+      state: "running",
+      current: true,
+      remainingS: 600,
+    });
+    renderFrame({ ...FRAME, timer: active });
+    fireEvent.click(stopwatch());
+    for (const state of ["expired", "stopped"] as const) {
+      renderFrame({
+        ...FRAME,
+        timer: timerBlock({ state, timerId: "00000000-0000-0000-0000-000000000000" }),
+      });
+      expect(stopwatch()).toHaveAttribute("aria-pressed", "false");
+      expect(screen.queryByRole("button", { name: "Start timer" })).not.toBeInTheDocument();
+    }
+    renderFrame({
+      ...FRAME,
+      timer: { ...active, timerId: "fcc611be-61db-4fd4-87b8-d401d7c10c6e" },
+    });
+    expect(stopwatch()).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Pause timer" })).toBeInTheDocument();
+  });
 
   it("drives the timer with the shell's own command client", () => {
-    const { container } = mountShell({ timer: timerBlock({ timerId: "66cc24ec-0bb4-42b7-af5d-c5e21124ec90", state: "running", current: true, remainingS: 600 }) });
+    const { container } = mountShell({
+      timer: timerBlock({
+        timerId: "66cc24ec-0bb4-42b7-af5d-c5e21124ec90",
+        state: "running",
+        current: true,
+        remainingS: 600,
+      }),
+    });
     const { command } = useLiveStateMock.mock.results[0].value;
     expect(timerBar(container)).toBeTruthy();
 

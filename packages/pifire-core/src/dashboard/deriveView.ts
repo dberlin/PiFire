@@ -47,6 +47,13 @@ export function staleLabel(seconds: number): string {
   return `last data ${Math.floor(seconds / 3600)}h ago`;
 }
 
+/** Client presentation metadata only; never written back to the probe/wire.
+ * Absence preserves compatibility with raw payloads and simulated readings.
+ * A transport receipt can qualify a number, not invalidate its acquisition. */
+export interface ReadingStatus extends ProbeStatusPayload {
+  readingCurrent?: boolean;
+}
+
 /** What a card shows for a probe, and whether that number is live.
  *
  *  A probe with no current reading keeps showing its last real one -- 40 s of
@@ -55,14 +62,16 @@ export function staleLabel(seconds: number): string {
  *  null only for a probe that has produced nothing at all. */
 export function reading(
   temp: number | null,
-  status: ProbeStatusPayload,
+  status: ReadingStatus,
 ): { shown: number | null; stale: string | null } {
-  if (temp !== null) return { shown: temp, stale: null };
-  const last = status.lastTemp;
+  const retained = status.readingCurrent === false || status.lastReadingAge === null;
+  if (temp !== null && !retained) return { shown: temp, stale: null };
+  const last = temp ?? status.lastTemp;
   if (typeof last !== "number") return { shown: null, stale: null };
   return {
     shown: last,
-    stale: typeof status.lastReadingAge === "number" ? staleLabel(status.lastReadingAge) : "Last known",
+    stale: typeof status.lastReadingAge === "number" && Number.isFinite(status.lastReadingAge)
+      && status.lastReadingAge >= 0 ? staleLabel(Math.floor(status.lastReadingAge)) : "Last known",
   };
 }
 

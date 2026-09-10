@@ -6,11 +6,9 @@ import hashlib
 import math
 import os
 from dataclasses import FrozenInstanceError, replace
-from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from scipy import optimize
 
 from common.learning_trajectory import (
     FitCorpusIdentity,
@@ -30,7 +28,6 @@ from controller.runtime.model_fitting import (
     GreyFitSegmentArrays,
     GreyFitSuccess,
     GreyFitWorker,
-    fit_segmented_grey,
 )
 
 _DIGEST_A = "a" * 64
@@ -264,23 +261,3 @@ def test_result_identity_is_lossless_and_next_request_waits_for_result_drain() -
         second_message = worker.receive(timeout_s=10.0)
     assert second_message.outcome.request == second.request
     assert second_message.outcome.request.fit_corpus == second.request.fit_corpus
-
-
-def test_default_segmented_kernel_keeps_fixed_residual_shape_and_uses_no_continuous_job_path(
-    monkeypatch,
-) -> None:
-    job = _job()
-    point = np.log(np.asarray([getattr(job.config, key) for key in FITTED_PARAMETERS]))
-    residual_lengths = []
-
-    def fixed(residual, _x0, *args, **kwargs):
-        residual_lengths.append(len(residual(point)))
-        return SimpleNamespace(x=point, status=1, nfev=1, success=True)
-
-    monkeypatch.setattr(optimize, "least_squares", fixed)
-    outcome = fit_segmented_grey(job)
-
-    assert isinstance(outcome, GreyFitSuccess)
-    assert residual_lengths == [12, 12]
-    assert outcome.optimizer_residual_count == 12
-    assert not hasattr(job, "observations")

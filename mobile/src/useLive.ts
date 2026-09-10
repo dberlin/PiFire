@@ -7,15 +7,14 @@ import {
   type ConnectionPhase,
   type LiveConnection,
   createLiveConnection,
+  liveReceiptFreshness,
   monotonicNowMs,
-  projectLiveDurations,
+  projectLiveSnapshot,
 } from "@pifire/core/liveConnection";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
 
 export type { ConnectionPhase };
-
-export const LIVE_STALE_AFTER_MS = 30_000;
 
 export interface LiveResult {
   live: DashSocketPayload;
@@ -35,40 +34,18 @@ export interface LiveResult {
 
 /** Shared by retained health and the transport header; never consult wall time. */
 export function receiptFreshness(result: LiveResult, now: number) {
-  const payloadAgeMs = result.lastPayloadMonotonicMs === null
-    ? null
-    : now - result.lastPayloadMonotonicMs;
-  const validAge = payloadAgeMs !== null && Number.isFinite(payloadAgeMs) && payloadAgeMs >= 0;
-  return {
-    payloadAgeMs: validAge ? payloadAgeMs : null,
-    retained: result.phase !== "live" || !validAge || payloadAgeMs > LIVE_STALE_AFTER_MS,
-  };
+  return liveReceiptFreshness(result.lastPayloadMonotonicMs, now, result.phase === "live");
 }
 
 export function qualifyRetainedHealth(result: LiveResult, now: number): LiveResult {
-  const { payloadAgeMs, retained } = receiptFreshness(result, now);
-  const projected = projectLiveDurations(
-    result.live, result.lastPayloadMonotonicMs, now, result.phase === "live",
-  );
   return {
     ...result,
-    live: {
-      ...projected,
-      thermocoupleHealth: result.live.thermocoupleHealth?.map((health) => ({
-        ...health,
-        freshness: {
-          ...health.freshness,
-          current: health.freshness.current && health.freshness.lastReportedAgeS !== null && !retained,
-          lastReportedAgeS:
-            health.freshness.lastReportedAgeS === null || payloadAgeMs === null
-              ? null
-              : health.freshness.lastReportedAgeS + payloadAgeMs / 1000,
-          reason: payloadAgeMs === null || health.freshness.lastReportedAgeS === null
-            ? "unknown-clock"
-            : retained ? "retained" : health.freshness.reason,
-        },
-      })),
-    },
+    ...projectLiveSnapshot(
+      result.live,
+      result.lastPayloadMonotonicMs,
+      now,
+      result.phase === "live",
+    ),
   };
 }
 
@@ -95,7 +72,9 @@ export function useLive(host: string): LiveResult {
   const [lastPayloadMonotonicMs, setLastPayloadMonotonicMs] = useState<number | null>(null);
 
   const connectionRef = useRef<LiveConnection | null>(null);
-  const activeRef = useRef(AppState.currentState !== "background" && AppState.currentState !== "inactive");
+  const activeRef = useRef(
+    AppState.currentState !== "background" && AppState.currentState !== "inactive",
+  );
 
   // Owns the connection's lifetime: open on mount (or host change), close
   // on unmount.
@@ -121,9 +100,8 @@ export function useLive(host: string): LiveResult {
 
     const connection = createLiveConnection(host, {
       onDash: (payload) => {
-        if (!activeRef.current) return;
         setLive(payload);
-        setLastPayloadMonotonicMs(monotonicNowMs());
+        setLastPayloadMonotonicMs(activeRef.current ? monotonicNowMs() : null);
       },
       onPellets: setPellets,
       onPhase: showPhase,
@@ -143,11 +121,13 @@ export function useLive(host: string): LiveResult {
   // previous coordinate. Only onDash can establish a new receipt.
   useEffect(() => {
     if (lastPayloadMonotonicMs === null) return;
+    let previousNow = lastPayloadMonotonicMs;
     const timer = setInterval(() => {
-      const ageMs = monotonicNowMs() - lastPayloadMonotonicMs;
-      if (!Number.isFinite(ageMs) || ageMs < 0) {
+      const now = monotonicNowMs();
+      if (!Number.isFinite(now) || now < previousNow) {
         setLastPayloadMonotonicMs(null);
       }
+      previousNow = now;
     }, 1000);
     return () => clearInterval(timer);
   }, [lastPayloadMonotonicMs]);
@@ -166,7 +146,9 @@ export function useLive(host: string): LiveResult {
   }, []);
 
   const command = useMemo(() => createCommand(host), [host]);
-  const controlAlive = deriveControlAlive(live);
+  const controlAlive =
+    !liveReceiptFreshness(lastPayloadMonotonicMs, monotonicNowMs(), phase === "live").retained &&
+    deriveControlAlive(live);
 
   return { live, phase, controlAlive, pellets, command, lastPayloadMonotonicMs, host };
 }

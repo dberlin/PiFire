@@ -19,8 +19,7 @@ import logging
 import time
 from dataclasses import replace
 
-from common.clock_domain import ClockStamp, RuntimeClockDomain, continuity_lost
-
+from common.clock_domain import CONTROL_DISCONTINUITY_SECONDS, ClockStamp, RuntimeClockDomain, stamp_age_s
 from probes.thermocouple_health import (
     ThermocoupleHealthReport,
     ThermocoupleHealthState,
@@ -183,12 +182,19 @@ class ProbesMain:
         self._thermocouple_health_by_device = health_by_device
         self._thermocouple_health_transitions.clear()
 
-    def invalidate_control_history(self) -> None:
-        """Discard timing authority, not confirmed fault acknowledgment state."""
+    def invalidate_control_history(self, *, clock_discontinuity: bool = True) -> None:
+        """Reset acquisition history, preserving independent receipts on an idle gap.
+
+        Clock-domain loss also revokes device-local receipt authority. Confirmed
+        faults survive either reset until their normal acknowledgment/recovery.
+        """
         for engine in self._thermocouple_inference_engines.values():
             engine.invalidate_clock_domain()
         for device in self.probe_device_list:
-            device.invalidate_clock_domain()
+            if clock_discontinuity:
+                device.invalidate_clock_domain()
+            else:
+                device.invalidate_acquisition_history()
         self.last_clock_stamp = None
         self._thermocouple_health = {
             label: replace(report, clock_stamp=None) for label, report in self._thermocouple_health.items()
@@ -218,9 +224,20 @@ class ProbesMain:
         domain = clock_domain or self._clock_domain
         stamp = domain.capture(monotonic_s=monotonic_s, wall_s=wall_s)
         previous_stamp = self.last_clock_stamp
-        discontinuous = previous_stamp is not None and continuity_lost(previous_stamp, stamp)
+        age_s = (
+            stamp_age_s(
+                previous_stamp,
+                monotonic_s=stamp.observed_monotonic_s,
+                boot_id=stamp.boot_id,
+                runtime_id=stamp.runtime_id,
+                suspend_offset_s=stamp.suspend_offset_s,
+            )
+            if previous_stamp is not None
+            else None
+        )
+        discontinuous = previous_stamp is not None and (age_s is None or age_s > CONTROL_DISCONTINUITY_SECONDS)
         if discontinuous:
-            self.invalidate_control_history()
+            self.invalidate_control_history(clock_discontinuity=age_s is None)
         observed_monotonic_s = stamp.observed_monotonic_s
         base_excitation = excitation or ThermocoupleExcitationContext(
             active_cook=False,

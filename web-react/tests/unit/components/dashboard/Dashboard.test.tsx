@@ -7,6 +7,7 @@ import type {
   PidSpLearningReport,
 } from "@pifire/core/contracts/learning";
 import { FIXTURE_DASH } from "@pifire/core/fixture";
+import { projectLiveSnapshot } from "@pifire/core/liveConnection";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
@@ -573,15 +574,23 @@ describe("Dashboard", () => {
     rs.setSystemTime(new Date(2024, 0, 1, 12, 34, 59));
     try {
       const timer: DashSocketPayload["timer"] = {
-        ...FIXTURE_DASH.timer, state: "running", remainingS: 2, current: false,
+        ...FIXTURE_DASH.timer,
+        state: "running",
+        remainingS: 2,
+        current: false,
       };
       const dash: DashSocketPayload = {
-        ...FIXTURE_DASH, currentMode: "Hold", timer,
+        ...FIXTURE_DASH,
+        currentMode: "Hold",
+        timer,
         durations: { ...FIXTURE_DASH.durations, cookElapsedS: 59 },
       };
       const command = makeCommand();
       const view = renderInQueryRouter(
-        <>{dashboardAt("", dash)}<TimerBar timer={timer} command={command} /></>,
+        <>
+          {dashboardAt("", dash)}
+          <TimerBar timer={timer} command={command} />
+        </>,
       );
       const initialCalendarLabel = view.container.querySelector('[data-pf="clock"]')?.textContent;
       expect(screen.getByText("59s")).toBeInTheDocument();
@@ -590,7 +599,9 @@ describe("Dashboard", () => {
         rs.setSystemTime(new Date(2024, 0, 1, 13, 34, 59));
         rs.advanceTimersByTime(1000);
       });
-      expect(view.container.querySelector('[data-pf="clock"]')?.textContent).not.toBe(initialCalendarLabel);
+      expect(view.container.querySelector('[data-pf="clock"]')?.textContent).not.toBe(
+        initialCalendarLabel,
+      );
       expect(screen.getByText("59s")).toBeInTheDocument();
       expect(screen.getByText("00:00:02")).toBeInTheDocument();
       expect(command.timerStop).not.toHaveBeenCalled();
@@ -972,11 +983,8 @@ describe("Dashboard target notifications", () => {
   });
 });
 
-// D1: the CTRL OFFLINE signal comes from the errors blob, which never clears
-// without a control.py restart (common/datastore_accessors.py:126-132) and can
-// be written on a healthy system by a queue race (common/app.py:31-44). The
-// frontend cannot clear the blob -- no route does -- so it offers to ask the
-// same question directly instead.
+// A manual check can close the server poll's recovery gap, but the next
+// authoritative socket snapshot must be able to report control down again.
 describe("Dashboard control-health recheck", () => {
   afterEach(() => {
     rs.unstubAllGlobals();
@@ -987,6 +995,33 @@ describe("Dashboard control-health recheck", () => {
     expect(screen.getByText("CTRL OFFLINE")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Recheck" })).toBeInTheDocument();
   });
+
+  it.each([false, true])(
+    "does not turn a retained receipt into producer failure or live controls (alive=%s)",
+    (controlAlive) => {
+      const retained = projectLiveSnapshot(
+        {
+          ...FIXTURE_DASH,
+          currentMode: "Hold",
+          primaryProbe: {
+            ...FIXTURE_DASH.primaryProbe,
+            temp: 226,
+            status: { lastTemp: 226, lastReadingAge: 2 },
+          },
+        },
+        100_000,
+        131_000,
+        true,
+      );
+      renderDashboard(retained.live, { phase: "live", controlAlive });
+      expect(screen.getByText("LAST REPORTED")).toBeInTheDocument();
+      expect(screen.queryByText("CTRL OFFLINE")).not.toBeInTheDocument();
+      expect(screen.queryByText("LIVE")).not.toBeInTheDocument();
+      expect(screen.getByText("last data 33s ago")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Smoke" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
+    },
+  );
 
   it("offers no Recheck while the control process is reported alive", () => {
     renderDashboard(FIXTURE_DASH, { phase: "live", controlAlive: true });
@@ -1011,6 +1046,53 @@ describe("Dashboard control-health recheck", () => {
     await waitFor(() => expect(screen.getByText("LIVE")).toBeInTheDocument());
     expect(fetchCallsTo(fetchMock, "/api/sys/check_alive")).toHaveLength(1);
     expect(screen.queryByRole("button", { name: "Recheck" })).not.toBeInTheDocument();
+  });
+
+  it("returns to CTRL OFFLINE when a newer current packet follows a successful Recheck", async () => {
+    const user = userEvent.setup();
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async () => ({ ok: true, json: async () => ({ result: "OK" }) })),
+    );
+    const packet = {
+      ...FIXTURE_DASH,
+      currentMode: "Hold",
+      errors: ["The control process did not respond to a request and may be stopped."],
+    };
+    const packets = [packet, { ...packet, errors: [...packet.errors] }];
+    function SnapshotHarness() {
+      const [index, setIndex] = useState(0);
+      const { live, controlAlive } = projectLiveSnapshot(
+        packets[index],
+        100_000 + index,
+        100_000 + index,
+        true,
+      );
+      return (
+        <>
+          <button onClick={() => setIndex(1)}>Next report</button>
+          <Dashboard
+            dash={live}
+            controlAlive={controlAlive}
+            command={makeCommand()}
+            apiBase=""
+            phase="live"
+            accent="ember"
+            setAccent={rs.fn()}
+            animate={false}
+            setAnimate={rs.fn()}
+          />
+        </>
+      );
+    }
+    renderInQueryRouter(<SnapshotHarness />);
+    await user.click(screen.getByRole("button", { name: "Recheck" }));
+    await waitFor(() => expect(screen.getByText("LIVE")).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Next report" }));
+    expect(screen.getByText("CTRL OFFLINE")).toBeInTheDocument();
+    expect(screen.queryByText("LIVE")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Smoke" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
   });
 
   it("stays offline when the recheck says the control process really is down", async () => {
@@ -1040,7 +1122,6 @@ describe("Dashboard control-health recheck", () => {
 // renders INSIDE an existing box -- no new rows -- so the 1280x720 geometry is
 // unchanged whenever they are absent.
 describe("Dashboard status readouts", () => {
-
   it("shows explicit remaining in a timed mode", () => {
     renderDashboard({
       ...FIXTURE_DASH,

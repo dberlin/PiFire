@@ -38,7 +38,7 @@ def _advance_runtime(mode, now, actual_auger_on, *, ptemp=None, apply_transition
     result = _runtime(mode).advance(
         now,
         actual_auger_on,
-        sample=mode._framed_sample(ptemp),
+        sample=mode._framed_sample(ptemp, acquired_at_s=now),
         prior_output_source=_trace(mode).applied_state.output_source,
     )
     transition = result.decision.transition

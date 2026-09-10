@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -89,13 +90,15 @@ class PulseControllerState(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class FramedPulseSample:
-    """Thermal and model identity sampled when a frame is observed."""
+    """Thermal/model sample with its pre-device-read monotonic acquisition time."""
 
     temperature: float | None
     setpoint: float
     ambient_c: float
     units: str
     role_generation: int
+    # None means acquisition provenance is unavailable, never scheduler "now".
+    acquired_at_s: float | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -281,7 +284,6 @@ class FramedPulseRuntime:
                 frame,
                 latched=previous,
                 sample=sample,
-                sample_at_s=now,
                 inhibit=InhibitReason.NONE,
                 terminal_feedback=True,
                 feedback_source=previous.output_source,
@@ -339,7 +341,6 @@ class FramedPulseRuntime:
                 frame,
                 latched=previous,
                 sample=sample,
-                sample_at_s=now,
                 inhibit=inhibit,
                 terminal_feedback=True,
                 feedback_source=previous.output_source,
@@ -364,7 +365,6 @@ class FramedPulseRuntime:
                     interrupted,
                     latched=latched,
                     sample=sample,
-                    sample_at_s=now,
                     inhibit=inhibit,
                     terminal_feedback=terminal_feedback,
                     feedback_source=feedback_source or latched.output_source,
@@ -403,7 +403,6 @@ class FramedPulseRuntime:
                     latched=latched,
                     # The resume temperature cannot describe the interrupted frame.
                     sample=replace(sample, temperature=None),
-                    sample_at_s=interrupted.ended_at_s,
                     inhibit=InhibitReason.SAFETY,
                     terminal_feedback=True,
                     feedback_source=latched.output_source,
@@ -432,7 +431,6 @@ class FramedPulseRuntime:
         *,
         sample: FramedPulseSample,
         inhibit: InhibitReason,
-        sample_at_s: float | None = None,
         terminal_feedback: bool = False,
         feedback_source: OutputSource | None = None,
     ) -> FramedPulseCompletion:
@@ -441,7 +439,6 @@ class FramedPulseRuntime:
             frame,
             latched=latched,
             sample=sample,
-            sample_at_s=frame.ended_at_s if sample_at_s is None else sample_at_s,
             inhibit=inhibit,
             terminal_feedback=terminal_feedback,
             feedback_source=feedback_source or latched.output_source,
@@ -594,7 +591,6 @@ class FramedPulseRuntime:
         *,
         latched: _LatchedFrame,
         sample: FramedPulseSample,
-        sample_at_s: float,
         inhibit: InhibitReason,
         terminal_feedback: bool,
         feedback_source: OutputSource,
@@ -622,7 +618,6 @@ class FramedPulseRuntime:
                     frame,
                     latched=latched,
                     sample=sample,
-                    sample_at_s=sample_at_s,
                     inhibit=inhibit,
                     sequence=sequence,
                     wall_start_ms=wall_start_ms,
@@ -679,7 +674,6 @@ class FramedPulseRuntime:
         *,
         latched: _LatchedFrame,
         sample: FramedPulseSample,
-        sample_at_s: float,
         inhibit: InhibitReason,
         sequence: int,
         wall_start_ms: int,
@@ -697,7 +691,8 @@ class FramedPulseRuntime:
         # the first tick at or after the frame boundary. A sample from before the
         # boundary predates the actuation it is meant to describe, and one a whole
         # frame late belongs to a frame the loop never closed.
-        sample_lag_s = sample_at_s - frame.ended_at_s
+        acquired_at_s = sample.acquired_at_s
+        sample_lag_s = None if acquired_at_s is None else acquired_at_s - frame.ended_at_s
         continuous = not (
             lid_open
             or manual_override
@@ -706,6 +701,8 @@ class FramedPulseRuntime:
             or frame.skipped
             or reset
             or source == "unknown"
+            or sample_lag_s is None
+            or not math.isfinite(sample_lag_s)
             or sample_lag_s < 0.0
             or sample_lag_s >= duration_s
         )

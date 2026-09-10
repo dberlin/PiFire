@@ -1808,9 +1808,9 @@ class TimerStatus(FlexObject):
         canvas = Image.new("RGBA", size)
         draw = ImageDraw.Draw(canvas)
 
-        # Zero with no active countdown remains blank; unknown stays visible.
+        # Activity is independent of the countdown reaching zero.
         seconds = self.objectData["data"]["seconds"]
-        if seconds is None or seconds > 0:
+        if self.objectData["data"]["active"]:
             # Timer Background
             draw.rounded_rectangle((15, 15, size[0] - 15, size[1] - 15), radius=20, fill=bg_color)
 
@@ -1818,19 +1818,21 @@ class TimerStatus(FlexObject):
             timer_icon = self._create_icon("\uf2f2", 35, fg_color)
             canvas.paste(timer_icon, (40, 30), timer_icon)
 
-            # Draw Timer Label on Top Portion of Box
-            if len(self.objectData["label"]) > 11:
-                label_displayed = self.objectData["label"][0:11]
-            else:
-                label_displayed = self.objectData["label"]
-
-            timer_label = self._draw_text(label_displayed, "trebuc.ttf", 50, fg_color)
-            canvas.paste(timer_label, (80, 30), timer_label)
+            # Keep the retained-value qualifier on its own readable line.
+            label_lines = self.objectData["label"].split("\n")
+            for index, line in enumerate(label_lines):
+                font_size = 50 if index == 0 else 36
+                timer_label = self._draw_text(line, "trebuc.ttf", font_size, fg_color)
+                if timer_label.width > 290:
+                    font_size = max(1, int(font_size * 290 / timer_label.width))
+                    timer_label = self._draw_text(line, "trebuc.ttf", font_size, fg_color)
+                canvas.paste(timer_label, (80, 30 + index * 48), timer_label)
 
             # Draw Seconds Remaining
             seconds_remaining = "--" if seconds is None else f"{seconds}s"
-            timer_text = self._draw_text(seconds_remaining, "trebuc.ttf", 100, fg_color)
-            timer_text_position = ((size[0] // 2) - (timer_text.width // 2), 90)
+            qualified = len(label_lines) > 1
+            timer_text = self._draw_text(seconds_remaining, "trebuc.ttf", 80 if qualified else 100, fg_color)
+            timer_text_position = ((size[0] // 2) - (timer_text.width // 2), 112 if qualified else 90)
             canvas.paste(timer_text, timer_text_position, timer_text)
 
         # Resize and Prepare Output
@@ -2204,12 +2206,21 @@ class CookTimeBar(FlexObject):
         )
 
         pad = round(height * 0.55)
-        label_canvas = self._draw_text(label, "./static/font/Barlow-SemiBold.ttf", round(height * 0.28), label_color)
+        label_lines = label.split("\n")
+        label_canvases = [
+            self._draw_text(line, "./static/font/Barlow-SemiBold.ttf", round(height * 0.28), label_color)
+            for line in label_lines
+        ]
         value_canvas = self._draw_text(
             value, "./static/font/BarlowSemiCondensed-Bold.ttf", round(height * 0.50), value_color
         )
 
-        bar.paste(label_canvas, (pad, (height - label_canvas.size[1]) // 2), label_canvas)
+        line_gap = max(2, round(height * 0.05))
+        label_height = sum(line.height for line in label_canvases) + line_gap * (len(label_canvases) - 1)
+        label_y = (height - label_height) // 2
+        for line in label_canvases:
+            bar.paste(line, (pad, label_y), line)
+            label_y += line.height + line_gap
         bar.paste(
             value_canvas, (width - pad - value_canvas.size[0], (height - value_canvas.size[1]) // 2), value_canvas
         )

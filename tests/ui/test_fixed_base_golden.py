@@ -19,8 +19,9 @@ build and installed fonts and will differ on another machine; they are
 only valid where these golden tests actually run rather than skip, and
 must never be recaptured there.
 
-Countdown fixtures contain explicit frozen zero-duration snapshots. This keeps
-the existing "0s" / "Lid Pause 0s" pixels deterministic without clock subtraction.
+Countdown fixtures contain explicit current, frozen zero-duration snapshots and
+matching clock/heartbeat admission. This preserves the existing "0s" / "Lid Pause
+0s" pixels; retained-value qualifiers are covered separately by the smoke tests.
 """
 
 import json
@@ -29,6 +30,7 @@ import pathlib
 
 import pytest
 
+from tests.fakes.clock import clock_stamp
 from tests.ui.fixed_base_harness import GOLDEN_ENVIRONMENT_AVAILABLE, make_base, render
 
 pytestmark = pytest.mark.skipif(
@@ -243,12 +245,19 @@ def _load_golden():
 
 
 @pytest.mark.parametrize("case", CASES, ids=[c[0] for c in CASES])
-def test_matches_golden(case):
+def test_matches_golden(case, monkeypatch):
     name, module, rotation, units, method, args_factory = case
+    stamp = clock_stamp()
+    monkeypatch.setattr("display._base_fixed.local_clock_stamp", lambda: stamp)
+    monkeypatch.setattr("display._base_fixed.read_control_heartbeat", lambda: stamp)
     base = make_base(module, rotation=rotation, units=units)
     if method == "_display_text":
         base.display_text("Network Error")
-    h = render(base, method, *args_factory())
+    args = args_factory()
+    if method == "_display_current":
+        in_data, status_data = args
+        args = (in_data, {**status_data, "running": True, "clock_stamp": stamp.as_dict()})
+    h = render(base, method, *args)
     golden = _load_golden()
     if os.environ.get("CAPTURE_GOLDEN") == "1":
         golden[name] = h

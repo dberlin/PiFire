@@ -374,6 +374,28 @@ def test_cook_time_bar_shows_countdown_when_timer_running():
     assert value.property("text") == "04:32"
 
 
+def test_cook_time_bar_marks_retained_values_and_keeps_unknown_honest():
+    _app()
+    status = {"mode": "Startup", "remaining_seconds": 0, "cook_elapsed_seconds": 125}
+    backend = _stub_backend(status=status)
+    engine = _engine_with_backend(backend)
+    obj = _create(engine, "components/CookTimeBar.qml")
+    obj.setProperty("width", 260)
+    obj.setProperty("height", 44)
+    obj.setProperty("compact", True)
+    label = obj.findChild(QObject, "cookTimeLabel")
+    value = obj.findChild(QObject, "cookTimeValue")
+    assert "reported" in label.property("text").lower()
+    assert value.property("text") == "00:00"
+    status["mode"] = "Hold"
+    backend.poll()
+    assert "reported" in label.property("text").lower()
+    assert value.property("text") == "02:05"
+    status["cook_elapsed_seconds"] = None
+    backend.poll()
+    assert value.property("text") == "--:--"
+
+
 def test_alert_pill_has_fixed_width_and_keeps_message_shown_props():
     # Alert.qml: keeps its message/shown public props, is a
     # fixed-width pill (Layout.preferredWidth: 210) so DashScreen's cook-time bar

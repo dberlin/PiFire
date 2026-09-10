@@ -15,6 +15,7 @@ class _HealthDevice(ProbeInterface):
     def __init__(self, health):
         self.health = health
         self.closed = False
+        self.port_filters = {}
 
     def read_all_ports(self, _output_data):
         return {

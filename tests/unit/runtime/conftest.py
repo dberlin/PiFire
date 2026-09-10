@@ -23,10 +23,10 @@ def _off():
 def hold_cycle(monkeypatch):
     """A HoldMode wired to a FakeControllerRunner, driven tick by tick.
 
-    Direct on_tick() calls take monotonic seconds. Tests must advance ctx.clock
-    explicitly before each physical tick; this fixture does not replace
-    on_tick() or derive elapsed time from wall provenance. It reproduces the
-    state ControlMode.run() seeds before entering its loop.
+    Direct on_tick() calls supply simulated samples acquired at the given
+    monotonic tick, unless acquired_at_s explicitly describes an earlier read.
+    Tests advance ctx.clock themselves; the wrapper only supplies the acquisition
+    provenance that ControlMode.run() obtains from the real probe read.
     """
 
     def build(
@@ -80,6 +80,17 @@ def hold_cycle(monkeypatch):
         mode.control = control_data
         mode._model_store = model_store
         mode.state.manual_override = {"igniter": 0, "auger": 0, "fan": 0, "power": 0, "pwm": 0}
+        on_tick = mode.on_tick
+        acquired_at_tick = object()
+
+        def sampled_tick(now, ptemp, current_output_status, *, acquired_at_s=acquired_at_tick):
+            mode._last_probe_monotonic_s = now if acquired_at_s is acquired_at_tick else acquired_at_s
+            if isinstance(ptemp, (int, float)):
+                mode._last_valid_ptemp = ptemp
+                mode._last_valid_ptemp_monotonic_s = mode._last_probe_monotonic_s
+            return on_tick(now, ptemp, current_output_status)
+
+        monkeypatch.setattr(mode, "on_tick", sampled_tick)
         return mode
 
     return build

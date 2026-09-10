@@ -1,6 +1,8 @@
 import { io } from "socket.io-client";
 import type { PelletSocketPayload } from "./contracts/control.gen";
 import type { DashSocketPayload } from "./contracts/core.gen";
+import type { ReadingStatus } from "./dashboard/deriveView";
+import { deriveControlAlive } from "./dashboard/health";
 
 export type ConnectionPhase = "connecting" | "live" | "unreachable" | "demo";
 
@@ -42,6 +44,67 @@ export function projectLiveDurations(
       cookElapsedS: elapsed(durations.cookElapsedS),
       modeRemainingS: remaining(durations.modeRemainingS, advanceDurations),
       lidRemainingS: remaining(durations.lidRemainingS, advanceDurations),
+    },
+  };
+}
+
+/** Shared web/mobile receipt qualification, independent of producer clocks. */
+export function liveReceiptFreshness(
+  receivedMonotonicMs: number | null,
+  nowMonotonicMs: number,
+  connected: boolean,
+) {
+  const ageMs = receivedMonotonicMs === null ? NaN : nowMonotonicMs - receivedMonotonicMs;
+  const payloadAgeMs = Number.isFinite(ageMs) && ageMs >= 0 ? ageMs : null;
+  return {
+    payloadAgeMs,
+    retained: !connected || payloadAgeMs === null || payloadAgeMs > DURATION_RECEIPT_MAX_AGE_MS,
+  };
+}
+
+/** Project a raw snapshot for display without changing producer evidence.
+ * Receipt expiry makes readings and reports retained, never a new fault.
+ * Call with the raw packet each tick, not with a previous projection. */
+export function projectLiveSnapshot(
+  payload: DashSocketPayload,
+  receivedMonotonicMs: number | null,
+  nowMonotonicMs: number,
+  connected: boolean,
+): { live: DashSocketPayload; controlAlive: boolean } {
+  const { payloadAgeMs, retained } = liveReceiptFreshness(
+    receivedMonotonicMs, nowMonotonicMs, connected,
+  );
+  const age = (producerAge: number | null | undefined): number | null =>
+    typeof producerAge !== "number" || !Number.isFinite(producerAge)
+      || producerAge < 0 || payloadAgeMs === null
+      ? null : producerAge + payloadAgeMs / 1000;
+  const readingStatus = (status: ReadingStatus): ReadingStatus => ({
+    ...status,
+    readingCurrent: !retained,
+    // Missing metadata is normal for demos/older producers. Preserve that
+    // distinction from an explicit null (producer provenance is unknown).
+    ...(status.lastReadingAge === undefined && !retained
+      ? {} : { lastReadingAge: age(status.lastReadingAge) }),
+  });
+  return {
+    controlAlive: !retained && deriveControlAlive(payload),
+    live: {
+      ...projectLiveDurations(payload, receivedMonotonicMs, nowMonotonicMs, connected),
+      primaryProbe: { ...payload.primaryProbe, status: readingStatus(payload.primaryProbe.status) },
+      foodProbes: payload.foodProbes.map((probe) => ({ ...probe, status: readingStatus(probe.status) })),
+      thermocoupleHealth: payload.thermocoupleHealth?.map((health) => {
+        const lastReportedAgeS = age(health.freshness.lastReportedAgeS);
+        return {
+          ...health,
+          freshness: {
+            ...health.freshness,
+            current: health.freshness.current && lastReportedAgeS !== null && !retained,
+            lastReportedAgeS,
+            reason: lastReportedAgeS === null
+              ? "unknown-clock" : retained ? "retained" : health.freshness.reason,
+          },
+        };
+      }),
     },
   };
 }

@@ -40,7 +40,7 @@ export function AppShell() {
       ),
     [live.thermocoupleHealth],
   );
-  const { visible, toggle } = useTimerVisibility(live.timer.timerId);
+  const { visible, toggle } = useTimerVisibility(live.timer);
   const timerRunning = live.timer.state === "running" && live.timer.current;
 
   // uiHash moves when set_probe_map() runs anywhere -- another client, the

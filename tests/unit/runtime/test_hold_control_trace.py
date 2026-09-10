@@ -136,7 +136,7 @@ def _advance_runtime(mode, now, actual_auger_on, *, ptemp=None, apply_transition
     result = _runtime(mode).advance(
         now,
         actual_auger_on,
-        sample=mode._framed_sample(ptemp),
+        sample=mode._framed_sample(ptemp, acquired_at_s=now),
         prior_output_source=mode._control_trace.applied_state.output_source,
     )
     transition = result.decision.transition
@@ -164,7 +164,7 @@ def _observe_runtime(mode, frame, *, ptemp, inhibit, role_generation=None):
     runtime.latch(mode._model_role_generation(mode._runner_status()) if role_generation is None else role_generation)
     completion = runtime.complete_frame(
         frame,
-        sample=mode._framed_sample(ptemp),
+        sample=mode._framed_sample(ptemp, acquired_at_s=frame.ended_at_s),
         inhibit=inhibit,
     )
     if completion.observation is not None:
@@ -403,7 +403,6 @@ def test_active_history_clear_rotates_trace_and_evidence_identity_before_next_wr
     assert mode.state.metrics["mode"] == "Hold"
     assert mode.state.metrics["augerontime"] == 0
     assert mode.state.metrics["starttime"] != 1.0
-    assert mode.state.timers.auger_toggle == 2.0
     session_records = [record for record in recorder.records if record.event_kind is TraceEventKind.SESSION]
     assert [record.cook_id for record in session_records] == [
         "old-cook-session",
@@ -551,7 +550,7 @@ def test_real_pid_family_trace_keeps_delayed_publication_separate_from_elapsed_t
     mode = hold_cycle(None, controller=controller, clock=clock)
     monkeypatch.setattr(runner_module, "build_runner", build_runner)
     mode.setup()
-    request.addfinalizer(lambda: mode.teardown(220.0))
+    request.addfinalizer(lambda: mode.teardown(220.0, acquired_at_s=None))
     mode.on_tick(clock.monotonic(), 220.0, mode.grill.get_output_status())
     runner = mode._runner
     assert isinstance(runner, SyncControllerRunner)
@@ -745,7 +744,7 @@ def test_production_hold_seed_lifecycle_rereads_into_calibration(hold_cycle, tmp
         mode.on_tick(float(now), 225.0, output)
         output = mode.grill.get_output_status()
     mode.ctx.clock.advance(64.0 - mode.ctx.clock.monotonic())
-    mode.teardown(220.0)
+    mode.teardown(220.0, acquired_at_s=None)
 
     session_id = _identity(mode).session_id
     assert session_id is not None
@@ -1132,7 +1131,7 @@ def test_mpc_lid_interval_records_measured_feedback_under_the_producing_frame_re
     mode.ctx.clock.advance(26.0 - mode.ctx.clock.monotonic())
     mode.on_tick(26.0, 1.0, mode.grill.get_output_status())
     mode.ctx.clock.advance(26.0 - mode.ctx.clock.monotonic())
-    mode.teardown(1.0)
+    mode.teardown(1.0, acquired_at_s=None)
 
     lid_feedback = [
         record.payload
@@ -1802,7 +1801,7 @@ def test_unknown_selected_controller_keeps_control_live_without_trace_identity(
     mode.ctx.clock.advance(2.0 - mode.ctx.clock.monotonic())
     mode.on_tick(2.0, 200.0, mode.grill.get_output_status())
     runner.reconfigure({}, {})
-    mode.teardown(200.0)
+    mode.teardown(200.0, acquired_at_s=None)
 
     assert any(applied.source is OutputSource.CONTROLLER for applied in runner.applied)
     assert _trace(mode).identity is None
@@ -2042,7 +2041,7 @@ def test_threaded_stop_timeout_rotates_reserved_generation_gaps_and_fences_late_
         with runner._lock:
             runner._configuration_revision = 0
 
-        mode.teardown(212.0)
+        mode.teardown(212.0, acquired_at_s=None)
 
         gaps = [
             (record.session_id, record.payload)
