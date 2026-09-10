@@ -564,6 +564,90 @@ def test_noisy_mixed_duration_segments_fit_without_mask_fixed_point_perfection(i
         assert np.array_equal(mask, expected)
 
 
+def test_warmed_transients_prevent_tail_noise_from_biasing_unseen_pulse_predictions() -> None:
+    truth = _config(theta=45.0)
+    incumbent = _config(C_c=700.0, K_Q=320.0, theta=35.0)
+    rng = np.random.default_rng(812)
+    errors = rng.normal(0.0, 0.15, 110)
+    errors[-30:] += np.sin(np.linspace(0.0, np.pi, 30))
+    segment = _segment(
+        "tail-noise",
+        "cook-tail-noise",
+        config=truth,
+        sequence_start=0,
+        scored_load=tuple(float(value) for value in rng.choice((0.1, 0.3, 0.7, 0.9), size=110)),
+        pre_roll_load=(0.4,) * 8,
+        errors_c=tuple(errors),
+    )
+    held_out = _segment(
+        "unseen-pulses",
+        "cook-unseen",
+        config=truth,
+        sequence_start=200,
+        scored_load=(0.1,) * 10 + (0.8,) * 15 + (0.3,) * 15,
+        pre_roll_load=(0.2,) * 10,
+    )
+
+    result = fit_segmented_grey(_job((segment,), incumbent))
+
+    assert isinstance(result, GreyFitSuccess), result
+    prediction_error = _oracle_prediction(held_out, result.config) - held_out.scored_temperature_c
+    assert float(np.sqrt(np.mean(prediction_error**2))) < 0.1
+
+
+def test_outward_delay_descent_requires_more_warmup_evidence_before_fitting() -> None:
+    truth = _config(theta=120.0)
+    incumbent = _config(theta=50.0)
+    short = _segment(
+        "limited-delay",
+        "cook-limited",
+        config=truth,
+        sequence_start=0,
+        scored_load=(0.1, 0.9, 0.3, 0.7, 0.2) * 6,
+        pre_roll_load=(0.4,) * 8,
+    )
+
+    insufficient = fit_segmented_grey(_job((short,), incumbent))
+
+    assert isinstance(insufficient, GreyFitError), insufficient
+    assert insufficient.error_type == "InsufficientWarmup"
+    longer = _segment(
+        "supported-delay",
+        "cook-supported",
+        config=truth,
+        sequence_start=0,
+        scored_load=(0.1, 0.9, 0.3, 0.7, 0.2) * 20,
+        pre_roll_load=(0.4,) * 8,
+    )
+    supported = fit_segmented_grey(_job((longer,), incumbent))
+    assert isinstance(supported, GreyFitSuccess), supported
+    assert supported.config.theta == pytest.approx(truth.theta, rel=0.03)
+    assert supported.sample_count * fitting.FIT_CADENCE_S >= 600.0
+
+
+def test_exact_model_at_artificial_delay_ceiling_is_not_rejected_by_solver_roundoff() -> None:
+    truth = _config(theta=160.0 / 3.0)
+    segment = _segment(
+        "exact-delay-boundary",
+        "cook-exact-delay",
+        config=truth,
+        sequence_start=0,
+        scored_load=(0.1, 0.9, 0.3, 0.7, 0.2) * 6,
+        pre_roll_load=(0.4,) * 8,
+    )
+    exact_prediction = fitting._simulate_segments(
+        _job((segment,), truth), tuple(getattr(truth, key) for key in FITTED_PARAMETERS)
+    )
+    assert exact_prediction is not None
+    segment = replace(segment, scored_temperature_c=exact_prediction[0])
+
+    result = fit_segmented_grey(_job((segment,), truth))
+
+    assert isinstance(result, GreyFitSuccess), result
+    assert result.rmse_c < 1e-7
+    assert result.sample_count == 30
+
+
 def test_partial_preroll_duration_limits_theta_without_inventing_effective_time() -> None:
     truth = _config(theta=26.0)
     incumbent = _config(theta=25.0)

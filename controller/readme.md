@@ -115,12 +115,17 @@ older observations without increasing the total count. Repeated requests over an
 unchanged frame prefix do not repeat the same failed fit. A later completed fit
 replaces the previous fit error in the learning report.
 
-The fitter uses a fixed set of warmed observations throughout optimization.
-Its delay search is bounded by the available history, so a trial cannot improve
-its score merely by excluding more observations. Candidate/incumbent comparison
-still uses their common warmed support and the existing effective-duration,
-excitation, and identifiability requirements. `segment-warmup-incomplete` describes
-insufficient initial history for scoring, not an unfinished final interval when
+The fitter freezes its warmed observations during each bounded optimization
+stage, then progressively admits earlier warmed observations without dropping
+any already scored rows. The delay bound preserves every admitted row's warm-up
+history, so a trial cannot improve its score merely by excluding observations.
+All stages share one evaluation budget. An initial fit that still needs a larger
+delay at its history-imposed bound reports insufficient warm-up and waits for new
+frame evidence; an exact fit at the bound remains valid.
+Candidate/incumbent comparison still uses their common warmed support and the
+existing effective-duration, excitation, and identifiability requirements.
+`segment-warmup-incomplete` describes insufficient history for the fit attempt,
+not an unfinished final interval when
 Stop is pressed. `warmup-mask-unstable` in older reports describes a rejected fit
 whose scoring window changed during optimization; it does not by itself mean that
 the collector stopped. Storage or corpus-integrity failures remain distinct from

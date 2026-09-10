@@ -1017,7 +1017,7 @@ def _result_digest(
 
 
 def _fit_support(job: GreyFitJob) -> tuple[tuple[Any, ...], float]:
-    """Choose one scoreable support and its delay ceiling before optimization.
+    """Choose the initial scoreable support and its delay ceiling.
 
     The longest-history rows determine the largest delay for which at least the
     required effective duration remains. Every trial uses those same rows, and
@@ -1058,7 +1058,7 @@ def _fit_support(job: GreyFitJob) -> tuple[tuple[Any, ...], float]:
 
 
 def fit_segmented_grey(job: GreyFitJob) -> GreyFitSuccess | GreyFitError:
-    """Fit one shared grey parameter vector over independently reset segments."""
+    """Fit shared parameters while monotonically admitting warmed observations."""
 
     import numpy as np
     from scipy import optimize
@@ -1081,6 +1081,15 @@ def fit_segmented_grey(job: GreyFitJob) -> GreyFitSuccess | GreyFitError:
         upper,
     )
     residual_count = sum(len(segment.scored_load) for segment in job.segments)
+    histories = tuple(
+        np.concatenate(
+            (
+                np.asarray([float(np.sum(segment.pre_roll_duration_s))]),
+                float(np.sum(segment.pre_roll_duration_s)) + np.cumsum(segment.scored_duration_s[:-1]),
+            )
+        )
+        for segment in job.segments
+    )
 
     # A boundary can pin theta exactly to the physical lower limit. SciPy
     # requires strict bounds, so optimize only genuinely free coordinates.
@@ -1111,29 +1120,94 @@ def fit_segmented_grey(job: GreyFitJob) -> GreyFitSuccess | GreyFitError:
             ]
         )
 
+    total_nfev = 0
+    initial_stage = True
     try:
-        first = optimize.least_squares(
-            frozen_residual,
-            x0[free],
-            method="trf",
-            bounds=(lower[free], upper[free]),
-            max_nfev=_MAX_FIT_NFEV,
-        )
+        while True:
+            remaining_nfev = _MAX_FIT_NFEV - total_nfev
+            if remaining_nfev <= 0:
+                return _fit_failure(job, "bounded grey fit did not converge", error_type="FitConvergenceError")
+            free = lower < upper
+            solved = optimize.least_squares(
+                frozen_residual,
+                x0[free],
+                method="trf",
+                bounds=(lower[free], upper[free]),
+                max_nfev=remaining_nfev,
+            )
+            total_nfev += int(getattr(solved, "nfev", 0))
+            if (
+                not bool(getattr(solved, "success", int(getattr(solved, "status", 0)) > 0))
+                or int(getattr(solved, "status", 0)) <= 0
+            ):
+                return _fit_failure(job, "bounded grey fit did not converge", error_type="FitConvergenceError")
+            fitted_log = full_parameters(solved.x)
+            parameters = _parameter_values(fitted_log)
+            if parameters is None:
+                return _fit_failure(job, "bounded grey fit produced non-finite parameters")
+
+            if initial_stage and free[theta_index] and theta_ceiling < FIT_VALUE_BOUNDS["theta"][1]:
+                active = getattr(solved, "active_mask", None)
+                gradient = getattr(solved, "grad", None)
+                cost = float(getattr(solved, "cost", math.nan))
+                theta_coordinate = int(np.count_nonzero(free[:theta_index]))
+                # A material outward slope at the artificial upper bound means
+                # this solve needs more warmup history, not a fabricated small
+                # delay just to retain 600 seconds. The floor is numerical, not
+                # a statistical confidence threshold; an exact boundary fit is
+                # valid despite SciPy's strictly-interior starting-point nudge.
+                numerical_floor = math.sqrt(np.finfo(float).eps) * max(1.0, 2.0 * cost)
+                if (
+                    active is not None
+                    and gradient is not None
+                    and active[theta_coordinate] > 0
+                    and math.isfinite(cost)
+                    and 2.0 * cost > numerical_floor
+                    and math.isfinite(float(gradient[theta_coordinate]))
+                    and gradient[theta_coordinate] < -numerical_floor
+                ):
+                    return _fit_failure(
+                        job,
+                        f"segment-warmup-incomplete:{job.segments[0].segment_id}",
+                        error_type="InsufficientWarmup",
+                    )
+            initial_stage = False
+
+            warmed = _warmup_masks(job.segments, parameters[theta_index])
+            additions = tuple(warm & ~old for warm, old in zip(warmed, frozen_masks, strict=True))
+            if not any(np.any(mask) for mask in additions):
+                break
+            next_history = max(
+                float(np.max(history[mask])) for history, mask in zip(histories, additions, strict=True) if np.any(mask)
+            )
+            # Admit the next cadence-wide history band, not all rows warmed by
+            # the tail-only estimate. This lets theta adjust before its domain
+            # contracts, and groups fractional-offset histories across segments.
+            frozen_masks = tuple(
+                old | (added & (history > next_history - FIT_CADENCE_S))
+                for old, added, history in zip(frozen_masks, additions, histories, strict=True)
+            )
+            for mask in frozen_masks:
+                mask.setflags(write=False)
+            available_history_s = min(
+                float(np.min(history[mask]))
+                for history, mask in zip(histories, frozen_masks, strict=True)
+                if np.any(mask)
+            )
+            theta_ceiling = min(theta_ceiling, available_history_s / 3.0)
+            if 3.0 * theta_ceiling > available_history_s:
+                theta_ceiling = math.nextafter(theta_ceiling, -math.inf)
+            ceiling_log = math.log(theta_ceiling)
+            upper[theta_index] = (
+                math.nextafter(ceiling_log, -math.inf) if ceiling_log > lower[theta_index] else ceiling_log
+            )
+            x0 = np.clip(fitted_log, lower, upper)
     except Exception as error:
         return _fit_failure(
             job,
             str(error) or repr(error),
             error_type=type(error).__name__,
         )
-    if (
-        not bool(getattr(first, "success", int(getattr(first, "status", 0)) > 0))
-        or int(getattr(first, "status", 0)) <= 0
-    ):
-        return _fit_failure(job, "bounded grey fit did not converge", error_type="FitConvergenceError")
-    fitted_log = full_parameters(first.x)
-    parameters = _parameter_values(fitted_log)
-    if parameters is None:
-        return _fit_failure(job, "bounded grey fit produced non-finite parameters")
     fitted_log_values = tuple(float(value) for value in fitted_log)
     parameters = tuple(
         float(getattr(job.config, key)) if log_value == math.log(float(getattr(job.config, key))) else parameter
@@ -1191,7 +1265,7 @@ def fit_segmented_grey(job: GreyFitJob) -> GreyFitSuccess | GreyFitError:
             float(np.min(pooled_temperatures)),
             float(np.max(pooled_temperatures)),
         ),
-        nfev=int(getattr(first, "nfev", 0)),
+        nfev=total_nfev,
         metrics=candidate_metrics,
         incumbent_metrics=incumbent_metrics,
         effective_masks=common_masks,
