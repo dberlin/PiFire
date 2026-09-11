@@ -1121,7 +1121,9 @@ def fit_segmented_grey(job: GreyFitJob) -> GreyFitSuccess | GreyFitError:
         )
 
     total_nfev = 0
-    initial_stage = True
+    committed_log = None
+    committed_parameters = None
+    pending_count = 0
     try:
         while True:
             remaining_nfev = _MAX_FIT_NFEV - total_nfev
@@ -1146,7 +1148,8 @@ def fit_segmented_grey(job: GreyFitJob) -> GreyFitSuccess | GreyFitError:
             if parameters is None:
                 return _fit_failure(job, "bounded grey fit produced non-finite parameters")
 
-            if initial_stage and free[theta_index] and theta_ceiling < FIT_VALUE_BOUNDS["theta"][1]:
+            outward_descent = False
+            if free[theta_index] and theta_ceiling < FIT_VALUE_BOUNDS["theta"][1]:
                 active = getattr(solved, "active_mask", None)
                 gradient = getattr(solved, "grad", None)
                 cost = float(getattr(solved, "cost", math.nan))
@@ -1157,7 +1160,7 @@ def fit_segmented_grey(job: GreyFitJob) -> GreyFitSuccess | GreyFitError:
                 # a statistical confidence threshold; an exact boundary fit is
                 # valid despite SciPy's strictly-interior starting-point nudge.
                 numerical_floor = math.sqrt(np.finfo(float).eps) * max(1.0, 2.0 * cost)
-                if (
+                outward_descent = (
                     active is not None
                     and gradient is not None
                     and active[theta_coordinate] > 0
@@ -1165,27 +1168,43 @@ def fit_segmented_grey(job: GreyFitJob) -> GreyFitSuccess | GreyFitError:
                     and 2.0 * cost > numerical_floor
                     and math.isfinite(float(gradient[theta_coordinate]))
                     and gradient[theta_coordinate] < -numerical_floor
-                ):
+                )
+            if outward_descent:
+                if committed_log is None:
                     return _fit_failure(
                         job,
                         f"segment-warmup-incomplete:{job.segments[0].segment_id}",
                         error_type="InsufficientWarmup",
                     )
-            initial_stage = False
+                if pending_count == 1:
+                    fitted_log = committed_log
+                    parameters = committed_parameters
+                    break
+                # Only the tentative expansion is rolled back. Retry from the
+                # last committed fit with fewer distinct history levels.
+                pending_count = max(1, pending_count // 2)
+            else:
+                committed_log = fitted_log
+                committed_parameters = parameters
+                committed_masks = frozen_masks
+                committed_theta_ceiling = theta_ceiling
+                warmed = _warmup_masks(job.segments, parameters[theta_index])
+                additions = tuple(warm & ~old for warm, old in zip(warmed, committed_masks, strict=True))
+                if not any(np.any(mask) for mask in additions):
+                    break
+                history_levels = np.unique(
+                    np.concatenate(
+                        [history[mask] for history, mask in zip(histories, additions, strict=True) if np.any(mask)]
+                    )
+                )[::-1]
+                pending_count = len(history_levels)
 
-            warmed = _warmup_masks(job.segments, parameters[theta_index])
-            additions = tuple(warm & ~old for warm, old in zip(warmed, frozen_masks, strict=True))
-            if not any(np.any(mask) for mask in additions):
-                break
-            next_history = max(
-                float(np.max(history[mask])) for history, mask in zip(histories, additions, strict=True) if np.any(mask)
-            )
-            # Admit the next cadence-wide history band, not all rows warmed by
-            # the tail-only estimate. This lets theta adjust before its domain
-            # contracts, and groups fractional-offset histories across segments.
+            # Try all newly warmed rows first. Each solve has immutable support;
+            # backtracking halves only uncommitted additions and keeps tied
+            # histories together. No costs from different supports are compared.
             frozen_masks = tuple(
-                old | (added & (history > next_history - FIT_CADENCE_S))
-                for old, added, history in zip(frozen_masks, additions, histories, strict=True)
+                old | (added & (history >= history_levels[pending_count - 1]))
+                for old, added, history in zip(committed_masks, additions, histories, strict=True)
             )
             for mask in frozen_masks:
                 mask.setflags(write=False)
@@ -1194,14 +1213,14 @@ def fit_segmented_grey(job: GreyFitJob) -> GreyFitSuccess | GreyFitError:
                 for history, mask in zip(histories, frozen_masks, strict=True)
                 if np.any(mask)
             )
-            theta_ceiling = min(theta_ceiling, available_history_s / 3.0)
+            theta_ceiling = min(committed_theta_ceiling, available_history_s / 3.0)
             if 3.0 * theta_ceiling > available_history_s:
                 theta_ceiling = math.nextafter(theta_ceiling, -math.inf)
             ceiling_log = math.log(theta_ceiling)
             upper[theta_index] = (
                 math.nextafter(ceiling_log, -math.inf) if ceiling_log > lower[theta_index] else ceiling_log
             )
-            x0 = np.clip(fitted_log, lower, upper)
+            x0 = np.clip(committed_log, lower, upper)
     except Exception as error:
         return _fit_failure(
             job,

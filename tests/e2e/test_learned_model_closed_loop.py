@@ -1218,7 +1218,15 @@ def _transplant_failure(
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("plant_type,family", [(GrillSim, "grill"), (MAKGrillSim, "mak")])
+@pytest.mark.parametrize(
+    "plant_type,family",
+    [
+        (GrillSim, "grill"),
+        # Qualification plus all 30 accepted-model cook simulations needs a
+        # campaign watchdog distinct from the unchanged production fit deadlines.
+        pytest.param(MAKGrillSim, "mak", marks=pytest.mark.timeout(300)),
+    ],
+)
 def test_production_gates_qualify_only_on_strict_held_out_prediction(
     ds,
     plant_type: type[GrillSim],

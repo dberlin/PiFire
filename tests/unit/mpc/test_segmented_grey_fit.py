@@ -564,7 +564,10 @@ def test_noisy_mixed_duration_segments_fit_without_mask_fixed_point_perfection(i
         assert np.array_equal(mask, expected)
 
 
-def test_warmed_transients_prevent_tail_noise_from_biasing_unseen_pulse_predictions() -> None:
+def test_warmed_transients_prevent_tail_noise_within_shared_fitting_work_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(fitting, "_MAX_FIT_NFEV", 80)
     truth = _config(theta=45.0)
     incumbent = _config(C_c=700.0, K_Q=320.0, theta=35.0)
     rng = np.random.default_rng(812)
@@ -591,6 +594,7 @@ def test_warmed_transients_prevent_tail_noise_from_biasing_unseen_pulse_predicti
     result = fit_segmented_grey(_job((segment,), incumbent))
 
     assert isinstance(result, GreyFitSuccess), result
+    assert result.nfev <= 80
     prediction_error = _oracle_prediction(held_out, result.config) - held_out.scored_temperature_c
     assert float(np.sqrt(np.mean(prediction_error**2))) < 0.1
 
