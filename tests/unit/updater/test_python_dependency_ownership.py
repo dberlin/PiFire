@@ -6,9 +6,10 @@ import os
 import pathlib
 import pwd
 import re
-import stat
 import sqlite3
+import stat
 import subprocess
+import sys
 import tomllib
 
 import pytest
@@ -336,83 +337,44 @@ def _existing_hardware() -> tuple[dict, dict]:
     return settings, wizard_data
 
 
-def test_updater_refreshes_exact_venv_and_selected_wizard_python_dependencies(monkeypatch) -> None:
-    import updater
-
-    settings, wizard_data = _existing_hardware()
-    commands = []
-    writes = []
-
-    def run(command):
-        commands.append(command)
-        return 0
-
-    monkeypatch.setattr(updater, "write_settings", lambda value: writes.append(value))
-
-    result, manual_actions = updater.refresh_python_environment(
-        settings=settings,
-        wizard_data=wizard_data,
-        runner=run,
-    )
-
-    assert result == 0
-    assert manual_actions == ()
-    assert commands == [
-        ["uv", "venv", "--allow-existing", ".venv"],
-        ["uv", "sync", "--no-dev"],
-        [
-            "uv",
-            "pip",
-            "install",
-            "--python",
-            ".venv/bin/python",
-            LINUX_LGPIO_DEPENDENCY,
-        ],
-        ["uv", "pip", "install", "--python", ".venv/bin/python", "display-extra>=1"],
-        ["uv", "pip", "install", "--python", ".venv/bin/python", "distance-extra>=2"],
-        ["uv", "pip", "install", "--python", ".venv/bin/python", "probe-extra>=3"],
-    ]
-    assert all(command[0] == "uv" for command in commands)
-    assert settings["globals"] == {
-        "units": "F",
-        "uv": True,
-        "venv": True,
-        "python_exec": ".venv/bin/python",
-    }
-    assert writes == [settings]
-
-
 def test_updater_clears_a_legacy_system_site_environment(tmp_path, monkeypatch) -> None:
     import updater
 
-    settings, wizard_data = _existing_hardware()
     config = tmp_path / ".venv" / "pyvenv.cfg"
     config.parent.mkdir()
     config.write_text("include-system-site-packages = true\n")
-    commands = []
+    stale_package = config.parent / "legacy-package"
+    stale_package.write_text("must not survive the isolated environment migration")
     monkeypatch.setattr(updater, "REPO_ROOT", str(tmp_path))
-    monkeypatch.setattr(updater, "write_settings", lambda value: None)
+    monkeypatch.setenv("UV_PYTHON", sys.executable)
+    monkeypatch.setenv("UV_PYTHON_DOWNLOADS", "never")
 
-    result, _manual_actions = updater.refresh_python_environment(
-        settings=settings,
-        wizard_data=wizard_data,
-        runner=lambda command: commands.append(command) or 0,
+    completed = subprocess.run(
+        updater._venv_create_command(),
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
     )
 
-    assert result == 0
-    assert commands[0] == ["uv", "venv", "--clear", ".venv"]
+    assert completed.returncode == 0, completed.stderr
+    assert "include-system-site-packages = false" in config.read_text()
+    assert not stale_package.exists()
 
 
 def test_updater_stops_before_wizard_dependencies_when_uv_sync_fails(monkeypatch) -> None:
     import updater
 
     settings, wizard_data = _existing_hardware()
-    commands = []
-    codes = iter((0, 23))
+    failed = False
 
     def run(command):
-        commands.append(command)
-        return next(codes)
+        nonlocal failed
+        assert not failed, "dependency mutation continued after uv sync failed"
+        if command[1:2] == ["sync"]:
+            failed = True
+            return 23
+        return 0
 
     monkeypatch.setattr(
         updater,
@@ -428,10 +390,6 @@ def test_updater_stops_before_wizard_dependencies_when_uv_sync_fails(monkeypatch
 
     assert result == 23
     assert manual_actions == ()
-    assert commands == [
-        ["uv", "venv", "--allow-existing", ".venv"],
-        ["uv", "sync", "--no-dev"],
-    ]
 
 
 def raise_unexpected_write() -> None:

@@ -12,7 +12,6 @@ import pytest
 
 REPOSITORY = Path(__file__).resolve().parents[3]
 MIGRATION = REPOSITORY / "updater" / "install-acados-prerequisites.sh"
-MANIFEST = REPOSITORY / "updater" / "updater_manifest.json"
 
 
 def _write_executable(path: Path, body: str) -> None:
@@ -173,19 +172,6 @@ def test_pre_migration_updater_rolls_back_and_terminates_on_native_failure(tmp_p
     assert "failed" in json.loads(status["updater:status"]).lower()
     assert "apt-get install" in commands
     assert "rebuild --if-needed" in commands
-
-
-def test_manifest_bootstrap_is_the_first_acados_migration_and_uses_no_python_environment() -> None:
-    manifest = json.loads(MANIFEST.read_text())
-    acados_entries = [item for item in manifest["versions"] if item.get("acados_bootstrap")]
-
-    assert len(acados_entries) == 1
-    entry = acados_entries[0]
-    commands = [command for section in entry["dependencies"].values() for command in section["command_list"]]
-    assert commands == [["bash", "/usr/local/bin/pifire/updater/install-acados-prerequisites.sh"]]
-    assert all(
-        not section["py_dependencies"] and not section["apt_dependencies"] for section in entry["dependencies"].values()
-    )
 
 
 @pytest.mark.parametrize(

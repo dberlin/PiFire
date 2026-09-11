@@ -248,6 +248,30 @@
           ]
         }
       }
+    },
+    {
+      "version": "1.30.1",
+      "build": 131,
+      "reboot_required": false,
+      "acados_bootstrap": true,
+      "dependencies": {
+        "app": {
+          "py_dependencies": [],
+          "apt_dependencies": [],
+          "command_list": [
+            [
+              "python3",
+              "-B",
+              "/usr/local/bin/pifire/updater/prepare_python_environment.py"
+            ]
+          ]
+        },
+        "control": {
+          "py_dependencies": [],
+          "apt_dependencies": [],
+          "command_list": []
+        }
+      }
     }
   ]
 }

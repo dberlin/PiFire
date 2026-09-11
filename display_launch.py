@@ -23,6 +23,12 @@ import time
 from collections.abc import Iterable
 from typing import TextIO
 
+# Supervisor launches this as root. Imports must not leave root-owned caches
+# in the install user's environment; propagate the policy through sway too.
+if __name__ == "__main__":
+    sys.dont_write_bytecode = True
+    os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+
 from common import datastore
 from common.persistence.runtime import read_settings
 

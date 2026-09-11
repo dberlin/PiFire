@@ -191,6 +191,7 @@ def _challenger_projection(value: object) -> dict[str, object]:
         "evaluation_round": value.evaluation_round,
         "consecutive_wins": value.consecutive_wins,
         "required_wins": value.required_wins,
+        "decision_id": value.last_decision_id,
         "corpus": {
             "digest": corpus.corpus_digest,
             "revision": corpus.corpus_revision,
@@ -460,7 +461,22 @@ def build_learning_report(
         errors.append("checks-invalid")
 
     fit_payload = _latest_payload(current_records, FitLifecycleEvidence)
-    assessment_record = _latest(current_records, CandidateAssessmentEvidence)
+    if challenger:
+        lineage = cast(Mapping[str, object], challenger["lineage"])
+        current_decision_ids = (f"fit:{lineage['request_id']}", challenger["decision_id"])
+        # Assessments are append-only across fit requests and evaluation rounds.
+        # Select by durable lineage before checking identity contradictions.
+        assessment_record = next(
+            (
+                record
+                for record in reversed(current_records)
+                if isinstance(record.payload, CandidateAssessmentEvidence)
+                and record.payload.decision_id in current_decision_ids
+            ),
+            None,
+        )
+    else:
+        assessment_record = _latest(current_records, CandidateAssessmentEvidence)
     assessment = None if assessment_record is None else cast(CandidateAssessmentEvidence, assessment_record.payload)
     lifecycle_record = _latest(current_records, ActivationLifecycleEvidence)
     if lifecycle_record is not None:
@@ -554,14 +570,14 @@ def build_learning_report(
         status = LearningStatus.ERROR.value
     blockers = list(dict.fromkeys([*rejection_reasons, *errors]))
     decision_id = challenger.get("decision_id")
-    if not isinstance(decision_id, str):
+    if not isinstance(decision_id, str) and not challenger:
         decision_id = activation_authority.get(
             "evidence_decision_id",
             activation_authority.get("decision_id"),
         )
     if not isinstance(decision_id, str) and assessment is not None:
         decision_id = assessment.decision_id
-    if not isinstance(decision_id, str) and confidence is not None:
+    if not isinstance(decision_id, str) and confidence is not None and not challenger:
         decision_id = confidence.decision_id
 
     corpus_projection = challenger.get(

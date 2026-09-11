@@ -1093,6 +1093,7 @@ def refresh_python_environment(
     manual_actions = _manual_dependency_actions(previous_dependencies, current_dependencies)
     uv_executable = ensure_uv_executable()
     commands = [
+        [sys.executable, "-B", str(Path(REPO_ROOT) / "updater" / "prepare_python_environment.py")],
         _venv_create_command(uv_executable=uv_executable),
         [uv_executable, "sync", "--no-dev"],
         *[
@@ -1138,8 +1139,12 @@ def _migration_is_pending(current_version_string, current_build, version_info):
 
 
 def _run_acados_bootstrap_migrations(updater_info, current_version_string, current_build):
-    """Run the new-tree native bootstrap before inspecting any dependency."""
-    status = "Bootstrapping acados native runtime..."
+    """Run pre-sync migrations using the selector understood by installed updaters.
+
+    The historical acados_bootstrap key also lets the ownership repair run
+    before an old updater reaches its first virtualenv mutation.
+    """
+    status = "Preparing dependency updates..."
     for version_info in updater_info["versions"]:
         if not version_info.get("acados_bootstrap") or not _migration_is_pending(
             current_version_string,

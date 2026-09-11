@@ -220,6 +220,123 @@ def _payload(*, status: LearningStatus = LearningStatus.COLLECTING) -> dict[str,
     ).as_dict()
 
 
+def _candidate_assessment(
+    challenger: ModelChallengerState,
+    decision_id: str,
+    *,
+    digest: str | None = None,
+    origin: str | None = None,
+    rejection: str = "fit-error",
+) -> ModelEvidenceRecord:
+    return ModelEvidenceRecord(
+        evidence_id=f"assessment-{decision_id}",
+        kind=EvidenceKind.CANDIDATE_ASSESSMENT,
+        session_id="assessment-session",
+        cook_id="assessment-cook",
+        timestamp_ms=1,
+        role_generation=challenger.incumbent.role_generation,
+        model_digest=challenger.candidate.model_digest if digest is None else digest,
+        provenance_digest=challenger.incumbent.model_digest,
+        schema_version=MODEL_EVIDENCE_SCHEMA_VERSION,
+        payload=CandidateAssessmentEvidence(
+            decision_id=decision_id,
+            origin=challenger.origin.value if origin is None else origin,
+            policy=challenger.policy.value,
+            fit_accepted=rejection != "fit-error",
+            identifiability_accepted=True,
+            native_build="passed",
+            native_dry_solve="passed",
+            target_timing="passed",
+            confidence_accepted=False,
+            rejection_reasons=(rejection,),
+        ),
+    )
+
+
+def _assessment_report(challenger: ModelChallengerState, records: tuple[ModelEvidenceRecord, ...]) -> dict:
+    checkpoint = new_grey_learning_snapshot(
+        revision=1,
+        parameters={
+            **challenger.incumbent.configuration["parameters"],
+            "n_delay": challenger.incumbent.configuration["n_delay"],
+        },
+        metadata=None,
+    )
+    checkpoint["challenger_authority"] = {
+        "challenger_id": challenger.challenger_id,
+        "revision": challenger.revision,
+    }
+    return build_learning_report(
+        records,
+        checkpoint=checkpoint,
+        challenger_state=challenger,
+        activation_state=None,
+        live_status={"status": "evaluating", "fit_status": "succeeded"},
+        calibration_command_high_water=0,
+    ).as_dict()
+
+
+@pytest.mark.parametrize("same_model", (False, True))
+def test_superseded_fit_assessment_cannot_poison_current_challenger(same_model: bool) -> None:
+    challenger = _stored_challenger(phase="evaluating")
+    previous = _candidate_assessment(
+        challenger,
+        "fit:previous-request",
+        digest=challenger.candidate.model_digest if same_model else "e" * 64,
+    )
+
+    payload = _assessment_report(challenger, (previous,))
+
+    assert payload["status"] == "evaluating"
+    assert payload["blockers"] == []
+    assert payload["errors"] == []
+    assert payload["candidate"]["assessment"] is None
+    assert payload["decision_id"] is None
+    assert payload["evidence"]["count"] == 1
+
+
+def test_current_evaluation_assessment_wins_over_later_unrelated_failure() -> None:
+    challenger = _stored_challenger(
+        phase="evaluating",
+        evaluation_round=1,
+        last_decision_id="current-round",
+        last_evidence_id="current-round-evidence",
+    )
+    current = _candidate_assessment(challenger, "current-round", rejection="confidence-window")
+    unrelated = _candidate_assessment(challenger, "fit:other-request", digest="e" * 64)
+
+    payload = _assessment_report(challenger, (current, unrelated))
+
+    assert payload["status"] == "evaluating"
+    assert payload["blockers"] == ["confidence-window"]
+    assert payload["errors"] == []
+    assert payload["candidate"]["assessment"]["decision_id"] == "current-round"
+    assert payload["decision_id"] == "current-round"
+
+
+@pytest.mark.parametrize(
+    ("digest", "origin", "error"),
+    (
+        ("e" * 64, None, "assessment-candidate-digest-mismatch"),
+        (None, "operator-calibration", "assessment-candidate-origin-mismatch"),
+    ),
+)
+def test_current_fit_assessment_identity_contradictions_remain_errors(digest, origin, error) -> None:
+    challenger = _stored_challenger(phase="evaluating")
+    contradiction = _candidate_assessment(
+        challenger,
+        f"fit:{challenger.fit_lineage.request_id}",
+        digest=digest,
+        origin=origin,
+    )
+
+    payload = _assessment_report(challenger, (contradiction,))
+
+    assert payload["status"] == "error"
+    assert error in payload["errors"]
+    assert payload["candidate"]["assessment"] is None
+
+
 def test_diagnostic_learning_report_wraps_only_the_backend_report(monkeypatch) -> None:
     canonical = build_learning_report(
         (),

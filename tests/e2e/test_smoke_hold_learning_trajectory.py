@@ -63,6 +63,8 @@ from controller.model_learning.contracts import (
     FrameObservation,
     activation_policy_for_origin,
 )
+from controller.model_learning.grey_runtime import GreyLearningRuntime
+from controller.model_learning.report import build_learning_report
 from controller.mpc import Controller
 from controller.mpc_config import DEFAULT_MPC_CONFIG
 from controller.runtime.actuation_delivery import ActuationDeliveryJournal, DeliveredGrillPlatform
@@ -690,6 +692,8 @@ def test_cold_and_smoke_started_hold_fit_stable_parameters_from_one_physical_tra
 
 _REAL_COOK_FIXTURE_ROOT = Path(__file__).parents[1] / "fixtures" / "real_cook_learning"
 _REAL_COOK_MANIFEST_SHA256 = "0d924b9ff648fc40596423c1bb853a5d5bcadfa9f3e286cc387bc33ec72b5a2f"
+_SEP10_COOK_NAME = "2026-09-10--1843-CookFile.pifire"
+_SEP10_COOK_SHA256 = "21a1c807caf321c08d48ad137a71d267e4bb17ea1502cddee65267be93c8096f"
 
 
 @dataclass(frozen=True, slots=True)
@@ -703,6 +707,7 @@ class _RealCookHoldStream:
     pulse_slot_seconds: float
     pulse_frame_seconds: float
     fan_pwm_capable: bool
+    fan_authority: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -773,6 +778,34 @@ def test_fit_acceptance_without_durable_shadow_does_not_count() -> None:
 
 
 def _load_real_cook_hold_stream(campaign_id: str, cook_name: str) -> _RealCookHoldStream:
+    if campaign_id == "mpc-sep10":
+        # Keep the user-supplied archive unchanged, including provenance. Unlike
+        # the baseline campaigns, this regression starts with an empty database.
+        assert cook_name == _SEP10_COOK_NAME
+        archive_bytes = (_REAL_COOK_FIXTURE_ROOT.parent / cook_name).read_bytes()
+        assert sha256(archive_bytes).hexdigest() == _SEP10_COOK_SHA256
+        with zipfile.ZipFile(BytesIO(archive_bytes)) as archive:
+            raw = json.loads(archive.read("raw_data.json"))
+            diagnostics = json.loads(archive.read("learning_diagnostics.json"))
+            events = json.loads(archive.read("events.json"))
+        payload = next(
+            record["payload"] for record in diagnostics["control_trace"]["records"] if record["event_kind"] == "session"
+        )
+        hold_start_ms = next(event["starttime"] for event in events if event["mode"] == "Hold")
+        temperatures = tuple((int(row["T"]), float(row["P"]["PitProbe"]), float(row["PSP"])) for row in raw)
+        assert all(left[0] < right[0] for left, right in pairwise(temperatures))
+        return _RealCookHoldStream(
+            controller=payload["controller"],
+            cook_id=diagnostics["cook_id"],
+            temperatures=temperatures,
+            hold_start_index=next(index for index, sample in enumerate(temperatures) if sample[0] >= hold_start_ms),
+            controller_config={item["key"]: item["value"] for item in payload["controller_config"]},
+            control_period_seconds=payload["control_period_seconds"],
+            pulse_slot_seconds=payload["pulse_slot_seconds"],
+            pulse_frame_seconds=payload["pulse_frame_seconds"],
+            fan_pwm_capable=payload["fan_pwm_capable"],
+            fan_authority=payload["fan_authority"],
+        )
     manifest_bytes = (_REAL_COOK_FIXTURE_ROOT / "manifest.json").read_bytes()
     assert sha256(manifest_bytes).hexdigest() == _REAL_COOK_MANIFEST_SHA256
     manifest = json.loads(manifest_bytes)
@@ -1030,6 +1063,7 @@ def _assert_real_cook_hold_smoke(
     timestamp_offset_ms: int = 0,
     profile_repetitions: int = 1,
     require_stop_fit: bool | None = None,
+    fit_scored_prefixes: tuple[int, ...] = (),
 ) -> _RealCookHoldResult:
     del ds
     stream = _load_real_cook_hold_stream(campaign_id, cook_name)
@@ -1096,6 +1130,8 @@ def _assert_real_cook_hold_smoke(
     control["primary_setpoint"] = 0.0 if warm_with_smoke else first_setpoint
     control["safety"]["startuptemp"] = 0
     control["safety"]["afterstarttemp"] = 0
+    if stream.fan_authority is not None:
+        control["pwm_control"] = stream.fan_authority
 
     store = SqliteStore()
     real_grey_fit_worker_start = _REAL_GREY_FIT_WORKER_START
@@ -1159,12 +1195,44 @@ def _assert_real_cook_hold_smoke(
     observed_trajectory_frames: list[FrameObservation] = []
     replay_only_trajectory_frames: list[FrameObservation] = []
     real_observe_hold_frame = _REAL_OBSERVE_HOLD_FRAME
+    remaining_fit_prefixes = list(fit_scored_prefixes)
+    if fit_scored_prefixes:
+        assert expected_controller is ControllerType.MPC
+        assert tuple(sorted(set(fit_scored_prefixes))) == fit_scored_prefixes
+
+        def defer_automatic_fit_until_boundary(runtime, origin, *, replace_owned_prepared=False):
+            # The recorded thermal clock outruns the numerical worker. Dispatch
+            # through runner.schedule_corpus_fit at durable boundaries below,
+            # rather than let host scheduling select a different fit corpus.
+            assert origin is CandidateOrigin.PASSIVE_ONLINE
+            assert not replace_owned_prepared
+            return False
+
+        monkeypatch.setattr(GreyLearningRuntime, "request_corpus_fit", defer_automatic_fit_until_boundary)
 
     def capture_observe_hold_frame(runtime, observation, *, replay_only=False):
         observed_trajectory_frames.append(observation)
         if replay_only:
             replay_only_trajectory_frames.append(observation)
-        return real_observe_hold_frame(runtime, observation, replay_only=replay_only)
+        result = real_observe_hold_frame(runtime, observation, replay_only=replay_only)
+        if remaining_fit_prefixes and not replay_only:
+            assert trajectory.barrier(timeout=10.0)
+            scored = repository.corpus_report().scored_count - corpus_before.scored_count
+            assert scored <= remaining_fit_prefixes[0]
+            if scored == remaining_fit_prefixes[0]:
+                owned_runner, _status = captured_runners[0]
+                assert owned_runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
+                # The real dispatcher notifies after each lifecycle poll. Freeze
+                # the thermal clock until this exact prefix has terminalized.
+                with owned_runner._learning_condition:  # noqa: SLF001 - real dispatcher barrier
+                    assert owned_runner._learning_condition.wait_for(  # noqa: SLF001
+                        lambda: not owned_runner._corpus_fit_plans,  # noqa: SLF001
+                        timeout=_REAL_COOK_PROCESS_MONITOR_TIMEOUT_SECONDS,
+                    )
+                assert owned_runner._learning_poll_failure is None  # noqa: SLF001
+                assert persistence.barrier(timeout=10.0)
+                remaining_fit_prefixes.pop(0)
+        return result
 
     monkeypatch.setattr(
         LearningTrajectoryRuntime,
@@ -1337,6 +1405,7 @@ def _assert_real_cook_hold_smoke(
     assert grey_fit_worker_drained
     assert persistence_drained
     assert not persistence.failed
+    assert not remaining_fit_prefixes
 
     report_before_restart = repository.corpus_report()
     assert report_before_restart.open_segment_count == 0
@@ -1673,3 +1742,95 @@ def test_long_sep06_cook_produces_a_candidate_from_a_fresh_database(
     assert "succeeded" in result.fit_terminal_statuses, result.fit_terminal_errors
     assert result.candidate_assessment_count > 0
     assert result.candidate_fit_accepted_count > 0
+
+
+@pytest.mark.slow
+def test_sep10_changed_evidence_fit_recovery_reports_current_challenger(
+    ds,
+    monkeypatch,
+    caplog,
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "sep10-recovery.sqlite"
+    ds._reset_for_tests(str(database_path))
+    ds.init()
+
+    # Replay every original thermal sample once. The exported historical
+    # observations omit warmup, so generate it through real Hold admission;
+    # neither invent Smoke prehistory nor import the historical learning state.
+    result = _assert_real_cook_hold_smoke(
+        ds,
+        monkeypatch,
+        caplog,
+        campaign_id="mpc-sep10",
+        cook_name=_SEP10_COOK_NAME,
+        expected_controller=ControllerType.MPC,
+        warm_with_smoke=False,
+        require_stop_fit=False,
+        fit_scored_prefixes=(37, 46, 53),
+    )
+    assert result.replay_only_count == 8
+    assert result.scored_delta == 81
+    assert result.recorder_gap_reasons == ()
+    assert result.fit_terminal_statuses == ("succeeded", "failed", "succeeded")
+    assert result.fit_terminal_errors[0] is None
+    assert result.fit_terminal_errors[1] is not None
+    assert result.fit_terminal_errors[1].startswith("segment-warmup-incomplete:")
+    assert result.fit_terminal_errors[2] is None
+    assert result.candidate_fit_accepted_count == 1
+
+    stream = _load_real_cook_hold_stream("mpc-sep10", _SEP10_COOK_NAME)
+    records = read_control_trace_cook(stream.cook_id)
+    fits = [
+        record.payload
+        for record in records
+        if record.event_kind is TraceEventKind.FIT_LIFECYCLE
+        and record.payload.status in {"succeeded", "failed", "stale"}
+    ]
+    rejected_request = fits[1].request_id
+    recovered_request = fits[2].request_id
+    assert rejected_request != recovered_request
+    assert fits[1].fit_corpus_digest != fits[2].fit_corpus_digest
+    assessments = [record.payload for record in records if record.event_kind is TraceEventKind.CANDIDATE_ASSESSMENT]
+    assert any(
+        assessment.decision_id == f"fit:{fits[0].request_id}"
+        and assessment.fit_accepted
+        and "identifiability" in assessment.rejection_reasons
+        for assessment in assessments
+    )
+    assert any(
+        assessment.decision_id == f"fit:{rejected_request}" and "fit-error" in assessment.rejection_reasons
+        for assessment in assessments
+    )
+    challenger = read_model_challenger()
+    assert challenger is not None
+    assert challenger.fit_lineage.request_id == recovered_request
+    assert challenger.phase == "evaluating"
+    assert challenger.consecutive_wins < challenger.required_wins
+    assert challenger.fit_corpus.slices[0].pre_roll_count == 8
+    assert challenger.fit_corpus.slices[0].scored_count == 53
+
+    checkpoint = ControllerModelStore().load("mpc")
+    assert checkpoint is not None
+    report = build_learning_report(
+        read_model_evidence(),
+        activation_state=read_model_activation(),
+        live_status=None,
+        calibration_command_high_water=0,
+        checkpoint=checkpoint,
+        challenger_state=challenger,
+    ).as_dict()
+    assert report["fit"]["status"] == "succeeded"
+    assert report["fit"]["error"] is None
+    assert report["fit"]["request_id"] == recovered_request
+    assert report["candidate"]["phase"] == "evaluating"
+    assert report["candidate"]["assessment"] is None
+    assert report["decision_id"] != f"fit:{rejected_request}"
+    assert "fit-error" not in report["blockers"]
+    assert "assessment-candidate-digest-mismatch" not in report["blockers"]
+    assert report["errors"] == []
+    # A qualified prospective challenger is not an active-model promotion.
+    assert report["active_model"]["role_generation"] == 0
+    assert report["active_model"]["digest"] == challenger.fit_lineage.parent_incumbent_digest
+    assert not report["activation"]["pending_frame_boundary_swap"]
+    assert not report["activation"]["pending_persistence"]

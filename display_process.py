@@ -10,6 +10,13 @@ Run it directly as a script, e.g. `python display_process.py`.
 """
 
 import logging
+import os
+import sys
+
+# Also protect direct/legacy launches that do not pass through display_launch.
+if __name__ == "__main__":
+    sys.dont_write_bytecode = True
+    os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 
 from common import datastore
 from common.common import ErrorKind, create_logger

@@ -8,9 +8,11 @@ import math
 import shutil
 import sqlite3
 import zipfile
+from collections.abc import Sequence
 from dataclasses import dataclass
 from itertools import pairwise
 from pathlib import Path
+from threading import Event
 from typing import Any, Literal
 from uuid import NAMESPACE_URL, uuid5
 
@@ -18,8 +20,10 @@ from common import datastore
 from common.control_trace import AmbientSource, AmbientUncertainty, ControllerType, TraceEventKind
 from common.controller_model_state import MODEL_STATE_KEY, ControllerModelStore
 from common.learning_trajectory import TrajectoryBreakReason, trajectory_json_value
+from common.model_evidence import ModelEvidenceRecord
 from common.persistence.control_trace import read_control_trace_cook
 from common.persistence.learning_trajectory import LearningTrajectoryRepository
+from common.persistence.model_evidence import append_model_evidence
 from controller.model_learning.contracts import FrameObservation
 from controller.mpc import Controller as MpcController
 from controller.mpc_config import DEFAULT_MPC_CONFIG
@@ -1578,7 +1582,23 @@ def _run_exact_mpc_cook(
     clock_ms = [replay.frames[0].frame_start_ms]
     repository = LearningTrajectoryRepository(str(database_path))
     store = ControllerModelStore()
-    persistence = ModelPersistenceWorker(store, logger, trajectory_repository=repository)
+    evidence_started = Event()
+    release_evidence = Event()
+    defer_evidence = not reconcile_each_frame and evidence_available_before_submission
+
+    def append_replay_evidence(records: Sequence[ModelEvidenceRecord]) -> None:
+        if defer_evidence:
+            evidence_started.set()
+            if not release_evidence.wait(timeout=30.0):
+                raise RuntimeError("delayed replay evidence writer was not released")
+        append_model_evidence(records)
+
+    persistence = ModelPersistenceWorker(
+        store,
+        logger,
+        trajectory_repository=repository,
+        append_evidence=append_replay_evidence,
+    )
     partition_digest: list[str | None] = [None]
     core = MpcController(
         config,
@@ -1641,22 +1661,34 @@ def _run_exact_mpc_cook(
     learning.reconcile_activation()
     if not evidence_available_before_submission:
         learning.mark_evidence_unavailable()
-    for frame in replay.frames:
-        clock_ms[0] = frame.frame_end_ms
-        observation = frame.observation
-        learning.submit_completed_observation(
-            (frame.frame_start_ms, frame.frame_end_ms),
-            observation,
-        )
-        if reconcile_each_frame:
-            learning.reconcile_outcomes(frame.frame_end_ms / 1_000)
-            if not trajectory.barrier(timeout=10.0):
-                raise RuntimeError(f"trajectory persistence failed: {trajectory.status()!r}")
-            if not persistence.barrier(timeout=10.0):
-                raise RuntimeError("model persistence barrier failed")
-            segments = repository.read_cook_segments(replay.metadata.cook_id)
-            if segments:
-                partition_digest[0] = segments[-1].fit_partition_digest
+    try:
+        for frame_index, frame in enumerate(replay.frames):
+            clock_ms[0] = frame.frame_end_ms
+            observation = frame.observation
+            learning.submit_completed_observation(
+                (frame.frame_start_ms, frame.frame_end_ms),
+                observation,
+            )
+            # Keep the first overflow gap in flight while the bounded queue
+            # fills. Host thread scheduling must not change this failure
+            # campaign into a replay whose evidence writer keeps up.
+            if (
+                defer_evidence
+                and frame_index == HoldLearningRuntime._PENDING_CAPACITY  # noqa: SLF001
+                and not evidence_started.wait(timeout=10.0)
+            ):
+                raise RuntimeError("delayed replay evidence writer did not start")
+            if reconcile_each_frame:
+                learning.reconcile_outcomes(frame.frame_end_ms / 1_000)
+                if not trajectory.barrier(timeout=10.0):
+                    raise RuntimeError(f"trajectory persistence failed: {trajectory.status()!r}")
+                if not persistence.barrier(timeout=10.0):
+                    raise RuntimeError("model persistence barrier failed")
+                segments = repository.read_cook_segments(replay.metadata.cook_id)
+                if segments:
+                    partition_digest[0] = segments[-1].fit_partition_digest
+    finally:
+        release_evidence.set()
     if not reconcile_each_frame:
         learning.reconcile_outcomes(replay.frames[-1].frame_end_ms / 1_000)
         if not trajectory.barrier(timeout=30.0):
