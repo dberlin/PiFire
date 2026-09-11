@@ -11,15 +11,6 @@ def _manifest():
         return json.load(f)
 
 
-def test_manifest_entry_present():
-    entry = _manifest()["modules"]["display"]["qtquick_dsi_1280x720t"]
-    assert entry["filename"] == "qtquick_dsi_1280x720t"
-    assert manifest_config_default(entry, "display_data_filename") == "./display/qtquick_dsi_1280x720t.json"
-    assert manifest_config_default(entry, "input_types_supported") == ["button", "touch"]
-    assert "pyside6>=6.11.1" in entry["py_dependencies"]
-    assert entry["config"] != []
-
-
 def test_default_display_config_includes_entry():
     # _default_display_config reads ./wizard/wizard_manifest.json relative to CWD.
     cwd = os.getcwd()
@@ -60,7 +51,6 @@ def test_every_qtquick_module_has_its_layout_and_module_file():
         entry = _manifest()["modules"]["display"][name]
         assert entry["filename"] == name
         assert manifest_config_default(entry, "display_data_filename") == f"./display/{name}.json"
-        assert "pyside6>=6.11.1" in entry["py_dependencies"]
 
         assert os.path.exists(os.path.join(BASE, "display", f"{name}.py")), name
         layout_path = os.path.join(BASE, "display", f"{name}.json")

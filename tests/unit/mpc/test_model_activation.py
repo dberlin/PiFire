@@ -57,6 +57,8 @@ from tests.unit.mpc._solver_fixtures import (
     _config as _mpc_config,
 )
 
+pytestmark = pytest.mark.usefixtures("ds")
+
 _INCUMBENT_CONFIG = {
     "schema": "pifire-grey-box-model/v4",
     "n_delay": 8,

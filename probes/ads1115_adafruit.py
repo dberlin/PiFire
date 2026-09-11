@@ -1,6 +1,7 @@
 """Stable Adafruit ADS1115 probe plugin."""
 
 import adafruit_ads1x15.ads1115 as ADS
+from adafruit_ads1x15.ads1x15 import Pin
 from adafruit_ads1x15.analog_in import AnalogIn
 
 from common.i2c_bus import open_i2c_bus
@@ -12,7 +13,7 @@ class ADSDevice(AdafruitADSDevice):
     """ADS1115 selector for the shared Adafruit ADS1x15 implementation."""
 
     CHIP_FACTORY = ADS.ADS1115
-    CHANNELS = {"ADC0": ADS.P0, "ADC1": ADS.P1, "ADC2": ADS.P2, "ADC3": ADS.P3}
+    CHANNELS = {"ADC0": Pin.A0, "ADC1": Pin.A1, "ADC2": Pin.A2, "ADC3": Pin.A3}
 
 
 class ReadProbes(ProbeInterface):

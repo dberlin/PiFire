@@ -1011,18 +1011,10 @@ class _RealCookProbes:
 
 
 def _wait_for_fit_worker(runner) -> None:
-    deadline = time.monotonic() + 30.0
-    while True:
-        worker = getattr(runner, "_corpus_fit_thread", None)
-        if worker is None:
-            return
-        remaining = deadline - time.monotonic()
-        if remaining <= 0.0:
-            break
-        worker.join(timeout=min(remaining, 0.1))
-        if getattr(runner, "_corpus_fit_thread", None) is None:
-            return
-    assert getattr(runner, "_corpus_fit_thread", None) is None
+    # Completion is bounded by pytest's test watchdog, not a second wall-clock
+    # deadline that competes with concurrent numerical campaigns.
+    while (worker := getattr(runner, "_corpus_fit_thread", None)) is not None:
+        worker.join()
 
 
 def _assert_real_cook_hold_smoke(

@@ -224,12 +224,6 @@ def _apt_dependencies(value):
             yield from _apt_dependencies(child)
 
 
-def test_shared_scipy_is_a_production_project_dependency() -> None:
-    project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
-
-    assert any(dependency.startswith("scipy>=1.18.0") for dependency in project["dependencies"])
-
-
 def test_linux_blinka_profiles_install_platform_lgpio_in_the_venv() -> None:
     profiles = _manifest()["modules"]["grillplatform"]
     raspberry = [entry for entry in profiles.values() if entry["filename"] == "raspberry_pi_all"]

@@ -40,13 +40,13 @@ _RECURSIVE_DEPENDENCIES = {
     "interfaces/acados_template/tera_renderer": "a480a64b0a2cc15d4b1e6146e986388709ac0716",
 }
 _PYTHON_GENERATOR_DEPENDENCIES = {
-    "casadi": "3.7.2",
-    "Cython": "3.2.9",
+    "casadi": "3.8.0",
+    "Cython": "3.3.0",
     "Deprecated": "1.3.1",
     "matplotlib": "3.11.1",
-    "numpy": "2.5.1",
-    "scipy": "1.18.0",
-    "setuptools-scm": "8.3.1",
+    "numpy": "2.5.3",
+    "scipy": "1.18.1",
+    "setuptools-scm": "10.2.3",
 }
 _EXPECTED_ENVIRONMENT = {
     "acados": {

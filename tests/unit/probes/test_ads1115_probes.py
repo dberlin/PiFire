@@ -250,6 +250,7 @@ def _install_fake_adafruit_ads1x15(
     observed_channels=None,
 ):
     for module_name in (
+        "adafruit_ads1x15.ads1x15",
         "adafruit_ads1x15.ads1015",
         "adafruit_ads1x15.ads1115",
         "adafruit_ads1x15.analog_in",
@@ -258,6 +259,8 @@ def _install_fake_adafruit_ads1x15(
 
     pkg = types.ModuleType("adafruit_ads1x15")
     pkg.__path__ = []
+    base = types.ModuleType("adafruit_ads1x15.ads1x15")
+    base.Pin = types.SimpleNamespace(**dict(zip(("A0", "A1", "A2", "A3"), channels, strict=True)))
     sub = types.ModuleType(f"adafruit_ads1x15.{submodule_name}")
 
     class FakeADS:
@@ -266,8 +269,7 @@ def _install_fake_adafruit_ads1x15(
             self.address = address
 
     setattr(sub, class_name, FakeADS)
-    for port_name, channel in zip(("P0", "P1", "P2", "P3"), channels, strict=True):
-        setattr(sub, port_name, channel)
+    monkeypatch.setitem(sys.modules, "adafruit_ads1x15.ads1x15", base)
 
     analog_in_mod = types.ModuleType("adafruit_ads1x15.analog_in")
 
