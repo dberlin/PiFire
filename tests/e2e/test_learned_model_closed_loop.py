@@ -682,9 +682,10 @@ def _attempt_production_qualification(
         )
 
     def wait_for_evaluating_challenger():
-        deadline = time.monotonic() + 30.0
-        while time.monotonic() < deadline:
-            corpus.core.poll_learning_off_path()
+        # The test's campaign watchdog bounds this wait. A still-running fit
+        # is not a completed qualification rejection, even on a loaded worker.
+        while True:
+            fit_delivery, _ = corpus.core.poll_learning_off_path()
             assert corpus.persistence.barrier(timeout=30.0)
             learning.reconcile_activation()
             learning.drain_activation_events()
@@ -692,10 +693,9 @@ def _attempt_production_qualification(
             if current is not None and current.phase == "evaluating":
                 return current
             diagnostics = corpus.core.get_learning_diagnostics().state
-            if diagnostics.get("failure") is not None:
+            if diagnostics.get("failure") is not None or fit_delivery is not None:
                 return current
             time.sleep(0.01)
-        return read_model_challenger()
 
     corpus.partition["digest"] = fit_partition_digest
     assert corpus.runner.schedule_corpus_fit(CandidateOrigin.PASSIVE_ONLINE)
