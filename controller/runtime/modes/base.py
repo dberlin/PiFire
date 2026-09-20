@@ -1337,6 +1337,14 @@ class ControlMode:
         grill_platform.igniter_off()
         grill_platform.auger_off()
 
+        retained_metrics = ctx.store.read_all_metrics()
+        retained_id = (
+            retained_metrics[0].get("id")
+            if retained_metrics and retained_metrics[0].get("mode") == Mode.PRIME
+            else None
+        )
+        control = self._refresh_cook_identity(control, preferred=retained_id)
+
         trajectory_entry_monotonic_ms, trajectory_entry_wall_ms = self._trajectory_clock_pair()
         self._emit_trajectory_mode_entered(
             trajectory_entry_monotonic_ms,
@@ -1395,13 +1403,6 @@ class ControlMode:
             return ()
         self._account_auger_delivery(stamp.observed_monotonic_s, bool(grill_platform.get_output_status()["auger"]))
         self._excitation_last_read_at = stamp.observed_monotonic_s
-        retained_metrics = ctx.store.read_all_metrics()
-        retained_id = (
-            retained_metrics[0].get("id")
-            if retained_metrics and retained_metrics[0].get("mode") == Mode.PRIME
-            else None
-        )
-        control = self._refresh_cook_identity(control, preferred=retained_id)
 
         self._stamp_mode_metric(control, pelletdb)
 

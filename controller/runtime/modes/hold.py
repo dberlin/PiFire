@@ -956,6 +956,7 @@ class HoldMode(ControlMode):
             logger=self.ctx.event_log,
             initial_generation=self._runner_configuration_revision,
             learning_trajectory=self.ctx.learning_trajectory,
+            clock=self.ctx.clock,
         )
         if not learning_evidence_available:
             self._hold_learning.mark_evidence_unavailable()

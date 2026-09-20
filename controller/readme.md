@@ -115,6 +115,20 @@ older observations without increasing the total count. Repeated requests over an
 unchanged frame prefix do not repeat the same failed fit. A later completed fit
 replaces the previous fit error in the learning report.
 
+Leading-Hold seed warm-up advances only on accepted, valid, continuous replay
+frames. It has one absolute 300-second monotonic deadline, starting when warm-up
+begins; rejected frames, missing frames, wall-clock changes, and partial progress
+do not extend it. An unfinished countdown then reports `seed-warmup-timeout`
+as a learning error, including the remaining frame count and last rejection
+category when available. Grill control continues, and valid late frames can
+complete warm-up and clear this error. This seed deadline is separate from a
+candidate fit's history-dependent warm-up mask.
+
+Restored and candidate MPC pairs retain the current controller's actuator
+configuration, including fan authority and PWM bounds; persisted numerical model
+identity does not replace those settings. Mode entry establishes the durable
+cook identity before binding trajectory capture, including direct entry into Hold.
+
 The fitter freezes its warmed observations during each bounded optimization
 stage, then admits earlier warmed observations without dropping any previously
 admitted rows. It tries larger additions first and backtracks only tentative

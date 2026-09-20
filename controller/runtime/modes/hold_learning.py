@@ -45,6 +45,7 @@ from controller.applied_output import (
 from controller.model_learning.calibration import CalibrationDecision
 from controller.model_learning.contracts import CandidateOrigin, FrameObservation
 from controller.mpc_allocator import AllocationResult
+from controller.runtime.clock import Clock, RealClock
 from controller.runtime.control_trace_session import (
     ControlTraceSession,
     TraceModelAuthority,
@@ -274,6 +275,7 @@ class HoldLearningRuntime:
     """Own Hold's observation, model, persistence, and teardown lifecycle."""
 
     _PENDING_CAPACITY = 60
+    _SEED_WARMUP_TIMEOUT_SECONDS = 300.0
 
     _CALIBRATION_OUTCOME_STATUS: Mapping[str, _CalibrationStatus] = {
         "start_rejected": "rejected",
@@ -295,6 +297,7 @@ class HoldLearningRuntime:
         logger: _LifecycleLogger,
         initial_generation: int,
         learning_trajectory: _LearningTrajectoryObserver | None = None,
+        clock: Clock | None = None,
     ) -> None:
         self._runner = runner
         self._model_store = model_store
@@ -304,11 +307,15 @@ class HoldLearningRuntime:
         self._trace = trace
         self._controller_name = controller_name
         self._logger = logger
+        self._clock = RealClock() if clock is None else clock
         self._generation = initial_generation
         self._pending: dict[int, _PendingObservation] = {}
         self._evidence_available = True
         self._checkpoint_evidence_available = True
         self._seed_warmup_remaining = 0
+        self._seed_warmup_deadline: float | None = None
+        self._seed_warmup_timeout_logged = False
+        self._seed_warmup_last_rejection: str | None = None
         self._activation_state_identity: _ActivationIdentity | None = None
         self._retired_generations: set[int] = set()
         self._activation_lifecycle_evidence_id: str | None = None
@@ -350,6 +357,12 @@ class HoldLearningRuntime:
     def set_seed_warmup_remaining(self, frame_count: int) -> None:
         if isinstance(frame_count, bool) or not isinstance(frame_count, int) or frame_count < 0:
             raise ValueError("seed warm-up count must be a nonnegative integer")
+        if frame_count > 0 and self._seed_warmup_remaining == 0:
+            self._seed_warmup_deadline = self._clock.monotonic() + self._SEED_WARMUP_TIMEOUT_SECONDS
+            self._seed_warmup_timeout_logged = False
+            self._seed_warmup_last_rejection = None
+        elif frame_count == 0:
+            self._seed_warmup_deadline = None
         self._seed_warmup_remaining = frame_count
 
     def mark_evidence_unavailable(self) -> None:
@@ -654,21 +667,39 @@ class HoldLearningRuntime:
 
     def status_fragment(self) -> dict[str, dict[str, _StatusValue]]:
         runner = self._runner
-        if runner is None:
-            return {}
-        try:
-            status = runner.controller_state()
-        except Exception:
-            return {}
-        if not isinstance(status, Mapping):
-            return {}
-        learning = status.get("learning")
-        if not isinstance(learning, Mapping):
-            return {}
-        projected = deepcopy(dict(learning))
+        projected: dict[str, _StatusValue] | None = None
+        if runner is not None:
+            try:
+                status = runner.controller_state()
+            except Exception:
+                status = None
+            if isinstance(status, Mapping):
+                learning = status.get("learning")
+                if isinstance(learning, Mapping):
+                    projected = deepcopy(dict(learning))
         if self._seed_warmup_remaining > 0:
-            projected["status"] = "warming"
-        return {"learning": projected}
+            if projected is None:
+                projected = {}
+            deadline = self._seed_warmup_deadline
+            expired = deadline is not None and self._clock.monotonic() >= deadline
+            failure: dict[str, _StatusValue] | None = None
+            if expired:
+                detail = (
+                    "Learning seed warm-up exceeded 300 seconds; "
+                    f"{self._seed_warmup_remaining} valid replay frames remaining."
+                )
+                rejection = self._seed_warmup_last_rejection
+                if rejection is not None:
+                    detail += f" Last rejected frame: {rejection}."
+                failure = {"code": "seed-warmup-timeout", "detail": detail, "terminal": True}
+                if not self._seed_warmup_timeout_logged:
+                    self._seed_warmup_timeout_logged = True
+                    self._logger.error(detail)
+            if projected.get("status") != "error" and projected.get("failure") is None:
+                projected["status"] = "error" if expired else "warming"
+                if failure is not None:
+                    projected["failure"] = failure
+        return {} if projected is None else {"learning": projected}
 
     def submit_online_checkpoint(self, snapshot: dict[str, object]) -> bool:
         persistence = self._persistence
@@ -874,7 +905,15 @@ class HoldLearningRuntime:
             if trajectory is not None:
                 replayed_exactly = trajectory.observe_hold_frame(observation, replay_only=True) is True
             if replayed_exactly and observation.probe_valid and observation.continuous:
-                self._seed_warmup_remaining -= 1
+                self.set_seed_warmup_remaining(self._seed_warmup_remaining - 1)
+            elif not observation.probe_valid:
+                self._seed_warmup_last_rejection = "invalid probe"
+            elif not observation.continuous:
+                self._seed_warmup_last_rejection = "discontinuous frame"
+            elif trajectory is None:
+                self._seed_warmup_last_rejection = "learning trajectory unavailable"
+            else:
+                self._seed_warmup_last_rejection = "trajectory capture rejected"
             self._deliver_feedback_without_observation(feedback)
             return
         self._submit_calibration_frame_evidence(observation)

@@ -470,6 +470,7 @@ class MpcPairFactory:
         return self._settings_for_native(
             native,
             estimator_kind,
+            base_configuration=self._base_configuration,
             control_period=self._base_configuration["control_period"],
             est_q_temp=self._base_configuration["est_q_temp"],
             est_q_dist=self._base_configuration["est_q_dist"],
@@ -481,6 +482,7 @@ class MpcPairFactory:
         native: GreyBoxMPCConfig,
         estimator_kind: str,
         *,
+        base_configuration: Mapping[str, JsonValue],
         control_period: float,
         est_q_temp: float,
         est_q_dist: float,
@@ -488,6 +490,9 @@ class MpcPairFactory:
     ) -> MpcConfig:
         return normalize_config(
             {
+                # Numerical identity belongs to the pair; actuator and learning
+                # settings belong to the current controller, not native defaults.
+                **base_configuration,
                 "C_c": native.C_c,
                 "h_amb": native.h_amb,
                 "T_amb": native.T_amb,
@@ -647,6 +652,7 @@ class MpcPairFactory:
         settings = MpcPairFactory._settings_for_native(
             native,
             descriptor.estimator_kind,
+            base_configuration={},
             control_period=5.0,
             est_q_temp=1e-2,
             est_q_dist=0.05,
@@ -677,8 +683,8 @@ class MpcPairFactory:
             f"; unexpected: {unexpected or 'none'}"
         )
 
-    @staticmethod
     def _settings_from_descriptor(
+        self,
         descriptor: GreyControlPairDescriptor,
         native: GreyBoxMPCConfig,
         estimator_kind: str,
@@ -691,9 +697,10 @@ class MpcPairFactory:
                 raise TypeError(f"descriptor {name} must be numeric")
             return float(value)
 
-        return MpcPairFactory._settings_for_native(
+        return self._settings_for_native(
             native,
             estimator_kind,
+            base_configuration=self._base_configuration,
             control_period=number("control_period"),
             est_q_temp=number("est_q_temp"),
             est_q_dist=number("est_q_dist"),

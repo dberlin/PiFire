@@ -32,6 +32,7 @@ from common.model_evidence import (
     RollbackEvidence,
 )
 from common.mpc_learning import MPC_FORECAST_HORIZON_SECONDS
+from common.web_contracts.learning import LearningFailure
 from controller.applied_output import AppliedOutput, FrameFeedbackDisposition, OutputSource
 from controller.model_learning.activation import ActivationPhase
 from controller.model_learning.calibration import (
@@ -42,6 +43,7 @@ from controller.model_learning.calibration import (
 from controller.model_learning.contracts import CandidateOrigin, FrameObservation
 from controller.mpc_allocator import allocate
 from controller.mpc_model import EstimatorSeed
+from controller.runtime.clock import ManualClock, RealClock
 from controller.runtime.control_trace_session import (
     ControlTraceSession,
     TraceSessionContext,
@@ -2525,6 +2527,159 @@ def test_status_fragment_reports_seed_replay_as_warming() -> None:
             "role_generation": 7,
         }
     }
+
+
+@pytest.fixture
+def seed_warmup_clock(monkeypatch: pytest.MonkeyPatch) -> ManualClock:
+    clock = ManualClock(wall_start=1_700_000_000.0, monotonic_start=50.0)
+    monkeypatch.setattr(RealClock, "monotonic", lambda _self: clock.monotonic())
+    return clock
+
+
+def test_seed_warmup_times_out_without_frames_at_exact_monotonic_deadline(
+    seed_warmup_clock: ManualClock,
+) -> None:
+    runner = _LifecycleRunner()
+    runner.status = {"learning": {"status": "collecting", "failure": None}}
+    runtime, _, _, _, _, logger = _lifecycle_runtime(runner=runner)
+    seed_warmup_clock.advance(1_000.0)
+    runtime.set_seed_warmup_remaining(3)
+    seed_warmup_clock.jump_wall(86_400.0)
+    seed_warmup_clock.advance(299.0)
+
+    assert runtime.status_fragment()["learning"]["status"] == "warming"
+    assert logger.errors == []
+    seed_warmup_clock.jump_wall(-172_800.0)
+    seed_warmup_clock.advance(1.0)
+
+    learning = runtime.status_fragment()["learning"]
+    assert learning["status"] == "error"
+    failure = LearningFailure.model_validate(learning["failure"])
+    assert failure.code == "seed-warmup-timeout"
+    assert "300" in failure.detail
+    assert "3" in failure.detail
+    assert failure.terminal is True
+    assert not runtime.evidence_available
+    assert runtime.seed_warmup_remaining == 3
+    assert len(logger.errors) == 1
+    assert failure.detail in logger.errors[0]
+    seed_warmup_clock.advance(100.0)
+    assert runtime.status_fragment()["learning"]["failure"] == learning["failure"]
+    assert len(logger.errors) == 1
+
+
+def test_seed_warmup_progress_and_rejection_do_not_extend_deadline(
+    seed_warmup_clock: ManualClock,
+) -> None:
+    runner = _LifecycleRunner()
+    runner.status = {"learning": {"status": "collecting", "failure": None}}
+    trajectory = _ReplayTrajectory()
+    runtime, *_ = _runtime(runner=runner, learning_trajectory=trajectory)
+    runtime.set_seed_warmup_remaining(2)
+    seed_warmup_clock.advance(250.0)
+    runtime.submit_completed_observation((0, 20_000), _observation())
+    assert runtime.seed_warmup_remaining == 1
+    runtime.set_seed_warmup_remaining(1)
+    seed_warmup_clock.advance(49.0)
+    trajectory.accepted = False
+    runtime.submit_completed_observation((20_000, 40_000), _observation(1))
+    assert runtime.status_fragment()["learning"]["status"] == "warming"
+    seed_warmup_clock.advance(1.0)
+
+    learning = runtime.status_fragment()["learning"]
+    assert learning["status"] == "error"
+    failure = LearningFailure.model_validate(learning["failure"])
+    assert failure.code == "seed-warmup-timeout"
+    assert "1" in failure.detail
+    assert "rejected" in failure.detail.lower()
+    assert runtime.seed_warmup_remaining == 1
+    assert not runtime.evidence_available
+
+
+def test_seed_warmup_timeout_recovers_only_after_valid_accepted_frames(
+    seed_warmup_clock: ManualClock,
+) -> None:
+    runner = _LifecycleRunner()
+    runner.status = {"learning": {"status": "collecting", "failure": None}}
+    logger = _LifecycleLogger()
+    trajectory = _ReplayTrajectory(accepted=False)
+    runtime, *_ = _runtime(runner=runner, logger=logger, learning_trajectory=trajectory)
+    runtime.set_seed_warmup_remaining(1)
+    seed_warmup_clock.advance(300.0)
+    assert runtime.status_fragment()["learning"]["status"] == "error"
+    feedback = AppliedOutput(
+        0.25,
+        OutputSource.CONTROLLER,
+        20.0,
+        requested=0.25,
+        feedback_disposition=FrameFeedbackDisposition.COMPLETE,
+    )
+    runtime.submit_completed_observation((0, 20_000), _observation(), feedback)
+    trajectory.accepted = True
+    runtime.submit_completed_observation((20_000, 40_000), _observation(1, probe_valid=False))
+    runtime.submit_completed_observation((40_000, 60_000), _observation(2, continuous=False))
+
+    assert runtime.status_fragment()["learning"]["status"] == "error"
+    assert runtime.seed_warmup_remaining == 1
+    assert not runtime.evidence_available
+    assert runner.outputs == [feedback]
+    assert runner.submissions == []
+    runtime.submit_completed_observation((60_000, 80_000), _observation(3))
+
+    assert runtime.status_fragment() == runner.status
+    assert runtime.seed_warmup_remaining == 0
+    assert runtime.evidence_available
+    assert len(logger.errors) == 1
+
+
+def test_seed_warmup_completion_before_deadline_never_reports_timeout(
+    seed_warmup_clock: ManualClock,
+) -> None:
+    runner = _LifecycleRunner()
+    runner.status = {"learning": {"status": "collecting", "failure": None}}
+    logger = _LifecycleLogger()
+    runtime, *_ = _runtime(runner=runner, logger=logger, learning_trajectory=_ReplayTrajectory())
+    runtime.set_seed_warmup_remaining(1)
+    seed_warmup_clock.advance(299.0)
+    runtime.submit_completed_observation((0, 20_000), _observation())
+    seed_warmup_clock.advance(2.0)
+
+    assert runtime.status_fragment() == runner.status
+    assert runtime.evidence_available
+    assert logger.errors == []
+
+
+def test_seed_warmup_preserves_existing_learning_error(
+    seed_warmup_clock: ManualClock,
+) -> None:
+    runner = _LifecycleRunner()
+    runner.status = {
+        "learning": {
+            "status": "error",
+            "failure": {"code": "activation-terminal", "detail": "model rejected", "terminal": True},
+        }
+    }
+    runtime, *_ = _lifecycle_runtime(runner=runner)
+    runtime.set_seed_warmup_remaining(3)
+
+    assert runtime.status_fragment() == runner.status
+    seed_warmup_clock.advance(300.0)
+    assert runtime.status_fragment() == runner.status
+    assert not runtime.evidence_available
+
+
+def test_seed_warmup_timeout_surfaces_without_runner_learning_status(
+    seed_warmup_clock: ManualClock,
+) -> None:
+    runner = _LifecycleRunner()
+    runtime, *_ = _lifecycle_runtime(runner=runner)
+    runtime.set_seed_warmup_remaining(2)
+    seed_warmup_clock.advance(300.0)
+
+    learning = runtime.status_fragment()["learning"]
+    assert learning["status"] == "error"
+    assert LearningFailure.model_validate(learning["failure"]).code == "seed-warmup-timeout"
+    assert not runtime.evidence_available
 
 
 @pytest.mark.parametrize("accepted", (True, False), ids=("accepted", "refused"))

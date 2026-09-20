@@ -214,6 +214,56 @@ def test_restore_preserves_the_live_target_on_the_replacement_pair():
     assert result["cycle_ratio"] == pytest.approx(CYCLE["u_max"])
 
 
+@pytest.mark.parametrize("fan_enabled", (False, True))
+def test_restore_keeps_current_fan_actuation_policy(fan_enabled: bool) -> None:
+    source = _identified()
+    restored = _controller(
+        enable_fan_input=fan_enabled,
+        fan_min_pct=55.0,
+        fan_max_pct=70.0,
+    )
+    try:
+        snapshot = source.get_model_snapshot()
+        assert restored.restore_model(snapshot) is True
+        restored.set_target(190.0)
+        restored.set_output(AppliedOutput(0.18, OutputSource.CONTROLLER, 1.0))
+        result = restored.update(100.0)
+
+        assert restored.commands_fan() is fan_enabled
+        if fan_enabled:
+            assert result["fan"] is not None
+            assert 55.0 <= result["fan"]["duty"] <= 70.0
+        else:
+            assert result["fan"]["duty"] is None
+        assert restored.active_control_pair.descriptor.to_dict() == snapshot["active_pair"]
+    finally:
+        source.close()
+        restored.close()
+
+
+def test_native_candidate_keeps_current_fan_actuation_policy() -> None:
+    controller = _controller(enable_fan_input=True, fan_min_pct=55.0, fan_max_pct=70.0)
+    pair = controller._pair_factory.build(
+        controller._pair_factory.native(
+            controller.mpc.config,
+            estimator_kind="ekf",
+            candidate_generation=1,
+            role_generation=1,
+        ),
+        authorized=True,
+    )
+    try:
+        pair.core.set_target(190.0)
+        pair.core.set_output(AppliedOutput(0.18, OutputSource.CONTROLLER, 1.0))
+        result = pair.core.update(100.0)
+
+        assert result.allocation.fan_duty is not None
+        assert 55.0 <= result.allocation.fan_duty <= 70.0
+    finally:
+        pair.close()
+        controller.close()
+
+
 def test_restore_round_trips_complete_validated_v6_checkpoint_state() -> None:
     source = _identified()
     restored = _controller()

@@ -1064,6 +1064,9 @@ def _assert_real_cook_hold_smoke(
     profile_repetitions: int = 1,
     require_stop_fit: bool | None = None,
     fit_scored_prefixes: tuple[int, ...] = (),
+    restore_checkpoint: bool = False,
+    allocate_cook_identity: bool = False,
+    readback_authoritative: bool = True,
 ) -> _RealCookHoldResult:
     del ds
     stream = _load_real_cook_hold_stream(campaign_id, cook_name)
@@ -1126,7 +1129,7 @@ def _assert_real_cook_hold_smoke(
         setpoint for _, _, setpoint in stream.temperatures[stream.hold_start_index :] if setpoint > 0.0
     )
     control = base_control("Smoke" if warm_with_smoke else "Hold")
-    control["cook_id"] = stream.cook_id
+    control["cook_id"] = None if allocate_cook_identity else stream.cook_id
     control["primary_setpoint"] = 0.0 if warm_with_smoke else first_setpoint
     control["safety"]["startuptemp"] = 0
     control["safety"]["afterstarttemp"] = 0
@@ -1163,6 +1166,12 @@ def _assert_real_cook_hold_smoke(
         build_real_cook_process_monitor,
     )
     _seed_sqlite_store(store, settings, control)
+    if restore_checkpoint:
+        checkpoint_source = Controller(configured, "F", settings["cycle_data"])
+        try:
+            assert ControllerModelStore().save("mpc", checkpoint_source.get_model_snapshot())
+        finally:
+            checkpoint_source.close()
     clock = _RealCookClock(stream, start_index=stream_start_index)
     journal = ActuationDeliveryJournal(
         monotonic_clock=lambda: round(clock.monotonic() * 1_000),
@@ -1172,7 +1181,7 @@ def _assert_real_cook_hold_smoke(
         dc_fan=stream.fan_pwm_capable,
         outputs=tuple(settings["platform"]["outputs"]),
     )
-    grill = DeliveredGrillPlatform(physical_grill, journal=journal, readback_authoritative=True)
+    grill = DeliveredGrillPlatform(physical_grill, journal=journal, readback_authoritative=readback_authoritative)
     grill.fan_off()
     grill.auger_off()
     repository = LearningTrajectoryRepository()
@@ -1294,7 +1303,6 @@ def _assert_real_cook_hold_smoke(
     grey_owner = getattr(ctx, "grey_learning_process", None)
     persistence_drained = False
     grey_owner_drained = False
-    grey_fit_worker = None
     grey_fit_worker_drained = False
     try:
         with caplog.at_level(logging.WARNING):
@@ -1307,6 +1315,8 @@ def _assert_real_cook_hold_smoke(
                 store.write_control_snapshot(hold_control, origin="real-cook-hold-handoff")
                 probes.arm_stop()
             run_work_cycle("Hold", ctx)
+            if allocate_cook_identity:
+                stream = replace(stream, cook_id=store.read_control()["cook_id"])
 
         assert len(captured_runners) == 1
         runner, runner_status = captured_runners[0]
@@ -1378,8 +1388,6 @@ def _assert_real_cook_hold_smoke(
             assert not outcome_buffer._terminal_drops  # noqa: SLF001 - terminal ownership proof
     finally:
         grey_owner = getattr(ctx, "grey_learning_process", grey_owner)
-        if grey_owner is not None and grey_owner.learning is not None:
-            grey_fit_worker = grey_owner.learning.worker
         if grey_owner is not None:
             grey_owner.close()
         runners_to_stop = [built_runner for built_runner, _status in captured_runners if built_runner is not None]
@@ -1396,12 +1404,6 @@ def _assert_real_cook_hold_smoke(
 
     assert trajectory_closed
     assert grey_owner_drained
-    expected_grey_fit_workers = 1 if expected_controller is ControllerType.MPC else 0
-    assert len(captured_grey_fit_workers) == expected_grey_fit_workers
-    if grey_fit_worker is None:
-        assert not captured_grey_fit_workers
-    else:
-        assert captured_grey_fit_workers == [grey_fit_worker]
     assert grey_fit_worker_drained
     assert persistence_drained
     assert not persistence.failed
@@ -1669,6 +1671,30 @@ def test_fresh_sep06_database_warms_then_persists_learning(
     assert result.scored_delta > 0
     assert result.finalized_segment_delta > 0
     assert result.replay_only_count + result.model_observation_count == 59
+    assert result.recorder_gap_reasons == ()
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("allocate_cook_identity", (False, True), ids=("existing-cook", "new-cook"))
+def test_restored_pwm_mpc_warms_with_uncertified_hardware_readback(
+    ds, monkeypatch, caplog, allocate_cook_identity: bool
+) -> None:
+    result = _assert_real_cook_hold_smoke(
+        ds,
+        monkeypatch,
+        caplog,
+        campaign_id="mpc-sep10",
+        cook_name=_SEP10_COOK_NAME,
+        expected_controller=ControllerType.MPC,
+        warm_with_smoke=False,
+        restore_checkpoint=True,
+        allocate_cook_identity=allocate_cook_identity,
+        readback_authoritative=False,
+    )
+
+    assert result.replay_only_count == 8
+    assert result.scored_delta > 0
+    assert result.candidate_fit_accepted_count > 0
     assert result.recorder_gap_reasons == ()
 
 

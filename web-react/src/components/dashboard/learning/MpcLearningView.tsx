@@ -50,6 +50,11 @@ const LEARNING_STATUS_COPY: Record<ModelEvidenceStatus, string> = {
 };
 
 const LEARNING_ISSUES: Readonly<Record<string, LearningIssueCopy>> = {
+  "seed-warmup-timeout": {
+    summary: "Learning could not finish warm-up within five minutes.",
+    action:
+      "Grill control continues. Check diagnostics for rejected frames; learning can resume once valid warm-up frames are available.",
+  },
   "learning-digest-checkpoint-mismatch": {
     summary: "The running MPC model does not match the saved learned model.",
     action: "Restart Hold. If this returns, export diagnostics.",
