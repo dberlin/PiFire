@@ -814,6 +814,32 @@ def test_compatible_smoke_to_hold_keeps_one_segment_with_partial_tail_and_exact_
     assert scored_batches[0].scored[0].sequence == 3
 
 
+@pytest.mark.parametrize("verified", [False, True])
+def test_hold_fan_evidence_uses_observed_integral_not_numeric_request(verified: bool) -> None:
+    runtime, journal, persistence = _runtime()
+    runtime.mode_entered(_entered("Hold"))
+    runtime.observe_temperature(_sample(25, 109.5))
+    runtime.observe_temperature(_sample(19_975, 111.0))
+    journal.set_exact(0, 20_000, fan_on_s=15.0, fan_duty_integral_s=9.0)
+    if not verified:
+        journal.integrals[(0, 20_000)] = replace(
+            journal.integrals[(0, 20_000)],
+            fan_certainty=FrameDeliveryCertainty.UNKNOWN,
+            unknown_reasons=("uncertified fan readback",),
+        )
+    observation = replace(_hold_frame(1, temp_c=111.0), actual_fan_duty=0.45 if verified else 1.0)
+
+    assert runtime.observe_hold_frame(observation) is verified
+    scored = _scored_frames(persistence)
+    if verified:
+        assert scored[0].mean_actual_fan_duty == pytest.approx(0.45)
+        assert scored[0].delivered_fan_on_seconds == 15.0
+        assert scored[0].fan_duty_integral_seconds == 9.0
+    else:
+        assert scored == []
+        assert runtime.status().last_break_reason is TrajectoryBreakReason.ACTUATION_UNKNOWN
+
+
 def test_pure_hold_begins_without_pre_roll_and_anchors_first_valid_measurement() -> None:
     runtime, _journal, persistence = _runtime()
     runtime.mode_entered(_entered("Hold"))

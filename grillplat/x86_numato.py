@@ -29,6 +29,7 @@ from common.i2c_bus_config import parse_i2c_bus
 from grillplat.actuator_capabilities import AUGER_TIMING
 from grillplat.emc2301 import EMC2301
 from grillplat.numato_usbrelay import NumatoUSBRelay
+from grillplat.output_readback import EmcPwmReadback
 from grillplat.system_commands import SystemCommandsMixin
 
 """
@@ -91,9 +92,10 @@ class GrillPlatform(SystemCommandsMixin):
             # chip's internal lookup-table fan curve.
             self.emc.lut_enabled = False
 
+        self._pwm_readback = EmcPwmReadback(self.emc, self.chip)
         # Start in a known state: all relays off, fan stopped.
         self.relay.reset()
-        self.emc.manual_fan_speed = 0
+        self._pwm_readback.write(0)
         # Apply the fan PWM frequency now so the chip is correct immediately,
         # independent of whether control.py later calls set_pwm_frequency.
         self.set_pwm_frequency(self.frequency)
@@ -151,7 +153,7 @@ class GrillPlatform(SystemCommandsMixin):
     def fan_off(self):
         self.logger.debug("fan_off: Stopping fan and removing power")
         self._stop_ramp()
-        self.emc.manual_fan_speed = 0
+        self._pwm_readback.write(0)
         self._fan_speed_percent = 0
         self.relay.relay_off(self.relay_map["fan"])
         self._output_state["fan"] = False
@@ -172,7 +174,7 @@ class GrillPlatform(SystemCommandsMixin):
         # otherwise kill the ramp thread silently mid-ramp.
         fan_speed_percent = max(0, min(100, fan_speed_percent))
         # EMC2101 duty maps directly to fan speed percent (no inversion).
-        self.emc.manual_fan_speed = fan_speed_percent
+        self._pwm_readback.write(fan_speed_percent)
         self._fan_speed_percent = fan_speed_percent
 
     def set_pwm_frequency(self, frequency=25000):
@@ -243,13 +245,24 @@ class GrillPlatform(SystemCommandsMixin):
         self.logger.debug("cleanup: Shutting down outputs")
         self._stop_ramp()
         try:
-            self.emc.manual_fan_speed = 0
+            self._pwm_readback.write(0)
         except Exception:
             pass
         try:
             self.relay.reset()
         finally:
             self.relay.close()
+
+    def get_output_readback(self):
+        """Read relay-board state and the quantized electrical PWM setting."""
+        relays = self.relay.relay_read_all()
+        observed = {name: relays[self.relay_map[name]] for name in ("auger", "fan")}
+        if self._ramp_thread is not None and self._ramp_thread.is_alive():
+            return observed
+        pwm = self._pwm_readback.read(self._fan_speed_percent, self.logger)
+        if pwm is not None:
+            observed["pwm"] = pwm
+        return observed
 
     def get_output_status(self):
         self.current = {

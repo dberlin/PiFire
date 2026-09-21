@@ -596,7 +596,8 @@ def _reconcile_framed_applied_outputs(
         cursor_ms = frame.frame_start_ms
         delivered_on_seconds = 0.0
         incomplete = False
-        fan_mismatch = False
+        fan_integral = 0.0
+        fan_known = True
         for _, payload in applied:
             if (
                 payload.result_revision != frame.result_revision
@@ -611,7 +612,10 @@ def _reconcile_framed_applied_outputs(
             overlap_seconds = (overlap_end_ms - cursor_ms) / 1000
             delivered_on_seconds += payload.realized_auger_duty * overlap_seconds
             incomplete = incomplete or not payload.sample_complete
-            fan_mismatch = fan_mismatch or not _optional_close(payload.actual_fan_duty, frame.applied_fan_duty)
+            if payload.actual_fan_duty is None:
+                fan_known = False
+            else:
+                fan_integral += payload.actual_fan_duty * overlap_seconds
             cursor_ms = overlap_end_ms
             if cursor_ms == frame.frame_end_ms:
                 break
@@ -630,10 +634,11 @@ def _reconcile_framed_applied_outputs(
                 "framed pulse applied duty disagrees with delivered on-time",
                 frame_index,
             )
-        if fan_mismatch:
+        mean_fan_duty = fan_integral / ((frame.frame_end_ms - frame.frame_start_ms) / 1000) if fan_known else None
+        if not _optional_close(mean_fan_duty, frame.applied_fan_duty):
             add(
                 ReplayIssueCode.APPLIED_OUTPUT_MISMATCH,
-                "framed pulse applied fan disagrees with same-revision applied output",
+                "framed pulse mean fan disagrees with same-revision applied-output integral",
                 frame_index,
             )
 

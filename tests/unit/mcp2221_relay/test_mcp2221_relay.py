@@ -32,21 +32,6 @@ class FailingOffGpio(FakeGpio):
         super().set(pin_name, high)
 
 
-class FailingFanController:
-    def __init__(self, speed):
-        self._speed = speed
-
-    @property
-    def manual_fan_speed(self):
-        return self._speed
-
-    @manual_fan_speed.setter
-    def manual_fan_speed(self, value):
-        if value == 0:
-            raise OSError("fan controller unavailable")
-        self._speed = value
-
-
 def _config(*, chip="none", triggerlevel="LOW", outputs=None, fan_bus=None):
     return {
         "outputs": outputs or {},
@@ -158,9 +143,16 @@ def test_cleanup_attempts_to_deassert_every_relay_before_reporting_a_gpio_failur
 def test_fan_off_deasserts_the_relay_when_zeroing_pwm_fails():
     platform, gpio, *_ = _build(_config(chip="emc2301"))
     platform.fan_on(63)
-    platform.emc = FailingFanController(63)
 
-    with pytest.raises(OSError, match="fan controller unavailable"):
+    with (
+        mock.patch.object(
+            type(platform.emc),
+            "manual_fan_speed",
+            mock.PropertyMock(side_effect=OSError("fan controller unavailable")),
+            create=True,
+        ),
+        pytest.raises(OSError, match="fan controller unavailable"),
+    ):
         platform.fan_off()
 
     assert gpio.values["GP3"] is True

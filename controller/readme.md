@@ -147,6 +147,32 @@ optimization; it does not by itself mean that
 the collector stopped. Storage or corpus-integrity failures remain distinct from
 these recoverable fitting conditions.
 
+#### Fan delivery evidence
+
+MPC fan updates follow the control cadence (five seconds in the September 20
+cook), independently of the 20-second auger frame. Frame and applied-output
+fan values are duration-weighted means of observed settings, not the requested
+or frame-start duty.
+
+FT232H, MCP2221, and Numato EMC platforms read the relay state and programmed
+PWM registers independently of their command/status caches. EMC2301 uses its
+8-bit duty grid; EMC2101 decoding uses the current PWM resolution and polarity.
+Normal quantization is expected. A valid readback differing from the expected
+device-grid command produces a warning only: the observed value remains usable
+evidence. Missing, failed, invalid, or autonomous output remains unknown.
+Hardware startup boost is preserved; its bounded transient is unknown until a
+fresh post-startup read. Hold refreshes readback at completed frame boundaries
+even when the fan command is unchanged; active software ramps remain unknown.
+Unsupported platforms do not substitute requested duty.
+This certifies the programmed electrical setting, not RPM, airflow, or rotation;
+no tachometer is required.
+
+The sanitized September 20 regression retains only relative chamber readings,
+setpoints, and the allowlisted replay configuration. It drives production Hold,
+threaded MPC, SQLite trajectory capture, and the real fit worker with independent
+quantized register readback. It is a counterfactual thermal-stream replay, not
+repaired historical actuation evidence or proof of model qualification/activation.
+
 #### Physical timing and retained readings
 
 Mode deadlines start at actuator setup, after preflight. Clearing cook history

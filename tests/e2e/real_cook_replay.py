@@ -268,14 +268,9 @@ def _observation(
     row: dict[str, object],
     ambient_temperature_f: float,
 ) -> FrameObservation:
-    duration_s = frame.end_s - frame.start_s
-    # JSON decimal frame bounds can subtract one ULP below their exact
-    # millisecond duration. Preserve the archived values in ReplayActuationFrame
-    # and normalize only that representation artifact at FrameObservation's
-    # strict delivered-on boundary.
-    assert frame.delivered_on_s - duration_s <= 1e-12
-    delivered_on_s = min(frame.delivered_on_s, duration_s)
-    scheduled_on_s = min(frame.scheduled_on_s, duration_s)
+    duration_s = (round(frame.end_s * 1_000) - round(frame.start_s * 1_000)) / 1_000
+    delivered_on_s = frame.delivered_on_s
+    scheduled_on_s = frame.scheduled_on_s
     realized_duty = delivered_on_s / duration_s
     # The sanitized fixture has relative time, including a negative first
     # interval. This replay supplies its own simulated wall origin; it does not

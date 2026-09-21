@@ -374,6 +374,34 @@ def test_command_echo_readback_is_unknown_until_explicitly_certified() -> None:
     assert delivered.journal.integrate(100, 200).auger_certainty is FrameDeliveryCertainty.UNKNOWN
 
 
+def test_hardware_readback_integrates_quantized_pwm_without_certifying_command_echo() -> None:
+    clock = FakeClock()
+    raw = ControlledGrillPlatform()
+    raw.get_output_readback = raw.snapshot
+    raw.get_output_status = lambda: dict(raw.commanded)
+    journal = ActuationDeliveryJournal(monotonic_clock=clock.monotonic_clock, wall_clock=clock.wall_clock)
+    delivered = DeliveredGrillPlatform(raw, journal=journal)
+    raw.effect("fan_on", fan=True, pwm=100.0)
+    delivered.fan_on(100.0)
+    clock.set(5_000)
+    raw.effect("set_duty_cycle", pwm=179 / 255 * 100)
+    delivered.set_duty_cycle(70.1)
+
+    integral = journal.integrate(0, 20_000)
+    assert integral.fan_certainty is FrameDeliveryCertainty.EXACT
+    assert integral.fan_duty_integral_seconds == pytest.approx(5 + 15 * 179 / 255)
+    assert integral.pwm_end == pytest.approx(179 / 255)
+    assert raw.commanded["pwm"] == 70.1
+
+    def failed_readback():
+        raise OSError("PWM register read failed")
+
+    raw.get_output_readback = failed_readback
+    clock.set(20_000)
+    delivered.set_duty_cycle(80.0)
+    assert journal.integrate(20_000, 21_000).fan_certainty is FrameDeliveryCertainty.UNKNOWN
+
+
 def test_asynchronous_ramp_is_not_interpolated_and_exact_command_closes_uncertainty() -> None:
     delivered, raw, clock = _platform()
     _establish_all_channels(delivered, raw, clock)

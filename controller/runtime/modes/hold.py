@@ -768,7 +768,6 @@ class HoldMode(ControlMode):
                 timestamp_ms=int(now * 1_000),
                 monotonic_ms=round(applied.timestamp * 1_000),
                 pulse_frame_result_revision=controller.pulse_frame_result_revision,
-                fan_duty=controller.fan_duty,
                 controls_fan=controller.controls_fan,
                 producing_revision=producing_revision,
                 producing_calibration_revision=(
@@ -853,7 +852,11 @@ class HoldMode(ControlMode):
         self._fit_segment_id_cache = None
         learning_evidence_available = True
         self._reachability_advisory_key = None
-        self._framed_pulse = FramedPulseRuntime(wall_clock_ms=lambda: int(self.ctx.clock.wall_time() * 1_000))
+        delivery_journal = getattr(self.grill, "journal", None)
+        self._framed_pulse = FramedPulseRuntime(
+            wall_clock_ms=lambda: int(self.ctx.clock.wall_time() * 1_000),
+            delivery_journal=delivery_journal,
+        )
         self._last_ptemp = None
         self._last_ptemp_monotonic_s = None
         self._last_target = None
@@ -876,7 +879,9 @@ class HoldMode(ControlMode):
         except Exception as error:
             learning_evidence_available = False
             self._trace_warning(f"Control trace recorder unavailable: {error}")
-        self._control_trace = ControlTraceSession(recorder, warning=self._trace_warning)
+        self._control_trace = ControlTraceSession(
+            recorder, warning=self._trace_warning, delivery_journal=delivery_journal
+        )
 
         start_fan(self.grill, self.settings)
         self.grill.power_on()
@@ -2294,6 +2299,12 @@ class HoldMode(ControlMode):
                 self.grill.auger_off()
         if framed_pulse.lid_will_open:
             self.grill.auger_off()
+        if result.completions:
+            observe_outputs = getattr(self.grill, "observe_outputs", None)
+            if callable(observe_outputs):
+                # Recover stable readback after startup even at unchanged duty.
+                # This observes the next interval, never repairs the past frame.
+                observe_outputs()
 
     def _dispatch_framed_trace_and_feedback(
         self,

@@ -56,6 +56,7 @@ from common.persistence.model_challenger import ModelChallengerState, read_model
 from common.persistence.model_evidence import read_model_activation, read_model_evidence
 from controller.acados import GreyBoxMPCConfig
 from controller.applied_output import AppliedOutput, OutputSource
+from controller.control_trace_replay import ReplayIssueCode, ReplayIssueSeverity, validate_records
 from controller.model_learning.activation import PreparedActivationRecord
 from controller.model_learning.contracts import (
     CandidateOrigin,
@@ -694,6 +695,7 @@ _REAL_COOK_FIXTURE_ROOT = Path(__file__).parents[1] / "fixtures" / "real_cook_le
 _REAL_COOK_MANIFEST_SHA256 = "0d924b9ff648fc40596423c1bb853a5d5bcadfa9f3e286cc387bc33ec72b5a2f"
 _SEP10_COOK_NAME = "2026-09-10--1843-CookFile.pifire"
 _SEP10_COOK_SHA256 = "21a1c807caf321c08d48ad137a71d267e4bb17ea1502cddee65267be93c8096f"
+_SEP20_COOK_NAME = "2026-09-20--1720.pifire"
 
 
 @dataclass(frozen=True, slots=True)
@@ -778,6 +780,44 @@ def test_fit_acceptance_without_durable_shadow_does_not_count() -> None:
 
 
 def _load_real_cook_hold_stream(campaign_id: str, cook_name: str) -> _RealCookHoldStream:
+    if campaign_id == "mpc-sep20":
+        assert cook_name == _SEP20_COOK_NAME
+        archive_path = _REAL_COOK_FIXTURE_ROOT / "cookfiles" / cook_name
+        companion = json.loads(archive_path.with_suffix(".thermal-smoke.json").read_text())
+        archive_bytes = archive_path.read_bytes()
+        assert sha256(archive_bytes).hexdigest() == companion["cook"]["sanitized_sha256"]
+        with zipfile.ZipFile(BytesIO(archive_bytes)) as archive:
+            metadata = json.loads(archive.read("metadata.json"))
+            chamber_samples = json.loads(archive.read("chamber_samples.json"))
+        # This standalone archive deliberately has no historical actuation or
+        # learning evidence. Only its thermal stream and original configuration
+        # feed the current production runtime.
+        assert metadata["replay_kind"] == companion["cook"]["replay_kind"] == "thermal-smoke-only"
+        payload = companion["sessions"][0]["payload"]
+        temperatures = tuple(
+            (int(row["timestamp_ms"]), float(row["chamber_temperature_f"]), float(row["setpoint_f"]))
+            for row in chamber_samples
+        )
+        assert len(temperatures) == metadata["chamber_sample_count"] == 1616
+        assert all(left[0] < right[0] for left, right in pairwise(temperatures))
+        hold_start_index = next(
+            index for index, sample in enumerate(temperatures) if sample[0] >= companion["hold"]["start_ms"]
+        )
+        assert len(temperatures) - hold_start_index == 1560
+        assert temperatures[-1][0] == companion["cook"]["cook_end_ms"]
+        assert temperatures[-1][0] < companion["hold"]["end_ms"]
+        return _RealCookHoldStream(
+            controller=payload["controller"],
+            cook_id=metadata["cook_id"],
+            temperatures=temperatures,
+            hold_start_index=hold_start_index,
+            controller_config={item["key"]: item["value"] for item in payload["controller_config"]},
+            control_period_seconds=payload["control_period_seconds"],
+            pulse_slot_seconds=payload["pulse_slot_seconds"],
+            pulse_frame_seconds=payload["pulse_frame_seconds"],
+            fan_pwm_capable=payload["fan_pwm_capable"],
+            fan_authority=payload["fan_authority"],
+        )
     if campaign_id == "mpc-sep10":
         # Keep the user-supplied archive unchanged, including provenance. Unlike
         # the baseline campaigns, this regression starts with an empty database.
@@ -912,8 +952,9 @@ class _DeterministicRunnerPeriodGate:
 
 
 class _RealCookClock(Clock):
-    def __init__(self, stream: _RealCookHoldStream, *, start_index: int) -> None:
+    def __init__(self, stream: _RealCookHoldStream, *, start_index: int, minimum_sleep_s: float = 0.0) -> None:
         self._stream = stream
+        self._minimum_sleep_s = minimum_sleep_s
         start_ms = stream.temperatures[start_index][0]
         end_ms = stream.temperatures[-1][0]
         slot_ms = round(stream.pulse_slot_seconds * 1_000)
@@ -924,6 +965,7 @@ class _RealCookClock(Clock):
         self._monotonic_origin_ms: int = stream.temperatures[0][0]
         self._wall_offset_s: float = 0.0
         self._tick_index = 0
+        self._timestamp_ms = float(start_ms)
         self._sample_index = start_index
         self._period_gate: _DeterministicRunnerPeriodGate | None = None
         self._pause_next_sleep = False
@@ -933,8 +975,8 @@ class _RealCookClock(Clock):
         return self._sample_index
 
     @property
-    def timestamp_ms(self) -> int:
-        return self._ticks[self._tick_index]
+    def timestamp_ms(self) -> float:
+        return self._timestamp_ms
 
     @override
     def wall_time(self) -> float:
@@ -959,7 +1001,13 @@ class _RealCookClock(Clock):
         if self._pause_next_sleep:
             self._pause_next_sleep = False
             return
+        # Normally honor the production 50 ms sleep. A deliberate delayed-loop
+        # scenario can impose a floor; source/slot boundaries still wake earlier.
+        deadline_ms = self._timestamp_ms + max(seconds, self._minimum_sleep_s) * 1_000
         if self._tick_index + 1 < len(self._ticks):
+            deadline_ms = min(deadline_ms, self._ticks[self._tick_index + 1])
+        self._timestamp_ms = min(deadline_ms, self._ticks[-1])
+        while self._tick_index + 1 < len(self._ticks) and self._ticks[self._tick_index + 1] <= self._timestamp_ms:
             self._tick_index += 1
         while (
             self._sample_index + 1 < len(self._stream.temperatures)
@@ -968,6 +1016,79 @@ class _RealCookClock(Clock):
             self._sample_index += 1
         if self._period_gate is not None:
             self._period_gate.advance_to(self.monotonic())
+
+
+class _DiscretePwmReadbackGrill(FakeGrillPlatform):
+    """Electrical relay state plus EMC2301 direct-PWM register 0x30.
+
+    Microchip DS20006532A encodes duty as 0..255. Match the driver's
+    round(percent * 255 / 100) write and raw-byte / 255 read, not its command
+    cache. There is no mechanical speed or tachometer input.
+    """
+
+    def __init__(self, *, clock: Clock, outputs: tuple[str, ...]) -> None:
+        super().__init__(dc_fan=True, outputs=outputs)
+        self._clock = clock
+        self._fan_relay = False
+        self._auger_relay = False
+        self._pwm_register = 255
+        self.discrepancy_at_ms: int | None = None
+        self.hardware_history: list[tuple[int, bool, int]] = []
+        self._capture_hardware()
+
+    def _capture_hardware(self) -> None:
+        state = (self._fan_relay, self._pwm_register)
+        if not self.hardware_history or self.hardware_history[-1][1:] != state:
+            self.hardware_history.append((round(self._clock.monotonic() * 1_000), *state))
+
+    def get_output_readback(self) -> dict[str, bool | float]:
+        return {
+            "auger": self._auger_relay,
+            "fan": self._fan_relay,
+            "pwm": self._pwm_register * 100.0 / 255,
+        }
+
+    def set_duty_cycle(self, pct):
+        assert 0.0 <= pct <= 100.0
+        super().set_duty_cycle(pct)
+        self._pwm_register = round(pct * 255 / 100)
+        now_ms = round(self._clock.monotonic() * 1_000)
+        if now_ms >= 300_000 and self.discrepancy_at_ms is None and 0 < self._pwm_register < 255:
+            # One valid device setting deliberately differs even from the
+            # quantized target. It remains electrical evidence, not grounds
+            # to reject learning or substitute the requested command.
+            self._pwm_register -= 1
+            self.discrepancy_at_ms = now_ms
+        self._capture_hardware()
+
+    def fan_on(self, dc=None):
+        super().fan_on(dc)
+        self._fan_relay = True
+        self.set_duty_cycle(100 if dc is None else dc)
+
+    def fan_off(self):
+        super().fan_off()
+        self._fan_relay = False
+        self.set_duty_cycle(0)
+
+    def auger_on(self):
+        super().auger_on()
+        self._auger_relay = True
+
+    def auger_off(self):
+        super().auger_off()
+        self._auger_relay = False
+
+    def fan_integral(self, start_ms: int, end_ms: int) -> float:
+        # Independent zero-order hold integral over actual register writes.
+        # Do not consult journal events, requests, or production integration.
+        assert self.hardware_history[0][0] <= start_ms < end_ms
+        integral = 0.0
+        for index, (at_ms, enabled, raw) in enumerate(self.hardware_history):
+            until_ms = self.hardware_history[index + 1][0] if index + 1 < len(self.hardware_history) else end_ms
+            overlap_ms = max(0, min(until_ms, end_ms) - max(at_ms, start_ms))
+            integral += overlap_ms / 1_000 * (raw / 255 if enabled else 0.0)
+        return integral
 
 
 class _RealCookProbes:
@@ -1067,6 +1188,8 @@ def _assert_real_cook_hold_smoke(
     restore_checkpoint: bool = False,
     allocate_cook_identity: bool = False,
     readback_authoritative: bool = True,
+    discrete_pwm_readback: bool = False,
+    minimum_sleep_s: float = 0.0,
 ) -> _RealCookHoldResult:
     del ds
     stream = _load_real_cook_hold_stream(campaign_id, cook_name)
@@ -1172,15 +1295,20 @@ def _assert_real_cook_hold_smoke(
             assert ControllerModelStore().save("mpc", checkpoint_source.get_model_snapshot())
         finally:
             checkpoint_source.close()
-    clock = _RealCookClock(stream, start_index=stream_start_index)
+    clock = _RealCookClock(stream, start_index=stream_start_index, minimum_sleep_s=minimum_sleep_s)
     journal = ActuationDeliveryJournal(
         monotonic_clock=lambda: round(clock.monotonic() * 1_000),
         wall_clock=lambda: round(clock.wall_time() * 1_000),
     )
-    physical_grill = FakeGrillPlatform(
-        dc_fan=stream.fan_pwm_capable,
-        outputs=tuple(settings["platform"]["outputs"]),
+    physical_grill = (
+        _DiscretePwmReadbackGrill(clock=clock, outputs=tuple(settings["platform"]["outputs"]))
+        if discrete_pwm_readback
+        else FakeGrillPlatform(
+            dc_fan=stream.fan_pwm_capable,
+            outputs=tuple(settings["platform"]["outputs"]),
+        )
     )
+    physical_grill.dc_fan = stream.fan_pwm_capable
     grill = DeliveredGrillPlatform(physical_grill, journal=journal, readback_authoritative=readback_authoritative)
     grill.fan_off()
     grill.auger_off()
@@ -1334,6 +1462,11 @@ def _assert_real_cook_hold_smoke(
         assert tuple(dict.fromkeys(probes.visited_timestamps)) == tuple(
             timestamp_ms for timestamp_ms, _, _ in stream.temperatures[visited_start:]
         )
+        if discrete_pwm_readback:
+            assert runner.runs_async()
+            assert not readback_authoritative
+            assert stream_start_index == 0
+            assert len(tuple(dict.fromkeys(probes.visited_timestamps))) == 1616
         assert store.read_control()["mode"] == "Stop"
         assert store.read_control()["updated"] is True
         assert runtime_persistence.read_errors(ErrorKind.CONTROL) == list(errors_before)
@@ -1420,10 +1553,14 @@ def _assert_real_cook_hold_smoke(
     observation_payloads = [
         record.payload for record in records if record.event_kind is TraceEventKind.MODEL_OBSERVATION
     ]
-    assert observation_payloads
+    expect_observations = readback_authoritative or discrete_pwm_readback
+    assert bool(observation_payloads) is expect_observations
     assert all(payload.eligible or payload.rejection_reasons for payload in observation_payloads)
     assert report_before_restart.quarantined_segment_count == 0
     assert report_before_restart.last_recovery_error is None
+    if not readback_authoritative and not discrete_pwm_readback:
+        assert not any(payload.eligible for payload in observation_payloads)
+        assert report_before_restart.scored_count == corpus_before.scored_count
 
     control_updates = [record.payload for record in records if record.event_kind is TraceEventKind.CONTROL_UPDATE]
     assert control_updates
@@ -1539,7 +1676,6 @@ def _assert_real_cook_hold_smoke(
             "checkpoint-failure",
         }, (pid_stop_fit.outcome, pid_stop_fit.reason, pid_stop_fit.request_bound)
     assert not [record for record in records if record.event_kind is TraceEventKind.RECORDER_GAP]
-    assert any(record.event_kind is TraceEventKind.MODEL_OBSERVATION for record in records)
     terminal_frames = [
         (index, cast(FramedPulseFramePayload, record.payload))
         for index, record in enumerate(records)
@@ -1556,11 +1692,12 @@ def _assert_real_cook_hold_smoke(
         and record.payload.frame_start_ms == terminal_frame.frame_start_ms
         and record.payload.frame_end_ms == terminal_frame.frame_end_ms
     ]
-    assert len(matching_terminal_observations) == 1
-    terminal_observation_index, terminal_observation = matching_terminal_observations[0]
-    assert terminal_index < terminal_observation_index
-    assert terminal_observation.probe_valid
-    assert terminal_observation.eligible or terminal_observation.rejection_reasons
+    assert len(matching_terminal_observations) == int(expect_observations)
+    if expect_observations:
+        terminal_observation_index, terminal_observation = matching_terminal_observations[0]
+        assert terminal_index < terminal_observation_index
+        assert terminal_observation.probe_valid
+        assert terminal_observation.eligible or terminal_observation.rejection_reasons
 
     final_outputs = physical_grill.get_output_status()
     assert all(not final_outputs[name] for name in ("auger", "fan", "igniter", "power"))
@@ -1570,6 +1707,80 @@ def _assert_real_cook_hold_smoke(
     assert restarted_report.open_segment_count == 0
     assert restarted_report.finalized_segment_count == report_before_restart.finalized_segment_count
     assert restarted_report.scored_count == report_before_restart.scored_count
+    if discrete_pwm_readback:
+        assert isinstance(physical_grill, _DiscretePwmReadbackGrill)
+        assert captured_grey_fit_workers
+        assert any(payload.eligible for payload in observation_payloads)
+        frames = [
+            cast(FramedPulseFramePayload, record.payload)
+            for record in records
+            if record.event_kind is TraceEventKind.ACTUATION_FRAME
+        ]
+        # At least one completed physical frame must contain distinct interior
+        # PWM writes. Freezing the fan until a 20-second boundary is not a fix.
+        assert any(
+            any(
+                frame.frame_start_ms < at_ms < frame.frame_end_ms
+                and enabled
+                and previous_enabled
+                and raw != previous_raw
+                for (_, previous_enabled, previous_raw), (at_ms, enabled, raw) in pairwise(
+                    physical_grill.hardware_history
+                )
+            )
+            for frame in frames
+        )
+        assert any(
+            name == "set_duty_cycle" and abs(args[0] * 255 / 100 - round(args[0] * 255 / 100)) > 1e-6
+            for name, args in physical_grill.calls
+        ), "the thermal stream must exercise a request that cannot be encoded exactly"
+        for frame in frames:
+            duration_s = (frame.frame_end_ms - frame.frame_start_ms) / 1_000
+            expected = physical_grill.fan_integral(frame.frame_start_ms, frame.frame_end_ms) / duration_s
+            assert frame.applied_fan_duty == pytest.approx(expected * 100, rel=0, abs=1e-9)
+        for record in records:
+            if record.event_kind is not TraceEventKind.APPLIED_OUTPUT:
+                continue
+            applied = record.payload
+            if applied.interval_end_ms == applied.interval_start_ms:
+                continue
+            duration_s = (applied.interval_end_ms - applied.interval_start_ms) / 1_000
+            expected = physical_grill.fan_integral(applied.interval_start_ms, applied.interval_end_ms) / duration_s
+            assert applied.actual_fan_duty == pytest.approx(expected * 100, rel=0, abs=1e-9)
+        for observation in observed_trajectory_frames:
+            start_ms = round(observation.frame_start_s * 1_000)
+            end_ms = round(observation.frame_end_s * 1_000)
+            expected = physical_grill.fan_integral(start_ms, end_ms) / ((end_ms - start_ms) / 1_000)
+            assert observation.actual_fan_duty == pytest.approx(expected, rel=0, abs=1e-9)
+        segments = LearningTrajectoryRepository().read_cook_segments(stream.cook_id)
+        assert any(segment.scored_hold_frames for segment in segments)
+        assert any(segment.pre_roll_frames for segment in segments)
+        discrepancy_at_ms = physical_grill.discrepancy_at_ms
+        assert discrepancy_at_ms is not None
+        assert any(
+            frame.monotonic_start_ms <= discrepancy_at_ms < frame.monotonic_end_ms
+            for segment in segments
+            for frame in segment.scored_hold_frames
+        ), "a valid but unexpected PWM register value must remain admissible evidence"
+        for segment in segments:
+            for frame in (*segment.pre_roll_frames, *segment.scored_hold_frames):
+                duration_s = (frame.monotonic_end_ms - frame.monotonic_start_ms) / 1_000
+                expected = physical_grill.fan_integral(frame.monotonic_start_ms, frame.monotonic_end_ms)
+                assert frame.fan_delivery_certainty.value == "exact"
+                assert frame.fan_duty_integral_seconds == pytest.approx(expected, rel=0, abs=1e-9)
+                assert frame.mean_actual_fan_duty == pytest.approx(expected / duration_s, rel=0, abs=1e-9)
+        replay = validate_records(records)
+        errors = [issue for issue in replay.issues if issue.severity is ReplayIssueSeverity.ERROR]
+        # Do not weaken strict replay: genuine late auger-off delivery remains
+        # an error. Fan/interval inconsistency and all other violations fail.
+        for issue in errors:
+            assert issue.code is ReplayIssueCode.FRAME_DELIVERY_MISMATCH, issue
+            assert issue.record is not None
+            frame = records[issue.record.index].payload
+            assert isinstance(frame, FramedPulseFramePayload)
+            assert frame.delivered_on_seconds > frame.scheduled_on_seconds + 1e-6
+            assert frame.delivered_on_seconds <= (frame.frame_end_ms - frame.frame_start_ms) / 1_000
+        assert replay.valid is (not errors)
     recorder_gap_reasons = tuple(
         cast(RecorderGapPayload, record.payload).reason
         for record in records
@@ -1612,6 +1823,75 @@ def _assert_real_cook_hold_smoke(
     )
 
 
+def test_real_cook_clock_preserves_requested_delay_and_earlier_source_wakes() -> None:
+    stream = _RealCookHoldStream(
+        controller="mpc",
+        cook_id="clock-boundaries",
+        temperatures=((1_000, 100.0, 0.0), (1_075, 101.0, 375.0), (1_200, 102.0, 375.0)),
+        hold_start_index=1,
+        controller_config={},
+        control_period_seconds=5.0,
+        pulse_slot_seconds=2.0,
+        pulse_frame_seconds=20.0,
+        fan_pwm_capable=True,
+    )
+    clock = _RealCookClock(stream, start_index=0)
+    clock.sleep(0.05)
+    assert clock.monotonic() == pytest.approx(0.05)
+    assert clock.index == 0
+    clock.sleep(0.05)
+    assert clock.monotonic() == pytest.approx(0.075)
+    assert clock.index == 1
+    clock.pause_next_sleep()
+    clock.sleep(0.05)
+    assert clock.monotonic() == pytest.approx(0.075)
+    clock.jump_wall(3_600)
+    assert clock.monotonic() == pytest.approx(0.075)
+    assert clock.wall_time() == pytest.approx(3_601.075)
+    clock.sleep(0.05)
+    assert clock.monotonic() == pytest.approx(0.125)
+    clock.sleep(0)
+    assert clock.monotonic() == pytest.approx(0.125)
+    clock.sleep(0.1)
+    assert clock.monotonic() == pytest.approx(0.2)
+    assert clock.index == 2
+
+
+@pytest.mark.timeout(300)
+@pytest.mark.slow
+def test_sanitized_sep20_hold_integrates_discrete_pwm_readback_and_drains_real_fit(
+    ds, monkeypatch, caplog, tmp_path: Path
+) -> None:
+    ds._reset_for_tests(str(tmp_path / "sep20-electrical-readback.sqlite"))
+    ds.init()
+    stream = _load_real_cook_hold_stream("mpc-sep20", _SEP20_COOK_NAME)
+    assert len(stream.temperatures) == 1616
+    assert len(stream.temperatures[stream.hold_start_index :]) == 1560
+    assert stream.control_period_seconds == 5.0
+    assert stream.pulse_slot_seconds == 2.0
+    assert stream.pulse_frame_seconds == 20.0
+    assert stream.fan_pwm_capable and stream.fan_authority
+    result = _assert_real_cook_hold_smoke(
+        ds,
+        monkeypatch,
+        caplog,
+        campaign_id="mpc-sep20",
+        cook_name=_SEP20_COOK_NAME,
+        expected_controller=ControllerType.MPC,
+        readback_authoritative=False,
+        discrete_pwm_readback=True,
+        require_stop_fit=True,
+    )
+    assert result.scored_delta > 0
+    assert result.finalized_segment_delta > 0
+    assert result.fit_terminal_statuses
+    assert result.recorder_gap_reasons == ()
+    # Fit terminalization and durable corpus are required; a historically
+    # recorded temperature stream does not warrant accepting or activating a
+    # newly fitted physical model.
+
+
+@pytest.mark.timeout(600)
 @pytest.mark.slow
 def test_real_cook_mpc_chamber_stream_completes_full_hold_and_drains_learning(
     ds,
@@ -1628,6 +1908,7 @@ def test_real_cook_mpc_chamber_stream_completes_full_hold_and_drains_learning(
     )
 
 
+@pytest.mark.timeout(600)
 @pytest.mark.slow
 def test_real_cook_pid_sp_august_28_chamber_stream_completes_full_hold_and_drains_learning(
     ds,
@@ -1676,7 +1957,7 @@ def test_fresh_sep06_database_warms_then_persists_learning(
 
 @pytest.mark.slow
 @pytest.mark.parametrize("allocate_cook_identity", (False, True), ids=("existing-cook", "new-cook"))
-def test_restored_pwm_mpc_warms_with_uncertified_hardware_readback(
+def test_restored_pwm_mpc_rejects_uncertified_hardware_readback(
     ds, monkeypatch, caplog, allocate_cook_identity: bool
 ) -> None:
     result = _assert_real_cook_hold_smoke(
@@ -1690,11 +1971,11 @@ def test_restored_pwm_mpc_warms_with_uncertified_hardware_readback(
         restore_checkpoint=True,
         allocate_cook_identity=allocate_cook_identity,
         readback_authoritative=False,
+        require_stop_fit=False,
     )
 
-    assert result.replay_only_count == 8
-    assert result.scored_delta > 0
-    assert result.candidate_fit_accepted_count > 0
+    assert result.scored_delta == 0
+    assert result.candidate_fit_accepted_count == 0
     assert result.recorder_gap_reasons == ()
 
 
@@ -1741,6 +2022,7 @@ def test_repeated_sep06_cook_adds_learning_to_the_same_database(
     assert first.recorder_gap_reasons == second.recorder_gap_reasons == ()
 
 
+@pytest.mark.timeout(600)
 @pytest.mark.slow
 def test_long_sep06_cook_produces_a_candidate_from_a_fresh_database(
     ds,
@@ -1784,6 +2066,9 @@ def test_sep10_changed_evidence_fit_recovery_reports_current_challenger(
     # Replay every original thermal sample once. The exported historical
     # observations omit warmup, so generate it through real Hold admission;
     # neither invent Smoke prehistory nor import the historical learning state.
+    # Keep this recovery scenario's source/slot-paced delayed loop explicit.
+    # The normal 50 ms replay admits a challenger at the first prefix, correctly
+    # preventing further passive fits; it is not this failure/recovery stimulus.
     result = _assert_real_cook_hold_smoke(
         ds,
         monkeypatch,
@@ -1794,6 +2079,7 @@ def test_sep10_changed_evidence_fit_recovery_reports_current_challenger(
         warm_with_smoke=False,
         require_stop_fit=False,
         fit_scored_prefixes=(37, 46, 53),
+        minimum_sleep_s=2.0,
     )
     assert result.replay_only_count == 8
     assert result.scored_delta == 81

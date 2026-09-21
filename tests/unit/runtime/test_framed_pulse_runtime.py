@@ -5,15 +5,19 @@ import pytest
 
 from common.control_trace import ActuationMode, InhibitReason
 from controller.applied_output import FrameFeedbackDisposition, OutputSource
+from controller.runtime.actuation_delivery import ActuationDeliveryJournal, DeliveredGrillPlatform
 from controller.runtime.framed_pulse import FramedPulseRuntime, FramedPulseSample, PulseControllerState
 from controller.runtime.logic.pulse import PulseFrameResult, PulseReason, PulseResetReason
 from controller.runtime.state import ControllerState
 from grillplat.actuator_capabilities import AugerTiming
+from tests.fakes.grill import FakeGrillPlatform
 
 
-def _runtime(*, now: float = 0.0) -> tuple[FramedPulseRuntime, PulseControllerState]:
+def _runtime(
+    *, now: float = 0.0, delivery_journal: ActuationDeliveryJournal | None = None
+) -> tuple[FramedPulseRuntime, PulseControllerState]:
     controller = cast(PulseControllerState, ControllerState())
-    runtime = FramedPulseRuntime()
+    runtime = FramedPulseRuntime(delivery_journal=delivery_journal)
     runtime.configure(
         ActuationMode.FRAMED_PULSE,
         controller=controller,
@@ -692,3 +696,122 @@ def test_reset_cancels_active_calibration_and_missing_revision_gap_is_deduplicat
     assert missing.missing_observation_reason == "missing-result-revision"
     assert missing.duplicate is False
     assert duplicate.duplicate is True
+
+
+def test_frame_integrates_programmed_fan_changes_instead_of_latching_request() -> None:
+    now_ms = [0]
+    journal = ActuationDeliveryJournal(monotonic_clock=lambda: now_ms[0], wall_clock=lambda: now_ms[0])
+    grill = DeliveredGrillPlatform(FakeGrillPlatform(dc_fan=True), journal=journal, readback_authoritative=True)
+    grill.fan_on()
+    runtime, controller = _runtime(delivery_journal=journal)
+    _latch_controller_frame(runtime, controller)
+    now_ms[0] = 5_000
+    grill.set_duty_cycle(179 / 255 * 100)
+    runtime.advance(6.0, False, sample=_sample())
+    now_ms[0] = 15_000
+    grill.set_duty_cycle(127 / 255 * 100)
+    controller.fan_duty = 40.0
+    completion = runtime.advance(20.0, False, sample=_sample()).completions[0]
+    expected = (5 + 10 * 179 / 255 + 5 * 127 / 255) / 20
+    assert completion.applied_fan_duty == pytest.approx(expected * 100)
+    assert completion.observation is not None
+    assert completion.observation.actual_fan_duty == pytest.approx(expected)
+
+
+def test_unobserved_fan_request_does_not_become_delivered_evidence() -> None:
+    runtime, controller = _runtime()
+    _latch_controller_frame(runtime, controller)
+    runtime.advance(6.0, False, sample=_sample())
+    completion = runtime.advance(20.0, False, sample=_sample()).completions[0]
+    assert completion.applied_fan_duty is None
+    assert completion.observation is not None
+    assert completion.observation.actual_fan_duty is None
+
+
+def test_terminal_feedback_keeps_whole_frame_and_unreported_suffix_distinct() -> None:
+    runtime, controller = _runtime()
+    _latch_controller_frame(runtime, controller)
+    runtime.advance(6.0, False, sample=_sample())
+    runtime.report_feedback(10.0, 6.0, source=OutputSource.CONTROLLER)
+    completion = runtime.advance(20.0, False, sample=_sample()).completions[0]
+    assert completion.applied is not None
+    assert completion.applied.ratio == pytest.approx(0.3)
+    assert completion.terminal_interval_start_s == 10.0
+    assert completion.terminal_auger_duty == 0.0
+    assert completion.terminal_combustion_load == 0.0
+
+
+def test_all_on_progress_and_terminal_suffix_share_millisecond_boundaries() -> None:
+    start = 0.0004
+    runtime, controller = _runtime(now=start)
+    controller.pulse_result_revision = 9
+    controller.pulse_requested_duty = 1.0
+    controller.pulse_combustion_load = 1.0
+    runtime.advance(start, True, sample=_sample())
+
+    zero_width = runtime.advance(0.00049, True, sample=_sample())
+    assert runtime.report_feedback(0.00049, zero_width.decision.delivered_on_s, source=OutputSource.CONTROLLER) is None
+    assert controller.pulse_feedback_start_s == start
+    progress = runtime.advance(0.00051, True, sample=_sample())
+    feedback = runtime.report_feedback(0.00051, progress.decision.delivered_on_s, source=OutputSource.CONTROLLER)
+    assert feedback is not None
+    assert feedback.applied.ratio == 1.0
+    assert progress.delivered_delta_s == 0.001
+
+    full = runtime.advance(start + 20, True, sample=_sample(acquired_at_s=start + 20)).completions[0]
+    assert full.applied.ratio == 1.0
+    assert full.terminal_interval_start_s == 0.001
+    assert full.terminal_auger_duty == 1.0
+    assert full.observation.frame_start_s == 0.0
+    assert full.observation.frame_end_s == 20.0
+    assert full.observation.delivered_on_s == 20.0
+    assert full.observation.realized_auger_duty == 1.0
+
+    second = runtime.advance(20.00051, True, sample=_sample())
+    feedback = runtime.report_feedback(20.00051, second.decision.delivered_on_s, source=OutputSource.CONTROLLER)
+    assert feedback.applied.ratio == 1.0
+    partial = runtime.reset(
+        PulseResetReason.SAFETY,
+        20.00151,
+        InhibitReason.SAFETY,
+        actual_auger_on=True,
+        sample=_sample(acquired_at_s=20.00151),
+        terminal_feedback=True,
+    ).completions[0]
+    assert partial.applied.ratio == 1.0
+    assert partial.terminal_interval_start_s == 20.001
+    assert partial.terminal_auger_duty == 1.0
+    assert partial.observation.frame_start_s == 20.0
+    assert partial.observation.frame_end_s == 20.002
+    assert partial.observation.delivered_on_s == 0.002
+    assert partial.observation.realized_auger_duty == 1.0
+
+
+def test_zero_grid_width_completion_emits_no_evidence_or_consumes_sequence() -> None:
+    runtime, controller = _runtime()
+    _latch_controller_frame(runtime, controller)
+    completion = runtime.complete_frame(
+        _frame(start=0.0001, end=0.0004, delivered=0.0),
+        sample=_sample(),
+        inhibit=InhibitReason.NONE,
+        terminal_feedback=True,
+    )
+    assert completion.observation is None
+    assert completion.applied is None
+    assert completion.frame_key is None
+    assert completion.terminal_auger_duty is None
+    assert runtime.observation_sequence == 0
+    assert controller.pulse_feedback_start_s == 0.0
+    assert controller.pulse_feedback_delivered_on_s == 0.0
+
+
+def test_quantized_observation_keeps_raw_sample_freshness_comparison() -> None:
+    runtime, controller = _runtime()
+    _latch_controller_frame(runtime, controller)
+    completion = runtime.complete_frame(
+        _frame(start=0.0004, end=20.0004),
+        sample=_sample(acquired_at_s=20.00039),
+        inhibit=InhibitReason.NONE,
+    )
+    assert completion.observation.frame_end_s == 20.0
+    assert completion.observation.continuous is False

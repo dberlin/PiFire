@@ -908,48 +908,22 @@ class LearningTrajectoryRuntime:
                     probe_valid=True,
                     probe_source=entry_sample.probe_source,
                 )
-        actual_fan_duty = observation.actual_fan_duty
-        duration_seconds = (end_ms - start_ms) / 1_000
-        if (
-            isinstance(actual_fan_duty, (int, float))
-            and not isinstance(actual_fan_duty, bool)
-            and math.isfinite(float(actual_fan_duty))
-            and 0.0 <= float(actual_fan_duty) <= 1.0
-        ):
-            fan_duty = float(actual_fan_duty)
-            integral = DeliveredActuationIntegral(
-                monotonic_start_ms=start_ms,
-                monotonic_end_ms=end_ms,
-                auger_on_seconds=float(observation.delivered_on_s),
-                fan_on_seconds=duration_seconds if fan_duty > 0.0 else 0.0,
-                fan_duty_integral_seconds=duration_seconds * fan_duty,
-                auger_start_active=False,
-                auger_end_active=False,
-                fan_start_active=fan_duty > 0.0,
-                fan_end_active=fan_duty > 0.0,
-                pwm_start=fan_duty,
-                pwm_end=fan_duty,
-                auger_certainty=FrameDeliveryCertainty.EXACT,
-                fan_certainty=FrameDeliveryCertainty.EXACT,
-                unknown_reasons=(),
-            )
-        else:
-            try:
-                delivered = self.journal.integrate(start_ms, end_ms)
-            except Exception:
-                delivered = None
-            if delivered is None or delivered.fan_certainty is not FrameDeliveryCertainty.EXACT:
-                self._finalize(TrajectoryBreakReason.ACTUATION_UNKNOWN)
-                self._last_break_reason = TrajectoryBreakReason.ACTUATION_UNKNOWN
-                return False
-            integral = replace(
-                delivered,
-                auger_on_seconds=float(observation.delivered_on_s),
-                auger_start_active=False,
-                auger_end_active=False,
-                auger_certainty=FrameDeliveryCertainty.EXACT,
-                unknown_reasons=(),
-            )
+        try:
+            delivered = self.journal.integrate(start_ms, end_ms)
+        except Exception:
+            delivered = None
+        if delivered is None or delivered.fan_certainty is not FrameDeliveryCertainty.EXACT:
+            self._finalize(TrajectoryBreakReason.ACTUATION_UNKNOWN)
+            self._last_break_reason = TrajectoryBreakReason.ACTUATION_UNKNOWN
+            return False
+        integral = replace(
+            delivered,
+            auger_on_seconds=float(observation.delivered_on_s),
+            auger_start_active=False,
+            auger_end_active=False,
+            auger_certainty=FrameDeliveryCertainty.EXACT,
+            unknown_reasons=(),
+        )
         frame = self._frame_from_integral(
             start_ms=start_ms,
             end_ms=end_ms,

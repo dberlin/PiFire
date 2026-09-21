@@ -24,6 +24,7 @@ from common.i2c_bus_config import FT232HBus
 from grillplat.actuator_capabilities import AUGER_TIMING
 from grillplat.emc2301 import EMC2301
 from grillplat.ft232h import open_gpio as open_ft232h_gpio
+from grillplat.output_readback import EmcPwmReadback
 from grillplat.system_commands import SystemCommandsMixin
 
 # Default FT232H pin name per PiFire output.  The C-bank keeps the I2C pins
@@ -55,6 +56,11 @@ class _Relay:
     @property
     def is_active(self):
         return self._state
+
+    def read_active(self):
+        """Observe the pin rather than this relay's last commanded state."""
+        level = self._gpio.get(self._pin_name)
+        return None if level is None else level == self._active_high
 
     def close(self):
         # The shared pyftdi controller lives for the process lifetime; nothing
@@ -133,7 +139,8 @@ class GrillPlatform(SystemCommandsMixin):
             self.emc = EMC2101_LUT(i2c)
             # Drive the fan from PiFire's control logic, not the chip's LUT curve.
             self.emc.lut_enabled = False
-        self.emc.manual_fan_speed = 0
+        self._pwm_readback = EmcPwmReadback(self.emc, self.chip)
+        self._pwm_readback.write(0)
         # Apply the PWM frequency now so the chip is correct immediately.
         self.set_pwm_frequency(self.frequency)
 
@@ -189,7 +196,7 @@ class GrillPlatform(SystemCommandsMixin):
         self.logger.debug("fan_off: Stopping fan and removing power")
         if self.pwm_fan:
             self._stop_ramp()
-            self.emc.manual_fan_speed = 0
+            self._pwm_readback.write(0)
             self._fan_speed_percent = 0
         self._set_output("fan", False)
 
@@ -205,7 +212,7 @@ class GrillPlatform(SystemCommandsMixin):
         if override_ramping:
             self._stop_ramp()
         fan_speed_percent = max(0, min(100, fan_speed_percent))
-        self.emc.manual_fan_speed = fan_speed_percent
+        self._pwm_readback.write(fan_speed_percent)
         self._fan_speed_percent = fan_speed_percent
 
     def set_pwm_frequency(self, frequency=25000):
@@ -262,7 +269,7 @@ class GrillPlatform(SystemCommandsMixin):
         self._stop_ramp()
         if self.pwm_fan and self.emc is not None:
             try:
-                self.emc.manual_fan_speed = 0
+                self._pwm_readback.write(0)
             except Exception:
                 pass
         for relay in self.relays.values():
@@ -270,6 +277,19 @@ class GrillPlatform(SystemCommandsMixin):
                 relay.off()
             finally:
                 relay.close()
+
+    def get_output_readback(self):
+        """Read programmed electrical outputs; no command-cache fallback."""
+        observed = {}
+        for name in ("auger", "fan"):
+            active = self.relays[name].read_active()
+            if active is not None:
+                observed[name] = active
+        if self.pwm_fan and not (self._ramp_thread is not None and self._ramp_thread.is_alive()):
+            pwm = self._pwm_readback.read(self._fan_speed_percent, self.logger)
+            if pwm is not None:
+                observed["pwm"] = pwm
+        return observed
 
     def get_output_status(self):
         self.current = {

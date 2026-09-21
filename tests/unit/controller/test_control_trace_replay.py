@@ -565,6 +565,22 @@ def test_validate_records_reconciles_framed_delivery_across_feedback_intervals_a
     assert validate_records(records).valid
 
 
+def test_framed_fan_mean_reconciles_intra_frame_changes_not_the_initial_setting():
+    records = _mpc_framed_records()
+    first = replace(_applied(), interval_start_ms=2_000, interval_end_ms=7_000, actual_fan_duty=100.0)
+    second = replace(_applied(), interval_start_ms=7_000, interval_end_ms=22_000, actual_fan_duty=60.0)
+    records = [
+        *records[:3],
+        _record(7_000, ControllerType.MPC, TraceEventKind.APPLIED_OUTPUT, first),
+        records[3],
+        _record(22_000, ControllerType.MPC, TraceEventKind.APPLIED_OUTPUT, second),
+    ]
+    assert validate_records(records).valid
+
+    records[4] = records[4].model_copy(update={"payload": replace(records[4].payload, applied_fan_duty=100.0)})
+    assert ReplayIssueCode.APPLIED_OUTPUT_MISMATCH in {issue.code for issue in validate_records(records).issues}
+
+
 def test_validate_records_accepts_queued_earlier_model_event_after_session():
     records = _pid_records()
     session = records[0].model_copy(update={"ts_ms": 2_000})

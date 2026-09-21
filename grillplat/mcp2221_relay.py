@@ -17,6 +17,7 @@ from common.i2c_bus_config import parse_i2c_bus
 from grillplat.actuator_capabilities import AUGER_TIMING
 from grillplat.emc2301 import EMC2301
 from grillplat.mcp2221 import open_gpio as open_mcp2221_gpio
+from grillplat.output_readback import EmcPwmReadback
 from grillplat.system_commands import SystemCommandsMixin
 
 _DEFAULT_OUTPUTS = {"power": "GP0", "igniter": "GP1", "auger": "GP2", "fan": "GP3"}
@@ -45,6 +46,11 @@ class _Relay:
     @property
     def is_active(self):
         return self._state
+
+    def read_active(self):
+        """Observe the pin rather than this relay's last commanded state."""
+        level = self._gpio.get(self._pin_name)
+        return None if level is None else level == self._active_high
 
     def close(self):
         # EasyMCP2221 owns one process-lifetime handle per physical adapter.
@@ -109,7 +115,8 @@ class GrillPlatform(SystemCommandsMixin):
         else:
             self.emc = EMC2101_LUT(i2c)
             self.emc.lut_enabled = False
-        self.emc.manual_fan_speed = 0
+        self._pwm_readback = EmcPwmReadback(self.emc, self.chip)
+        self._pwm_readback.write(0)
         self.set_pwm_frequency(self.frequency)
 
     def _set_output(self, name, state):
@@ -163,7 +170,7 @@ class GrillPlatform(SystemCommandsMixin):
             emc = self.emc
             if self.pwm_fan and emc is not None:
                 self._stop_ramp()
-                emc.manual_fan_speed = 0
+                self._pwm_readback.write(0)
                 self._fan_speed_percent = 0
         finally:
             self._set_output("fan", False)
@@ -181,7 +188,7 @@ class GrillPlatform(SystemCommandsMixin):
         if override_ramping:
             self._stop_ramp()
         fan_speed_percent = max(0, min(100, fan_speed_percent))
-        emc.manual_fan_speed = fan_speed_percent
+        self._pwm_readback.write(fan_speed_percent)
         self._fan_speed_percent = fan_speed_percent
 
     def set_pwm_frequency(self, frequency=25000):
@@ -239,7 +246,7 @@ class GrillPlatform(SystemCommandsMixin):
         self._stop_ramp()
         if self.pwm_fan and self.emc is not None:
             try:
-                self.emc.manual_fan_speed = 0
+                self._pwm_readback.write(0)
             except Exception:
                 pass
         first_failure = None
@@ -254,6 +261,19 @@ class GrillPlatform(SystemCommandsMixin):
                 first_failure = first_failure or exc
         if first_failure is not None:
             raise first_failure
+
+    def get_output_readback(self):
+        """Read programmed electrical outputs; no command-cache fallback."""
+        observed = {}
+        for name in ("auger", "fan"):
+            active = self.relays[name].read_active()
+            if active is not None:
+                observed[name] = active
+        if self.pwm_fan and not (self._ramp_thread is not None and self._ramp_thread.is_alive()):
+            pwm = self._pwm_readback.read(self._fan_speed_percent, self.logger)
+            if pwm is not None:
+                observed["pwm"] = pwm
+        return observed
 
     def get_output_status(self):
         self.current = {

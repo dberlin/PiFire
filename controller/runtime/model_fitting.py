@@ -1526,7 +1526,9 @@ def fit_trigger(
     else:
         input_variance = 0.0
         input_levels = 0
-    observed_duration_s = sum(frame.frame_end_s - frame.frame_start_s for frame in frames)
+    observed_duration_s = (
+        sum(round(frame.frame_end_s * 1_000) - round(frame.frame_start_s * 1_000) for frame in frames) / 1_000
+    )
     if observed_duration_s < resolved.min_effective_duration_s:
         return TriggerDecision(False, ("minimum-observed-duration",), input_variance, input_levels)
     blockers: list[str] = []

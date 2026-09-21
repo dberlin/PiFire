@@ -287,6 +287,7 @@ def test_smoke_partial_exit_and_hold_capture_use_independent_wall_samples(tmp_pa
     journal = _Journal()
     journal.add(0, 20_000, 5.0)
     journal.add(20_000, 30_000, 2.0)
+    journal.add(30_000, 50_000, 5.0)
     runtime = LearningTrajectoryRuntime(
         journal=journal,
         persistence=worker,
@@ -390,6 +391,8 @@ def test_pidsp_setup_gap_splits_smoke_history_before_durable_hold_capture(
 
         start_ms = round(first_frame_start_s * 1_000)
         end_ms = round((first_frame_start_s + 20.0) * 1_000)
+        journal.add(start_ms, end_ms, 5.0)
+        journal.add(end_ms, end_ms + 20_000, 5.0)
         first_wall_ms = _WALL_MS + start_ms - jump_ms
         first_end_wall_ms = _WALL_MS + end_ms + jump_ms
         sample_wall_ms = first_wall_ms + 19_975

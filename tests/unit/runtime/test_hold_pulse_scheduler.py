@@ -931,7 +931,6 @@ def _configure_frame_observation(mode, *, revision=1, u_max=0.5, load=0.3):
     controller.pulse_frame_calibration_probe_load = 0.0
     controller.pulse_frame_calibration_stage = None
     controller.pulse_frame_maximum_duty = u_max
-    controller.pulse_frame_applied_fan_duty = 60.0
     controller.pulse_frame_stale_command = False
     controller.controls_fan = True
 

@@ -300,3 +300,48 @@ def test_committed_allocator_fixed_loads_preserve_mean_and_transition_envelope(r
     error_s = abs(scheduled_seconds - requested_duty * 180 * 20)
     assert error_s <= math.nextafter(float(scheduler.timing.pulse_s), math.inf)
     assert sum(decision.transition is not None for decision in decisions) <= 360
+
+
+def test_submillisecond_observations_conserve_boundary_grid_without_moving_cutoff():
+    scheduler = PulseScheduler()
+    start = 0.0004
+    _advance(scheduler, 0.1, start, actual_on=True)
+    assert _advance(scheduler, 0.1, 0.00049, actual_on=True).delivered_on_s == 0.0
+    assert _advance(scheduler, 0.1, 0.00051, actual_on=False).delivered_on_s == 0.001
+    assert _advance(scheduler, 0.1, 0.00149, actual_on=True).delivered_on_s == 0.001
+    assert _advance(scheduler, 0.1, 0.00151, actual_on=False).delivered_on_s == 0.002
+
+    before_cutoff = _advance(scheduler, 0.1, 2.00039, actual_on=False)
+    assert before_cutoff.command_on is True
+    assert before_cutoff.transition.at_s == 2.00039
+    at_cutoff = _advance(scheduler, 0.1, start + 2, actual_on=False)
+    assert at_cutoff.command_on is False
+    assert at_cutoff.frame_start_s == start
+    assert at_cutoff.delivered_on_s == 0.002
+
+
+def test_skipped_and_reset_frames_conserve_integer_delivery_at_fractional_origin():
+    scheduler = PulseScheduler()
+    _advance(scheduler, 1.0, 0.0006, actual_on=True)
+    decision = _advance(scheduler, 1.0, 65.0004, actual_on=True)
+    assert [frame.delivered_on_s for frame in decision.completed_frames] == [20.0, 20.0, 20.0]
+    assert decision.delivered_on_s == 64.999
+    assert decision.frame_delivered_on_s == 4.999
+    interrupted = scheduler.reset(PulseResetReason.SAFETY)
+    assert interrupted.delivered_on_s == 4.999
+    assert interrupted.ended_at_s == 65.0004
+    _advance(scheduler, 1.0, 70.00049, actual_on=True)
+    resumed = _advance(scheduler, 1.0, 70.00051, actual_on=False)
+    assert resumed.delivered_on_s == 65.0
+    assert resumed.frame_delivered_on_s == 0.001
+
+
+def test_millisecond_overschedule_remains_observed_instead_of_capped():
+    scheduler = PulseScheduler()
+    _advance(scheduler, 0.1, 0.0004, actual_on=True)
+    cutoff = _advance(scheduler, 0.1, 2.0014, actual_on=False)
+    assert cutoff.command_on is False
+    assert cutoff.delivered_on_s == 2.001
+    frame = _advance(scheduler, 0.1, 20.0004, actual_on=False).completed_frames[0]
+    assert frame.scheduled_on_s == 2
+    assert frame.delivered_on_s == 2.001

@@ -843,28 +843,15 @@ def test_rejected_observation_payload_failure_never_escapes_outcome_reconciliati
     assert any("validator refused the payload" in message for message in logger.warnings)
 
 
-def test_sub_millisecond_frame_leaves_the_control_loop_running() -> None:
-    logger = _LifecycleLogger()
-    runtime, _runner, persistence, _trace_session, recorder = _runtime(logger=logger)
-    # Both frame bounds truncate to the same millisecond, so neither the
-    # observation payload nor the gap that replaces it can state an interval.
-    observation = _observation(
-        frame_start_s=40.0,
-        frame_end_s=40.0004,
-        delivered_on_s=0.0002,
-        probe_valid=False,
-        continuous=False,
-    )
-
-    runtime.submit_completed_observation((40_000, 40_000), observation)
-
-    assert _observation_payloads(recorder) == []
-    assert _gap_payloads(recorder) == []
-    assert [record.kind for batch in persistence.batches for record in batch] == [EvidenceKind.RECORDER_GAP]
-    assert [message.split(":")[0] for message in logger.warnings] == [
-        "Rejected model observation failed",
-        "Recorder gap trace failed",
-    ]
+def test_observation_rejects_a_frame_without_millisecond_width() -> None:
+    with pytest.raises(ValueError):
+        _observation(
+            frame_start_s=40.0,
+            frame_end_s=40.0004,
+            delivered_on_s=0.0002,
+            probe_valid=False,
+            continuous=False,
+        )
 
 
 class _ReplayTrajectory:

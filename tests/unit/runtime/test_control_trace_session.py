@@ -661,11 +661,11 @@ def test_frame_and_terminal_applied_intervals_preserve_boundaries_and_identity()
     seed = seed_output(0.0, 0.0, lid_open=False, manual_override_active=False, auger_output=False)
     prepared_seed = session.prepare_applied_output(
         seed,
-        TraceOutputContext(timestamp_ms=0, monotonic_ms=0, pulse_frame_result_revision=0, fan_duty=None),
+        TraceOutputContext(timestamp_ms=0, monotonic_ms=0, pulse_frame_result_revision=0),
     )
     coalesced = session.prepare_applied_output(
         AppliedOutput(0.2, OutputSource.CONTROLLER, 1.0, requested=0.3),
-        TraceOutputContext(timestamp_ms=1_000, monotonic_ms=1_000, pulse_frame_result_revision=0, fan_duty=40.0),
+        TraceOutputContext(timestamp_ms=1_000, monotonic_ms=1_000, pulse_frame_result_revision=0),
     )
     assert prepared_seed.producing_result_revision == 0
     assert coalesced.producing_result_revision == 0
@@ -687,7 +687,6 @@ def test_frame_and_terminal_applied_intervals_preserve_boundaries_and_identity()
             timestamp_ms=20_000,
             monotonic_ms=20_000,
             pulse_frame_result_revision=5,
-            fan_duty=60.0,
             producing_revision=5,
         ),
     )
@@ -709,7 +708,7 @@ def test_measured_feedback_closes_prior_interval_and_seeds_next_realized_load() 
     session = _open(recorder)
     session.prepare_applied_output(
         seed_output(0.0, 0.0, lid_open=False, manual_override_active=False, auger_output=False),
-        TraceOutputContext(timestamp_ms=0, monotonic_ms=0, pulse_frame_result_revision=0, fan_duty=None),
+        TraceOutputContext(timestamp_ms=0, monotonic_ms=0, pulse_frame_result_revision=0),
     )
 
     session.prepare_applied_output(
@@ -718,7 +717,6 @@ def test_measured_feedback_closes_prior_interval_and_seeds_next_realized_load() 
             timestamp_ms=20_000,
             monotonic_ms=20_000,
             pulse_frame_result_revision=4,
-            fan_duty=60.0,
             controls_fan=True,
             producing_revision=4,
             sample_complete=True,
@@ -731,7 +729,6 @@ def test_measured_feedback_closes_prior_interval_and_seeds_next_realized_load() 
             timestamp_ms=40_000,
             monotonic_ms=40_000,
             pulse_frame_result_revision=5,
-            fan_duty=50.0,
             controls_fan=True,
             producing_revision=5,
             sample_complete=True,
@@ -748,7 +745,7 @@ def test_seed_promotion_keeps_interval_boundary_and_adopts_first_frame_identity(
     session = _open(recorder)
     session.prepare_applied_output(
         seed_output(0.0, 0.0, lid_open=False, manual_override_active=False, auger_output=False),
-        TraceOutputContext(timestamp_ms=0, monotonic_ms=0, pulse_frame_result_revision=0, fan_duty=None),
+        TraceOutputContext(timestamp_ms=0, monotonic_ms=0, pulse_frame_result_revision=0),
     )
 
     assert session.promote_seed_interval(6, OutputSource.CONTROLLER)
@@ -797,7 +794,6 @@ def test_identity_rotation_preserves_live_update_applied_and_pending_state() -> 
             timestamp_ms=2_000,
             monotonic_ms=2_000,
             pulse_frame_result_revision=3,
-            fan_duty=50.0,
             producing_revision=3,
             measured_combustion_load=0.3,
         ),
@@ -931,6 +927,20 @@ def test_repeated_open_and_invalid_updates_frames_and_seed_promotions_are_reject
     )
 
 
+def test_submillisecond_frame_without_serialized_width_is_not_recorded() -> None:
+    recorder = _Recorder()
+    session = _open(recorder)
+    completion = _completion()
+    completion = replace(
+        completion,
+        frame=replace(completion.frame, nominal_start_s=20.0001, ended_at_s=20.0004),
+    )
+    assert not session.record_frame(
+        TraceFrameContext(completion, pulse_slot_seconds=2.0, frame_seconds=20.0, timestamp_ms=40_000)
+    )
+    assert not any(record.event_kind is TraceEventKind.ACTUATION_FRAME for record in recorder.records)
+
+
 def test_model_authority_property_and_model_event_without_snapshot_are_explicit() -> None:
     recorder = _Recorder()
     session = _open(recorder)
@@ -948,3 +958,36 @@ def test_model_authority_property_and_model_event_without_snapshot_are_explicit(
             timestamp_ms=3_000,
         )
     )
+
+
+def test_terminal_suffix_does_not_reapply_whole_frame_average_to_remaining_time() -> None:
+    recorder = _Recorder()
+    session = _open(recorder)
+    session.prepare_applied_output(
+        AppliedOutput(0.0, OutputSource.CONTROLLER, 20.0, requested=0.5),
+        TraceOutputContext(timestamp_ms=20_000, monotonic_ms=20_000, pulse_frame_result_revision=5),
+    )
+    session.prepare_applied_output(
+        AppliedOutput(1.0, OutputSource.CONTROLLER, 30.0, requested=0.5),
+        TraceOutputContext(
+            timestamp_ms=30_000,
+            monotonic_ms=30_000,
+            pulse_frame_result_revision=5,
+            sample_complete=True,
+            measured_combustion_load=0.8,
+        ),
+    )
+    completion = replace(
+        _completion(),
+        terminal_interval_start_s=30.0,
+        terminal_auger_duty=0.0,
+        terminal_combustion_load=0.0,
+    )
+    assert session.record_terminal_framed_output(completion, controls_fan=True, timestamp_ms=40_000)
+    intervals = [record.payload for record in recorder.records if record.event_kind is TraceEventKind.APPLIED_OUTPUT]
+    delivered = sum(
+        payload.realized_auger_duty * (payload.interval_end_ms - payload.interval_start_ms) / 1_000
+        for payload in intervals
+    )
+    assert delivered == completion.frame.delivered_on_s == 10.0
+    assert intervals[-1].realized_auger_duty == 0.0

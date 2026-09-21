@@ -124,6 +124,17 @@ class Mcp2221Gpio:
         with self._lock:
             self._device.GPIO_write(**{pin: bool(high)})
 
+    def get(self, pin_name):
+        """Read the electrical pin level; None means it is not a GPIO pin."""
+        pin, _ = self._pin(pin_name)
+        with self._lock:
+            level = self._device.GPIO_read()[int(pin[-1])]
+        if level is None:
+            return None
+        if level not in (0, 1):
+            raise OSError(f"Invalid MCP2221 GPIO level for {pin_name!r}: {level!r}")
+        return bool(level)
+
 
 # EasyMCP2221.Device -> _LockedI2C. Keyed by the Device object itself (identity),
 # since EasyMCP2221.Device.__new__ returns the SAME object for the SAME physical

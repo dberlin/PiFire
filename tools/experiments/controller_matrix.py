@@ -204,8 +204,10 @@ def _observe_frame(
     from controller.model_learning.contracts import FrameObservation
     from controller.mpc_allocator import normalized_load_from_auger_duty
 
-    duration_s = frame.ended_at_s - frame.nominal_start_s
-    realized_auger_duty = frame.delivered_on_s / duration_s if duration_s > 0 else 0.0
+    duration_ms = round(frame.ended_at_s * 1_000) - round(frame.nominal_start_s * 1_000)
+    if duration_ms <= 0:
+        return
+    realized_auger_duty = frame.delivered_on_s / (duration_ms / 1_000)
     u_max = float(getattr(core, "pulse_frame_maximum_duty", None) or 1.0)
     observe(
         FrameObservation(

@@ -177,6 +177,12 @@ class Ft232hGpio:
                 self._output &= ~bit
             self._port.write(self._output)
 
+    def get(self, pin_name):
+        """Read the electrical pin level, including configured output pins."""
+        bit = self._bit(pin_name)
+        with self._lock:
+            return bool(self._port.read(with_output=True) & bit)
+
 
 def open_gpio(selector):
     """Return the Ft232hGpio for `selector`, sharing the same controller as the

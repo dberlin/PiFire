@@ -1749,7 +1749,6 @@ def test_historical_evidence_rotation_preserves_live_applied_interval(hold_cycle
             timestamp_ms=2_000,
             monotonic_ms=2_000,
             pulse_frame_result_revision=3,
-            fan_duty=None,
             producing_revision=3,
             measured_combustion_load=0.3,
         ),

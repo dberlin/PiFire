@@ -172,6 +172,10 @@ class GrillPlatform(SystemCommandsMixin):
             return self.selector.is_active
         return False
 
+    # No get_output_readback capability: HardwarePWM exposes requested duty
+    # (and sysfs exposes kernel state), not quantized hardware duty readback.
+    # GPIOZero output reads also depend on the selected pin backend. Keep this
+    # command/status API distinct from independently certified electrical data.
     def get_output_status(self):
         self.current = {}
         self.current["auger"] = self.auger.is_active

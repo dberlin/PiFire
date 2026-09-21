@@ -18,6 +18,7 @@ from common.control_trace import (
 from controller.applied_output import AppliedOutput, FrameFeedbackDisposition, OutputSource
 from controller.model_learning.contracts import FrameObservation
 from controller.mpc_allocator import AllocationResult, normalized_load_from_auger_duty
+from controller.runtime.actuation_delivery import ActuationDeliveryJournal
 from controller.runtime.logic.pulse import (
     PulseDecision,
     PulseFrameResult,
@@ -46,7 +47,6 @@ class PulseControllerState(Protocol):
     pulse_frame_baseline_combustion_load: float
     pulse_frame_requested_auger_duty: float
     pulse_frame_requested_fan_duty: float | None
-    pulse_frame_applied_fan_duty: float | None
     pulse_frame_maximum_duty: float
     pulse_frame_stale_command: bool
     pulse_feedback_start_s: float | None
@@ -132,6 +132,9 @@ class FramedPulseCompletion:
     missing_observation_reason: str | None
     observation_sequence: int | None
     duplicate: bool = False
+    terminal_interval_start_s: float | None = None
+    terminal_auger_duty: float | None = None
+    terminal_combustion_load: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,7 +154,6 @@ class _LatchedFrame:
     baseline_combustion_load: float
     requested_auger_duty: float
     requested_fan_duty: float | None
-    applied_fan_duty: float | None
     maximum_duty: float
     stale_command: bool
     allocator_revision: int
@@ -177,7 +179,13 @@ class _LatchedFrame:
 class FramedPulseRuntime:
     """Own pulse scheduling and typed frame-local construction without I/O."""
 
-    def __init__(self, *, wall_clock_ms: Callable[[], int] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        wall_clock_ms: Callable[[], int] | None = None,
+        delivery_journal: ActuationDeliveryJournal | None = None,
+    ) -> None:
+        self._delivery_journal = delivery_journal
         self._wall_clock_ms = (lambda: time.time_ns() // 1_000_000) if wall_clock_ms is None else wall_clock_ms
         self._frame_wall_start_ms = 0
         self._scheduler: PulseScheduler | None = None
@@ -185,6 +193,7 @@ class FramedPulseRuntime:
         self._frame: _LatchedFrame | None = None
         self._last_observation_key: tuple[int, int] | None = None
         self._observation_sequence = 0
+        self._frame_delivery_start_ms = 0
 
     @property
     def scheduler(self) -> PulseScheduler | None:
@@ -221,6 +230,7 @@ class FramedPulseRuntime:
         self._frame_wall_start_ms = self._wall_clock_ms()
         self._last_observation_key = None
         self._observation_sequence = 0
+        self._frame_delivery_start_ms = 0
         controller.pulse_result_revision = -1
         controller.pulse_frame_result_revision = 0
         controller.pulse_requested_duty = 0.0
@@ -233,7 +243,6 @@ class FramedPulseRuntime:
         controller.pulse_frame_baseline_combustion_load = 0.0
         controller.pulse_frame_requested_auger_duty = 0.0
         controller.pulse_frame_requested_fan_duty = None
-        controller.pulse_frame_applied_fan_duty = None
         controller.pulse_frame_maximum_duty = 1.0
         controller.pulse_frame_stale_command = False
         controller.pulse_allocator_revision = 0
@@ -301,7 +310,9 @@ class FramedPulseRuntime:
         delivered_at_transition_s = decision.delivered_on_s
         if decision.completed_frames:
             transition_at_s = decision.completed_frames[-1].ended_at_s
-            delivered_at_transition_s -= decision.frame_delivered_on_s
+            delivered_at_transition_s = (
+                round(decision.delivered_on_s * 1_000) - round(decision.frame_delivered_on_s * 1_000)
+            ) / 1_000
         elif previous_revision == 0 and current.result_revision > 0:
             transition_at_s = now
         if transition_at_s is not None:
@@ -462,13 +473,11 @@ class FramedPulseRuntime:
             controller.pulse_feedback_start_s = now
             controller.pulse_feedback_delivered_on_s = delivered_on_s
             return None
-        elapsed = now - start
-        if elapsed <= 0.0:
+        elapsed_ms = round(now * 1_000) - round(start * 1_000)
+        if elapsed_ms <= 0:
             return None
-        realized_duty = max(
-            0.0,
-            min(1.0, (delivered_on_s - controller.pulse_feedback_delivered_on_s) / elapsed),
-        )
+        delivered_ms = round(delivered_on_s * 1_000) - round(controller.pulse_feedback_delivered_on_s * 1_000)
+        realized_duty = delivered_ms / elapsed_ms
         realized_load = normalized_load_from_auger_duty(realized_duty, u_max=frame.maximum_duty)
         measured_source = prior_output_source is OutputSource.CONTROLLER
         applied = AppliedOutput(
@@ -494,11 +503,11 @@ class FramedPulseRuntime:
 
     def _record_delivery(self, delivered_on_s: float) -> float:
         controller = self._configured()[1]
-        delta = delivered_on_s - controller.pulse_metrics_delivered_on_s
-        if delta <= 0.0:
+        delta_ms = round(delivered_on_s * 1_000) - round(controller.pulse_metrics_delivered_on_s * 1_000)
+        if delta_ms <= 0:
             return 0.0
         controller.pulse_metrics_delivered_on_s = delivered_on_s
-        return delta
+        return delta_ms / 1_000
 
     def _latch_frame(self, role_generation: int) -> _LatchedFrame:
         if self._controller is None:
@@ -516,7 +525,6 @@ class FramedPulseRuntime:
             baseline_combustion_load=controller.pulse_baseline_combustion_load,
             requested_auger_duty=controller.pulse_requested_duty,
             requested_fan_duty=controller.pulse_requested_fan_duty,
-            applied_fan_duty=controller.fan_duty,
             maximum_duty=controller.pulse_maximum_duty,
             stale_command=controller.pulse_stale_command,
             allocator_revision=controller.pulse_allocator_revision,
@@ -550,7 +558,6 @@ class FramedPulseRuntime:
         controller.pulse_frame_baseline_combustion_load = frame.baseline_combustion_load
         controller.pulse_frame_requested_auger_duty = frame.requested_auger_duty
         controller.pulse_frame_requested_fan_duty = frame.requested_fan_duty
-        controller.pulse_frame_applied_fan_duty = frame.applied_fan_duty
         controller.pulse_frame_maximum_duty = frame.maximum_duty
         controller.pulse_frame_stale_command = frame.stale_command
         controller.pulse_frame_allocator_revision = frame.allocator_revision
@@ -595,17 +602,22 @@ class FramedPulseRuntime:
         terminal_feedback: bool,
         feedback_source: OutputSource,
     ) -> FramedPulseCompletion:
-        duration_s = frame.ended_at_s - frame.nominal_start_s
-        frame_key = None if duration_s <= 0.0 else self._frame_key(frame)
+        start_ms, end_ms = self._frame_key(frame)
+        duration_ms = end_ms - start_ms
+        delivered_ms = round(frame.delivered_on_s * 1_000)
+        frame_key = None if duration_ms <= 0 else (start_ms, end_ms)
+        applied_fan_duty = (
+            None if self._delivery_journal is None else self._delivery_journal.mean_fan_duty(start_ms, end_ms)
+        )
         duplicate = frame_key is not None and frame_key == self._last_observation_key
         wall_start_ms = self._frame_wall_start_ms
         wall_end_ms = self._wall_clock_ms()
-        if not duplicate:
+        if not duplicate and duration_ms > 0:
             self._frame_wall_start_ms = wall_end_ms
         observation = None
         missing_reason = None
         sequence = None
-        if not duplicate and duration_s > 0.0:
+        if not duplicate and duration_ms > 0:
             self._observation_sequence += 1
             sequence = self._observation_sequence
             self._last_observation_key = frame_key
@@ -622,12 +634,16 @@ class FramedPulseRuntime:
                     sequence=sequence,
                     wall_start_ms=wall_start_ms,
                     wall_end_ms=wall_end_ms,
+                    applied_fan_duty=applied_fan_duty,
                 )
 
         applied = None
         realized_load = None
-        if terminal_feedback and duration_s > 0.0:
-            ratio = frame.delivered_on_s / duration_s
+        terminal_start_s = None
+        terminal_duty = None
+        terminal_load = None
+        if terminal_feedback and duration_ms > 0:
+            ratio = delivered_ms / duration_ms
             realized_load = normalized_load_from_auger_duty(ratio, u_max=latched.maximum_duty)
             disposition = (
                 FrameFeedbackDisposition.DISCARDED
@@ -648,6 +664,23 @@ class FramedPulseRuntime:
                     disposition is FrameFeedbackDisposition.COMPLETE and feedback_source is OutputSource.CONTROLLER
                 ),
             )
+            controller = self._configured()[1]
+            feedback_start = controller.pulse_feedback_start_s
+            feedback_start_ms = None if feedback_start is None else round(feedback_start * 1_000)
+            terminal_start_ms = max(start_ms, start_ms if feedback_start_ms is None else feedback_start_ms)
+            reported_on_ms = (
+                round(controller.pulse_feedback_delivered_on_s * 1_000) - self._frame_delivery_start_ms
+                if feedback_start_ms is not None and feedback_start_ms >= start_ms
+                else 0
+            )
+            remaining_ms = end_ms - terminal_start_ms
+            remaining_on_ms = delivered_ms - reported_on_ms
+            if remaining_ms > 0 and 0 <= remaining_on_ms <= remaining_ms:
+                terminal_start_s = terminal_start_ms / 1_000
+                terminal_duty = remaining_on_ms / remaining_ms
+                terminal_load = normalized_load_from_auger_duty(terminal_duty, u_max=latched.maximum_duty)
+        if not duplicate and duration_ms > 0:
+            self._frame_delivery_start_ms += delivered_ms
         return FramedPulseCompletion(
             frame=frame,
             wall_start_ms=wall_start_ms,
@@ -658,7 +691,7 @@ class FramedPulseRuntime:
             requested_combustion_load=latched.combustion_load or 0.0,
             requested_fan_duty=latched.requested_fan_duty,
             stale_command=latched.stale_command,
-            applied_fan_duty=latched.applied_fan_duty,
+            applied_fan_duty=applied_fan_duty,
             frame_key=frame_key,
             observation=observation,
             applied=applied,
@@ -666,6 +699,9 @@ class FramedPulseRuntime:
             missing_observation_reason=missing_reason,
             observation_sequence=sequence,
             duplicate=duplicate,
+            terminal_interval_start_s=terminal_start_s,
+            terminal_auger_duty=terminal_duty,
+            terminal_combustion_load=terminal_load,
         )
 
     def _observation(
@@ -678,9 +714,12 @@ class FramedPulseRuntime:
         sequence: int,
         wall_start_ms: int,
         wall_end_ms: int,
+        applied_fan_duty: float | None,
     ) -> FrameObservation:
         assert sample.temperature is not None
         duration_s = frame.ended_at_s - frame.nominal_start_s
+        start_ms, end_ms = self._frame_key(frame)
+        duration_ms = end_ms - start_ms
         source = self._observation_source(frame, inhibit, latched)
         lid_open = inhibit is InhibitReason.LID_OPEN or frame.reset_reason is PulseResetReason.LID
         manual_override = inhibit is InhibitReason.MANUAL_OVERRIDE or frame.reset_reason is PulseResetReason.MANUAL
@@ -708,10 +747,10 @@ class FramedPulseRuntime:
         )
         baseline_q = max(0.0, min(1.0, latched.baseline_combustion_load))
         requested_q = max(0.0, min(1.0, baseline_q + latched.calibration_probe_load))
-        realized_auger_duty = frame.delivered_on_s / duration_s
+        realized_auger_duty = round(frame.delivered_on_s * 1_000) / duration_ms
         return FrameObservation(
-            frame_start_s=frame.nominal_start_s,
-            frame_end_s=frame.ended_at_s,
+            frame_start_s=start_ms / 1_000,
+            frame_end_s=end_ms / 1_000,
             temp_c=self._to_c(sample.temperature, sample.units),
             setpoint_c=self._to_c(sample.setpoint, sample.units),
             ambient_c=sample.ambient_c,
@@ -723,7 +762,7 @@ class FramedPulseRuntime:
             requested_auger_duty=frame.latched_request,
             delivered_on_s=frame.delivered_on_s,
             requested_fan_duty=self._fan_fraction(latched.requested_fan_duty),
-            actual_fan_duty=self._fan_fraction(latched.applied_fan_duty),
+            actual_fan_duty=self._fan_fraction(applied_fan_duty),
             result_revision=latched.result_revision,
             output_source=source,
             lid_open=lid_open,

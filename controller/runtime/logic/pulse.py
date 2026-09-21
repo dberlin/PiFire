@@ -74,9 +74,9 @@ class PulseScheduler:
     __slots__ = (
         "_credit_before_s",
         "_credit_s",
-        "_delivered_on_s",
+        "_delivered_on_ms",
         "_frame_actual_start_on",
-        "_frame_delivered_on_s",
+        "_frame_delivered_on_ms",
         "_frame_start_s",
         "_last_actual_on",
         "_last_at_s",
@@ -96,9 +96,9 @@ class PulseScheduler:
         self._maximum_request = maximum_request
         self._credit_before_s = 0.0
         self._credit_s = 0.0
-        self._delivered_on_s = 0.0
+        self._delivered_on_ms = 0
         self._frame_actual_start_on = False
-        self._frame_delivered_on_s = 0.0
+        self._frame_delivered_on_ms = 0
         self._frame_start_s: float | None = None
         self._last_actual_on = False
         self._last_at_s: float | None = None
@@ -118,7 +118,7 @@ class PulseScheduler:
         )
         self._credit_before_s = 0.0
         self._credit_s = 0.0
-        self._frame_delivered_on_s = 0.0
+        self._frame_delivered_on_ms = 0
         self._frame_start_s = None
         self._last_at_s = None
         self._last_actual_on = False
@@ -164,8 +164,8 @@ class PulseScheduler:
             credit_s=self._credit_s,
             command_on=command_on,
             transition=transition,
-            delivered_on_s=self._delivered_on_s,
-            frame_delivered_on_s=self._frame_delivered_on_s,
+            delivered_on_s=self._delivered_on_ms / 1_000,
+            frame_delivered_on_s=self._frame_delivered_on_ms / 1_000,
             reset_reason=reset_reason if reason is PulseReason.RESET else None,
             completed_frames=completed_frames,
         )
@@ -202,7 +202,7 @@ class PulseScheduler:
         self._credit_s = requested_s - self._scheduled_on_s
         self._frame_actual_start_on = actual_start_on
         self._last_actual_on = actual_start_on
-        self._frame_delivered_on_s = 0.0
+        self._frame_delivered_on_ms = 0
         self._frame_start_s = nominal_start_s
         self._latched_request = request
         self._observed_transition_count = 0
@@ -211,8 +211,12 @@ class PulseScheduler:
     def _skip_frame(self, nominal_start_s: float) -> PulseFrameResult:
         credit_before_s = self._credit_s
         self._credit_s = 0.0
-        delivered_on_s = float(self.timing.frame_s) if self._last_actual_on else 0.0
-        self._delivered_on_s += delivered_on_s
+        delivered_on_ms = (
+            round((nominal_start_s + self.timing.frame_s) * 1_000) - round(nominal_start_s * 1_000)
+            if self._last_actual_on
+            else 0
+        )
+        self._delivered_on_ms += delivered_on_ms
         return PulseFrameResult(
             nominal_start_s=nominal_start_s,
             nominal_end_s=nominal_start_s + self.timing.frame_s,
@@ -223,7 +227,7 @@ class PulseScheduler:
             credit_before_s=credit_before_s,
             credit_after_s=self._credit_s,
             scheduled_on_s=self.timing.frame_s if self._last_actual_on else 0,
-            delivered_on_s=delivered_on_s,
+            delivered_on_s=delivered_on_ms / 1_000,
             observed_transition_count=0,
             actual_start_on=self._last_actual_on,
             actual_end_on=self._last_actual_on,
@@ -250,7 +254,7 @@ class PulseScheduler:
             credit_before_s=self._credit_before_s,
             credit_after_s=self._credit_s,
             scheduled_on_s=self._scheduled_on_s,
-            delivered_on_s=self._frame_delivered_on_s,
+            delivered_on_s=self._frame_delivered_on_ms / 1_000,
             observed_transition_count=self._observed_transition_count,
             actual_start_on=self._frame_actual_start_on,
             actual_end_on=self._last_actual_on,
@@ -259,10 +263,12 @@ class PulseScheduler:
 
     def _account_until(self, at_s: float) -> None:
         assert self._last_at_s is not None
-        elapsed_s = at_s - self._last_at_s
         if self._last_actual_on:
-            self._delivered_on_s += elapsed_s
-            self._frame_delivered_on_s += elapsed_s
+            # Quantize boundaries, not deltas, so adjacent observations conserve
+            # exactly the same millisecond interval serialized as evidence.
+            elapsed_ms = round(at_s * 1_000) - round(self._last_at_s * 1_000)
+            self._delivered_on_ms += elapsed_ms
+            self._frame_delivered_on_ms += elapsed_ms
         self._last_at_s = at_s
 
     def _observe_actual(self, actual_auger_on: bool) -> None:

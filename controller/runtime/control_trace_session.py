@@ -42,6 +42,7 @@ from controller.applied_output import (
 )
 from controller.base import MpcTraceDiagnostics, PidSpTraceDiagnostics, PidTraceDiagnostics
 from controller.model_promotion import ReachabilityState
+from controller.runtime.actuation_delivery import ActuationDeliveryJournal
 from controller.runtime.framed_pulse import FramedPulseCompletion
 from controller.runtime.runner import ControllerUpdateResult
 
@@ -157,7 +158,6 @@ class TraceOutputContext:
     timestamp_ms: int
     monotonic_ms: int
     pulse_frame_result_revision: int
-    fan_duty: float | None
     controls_fan: bool = False
     producing_revision: int | None = None
     producing_calibration_revision: int = 0
@@ -197,7 +197,9 @@ class ControlTraceSession:
         *,
         warning: Callable[[str], None],
         session_id_factory: Callable[[], uuid.UUID | str] = uuid.uuid4,
+        delivery_journal: ActuationDeliveryJournal | None = None,
     ) -> None:
+        self._delivery_journal = delivery_journal
         self._recorder = recorder
         self._warning = warning
         self._session_id_factory: Callable[[], uuid.UUID | str] = session_id_factory
@@ -746,7 +748,7 @@ class ControlTraceSession:
     def record_frame(self, context: TraceFrameContext) -> bool:
         completion = context.completion
         frame = completion.frame
-        if completion.result_revision <= 0 or frame.ended_at_s <= frame.nominal_start_s:
+        if completion.result_revision <= 0 or round(frame.ended_at_s * 1_000) <= round(frame.nominal_start_s * 1_000):
             return False
         return self.record(
             TraceEventKind.ACTUATION_FRAME,
@@ -790,7 +792,6 @@ class ControlTraceSession:
                 requested_auger_duty=applied.requested if applied.requested is not None else applied.ratio,
                 realized_auger_duty=applied.ratio,
                 output_source=applied.source,
-                fan_duty=context.fan_duty,
                 combustion_load=context.measured_combustion_load,
             )
         coalesce_seed = (
@@ -825,7 +826,7 @@ class ControlTraceSession:
             requested_auger_duty=prepared.requested if prepared.requested is not None else prepared.ratio,
             realized_auger_duty=prepared.ratio,
             output_source=prepared.source,
-            fan_duty=context.fan_duty,
+            fan_duty=self._applied_state.fan_duty,
             combustion_load=context.measured_combustion_load,
         )
         return prepared
@@ -852,6 +853,11 @@ class ControlTraceSession:
         start_ms = state.interval_start_ms
         if start_ms is None or start_ms >= context.monotonic_ms or state.output_source is None:
             return False
+        mean_fan_duty = (
+            None
+            if self._delivery_journal is None
+            else self._delivery_journal.mean_fan_duty(start_ms, context.monotonic_ms)
+        )
         recorded = self.record(
             TraceEventKind.APPLIED_OUTPUT,
             AppliedOutputPayload(
@@ -868,13 +874,13 @@ class ControlTraceSession:
                         else context.realized_combustion_load
                     )
                 ),
-                actual_fan_duty=state.fan_duty,
+                actual_fan_duty=mean_fan_duty,
                 sample_complete=sample_complete,
                 output_source=state.output_source,
             ),
             context.timestamp_ms,
         )
-        self._applied_state = replace(state, interval_start_ms=context.monotonic_ms)
+        self._applied_state = replace(state, interval_start_ms=context.monotonic_ms, fan_duty=mean_fan_duty)
         return recorded
 
     def record_terminal_framed_output(
@@ -896,15 +902,33 @@ class ControlTraceSession:
         )
         recorded = False
         if trace_start_ms < trace_end_ms:
+            if trace_start_ms == round(frame.nominal_start_s * 1_000):
+                terminal_duty = applied.ratio
+                terminal_load = realized_load
+            elif (
+                completion.terminal_interval_start_s is not None
+                and round(completion.terminal_interval_start_s * 1_000) == trace_start_ms
+                and completion.terminal_auger_duty is not None
+                and completion.terminal_combustion_load is not None
+            ):
+                terminal_duty = completion.terminal_auger_duty
+                terminal_load = completion.terminal_combustion_load
+            else:
+                self._warn_once("Terminal framed trace lacks measured suffix delivery")
+                return False
             recorded = self.record(
                 TraceEventKind.APPLIED_OUTPUT,
                 AppliedOutputPayload(
                     result_revision=state.result_revision,
                     interval_start_ms=trace_start_ms,
                     interval_end_ms=trace_end_ms,
-                    realized_auger_duty=applied.ratio,
-                    realized_combustion_load=realized_load if sample_complete else None,
-                    actual_fan_duty=completion.applied_fan_duty,
+                    realized_auger_duty=terminal_duty,
+                    realized_combustion_load=terminal_load if sample_complete else None,
+                    actual_fan_duty=(
+                        None
+                        if self._delivery_journal is None
+                        else self._delivery_journal.mean_fan_duty(trace_start_ms, trace_end_ms)
+                    ),
                     sample_complete=sample_complete,
                     output_source=source,
                 ),

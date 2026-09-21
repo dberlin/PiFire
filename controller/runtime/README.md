@@ -103,6 +103,15 @@ seconds is admitted; wall-clock correction is not discontinuity. The independent
 30-second process watchdog remains separate. Deploy the coordinated clock,
 timer, probe, persistence, and UI contracts together.
 
+Pulse delivery accounting uses integer milliseconds: each observed ON interval
+adds the difference between its rounded boundary timestamps. Scheduling cutoffs,
+physical command times, and temperature freshness checks retain the unrounded
+monotonic clock. Progress feedback, completed observations, and terminal suffix
+feedback use the same serialized interval width; zero-width intervals produce
+no evidence. Terminal trace rows account only for delivery not already reported.
+Real delivery beyond the scheduled budget remains visible and fails strict
+replay; neither clipping nor a larger replay tolerance hides late auger-off.
+
 ## Shared-mode duration authority
 
 Mode hooks, actuator edges, lid/manual deadlines, and runner rebuilds share the

@@ -157,7 +157,7 @@ def _require_digest(value: object, name: str) -> str:
 
 @dataclass(frozen=True, slots=True)
 class FrameObservation:
-    """One monotonic actuator interval with independent wall-clock provenance."""
+    """One millisecond-resolution actuator interval with wall-clock provenance."""
 
     frame_start_s: float
     frame_end_s: float
@@ -211,13 +211,14 @@ class FrameObservation:
     def __post_init__(self) -> None:
         start = _finite_float(self.frame_start_s, "frame_start_s")
         end = _finite_float(self.frame_end_s, "frame_end_s")
-        if end <= start:
-            raise ValueError("frame_end_s must be greater than frame_start_s")
-        duration = end - start
-        object.__setattr__(self, "frame_start_s", start)
+        start_ms, end_ms = round(start * 1_000), round(end * 1_000)
+        if end_ms <= start_ms:
+            raise ValueError("frame_end_s must be greater than frame_start_s at millisecond resolution")
+        duration = (end_ms - start_ms) / 1_000
+        object.__setattr__(self, "frame_start_s", start_ms / 1_000)
         _nonnegative_int(self.wall_start_ms, "wall_start_ms")
         _nonnegative_int(self.wall_end_ms, "wall_end_ms")
-        object.__setattr__(self, "frame_end_s", end)
+        object.__setattr__(self, "frame_end_s", end_ms / 1_000)
         for name in ("temp_c", "setpoint_c", "ambient_c"):
             object.__setattr__(self, name, _finite_float(getattr(self, name), name))
         for name in ("requested_q", "realized_q", "requested_auger_duty"):

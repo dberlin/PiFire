@@ -204,6 +204,15 @@ class ActuationDeliveryJournal:
                 unknown_reasons=tuple(reasons),
             )
 
+    def mean_fan_duty(self, start_ms: int, end_ms: int) -> float | None:
+        """Return the observed mean programmed duty in percent, never requested duty."""
+        if end_ms <= start_ms:
+            return None
+        integral = self.integrate(start_ms, end_ms)
+        if integral.fan_certainty is not FrameDeliveryCertainty.EXACT:
+            return None
+        return 100_000.0 * integral.fan_duty_integral_seconds / (end_ms - start_ms)
+
     def _capture_timestamp(self) -> tuple[int, int]:
         monotonic_ms = _milliseconds(self._monotonic_clock(), "monotonic clock")
         wall_ms = _milliseconds(self._wall_clock(), "wall clock")
@@ -381,6 +390,30 @@ class DeliveredGrillPlatform:
     def journal(self) -> ActuationDeliveryJournal:
         return self._journal
 
+    def observe_outputs(self) -> None:
+        """Refresh stable hardware evidence without issuing an output command."""
+        if not callable(getattr(self._platform, "get_output_readback", None)):
+            return
+        with self._journal._command_lock:
+            instant = None
+            channels = tuple(ActuatorChannel)
+            try:
+                instant, wall_ms = self._journal._capture_timestamp()
+                after, errors = self._readback()
+                self._journal._record_success(
+                    channels=channels,
+                    before={},
+                    after=after,
+                    invalid_after=errors,
+                    monotonic_ms=instant,
+                    wall_ms=wall_ms,
+                    semantic_source="observe_outputs",
+                )
+            except Exception as error:
+                self._mark_observation_uncertain(
+                    f"output observation failed: {type(error).__name__}: {error}", channels, instant
+                )
+
     def auger_on(self, *args: Any, **kwargs: Any) -> Any:
         return self._invoke("auger_on", (ActuatorChannel.AUGER,), args, kwargs)
 
@@ -494,7 +527,9 @@ class DeliveredGrillPlatform:
                     affected,
                     monotonic_ms,
                 )
-            elif not self._readback_authoritative:
+            elif not self._readback_authoritative and not callable(
+                getattr(self._platform, "get_output_readback", None)
+            ):
                 self._mark_observation_uncertain(
                     f"{semantic_source} readback is not certified authoritative",
                     affected,
@@ -549,7 +584,8 @@ class DeliveredGrillPlatform:
 
     def _readback(self) -> tuple[dict[ActuatorChannel, bool | float], dict[ActuatorChannel, str]]:
         try:
-            raw = self._platform.get_output_status()  # type: ignore[attr-defined]
+            readback = getattr(self._platform, "get_output_readback", None)
+            raw = readback() if callable(readback) else self._platform.get_output_status()  # type: ignore[attr-defined]
             if not isinstance(raw, Mapping):
                 reason = "output readback is not a mapping"
                 return {}, {channel: reason for channel in ActuatorChannel}
