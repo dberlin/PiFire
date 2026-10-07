@@ -145,6 +145,15 @@ class FramedPulseResult:
     completions: tuple[FramedPulseCompletion, ...]
     feedback: FramedPulseFeedback | None
     delivered_delta_s: float
+    observations: tuple[FrameObservation, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _PendingObservation:
+    observation: FrameObservation
+    sample: FramedPulseSample
+    frame_end_s: float
+    duration_s: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,6 +203,7 @@ class FramedPulseRuntime:
         self._last_observation_key: tuple[int, int] | None = None
         self._observation_sequence = 0
         self._frame_delivery_start_ms = 0
+        self._pending_observation: _PendingObservation | None = None
 
     @property
     def scheduler(self) -> PulseScheduler | None:
@@ -231,6 +241,7 @@ class FramedPulseRuntime:
         self._last_observation_key = None
         self._observation_sequence = 0
         self._frame_delivery_start_ms = 0
+        self._pending_observation = None
         controller.pulse_result_revision = -1
         controller.pulse_frame_result_revision = 0
         controller.pulse_requested_duty = 0.0
@@ -285,6 +296,7 @@ class FramedPulseRuntime:
         prior_output_source: OutputSource | None = OutputSource.CONTROLLER,
     ) -> FramedPulseResult:
         scheduler, controller, previous = self._configured()
+        observations = self._resolve_pending_observation(sample, now=now)
         previous_revision = previous.result_revision
         decision = scheduler.advance(controller.pulse_requested_duty, now, actual_auger_on)
         delivered_delta_s = self._record_delivery(decision.delivered_on_s)
@@ -296,6 +308,10 @@ class FramedPulseRuntime:
                 inhibit=InhibitReason.NONE,
                 terminal_feedback=True,
                 feedback_source=previous.output_source,
+                defer_sample=(
+                    len(decision.completed_frames) == 1
+                    and now < frame.ended_at_s + (frame.ended_at_s - frame.nominal_start_s)
+                ),
             )
             for frame in decision.completed_frames
         )
@@ -326,7 +342,7 @@ class FramedPulseRuntime:
                 prior_output_source=prior_output_source,
                 dispatch=not bool(decision.completed_frames),
             )
-        return FramedPulseResult(decision, completions, feedback, delivered_delta_s)
+        return FramedPulseResult(decision, completions, feedback, delivered_delta_s, observations)
 
     def reset(
         self,
@@ -345,6 +361,7 @@ class FramedPulseRuntime:
         prior_output_source: OutputSource | None = OutputSource.CONTROLLER,
     ) -> FramedPulseResult:
         scheduler, controller, previous = self._configured()
+        observations = self._resolve_pending_observation(sample, now=now, invalidate=True)
         decision = scheduler.advance(controller.pulse_requested_duty, now, actual_auger_on)
         delivered_delta_s = self._record_delivery(decision.delivered_on_s)
         completions = [
@@ -393,11 +410,12 @@ class FramedPulseRuntime:
         controller.pulse_metrics_delivered_on_s = decision.delivered_on_s
         controller.pulse_feedback_start_s = now
         controller.pulse_feedback_delivered_on_s = decision.delivered_on_s
-        return FramedPulseResult(decision, tuple(completions), feedback, delivered_delta_s)
+        return FramedPulseResult(decision, tuple(completions), feedback, delivered_delta_s, observations)
 
     def invalidate_observation_gap(self, *, sample: FramedPulseSample) -> FramedPulseResult:
         """Discard an unknown interval without advancing beyond the last observation."""
         scheduler, controller, _ = self._configured()
+        observations = self._resolve_pending_observation(sample, invalidate=True)
         interrupted = scheduler.reset(PulseResetReason.SAFETY)
         self._stamp_calibration_cancellation(
             PulseResetReason.SAFETY.value,
@@ -434,7 +452,7 @@ class FramedPulseRuntime:
             reset_reason=PulseResetReason.SAFETY,
             completed_frames=() if interrupted is None else (interrupted,),
         )
-        return FramedPulseResult(decision, completions, None, 0.0)
+        return FramedPulseResult(decision, completions, None, 0.0, observations)
 
     def complete_frame(
         self,
@@ -592,6 +610,47 @@ class FramedPulseRuntime:
         )
         self._mirror_frame(self._frame)
 
+    def _resolve_pending_observation(
+        self,
+        sample: FramedPulseSample,
+        *,
+        now: float | None = None,
+        invalidate: bool = False,
+    ) -> tuple[FrameObservation, ...]:
+        pending = self._pending_observation
+        if pending is None:
+            return ()
+        observation = pending.observation
+        acquired = sample.acquired_at_s
+        deadline = pending.frame_end_s + pending.duration_s
+        compatible = (
+            sample.role_generation == observation.role_generation
+            and sample.units == pending.sample.units
+            and sample.setpoint == pending.sample.setpoint
+            and sample.ambient_c == pending.sample.ambient_c
+        )
+        valid_sample = (
+            sample.temperature is not None
+            and math.isfinite(sample.temperature)
+            and acquired is not None
+            and math.isfinite(acquired)
+            and now is not None
+            and acquired <= now < deadline
+        )
+        if not invalidate and compatible and valid_sample:
+            assert acquired is not None and sample.temperature is not None
+            if acquired < pending.frame_end_s:
+                return ()
+            observation = replace(
+                observation,
+                temp_c=self._to_c(sample.temperature, sample.units),
+                continuous=True,
+            )
+        # A boundary, missing sample, or expired window retires the original
+        # rejected observation. Never grant it a fabricated acquisition time.
+        self._pending_observation = None
+        return (observation,)
+
     def _complete_frame(
         self,
         frame: PulseFrameResult,
@@ -601,6 +660,7 @@ class FramedPulseRuntime:
         inhibit: InhibitReason,
         terminal_feedback: bool,
         feedback_source: OutputSource,
+        defer_sample: bool = False,
     ) -> FramedPulseCompletion:
         start_ms, end_ms = self._frame_key(frame)
         duration_ms = end_ms - start_ms
@@ -636,6 +696,32 @@ class FramedPulseRuntime:
                     wall_end_ms=wall_end_ms,
                     applied_fan_duty=applied_fan_duty,
                 )
+                acquired = sample.acquired_at_s
+                if (
+                    defer_sample
+                    and frame.complete
+                    and not observation.continuous
+                    and not (
+                        observation.lid_open
+                        or observation.manual_override
+                        or observation.safety_inhibited
+                        or observation.stale
+                        or observation.skipped
+                        or observation.reset
+                    )
+                    and observation.output_source == "controller"
+                    and math.isfinite(observation.temp_c)
+                    and acquired is not None
+                    and math.isfinite(acquired)
+                    and frame.nominal_start_s <= acquired < frame.ended_at_s
+                ):
+                    self._pending_observation = _PendingObservation(
+                        observation=observation,
+                        sample=sample,
+                        frame_end_s=frame.ended_at_s,
+                        duration_s=frame.ended_at_s - frame.nominal_start_s,
+                    )
+                    observation = None
 
         applied = None
         realized_load = None

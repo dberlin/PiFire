@@ -98,9 +98,11 @@ _STALE_MULTIPLIER = 3  # a cached channel reading is considered stale (-> None)
 def _channel_to_celsius(data):
     if data.value is None:
         return None
+    # Firestore integerValue fields reach us as strings in thermoworks-cloud.
+    value = float(data.value)
     if data.units == "F":
-        return (data.value - 32) * 5 / 9
-    return data.value
+        return (value - 32) * 5 / 9
+    return value
 
 
 class ThermoworksCloudDevice:

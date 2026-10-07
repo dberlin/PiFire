@@ -44,6 +44,37 @@ externally-provided `aiohttp.ClientSession`:
     `INVALID_PASSWORD`, `USER_DISABLED`, `UNKNOWN`) is raised on bad
     credentials.
 
+### Reading normalization and authentication recovery (2026-10-07)
+
+The current `thermoworks-cloud` decoder can return `DeviceChannel.value` as a
+string: Firestore encodes `integerValue` as JSON text, and the channel model
+does not apply a numeric converter. PiFire converts non-null readings to
+`float` before Celsius conversion, for both Fahrenheit and Celsius sources.
+This avoids `unsupported operand type(s) for -: 'str' and 'int'` on Fahrenheit
+readings and keeps Celsius strings out of the probe cache. The listing CLI
+also converts numeric strings for text formatting; JSON preserves the raw
+`value` while exposing a numeric `celsius`. Missing readings remain `None`.
+
+This arithmetic error is not evidence of an expired session token. The
+dependency converts both login `expiresIn` and refresh `expires_in` strings
+to integer seconds, then refreshes within 60 seconds of expiration. If a
+refresh or a channel request fails (including a rejected session), PiFire's
+existing background loop marks the connection disconnected, waits at least
+60 seconds, then creates a new session and signs in again. Cached receipts
+still expire after three polling intervals; an error does not renew them.
+Discovery and the listing CLI use fresh sign-ins and report authentication
+failures instead of indefinitely retrying.
+
+Offline regression coverage:
+
+```sh
+.venv/bin/python -m pytest -n 0 tests/unit/probes/test_thermoworks_cloud_probe.py tests/unit/probes/test_thermoworks_list.py -q
+```
+
+These tests use synthetic Firestore documents and fake network clients:
+they cover numeric-string readings reaching the probe reader, CLI text/JSON
+output, and a rejected polling session followed by a successful fresh login.
+
 ### PiFire probe architecture (relevant precedent)
 
 - Every probe module implements `ProbeInterface` (`probes/base.py:174`):

@@ -153,8 +153,8 @@ def test_blocking_solve_cannot_backfill_frames_before_gap_retirement(hold_cycle,
     assert runner.stops == 1
 
 
-@pytest.mark.parametrize("acquired_at_s, continuous", [(21.9, False), (22.05, True)])
-def test_solve_crossing_frame_edge_preserves_probe_acquisition(hold_cycle, monkeypatch, acquired_at_s, continuous):
+@pytest.mark.parametrize("acquired_at_s", [21.9, 22.05])
+def test_solve_crossing_frame_edge_waits_for_post_boundary_sample(hold_cycle, monkeypatch, acquired_at_s):
     clock = ManualClock(wall_start=1_800_000_000.0)
     allocation = allocate(0.3, u_max=1.0, fan_min_pct=0.0, fan_max_pct=100.0, enable_fan=False)
     runner = FakeControllerRunner(period=1.0).script(
@@ -174,10 +174,22 @@ def test_solve_crossing_frame_edge_preserves_probe_acquisition(hold_cycle, monke
     monkeypatch.setattr(runner, "latest", delayed_latest)
     hold.on_tick(acquired_at_s, 201.0, _status(hold), acquired_at_s=acquired_at_s)
 
+    if acquired_at_s < 22.0:
+        assert runner.observations == []
+        # The completed interval's actuator feedback is not delayed with learning.
+        assert any(output.timestamp == 22.0 for output in runner.applied)
+        monkeypatch.setattr(runner, "latest", latest)
+        clock.advance(0.2)
+        hold.on_tick(clock.monotonic(), 203.0, _status(hold))
+        expected_temperature_c = 95.0
+    else:
+        expected_temperature_c = (201.0 - 32.0) * 5.0 / 9.0
     assert len(runner.observations) == 1
+    assert runner.observations[0].frame_start_s == 2.0
     assert runner.observations[0].frame_end_s == 22.0
-    assert runner.observations[0].continuous is continuous
-    hold.teardown(201.0, acquired_at_s=None)
+    assert runner.observations[0].temp_c == pytest.approx(expected_temperature_c)
+    assert runner.observations[0].continuous is True
+    hold.teardown(203.0, acquired_at_s=None)
 
 
 def test_missing_probe_cannot_retimestamp_retained_temperature_at_teardown(hold_cycle):

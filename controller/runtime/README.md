@@ -90,6 +90,22 @@ and `build_runner()` picks between them based on the controller core's
 
 ## Pulse observation continuity
 
+A normal Hold tick can acquire its temperature just before a pulse-frame boundary
+and reach the scheduler just after it. `FramedPulseRuntime` completes physical
+delivery and actuator feedback immediately, but retains that frame's immutable
+learning observation until a genuinely post-boundary sample arrives. Deferred
+observations are returned separately from physical completions in
+`FramedPulseResult.observations`; Hold submits them once, without repeating
+actuator feedback or frame trace records.
+
+The sample must arrive within the following frame and retain the same model role,
+units, setpoint, and ambient configuration. Missing/nonfinite samples, an expired
+window, resets, or unknown intervals retire the pending observation as rejected.
+Multiple-frame gaps are never deferred. Acquisition timestamps are not rewritten,
+and the original monotonic frame identity, delivery, allocation, and wall-clock
+provenance remain unchanged. This prevents ordinary tick-boundary crossings from
+repeatedly restarting MPC learning history while preserving strict gap rejection.
+
 `FramedPulseRuntime.invalidate_observation_gap()` retires a partial frame at its
 last observed monotonic instant without advancing through the unknown interval.
 It preserves known delivered seconds, clears credit, and emits discarded partial

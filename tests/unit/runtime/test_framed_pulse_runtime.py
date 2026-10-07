@@ -500,6 +500,97 @@ def test_live_regime_completed_frames_are_continuous_repository_observations() -
         assert observation.continuous is True
 
 
+def test_crossed_boundaries_keep_contiguous_learning_without_delaying_feedback() -> None:
+    runtime, controller = _live_regime_runtime()
+    controller.pulse_requested_duty = 0.0
+    runtime.advance(0.0, False, sample=_sample(acquired_at_s=0.0))
+    observations = []
+    for end in range(20, 201, 20):
+        completed = runtime.advance(end + 0.1, False, sample=_sample(acquired_at_s=end - 0.01))
+        completion = completed.completions[0]
+        assert completion.observation is None
+        assert completion.applied is not None
+        assert completion.applied.timestamp == end
+        assert completion.applied.sample_complete is True
+        assert completion.frame.ended_at_s == end
+        waiting = runtime.advance(end + 0.15, False, sample=_sample(acquired_at_s=end - 0.01))
+        assert waiting.observations == ()
+        ready = runtime.advance(end + 0.2, False, sample=_sample(temperature=230.0, acquired_at_s=end + 0.15))
+        observations.extend(ready.observations)
+        assert ready.completions == ()
+        again = runtime.advance(end + 0.3, False, sample=_sample(acquired_at_s=end + 0.25))
+        assert again.observations == ()
+    assert [(item.frame_start_s, item.frame_end_s) for item in observations] == [
+        (0.0, 20.0),
+        (20.0, 40.0),
+        (40.0, 60.0),
+        (60.0, 80.0),
+        (80.0, 100.0),
+        (100.0, 120.0),
+        (120.0, 140.0),
+        (140.0, 160.0),
+        (160.0, 180.0),
+        (180.0, 200.0),
+    ]
+    assert [item.observation_sequence for item in observations] == list(range(1, 11))
+    assert all(item.continuous and item.temp_c == 110.0 for item in observations)
+    assert all(item.delivered_on_s == 0.0 for item in observations)
+
+
+@pytest.mark.parametrize(
+    "sample, now",
+    [
+        (_sample(temperature=None, acquired_at_s=20.2), 20.3),
+        (_sample(temperature=float("nan"), acquired_at_s=20.2), 20.3),
+        (_sample(acquired_at_s=None), 20.3),
+        (_sample(acquired_at_s=float("nan")), 20.3),
+        (_sample(acquired_at_s=21.0), 20.3),
+        (_sample(acquired_at_s=40.0), 40.0),
+        (_sample(acquired_at_s=20.2), 40.0),
+        (_sample(role_generation=8, acquired_at_s=20.2), 20.3),
+        (replace(_sample(acquired_at_s=20.2), units="C"), 20.3),
+        (replace(_sample(acquired_at_s=20.2), setpoint=300.0), 20.3),
+        (replace(_sample(acquired_at_s=20.2), ambient_c=30.0), 20.3),
+    ],
+)
+def test_pending_observation_rejects_missing_late_or_incompatible_samples(sample, now) -> None:
+    runtime, controller = _live_regime_runtime()
+    controller.pulse_requested_duty = 0.0
+    runtime.advance(0.0, False, sample=_sample(acquired_at_s=0.0))
+    runtime.advance(20.1, False, sample=_sample(acquired_at_s=19.9))
+    result = runtime.advance(now, False, sample=sample)
+    assert len(result.observations) == 1
+    assert result.observations[0].frame_end_s == 20.0
+    assert result.observations[0].continuous is False
+    assert result.observations[0].temp_c == 100.0
+    later = runtime.advance(now + 0.1, False, sample=_sample(acquired_at_s=now + 0.1))
+    assert all(item.frame_end_s != 20.0 for item in later.observations)
+
+
+@pytest.mark.parametrize("gap", [False, True])
+def test_pending_observation_cannot_cross_reset_or_unknown_interval(gap) -> None:
+    runtime, controller = _live_regime_runtime()
+    controller.pulse_requested_duty = 0.0
+    runtime.advance(0.0, False, sample=_sample(acquired_at_s=0.0))
+    runtime.advance(20.1, False, sample=_sample(acquired_at_s=19.9))
+    sample = _sample(acquired_at_s=20.2)
+    if gap:
+        result = runtime.invalidate_observation_gap(sample=sample)
+    else:
+        result = runtime.reset(
+            PulseResetReason.MODE_CHANGE,
+            20.2,
+            InhibitReason.NONE,
+            actual_auger_on=False,
+            sample=sample,
+            terminal_feedback=True,
+        )
+    assert result.observations[0].frame_end_s == 20.0
+    assert result.observations[0].continuous is False
+    resumed = runtime.advance(20.3, False, sample=_sample(acquired_at_s=20.3))
+    assert resumed.observations == ()
+
+
 @pytest.mark.parametrize("acquired_at_s, continuous", [(9.9, False), (10.05, True), (None, False)])
 @pytest.mark.parametrize("reset", [False, True])
 def test_frame_boundary_uses_acquisition_not_scheduler_time(acquired_at_s, continuous, reset):
@@ -527,6 +618,13 @@ def test_frame_boundary_uses_acquisition_not_scheduler_time(acquired_at_s, conti
         )
     else:
         result = runtime.advance(10.1, False, sample=sample)
+    if not reset and acquired_at_s == 9.9:
+        assert result.completions[0].observation is None
+        ready = runtime.advance(10.2, False, sample=_sample(temperature=230.0, acquired_at_s=10.15))
+        assert ready.observations[0].continuous is True
+        assert ready.observations[0].temp_c == 110.0
+        assert ready.observations[0].frame_end_s == 10.0
+        return
     observation = result.completions[0].observation
     assert observation is not None
     assert observation.frame_end_s == 10.0

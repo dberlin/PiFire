@@ -180,6 +180,7 @@ class _FramedDispatchState:
     ) = None
     delivered_recorded: bool = False
     completion_delivery_index: int = 0
+    observation_delivery_index: int = 0
     scheduler_reset_recorded: bool = False
     completion_trace_index: int = 0
     feedback_dispatched: bool = False
@@ -399,6 +400,14 @@ class HoldMode(ControlMode):
         if not dispatch.delivered_recorded:
             self._record_framed_delivery(result.delivered_delta_s)
             dispatch.delivered_recorded = True
+        while dispatch.observation_delivery_index < len(result.observations):
+            observation = result.observations[dispatch.observation_delivery_index]
+            learning = cast(HoldLearningRuntime, self._hold_learning)
+            learning.submit_completed_observation(
+                (round(observation.frame_start_s * 1_000), round(observation.frame_end_s * 1_000)),
+                observation,
+            )
+            dispatch.observation_delivery_index += 1
         while dispatch.completion_delivery_index < len(result.completions):
             completion = result.completions[dispatch.completion_delivery_index]
             self._deliver_framed_completion(completion)

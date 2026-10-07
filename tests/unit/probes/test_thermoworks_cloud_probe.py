@@ -217,6 +217,61 @@ def cloud_poll(monkeypatch):
     )
 
 
+@pytest.mark.parametrize(
+    ("value", "units", "expected"),
+    [("212", "F", 100.0), ("32", "F", 0.0), ("100", "C", 100.0), ("0", "C", 0.0)],
+)
+def test_cloud_numeric_strings_reach_probe_reader(cloud_poll, value, units, expected):
+    # Firestore integerValue is JSON text, retained by the cloud library.
+    cloud_poll.client.response = types.SimpleNamespace(value=value, units=units)
+    cloud_poll.poll()
+
+    assert cloud_poll.device.status["connected"] is True
+    assert cloud_poll.device.status["last_error"] is None
+    assert cloud_poll.reader.read_all_ports({})["primary"]["Grill"] == pytest.approx(expected)
+
+
+def test_cloud_rejected_session_reauthenticates_and_resumes_readings(cloud_poll, monkeypatch):
+    probe = cloud_poll.probe
+    attempts = []
+    delays = []
+    responses = iter(
+        [
+            RuntimeError("Failed to get device channel: 401 Unauthorized"),
+            types.SimpleNamespace(value="212", units="F"),
+        ]
+    )
+
+    class AuthFactory:
+        def __init__(self, session):
+            self.session = session
+
+        async def build_auth(self, email, password):
+            attempts.append(self.session)
+            cloud_poll.client.response = next(responses)
+            return object()
+
+    async def advance_retry(delay):
+        delays.append(delay)
+        if len(delays) == 1:
+            assert cloud_poll.device.status["connected"] is False
+            assert "401" in cloud_poll.device.status["last_error"]
+            assert cloud_poll.reader.read_all_ports({})["primary"]["Grill"] is None
+        else:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(probe, "AuthFactory", AuthFactory)
+    monkeypatch.setattr(probe.asyncio, "sleep", advance_retry)
+    cloud_poll.poll()
+
+    assert len(attempts) == 2
+    assert attempts[0] is not attempts[1]
+    assert delays == [60, 10]
+    assert cloud_poll.device.status["connected"] is True
+    assert cloud_poll.device.status["last_error"] is None
+    assert cloud_poll.reader.read_all_ports({})["primary"]["Grill"] == pytest.approx(100.0)
+
+
 def test_cloud_cache_uses_receipt_monotonic_boundary(cloud_poll):
     device, clock = cloud_poll.device, cloud_poll.clock
     assert device.get_channel_celsius(1) is None

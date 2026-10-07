@@ -78,7 +78,7 @@ def format_temp(channel, units):
     if channel.value is None:
         return "(no reading)"
     if units is None:
-        return f"{channel.value:g} \N{DEGREE SIGN}{channel.units}"
+        return f"{float(channel.value):g} \N{DEGREE SIGN}{channel.units}"
     celsius = _channel_to_celsius(channel)
     if celsius is None:
         return "(no reading)"
