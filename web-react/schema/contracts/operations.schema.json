@@ -600,6 +600,28 @@
       "title": "OsInfo",
       "type": "object"
     },
+    "ProbeProfileMutation": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "updated_probes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Updated Probes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "updated_probes"
+      ],
+      "title": "ProbeProfileMutation",
+      "type": "object"
+    },
     "ProfileInput": {
       "additionalProperties": false,
       "properties": {
@@ -636,6 +658,32 @@
         "c"
       ],
       "title": "ProfileInput",
+      "type": "object"
+    },
+    "ProfileValues": {
+      "additionalProperties": false,
+      "properties": {
+        "a": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "b": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "c": {
+          "$ref": "#/$defs/FiniteNumber"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "a",
+        "b",
+        "c"
+      ],
+      "title": "ProfileValues",
       "type": "object"
     },
     "Reading": {
@@ -1046,7 +1094,9 @@
     "MaintenanceActionResponse",
     "NetworkInterface",
     "OsInfo",
+    "ProbeProfileMutation",
     "ProfileInput",
+    "ProfileValues",
     "Reading",
     "SavedProfile",
     "Segment",

@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import * as actualTunerApi from "../../../../src/helpers/tuner/tunerApi" with {
   rstest: "importActual",
 };
+import { renderWithQuery as render } from "../../test-utils";
 
 const saveProfileMock = rs.fn();
 rs.mock("../../../../src/helpers/tuner/tunerApi", () => ({

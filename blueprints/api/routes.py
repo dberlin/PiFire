@@ -10,6 +10,7 @@ from blueprints.api.probe_map_actions import (
     module_requires_install,
     unsupported_new_modules,
 )
+from common import datastore
 from common.api_commands import mpc_calibration_command_revision, process_command
 from common.app import api_response, create_ui_hash, get_system_command_output, save_settings_and_flag_update
 from common.common import read_generic_json, read_wizard, write_log
@@ -675,52 +676,57 @@ def _api_post_probe_map(settings, request_json):
         return jsonify(response.model_dump(mode="json", by_alias=True, exclude_unset=True)), 400
     probe_map = request_payload.probe_map.model_dump(mode="json", by_alias=True, exclude_unset=True)
 
-    control = read_control()
-    if control.get("mode") != Mode.STOP:
-        response = ProbeMapErrorResponse(result="error", message="system_active")
-        return jsonify(response.model_dump(mode="json", by_alias=True, exclude_unset=True)), 409
+    # The dispatcher's snapshot can predate another profile mutation. Resolve
+    # and persist against one locked, current tree so map saves cannot undo it.
+    with datastore.transaction():
+        settings = read_settings()
+        control = read_control()
+        if control.get("mode") != Mode.STOP:
+            response = ProbeMapErrorResponse(result="error", message="system_active")
+            return jsonify(response.model_dump(mode="json", by_alias=True, exclude_unset=True)), 409
 
-    manifest_modules = read_wizard().get("modules", {}).get("probes", {})
-    live_map = settings["probe_settings"]["probe_map"]
-    offenders = unsupported_new_modules(probe_map, live_map, manifest_modules)
-    if offenders:
-        response = ProbeMapErrorResponse(
-            result="error",
-            message="modules_require_install",
-            modules=offenders,
+        manifest_modules = read_wizard().get("modules", {}).get("probes", {})
+        live_map = settings["probe_settings"]["probe_map"]
+        offenders = unsupported_new_modules(probe_map, live_map, manifest_modules)
+        if offenders:
+            response = ProbeMapErrorResponse(
+                result="error",
+                message="modules_require_install",
+                modules=offenders,
+            )
+            return jsonify(response.model_dump(mode="json", by_alias=True, exclude_unset=True)), 422
+
+        try:
+            validate_bus_kinds(configured_bus_kinds(settings, probe_map))
+        except I2CBusConfigError as exc:
+            response = ProbeMapErrorResponse(
+                result="error",
+                message="bus_conflict",
+                detail=str(exc),
+            )
+            return jsonify(response.model_dump(mode="json", by_alias=True, exclude_unset=True)), 422
+
+        profiles = settings["probe_settings"]["probe_profiles"]
+        for probe in probe_map["probe_info"]:
+            profile_id = probe["profile"].get("id")
+            if profile_id in profiles:
+                probe["profile"] = profiles[profile_id].copy()
+
+        settings = set_probe_map(settings, probe_map, control)
+        # A map change rebuilds devices; a profile-only change merely reloads
+        # coefficients. Replace notifications so removed probe entries vanish.
+        save_settings_and_flag_update(
+            settings,
+            control,
+            "settings_update",
+            "probe_map_update",
+            origin="api",
+            ops=[{"op": "notify.replace", "entries": control["notify_data"]}],
         )
-        return jsonify(response.model_dump(mode="json", by_alias=True, exclude_unset=True)), 422
-
-    try:
-        validate_bus_kinds(configured_bus_kinds(settings, probe_map))
-    except I2CBusConfigError as exc:
-        response = ProbeMapErrorResponse(
-            result="error",
-            message="bus_conflict",
-            detail=str(exc),
-        )
-        return jsonify(response.model_dump(mode="json", by_alias=True, exclude_unset=True)), 422
-
-    settings = set_probe_map(settings, probe_map, control)
-    # settings_update makes the loop re-read settings; probe_map_update is what
-    # makes it REBUILD its probe devices (controller.py). probe_profile_update is
-    # NOT enough on its own -- it only refills per-port profiles on
-    # already-constructed devices (probes/base.py:393). notify_data travels as a
-    # notify.replace op because set_probe_map() may have dropped entries, and "an
-    # entry the incoming array omits is a deletion" is exactly what replace says
-    # out loud.
-    save_settings_and_flag_update(
-        settings,
-        control,
-        "settings_update",
-        "probe_map_update",
-        origin="api",
-        ops=[{"op": "notify.replace", "entries": control["notify_data"]}],
-    )
     response = ProbeMapApplyResponse(
         result="success",
         message="Probe map applied.",
-        data=ProbeMapApplyData(probe_map=request_payload.probe_map),
+        data=ProbeMapApplyData(probe_map=probe_map),
     )
     return jsonify(response.model_dump(mode="json", by_alias=True, exclude_unset=True)), 200
 

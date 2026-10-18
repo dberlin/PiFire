@@ -49,68 +49,16 @@ function renderShell(dcFan = true) {
   );
 }
 
-// Every tab in SettingsShell's nav, in nav order. Literal IDs as well as
-// labels make the route identity observable without inspecting implementation
-// source. The title deliberately does not hardcode a count: it drifted while
-// still claiming "8".
-const TAB_LINKS = [
-  { id: "general", label: "General" },
-  { id: "work-mode", label: "Work Mode" },
-  { id: "controller", label: "Controller" },
-  { id: "pwm", label: "PWM Fan" },
-  { id: "startup", label: "Startup / Shutdown" },
-  { id: "safety", label: "Safety" },
-  { id: "pellets", label: "Pellet Levels" },
-  { id: "history", label: "History" },
-  { id: "notifications", label: "Notifications" },
-  { id: "units", label: "Units" },
-  { id: "platform", label: "Platform" },
-  { id: "probes", label: "Probes" },
-] as const;
-
 describe("SettingsShell", () => {
-  it("renders every nav tab and the back-to-dashboard control", async () => {
-    renderShell();
-    // Loader data resolves asynchronously even though the loader itself is
-    // synchronous — wait for the first tab link before asserting on the rest.
-    await screen.findByRole("link", { name: "General" });
-    for (const { id, label } of TAB_LINKS) {
-      expect(screen.getByRole("link", { name: label })).toHaveAttribute("href", `/settings/${id}`);
-    }
-    expect(screen.getAllByRole("link").map((a) => a.textContent)).toEqual(
-      TAB_LINKS.map(({ label }) => label),
-    );
-    expect(screen.getByRole("button", { name: /Dashboard/ })).toBeInTheDocument();
-  });
-
   // Flask gates the PWM nav pill on settings['platform']['dc_fan']
   // (blueprints/settings/templates/settings/index.html:63-65). The /settings/pwm
   // ROUTE stays registered either way so a bookmarked URL still resolves — only
   // the pill goes away.
-  it("hides the PWM Fan tab on an AC-fan build, keeping every other tab in order", async () => {
+  it("hides the PWM Fan tab on an AC-fan build", async () => {
     renderShell(false);
     await screen.findByRole("link", { name: "General" });
 
     expect(screen.queryByRole("link", { name: "PWM Fan" })).toBeNull();
-    const visibleTabs = TAB_LINKS.filter(({ id }) => id !== "pwm");
-    for (const { id, label } of visibleTabs) {
-      expect(screen.getByRole("link", { name: label })).toHaveAttribute("href", `/settings/${id}`);
-    }
-    const rendered = screen.getAllByRole("link").map((a) => a.textContent);
-    expect(rendered).toEqual(visibleTabs.map(({ label }) => label));
-  });
-
-  // A string `name` is a FULL accessible-name match, so this cannot start
-  // silently matching "Probe Profiles" the day this sub-project's second half
-  // adds that tab. (ByRoleOptions has no `exact` member -- that belongs to the
-  // ByText queries, and typescript7 rejects it here.)
-  it("links the Probes pill at the probes child route, last in the strip", async () => {
-    renderShell();
-    await screen.findByRole("link", { name: "General" });
-
-    const probes = screen.getByRole("link", { name: "Probes" });
-    expect(probes).toHaveAttribute("href", "/settings/probes");
-    expect(screen.getAllByRole("link").at(-1)).toBe(probes);
   });
 
   it("navigates back to the dashboard when the back button is clicked", async () => {

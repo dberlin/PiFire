@@ -552,6 +552,57 @@ def resolve_bookmark_revision(
     return revision
 
 
+def _validate_tag_name(tag: str) -> None:
+    if (
+        not tag
+        or tag == "@"
+        or tag.startswith("-")
+        or tag.endswith(("/", "."))
+        or any(part in tag for part in ("..", "//", "@{"))
+        or any(ord(character) <= 32 or ord(character) == 127 or character in "~^:?*[\\" for character in tag)
+        or any(component.startswith(".") or component.endswith(".lock") for component in tag.split("/"))
+    ):
+        raise ValueError("tag must be a valid literal release tag name, not a pattern or revision expression")
+
+
+def _resolve_tag_revision(
+    root: Path,
+    tag: str,
+    *,
+    operation_id: str | None = None,
+    remote: bool = False,
+) -> str:
+    operation_argv = () if operation_id is None else ("--at-operation", operation_id)
+    remote_argv = ("--remote", "origin") if remote else ()
+    # --remote also lists the local tag; only the requested side may authorize success.
+    side = "remote" if remote else "!remote"
+    completed = subprocess.run(
+        (
+            "jj",
+            *operation_argv,
+            "--no-pager",
+            "tag",
+            "list",
+            f"exact:{tag}",
+            *remote_argv,
+            "-T",
+            f'if({side}, if(conflict, "conflict", normal_target.commit_id()) ++ "\\n")',
+        ),
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    scope = "remote-tracking" if remote else "local"
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or "tag resolver exited without an error message"
+        raise RuntimeError(f"could not resolve {scope} tag {tag!r}: {detail}")
+    revision = completed.stdout.strip()
+    if _FULL_REVISION.fullmatch(revision) is None:
+        raise RuntimeError(f"{scope} tag {tag!r} did not resolve to exactly one unconflicted full revision")
+    return revision
+
+
 def resolve_current_operation_id(root: Path) -> str:
     """Resolve the current Jujutsu operation to its full immutable ID."""
 
@@ -820,13 +871,16 @@ def push_verified_bookmark(
     root: Path,
     bookmark: str,
     artifact_root: Path,
+    tag: str | None = None,
     run_command: _RunCommand = subprocess.run,
     resolve_operation: Callable[[], str] | None = None,
 ) -> GateEvidence:
-    """Gate and push the one authorized bookmark without reusing evidence."""
+    """Gate and push the authorized bookmark and optional tag without reusing evidence."""
 
     if bookmark != _VERIFIED_BOOKMARK:
         raise ValueError(f"push is restricted to bookmark {_VERIFIED_BOOKMARK!r}")
+    if tag is not None:
+        _validate_tag_name(tag)
 
     bookmark_revision = resolve_bookmark_revision(root, bookmark)
     current_revision = _resolve_current_revision(root)
@@ -837,6 +891,12 @@ def push_verified_bookmark(
         )
 
     with _artifact_lock(artifact_root):
+        if tag is not None:
+            tag_revision = _resolve_tag_revision(root, tag)
+            if tag_revision != bookmark_revision:
+                raise RuntimeError(
+                    f"local tag {tag!r} does not equal the current revision: {tag_revision} != {bookmark_revision}"
+                )
         with _isolated_live_pifire(root):
             evidence = _run_gate_with_lock_held(
                 root=root,
@@ -866,6 +926,10 @@ def push_verified_bookmark(
                 "local bookmark or current revision changed after the gate: "
                 f"evidence={evidence.revision}, bookmark={post_gate_bookmark}, current={post_gate_current}"
             )
+        if tag is not None:
+            post_gate_tag = _resolve_tag_revision(root, tag, operation_id=operation_id)
+            if post_gate_tag != evidence.revision:
+                raise RuntimeError(f"local tag {tag!r} changed after the gate: {post_gate_tag} != {evidence.revision}")
 
         push_argv = (
             "jj",
@@ -876,6 +940,8 @@ def push_verified_bookmark(
             "-b",
             bookmark,
         )
+        if tag is not None:
+            push_argv += ("--tag", f"exact:{tag}")
         completed = run_command(
             push_argv,
             cwd=root,
@@ -894,6 +960,13 @@ def push_verified_bookmark(
                 f"remote-tracking bookmark {bookmark!r} does not equal the evidence revision after push: "
                 f"{remote_revision} != {evidence.revision}"
             )
+        if tag is not None:
+            remote_tag_revision = _resolve_tag_revision(root, tag, remote=True)
+            if remote_tag_revision != evidence.revision:
+                raise RuntimeError(
+                    f"remote-tracking tag {tag!r} does not equal the evidence revision after push: "
+                    f"{remote_tag_revision} != {evidence.revision}"
+                )
         _validate_durable_pass_evidence(
             evidence=evidence,
             revision_dir=artifact_root / evidence.revision,
@@ -907,6 +980,7 @@ class _Arguments:
     expected_revision: str | None
     bookmark: str | None
     artifact_root: Path
+    tag: str | None
 
 
 def _parse_args(argv: list[str] | None = None) -> _Arguments:
@@ -926,6 +1000,7 @@ def _parse_args(argv: list[str] | None = None) -> _Arguments:
 
     push = subparsers.add_parser("push", help="gate and push the verified bookmark")
     _ = push.add_argument("--bookmark", required=True)
+    _ = push.add_argument("--tag", help="publish this literal release tag with the verified bookmark")
     _ = push.add_argument("--artifact-root", type=Path, default=_DEFAULT_ARTIFACT_ROOT)
 
     values = cast(dict[str, object], vars(parser.parse_args(argv)))
@@ -933,10 +1008,12 @@ def _parse_args(argv: list[str] | None = None) -> _Arguments:
     expected_revision = values.get("expected_revision")
     bookmark = values.get("bookmark")
     artifact_root = values.get("artifact_root")
+    tag = values.get("tag")
     if (
         operation not in {"verify", "verify-bookmark", "push"}
         or (expected_revision is not None and not isinstance(expected_revision, str))
         or (bookmark is not None and not isinstance(bookmark, str))
+        or (tag is not None and not isinstance(tag, str))
         or not isinstance(artifact_root, Path)
     ):
         parser.error("invalid exact-revision gate arguments")
@@ -945,6 +1022,7 @@ def _parse_args(argv: list[str] | None = None) -> _Arguments:
         expected_revision=expected_revision,
         bookmark=bookmark,
         artifact_root=artifact_root,
+        tag=tag,
     )
 
 
@@ -973,6 +1051,7 @@ def main(argv: list[str] | None = None) -> int:
                 root=root,
                 bookmark=args.bookmark,
                 artifact_root=args.artifact_root,
+                tag=args.tag,
             )
     except ValueError as error:
         print(f"exact-revision gate: {error}", file=sys.stderr)

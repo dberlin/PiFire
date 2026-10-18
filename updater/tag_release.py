@@ -15,16 +15,19 @@ that the updater page will actually show what you asked for.
     updater/tag_release.py v1.11-dannyb --git        # force the git path in a jj checkout
     updater/tag_release.py v1.11-dannyb --bookmark b # jj: which bookmark to move and push
 
-This repo is a jj workspace colocated with git, so the script drives jj when it
-finds one and git otherwise; --jj / --git force the choice. The difference
-matters: `git commit` in a colocated repo silently works, and leaves jj to
-reconcile a commit that appeared underneath it. jj mode does the same job with
-`jj describe` + `jj new` + `jj bookmark set` + `jj git push` instead.
+The script drives native jj in a jj workspace, and git otherwise; --jj / --git
+force the choice. JJ mode never executes Git commands: it fetches and discovers
+tags with jj, creates a lightweight tag with `jj tag set`, and publishes the
+bookmark and exact tag only through scripts/exact_revision_gate.py. The updater
+uses `git describe --tags`, so lightweight release tags are supported.
 
-TAGS ARE ALWAYS GIT, in both modes. jj has no tag support at all, and the two
-things that decide the updater page's "Remote:" line -- `git describe` and
-`git tag --sort=v:refname --merged` -- are git-side by nature. jj mode only
-changes how the COMMIT is made and pushed.
+JJ requires an empty, mutable working-copy commit before a manifest bump. The
+release ID is pinned before tagging, because JJ may automatically open an empty
+child when the release becomes immutable. Publication temporarily checks out
+that exact commit without rewriting it, so @ and its bookmark agree during the
+gate. Afterwards an empty @ is retained or opened, including on gate failure.
+--no-push checks the prospective local release, reports the unchanged remote,
+and prints a guarded publication command; it does not require origin to advance.
 
 The updater page's version line is TWO independent things:
 
@@ -52,6 +55,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -141,8 +145,7 @@ def write_manifest(manifest: Path, version: str, build: int) -> None:
 
 
 # ---------------------------------------------------------------------------
-# VCS backends. Everything below talks to these, never to jj/git directly,
-# except where the comment says the operation is git-only by nature.
+# VCS backends. Release orchestration uses these for every VCS operation.
 # ---------------------------------------------------------------------------
 
 
@@ -151,14 +154,12 @@ class JjVcs:
 
     def __init__(self, runner: Runner):
         self.runner = runner
+        self._release_id: str | None = None
 
     def release_commit(self) -> str:
-        """The commit the tag goes on.
-
-        jj's @ is the working copy, so the release is its parent once `jj new`
-        has sealed it; naming the commit explicitly beats relying on HEAD having
-        been exported yet.
-        """
+        """Pin releases by commit ID: tagging may automatically advance @."""
+        if self._release_id is not None:
+            return self._release_id
         return self.runner.out("jj", "--no-pager", "log", "-r", "@-", "--no-graph", "-T", "commit_id").strip()
 
     def resolve_bookmark(self) -> str:
@@ -189,7 +190,7 @@ class JjVcs:
             )
         return found[0]
 
-    def require_clean(self) -> None:
+    def require_clean(self, *, writing: bool = False) -> None:
         """A release commit must carry only the manifest.
 
         jj has no path-scoped commit, so instead of splitting the change out
@@ -204,27 +205,92 @@ class JjVcs:
                 "only the manifest. Describe or abandon them first, then re-run:\n"
                 + "\n".join(f"  {line}" for line in dirty.splitlines())
             )
+        if (
+            writing
+            and self.runner.out(
+                "jj", "--no-pager", "log", "-r", "@ & immutable()", "--no-graph", "-T", "commit_id"
+            ).strip()
+        ):
+            raise Refused("the jj working copy is immutable; run jj new before bumping the manifest.")
 
     def committed_versions(self, manifest: Path) -> dict:
-        return read_versions(self.runner.out("jj", "--no-pager", "file", "show", "-r", "@-", str(manifest)))
+        return read_versions(
+            self.runner.out("jj", "--no-pager", "file", "show", "-r", self.release_commit(), str(manifest))
+        )
 
     def is_dirty(self) -> bool:
         return bool(self.runner.out("jj", "--no-pager", "diff", "--name-only").strip())
 
     def commit(self, message: str, bookmark: str, manifest: Path) -> None:
         self.runner.run("jj", "describe", "-m", message)
-        # Seals it: @ becomes a fresh empty commit and the release is @-, which
-        # is what release_commit and committed_versions read. Without this the
-        # release would still be the working copy, and any later edit would
-        # silently amend a commit that is about to be tagged and pushed.
-        self.runner.run("jj", "new")
-        self.runner.run("jj", "bookmark", "set", bookmark, "-r", "@-")
+        self._release_id = self.runner.out(
+            "jj", "--no-pager", "log", "-r", "@", "--no-graph", "-T", "commit_id"
+        ).strip()
+        self.runner.run("jj", "bookmark", "set", bookmark, "-r", self._release_id)
 
-    def push(self, bookmark: str) -> None:
-        self.runner.run("jj", "git", "push", "-b", bookmark)
+    def fetch(self) -> None:
+        self.runner.run("jj", "git", "fetch", "--remote", "origin")
+
+    def measured_against(self, bookmark: str) -> str:
+        return f'{json.dumps(bookmark)}@"origin"'
+
+    def latest_merged_tag(self, ref: str) -> str:
+        tags = self.runner.out("jj", "--no-pager", "tag", "list", "-r", f"::{ref}", "-T", 'name ++ "\\n"').splitlines()
+        return max(tags, key=_version_sort_key, default="")
+
+    def tag_exists(self, tag: str) -> bool:
+        tags = self.runner.out("jj", "--no-pager", "tag", "list", "-T", 'name ++ "\\n"').splitlines()
+        return tag in tags
+
+    def tag(self, tag: str, commit: str) -> None:
+        self.runner.run("jj", "tag", "set", "-r", commit, tag)
+        self._release_id = commit
+
+    def describe(self, commit: str) -> str:
+        tags = self.runner.out("jj", "--no-pager", "tag", "list", "-r", commit, "-T", 'name ++ "\\n"').splitlines()
+        return max(tags, key=_version_sort_key, default=commit[:12])
+
+    def push(self, bookmark: str, tag: str) -> None:
+        commit = self.release_commit()
+        # Set the bookmark first: mutating commands can automatically open an
+        # empty child when @ becomes immutable. Only change the checkout after
+        # that, then invoke the gate without any intervening JJ mutations.
+        self.runner.run("jj", "bookmark", "set", bookmark, "-r", commit)
+        self.runner.run("jj", "--ignore-immutable", "edit", commit)
+        self.runner.run(*self._push_command(bookmark, tag))
+
+    def _push_command(self, bookmark: str, tag: str) -> tuple[str, ...]:
+        return (
+            "uv",
+            "--directory",
+            self.runner.out("jj", "workspace", "root").strip(),
+            "run",
+            "python",
+            "scripts/exact_revision_gate.py",
+            "push",
+            "--bookmark",
+            bookmark,
+            "--artifact-root",
+            ".artifacts/exact-revision",
+            "--tag",
+            tag,
+        )
 
     def push_hint(self, bookmark: str, tag: str) -> str:
-        return f"  jj git push -b {bookmark} && git push origin refs/tags/{tag}"
+        commit = self.release_commit()
+        bookmark_command = shlex.join(("jj", "bookmark", "set", bookmark, "-r", commit))
+        checkout = shlex.join(("jj", "--ignore-immutable", "edit", commit))
+        push = shlex.join(self._push_command(bookmark, tag))
+        cleanup = shlex.quote(shlex.join(("jj", "new", "-r", commit)))
+        return f"  {bookmark_command} && {checkout} && (trap {cleanup} EXIT; {push})"
+
+    def finish(self) -> None:
+        if self._release_id is None:
+            return
+        current = self.runner.out("jj", "--no-pager", "log", "-r", "@", "--no-graph", "-T", "commit_id").strip()
+        if current == self._release_id:
+            self.runner.run("jj", "new")
+        self._release_id = None
 
 
 class GitVcs:
@@ -240,7 +306,7 @@ class GitVcs:
         command = ("git", "symbolic-ref", "--quiet", "--short", "HEAD")
         return self.runner.out(*command).strip() if self.runner.ok(*command) else ""
 
-    def require_clean(self) -> None:
+    def require_clean(self, *, writing: bool = False) -> None:
         """Nothing to check: the git path commits the manifest by path."""
 
     def committed_versions(self, manifest: Path) -> dict:
@@ -254,11 +320,36 @@ class GitVcs:
         self.runner.run("git", "add", "--", str(manifest))
         self.runner.run("git", "commit", "-q", "-m", message, "--", str(manifest))
 
-    def push(self, bookmark: str) -> None:
-        if not bookmark:
+    def fetch(self) -> None:
+        self.runner.run("git", "fetch", "--tags", "--force")
+
+    def measured_against(self, bookmark: str) -> str:
+        if bookmark:
+            return f"origin/{bookmark}"
+        command = ("git", "symbolic-ref", "--quiet", "--short", "HEAD")
+        if self.runner.ok(*command):
+            return f"origin/{self.runner.out(*command).strip()}"
+        return "HEAD"
+
+    def latest_merged_tag(self, ref: str) -> str:
+        tags = self.runner.out("git", "tag", "--sort=v:refname", "--merged", ref).split()
+        return tags[-1] if tags else ""
+
+    def tag_exists(self, tag: str) -> bool:
+        return self.runner.ok("git", "rev-parse", "--verify", "--quiet", f"refs/tags/{tag}")
+
+    def tag(self, tag: str, commit: str) -> None:
+        self.runner.run("git", "tag", "-a", tag, "-m", tag, commit)
+
+    def describe(self, commit: str) -> str:
+        return self.runner.out("git", "describe", "--tags", "--always", commit).strip()
+
+    def push(self, bookmark: str, tag: str) -> None:
+        if bookmark:
+            self.runner.run("git", "push", "origin", bookmark)
+        else:
             print("Detached HEAD: not pushing the commit, only the tag.")
-            return
-        self.runner.run("git", "push", "origin", bookmark)
+        self.runner.run("git", "push", "origin", f"refs/tags/{tag}")
 
     def push_hint(self, bookmark: str, tag: str) -> str:
         return f"  git push origin HEAD refs/tags/{tag}"
@@ -314,36 +405,33 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return args
 
 
-def measured_against(runner: Runner, bookmark: str) -> str:
-    """Match updater.get_remote_version() for the ref being published.
+def _version_sort_key(tag: str) -> tuple[str | int, ...]:
+    """Numeric components, including devN, sort numerically rather than lexically.
 
-    A release with a publication bookmark will run as that branch in deployed
-    Git checkouts, so measure its remote-tracking ref. Without one, retain the
-    updater's attached-branch-or-HEAD fallback.
+    Keep text components so historical -dev, -bugfix00 and -dev12a tags still
+    participate, rather than silently hiding a tag the updater would consider.
     """
-    if bookmark:
-        return f"origin/{bookmark}"
-    command = ("git", "symbolic-ref", "--quiet", "--short", "HEAD")
-    if runner.ok(*command):
-        return f"origin/{runner.out(*command).strip()}"
-    return "HEAD"
+    return tuple(int(part) if part.isdigit() else part for part in re.split(r"([0-9]+)", tag))
 
 
-def latest_merged_tag(runner: Runner, ref: str) -> str:
-    tags = runner.out("git", "tag", "--sort=v:refname", "--merged", ref).split()
-    return tags[-1] if tags else ""
-
-
-def report(runner: Runner, vcs, manifest: Path, bookmark: str) -> tuple[str, str]:
-    ref = measured_against(runner, bookmark)
+def report(vcs, manifest: Path, bookmark: str, *, local: bool = False) -> tuple[str, str]:
+    ref = vcs.measured_against(bookmark)
     commit = vcs.release_commit()
-    described = runner.out("git", "describe", "--tags", "--always", commit).strip()
-    shown = latest_merged_tag(runner, ref)
+    described = vcs.describe(commit)
+    shown = vcs.latest_merged_tag(ref)
     print()
     print(f"VCS mode         : {vcs.name}{f' (bookmark {bookmark})' if bookmark else ''}")
     print(f"Measured against : {ref}")
-    print(f"Current: will show v{read_versions(manifest.read_text())['server']} ({described})")
+    version = read_versions(manifest.read_text())["server"]
+    if vcs.name == "jj":
+        print(f"Release manifest : v{version}; exact-commit tag/revision: {described}")
+        print("Current's git describe may prefer an older annotated tag on the same commit.")
+    else:
+        print(f"Current: will show v{version} ({described})")
     print(f"Remote:  will show {shown}")
+    if local:
+        shown = vcs.latest_merged_tag(commit)
+        print(f"After publication: {shown} (local release; origin is unchanged)")
     return described, shown
 
 
@@ -362,80 +450,73 @@ def main(argv=None, runner=None, vcs=None, manifest=None) -> int:
         # Refresh before deriving or reporting anything. Stale remote refs can
         # otherwise select an existing name or misreport what a deployed
         # checkout on the publication bookmark will show.
-        runner.run("git", "fetch", "--tags", "--force")
+        vcs.fetch()
 
     if args.increment:
-        ref = measured_against(runner, bookmark)
-        current_tag = latest_merged_tag(runner, ref)
+        ref = vcs.measured_against(bookmark)
+        current_tag = vcs.latest_merged_tag(ref)
         if not current_tag:
             raise Refused(f"cannot auto-increment: no tag is merged into {ref}")
         args.tag = increment_tag(current_tag, args.increment)
         print(f"Latest tag on {ref}: {current_tag}; cutting {args.tag}")
 
     if args.check:
-        report(runner, vcs, manifest, bookmark)
+        report(vcs, manifest, bookmark)
         return 0
 
-    if runner.ok("git", "rev-parse", "--verify", "--quiet", f"refs/tags/{args.tag}"):
-        raise Refused(
-            f"tag {args.tag} already exists. Delete it first:\n"
-            f"  git tag -d {args.tag} && git push origin :refs/tags/{args.tag}"
-        )
+    if vcs.tag_exists(args.tag):
+        raise Refused(f"tag {args.tag} already exists; choose a new release tag.")
 
     version = args.version or derive_version(args.tag)
     check_numeric(version)
     build = args.build if args.build is not None else next_build(manifest)
 
-    if args.commit:
-        vcs.require_clean()
-        write_manifest(manifest, version, build)
-        print(f"Set {MANIFEST} to server {version}, build {build}")
-        if vcs.is_dirty():
-            vcs.commit(f"chore(release): {args.tag} (server {version}, build {build})", bookmark, manifest)
-            print(f"Committed {vcs.release_commit()[:12]} and moved {bookmark} to it")
+    vcs.require_clean(writing=args.commit)
+    try:
+        if args.commit:
+            write_manifest(manifest, version, build)
+            print(f"Set {MANIFEST} to server {version}, build {build}")
+            if vcs.is_dirty():
+                vcs.commit(f"chore(release): {args.tag} (server {version}, build {build})", bookmark, manifest)
+                print(f"Committed {vcs.release_commit()[:12]} and moved {bookmark} to it")
+            else:
+                print(f"({MANIFEST} was already at those values; nothing to commit)")
+
+        # --tag-only must not tag a commit whose manifest says something else.
+        committed = vcs.committed_versions(manifest)["server"]
+        if committed != version:
+            raise Refused(
+                f"the release commit's manifest says server {committed}, not {version}.\n"
+                "Commit the manifest bump before tagging, or drop --tag-only."
+            )
+
+        commit_id = vcs.release_commit()
+        vcs.tag(args.tag, commit_id)
+        print(f"Tagged {commit_id[:12]} as {args.tag}")
+
+        if args.push:
+            vcs.push(bookmark, args.tag)
+            print(f"Pushed {args.tag} to origin")
         else:
-            print(f"({MANIFEST} was already at those values; nothing to commit)")
+            print("Not pushed (--no-push):")
+            print(vcs.push_hint(bookmark, args.tag))
 
-    # Checked rather than assumed, so --tag-only cannot quietly tag a commit
-    # whose manifest says something else.
-    committed = vcs.committed_versions(manifest)["server"]
-    if committed != version:
-        raise Refused(
-            f"the release commit's manifest says server {committed}, not {version}.\n"
-            "Commit the manifest bump before tagging, or drop --tag-only."
-        )
-
-    # Git, in both modes: jj has no tags. Annotated, not lightweight -- `git
-    # describe`, which is what the page's "Current:" field runs, prefers
-    # annotated tags and ignores lightweight ones unless asked. Named explicitly
-    # rather than tagging HEAD, so jj mode tags the commit it just sealed even
-    # if HEAD has not been exported.
-    commit_id = vcs.release_commit()
-    runner.run("git", "tag", "-a", args.tag, "-m", args.tag, commit_id)
-    print(f"Tagged {runner.out('git', 'rev-parse', '--short', commit_id).strip()} as {args.tag}")
-
-    if args.push:
-        vcs.push(bookmark)
-        runner.run("git", "push", "origin", f"refs/tags/{args.tag}")
-        print(f"Pushed {args.tag} to origin")
-    else:
-        print("Not pushed (--no-push):")
-        print(vcs.push_hint(bookmark, args.tag))
-
-    described, shown = report(runner, vcs, manifest, bookmark)
-
-    problems = 0
-    if described != args.tag:
-        print()
-        print(f"!! git describe says '{described}', not '{args.tag}' -- the tag is not on the")
-        print("!! commit you are running, so Current: will carry a -N-g<sha> suffix.")
-        problems = 1
-    if shown != args.tag:
-        print()
-        print(f"!! Remote: will keep showing {shown} -- it version-sorts above {args.tag}.")
-        print("!! Compare with:  git tag --sort=v:refname | tail -5")
-        problems = 1
-    return problems
+        described, shown = report(vcs, manifest, bookmark, local=not args.push and vcs.name == "jj")
+        problems = 0
+        if described != args.tag:
+            print()
+            print(f"!! Release commit describes as '{described}', not '{args.tag}'.")
+            print("!! Check the tags on the release commit before deploying.")
+            problems = 1
+        if shown != args.tag:
+            print()
+            print(f"!! Latest reachable tag is {shown}, not {args.tag}.")
+            print("!! The updater selects tags by version order, not creation time.")
+            problems = 1
+        return problems
+    finally:
+        if vcs.name == "jj":
+            vcs.finish()
 
 
 if __name__ == "__main__":

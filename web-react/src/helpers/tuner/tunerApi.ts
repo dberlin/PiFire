@@ -66,6 +66,8 @@ export function tunerErrorText(result: TunerResult<unknown>): string {
   switch (result.message) {
     case "not_tunable":
       return `The grill must be stopped before tuning — it is currently in ${result.mode || "another"} mode.`;
+    case "system_active":
+      return `Stop the grill before applying a probe profile — it is currently in ${result.mode || "another"} mode. You can Save Only now and assign it later in Settings → Probes.`;
     case "uncomputable":
       return "Those three readings could not be calculated into a profile. Check that each temperature and resistance pair is different from the others, then try again.";
     case "not_found":

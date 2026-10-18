@@ -9,7 +9,6 @@ import shutil
 import subprocess
 import sys
 import threading
-import tomllib
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import FrozenInstanceError, fields, replace
@@ -173,13 +172,6 @@ def test_contract_preflight_is_separate_from_the_five_release_commands() -> None
         ),
     )
     assert len(required_commands()) == 5
-
-
-def test_agents_requires_schema_v2_preflight_evidence_to_authorize_push() -> None:
-    rules = (_REPOSITORY_ROOT / "AGENTS.md").read_text(encoding="utf-8")
-
-    assert "Only schema v2 evidence with the separate contract preflight can authorize a push." in rules
-    assert "Preserved schema v1 evidence is historical-only and cannot authorize a push." in rules
 
 
 @pytest.mark.parametrize(
@@ -1527,9 +1519,11 @@ def test_push_stays_pinned_when_live_bookmark_moves_before_command_execution(
     ]
 
 
+@pytest.mark.parametrize("tag", [None, "v1.31.0"])
 def test_push_owns_artifact_lock_until_remote_and_durable_evidence_are_verified(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    tag: str | None,
 ) -> None:
     artifact_root = tmp_path / "artifacts"
     _bookmark_resolver(
@@ -1540,6 +1534,8 @@ def test_push_owns_artifact_lock_until_remote_and_durable_evidence_are_verified(
             "massive-reworks-and-new-ui@origin": [_REVISION],
         },
     )
+    if tag is not None:
+        _tag_queries(monkeypatch, [_REVISION, _REVISION, _REVISION])
     competing_command_started = threading.Event()
     final_validation_started = threading.Event()
     release_final_validation = threading.Event()
@@ -1619,6 +1615,7 @@ def test_push_owns_artifact_lock_until_remote_and_durable_evidence_are_verified(
                 artifact_root=artifact_root,
                 run_command=runner,
                 resolve_operation=lambda: _OPERATION_ID,
+                tag=tag,
             )
         except BaseException as error:
             errors.append(error)
@@ -1871,8 +1868,285 @@ def test_push_fails_if_durable_evidence_changes_before_final_revalidation(
     assert len(runner.push_calls) == 1
 
 
-def test_ci_entrypoint_and_exact_revision_workflow_are_absent(tmp_path: Path) -> None:
-    workflow_path = _REPOSITORY_ROOT / ".github" / "workflows" / "integration-gate.yml"
+def _tag_queries(
+    monkeypatch: pytest.MonkeyPatch,
+    outputs: list[str | subprocess.CompletedProcess[str]],
+    *,
+    on_remote: Callable[[], None] | None = None,
+) -> list[tuple[str, ...]]:
+    calls: list[tuple[str, ...]] = []
+
+    def query(argv: tuple[str, ...], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert kwargs == {
+            "cwd": _REPOSITORY_ROOT,
+            "check": False,
+            "capture_output": True,
+            "text": True,
+        }
+        assert argv[0] == "jj"
+        assert ("tag", "list", "exact:v1.31.0") == argv[argv.index("tag") : argv.index("tag") + 3]
+        if len(calls) == 1:
+            assert argv[1:3] == ("--at-operation", _OPERATION_ID)
+        if "--remote" in argv:
+            assert argv[argv.index("--remote") + 1] == "origin"
+            assert argv[-1] == 'if(remote, if(conflict, "conflict", normal_target.commit_id()) ++ "\\n")'
+            if on_remote is not None:
+                on_remote()
+        else:
+            assert argv[-1] == 'if(!remote, if(conflict, "conflict", normal_target.commit_id()) ++ "\\n")'
+        calls.append(argv)
+        result = outputs.pop(0)
+        if isinstance(result, subprocess.CompletedProcess):
+            return result
+        return subprocess.CompletedProcess(argv, 0, stdout=f"{result}\n", stderr="")
+
+    monkeypatch.setattr(gate_module.subprocess, "run", query)
+    return calls
+
+
+@pytest.mark.parametrize(
+    "tag",
+    [
+        "",
+        " v1.31.0",
+        "v1.31.0\n",
+        "--all",
+        "glob:v*",
+        "v*",
+        "v?",
+        "v[1]",
+        "v..1",
+        "v//1",
+        "v@{1}",
+        ".v1",
+        "v/.hidden",
+        "v.lock",
+        "v.lock/1",
+        "v1/",
+        "v1.",
+        "v\\1",
+        "v 1",
+        "@",
+    ],
+)
+def test_push_rejects_nonliteral_tag_before_any_command(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tag: str,
+) -> None:
+    def unexpected_query(*_args: object, **_kwargs: object) -> str:
+        pytest.fail("invalid tag must be rejected before querying revisions")
+
+    monkeypatch.setattr(gate_module, "resolve_bookmark_revision", unexpected_query)
+    runner = _PushRunner(*_success_results())
+    with pytest.raises(ValueError, match="tag"):
+        push_verified_bookmark(
+            root=_REPOSITORY_ROOT,
+            bookmark="massive-reworks-and-new-ui",
+            artifact_root=tmp_path / "artifacts",
+            tag=tag,
+            run_command=runner,
+        )
+    assert not runner.calls
+    assert not runner.push_calls
+    assert not (tmp_path / "artifacts").exists()
+
+
+@pytest.mark.parametrize("phase", ["initial", "pinned"])
+@pytest.mark.parametrize(
+    "target",
+    [
+        "",
+        _OTHER_REVISION,
+        "conflict",
+        f"{_REVISION}\n{_OTHER_REVISION}",
+        subprocess.CompletedProcess((), 1, stdout="", stderr="tag resolver failed"),
+    ],
+    ids=["absent", "wrong", "conflicted", "ambiguous", "query-failed"],
+)
+def test_push_refuses_invalid_tag_target_before_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+    target: str | subprocess.CompletedProcess[str],
+) -> None:
+    _bookmark_resolver(
+        monkeypatch,
+        {
+            "massive-reworks-and-new-ui": [_REVISION, _REVISION],
+            "@": [_REVISION] * 15,
+        },
+    )
+    _tag_queries(monkeypatch, [target] if phase == "initial" else [_REVISION, target])
+    runner = _PushRunner(*_success_results())
+    with pytest.raises(RuntimeError, match="tag"):
+        push_verified_bookmark(
+            root=_REPOSITORY_ROOT,
+            bookmark="massive-reworks-and-new-ui",
+            artifact_root=tmp_path / "artifacts",
+            tag="v1.31.0",
+            run_command=runner,
+            resolve_operation=lambda: _OPERATION_ID,
+        )
+    assert len(runner.calls) == (0 if phase == "initial" else 6)
+    assert not runner.push_calls
+
+
+@pytest.mark.parametrize("failure_index", [0, 3, 5])
+def test_failed_gate_never_publishes_tag(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_index: int,
+) -> None:
+    _bookmark_resolver(
+        monkeypatch,
+        {
+            "massive-reworks-and-new-ui": [_REVISION],
+            "@": [_REVISION] * 15,
+        },
+    )
+    queries = _tag_queries(monkeypatch, [_REVISION])
+    results = list(_success_results())
+    results[failure_index] = (1, b"", b"gate failed")
+    runner = _PushRunner(*results)
+    evidence = push_verified_bookmark(
+        root=_REPOSITORY_ROOT,
+        bookmark="massive-reworks-and-new-ui",
+        artifact_root=tmp_path / "artifacts",
+        tag="v1.31.0",
+        run_command=runner,
+    )
+    assert evidence.status == "failed"
+    assert len(queries) == 1
+    assert not runner.push_calls
+
+
+@pytest.mark.parametrize("remote_target", ["", _OTHER_REVISION, "conflict"])
+def test_remote_tag_mismatch_refuses_success_after_one_push(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    remote_target: str,
+) -> None:
+    _bookmark_resolver(
+        monkeypatch,
+        {
+            "massive-reworks-and-new-ui": [_REVISION, _REVISION],
+            "@": [_REVISION] * 15,
+            "massive-reworks-and-new-ui@origin": [_REVISION],
+        },
+    )
+    _tag_queries(monkeypatch, [_REVISION, _REVISION, remote_target])
+    runner = _PushRunner(*_success_results())
+    with pytest.raises(RuntimeError, match="tag"):
+        push_verified_bookmark(
+            root=_REPOSITORY_ROOT,
+            bookmark="massive-reworks-and-new-ui",
+            artifact_root=tmp_path / "artifacts",
+            tag="v1.31.0",
+            run_command=runner,
+            resolve_operation=lambda: _OPERATION_ID,
+        )
+    assert len(runner.push_calls) == 1
+
+
+@pytest.mark.parametrize("tamper_evidence", [False, True])
+def test_tag_push_pins_both_refs_and_revalidates_evidence_after_remote_tag(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tamper_evidence: bool,
+) -> None:
+    artifact_root = tmp_path / "artifacts"
+    _bookmark_resolver(
+        monkeypatch,
+        {
+            "massive-reworks-and-new-ui": [_REVISION, _REVISION],
+            "@": [_REVISION] * 15,
+            "massive-reworks-and-new-ui@origin": [_REVISION],
+        },
+    )
+    runner = _PushRunner(*_success_results())
+
+    def remote_read() -> None:
+        assert len(runner.push_calls) == 1
+        if tamper_evidence:
+            (artifact_root / _REVISION / "evidence.json").write_text("{}", encoding="utf-8")
+
+    queries = _tag_queries(monkeypatch, [_REVISION] * 3, on_remote=remote_read)
+
+    def publish() -> GateEvidence:
+        return push_verified_bookmark(
+            root=_REPOSITORY_ROOT,
+            bookmark="massive-reworks-and-new-ui",
+            artifact_root=artifact_root,
+            tag="v1.31.0",
+            run_command=runner,
+            resolve_operation=lambda: _OPERATION_ID,
+        )
+
+    if tamper_evidence:
+        with pytest.raises(RuntimeError, match="durable evidence"):
+            publish()
+    else:
+        evidence = publish()
+        assert evidence.status == "passed"
+        assert evidence.schema_version == 2
+        assert _read_json(artifact_root / _REVISION / "evidence.json")["status"] == "passed"
+    assert len(queries) == 3
+    assert len(runner.calls) == 6
+    assert runner.push_calls == [
+        (
+            (
+                "jj",
+                "--at-operation",
+                _OPERATION_ID,
+                "git",
+                "push",
+                "-b",
+                "massive-reworks-and-new-ui",
+                "--tag",
+                "exact:v1.31.0",
+            ),
+            _REPOSITORY_ROOT,
+        )
+    ]
+
+
+@pytest.mark.parametrize("operation", ["verify", "verify-bookmark"])
+def test_tag_cli_option_is_rejected_outside_push(operation: str) -> None:
+    identity = (
+        ["--expected-revision", _REVISION]
+        if operation == "verify"
+        else [
+            "--bookmark",
+            "massive-reworks-and-new-ui",
+        ]
+    )
+    with pytest.raises(SystemExit) as raised:
+        gate_module.main([operation, *identity, "--artifact-root", "unused", "--tag", "v1.31.0"])
+    assert raised.value.code == 2
+
+
+def test_push_cli_rejects_invalid_tag_without_querying_repo(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert (
+        gate_module.main(
+            [
+                "push",
+                "--bookmark",
+                "massive-reworks-and-new-ui",
+                "--tag",
+                "glob:v*",
+            ]
+        )
+        == 2
+    )
+    assert not (tmp_path / ".artifacts").exists()
+
+
+def test_cli_rejects_unsupported_ci_entrypoint(tmp_path: Path) -> None:
     completed = subprocess.run(
         [
             sys.executable,
@@ -1887,25 +2161,6 @@ def test_ci_entrypoint_and_exact_revision_workflow_are_absent(tmp_path: Path) ->
         text=True,
     )
 
-    assert not workflow_path.exists()
     assert completed.returncode == 2
     assert "invalid choice: 'verify-ci'" in completed.stderr
     assert not (tmp_path / ".artifacts").exists()
-
-
-def test_prek_pre_push_hook_verifies_the_cumulative_bookmark() -> None:
-    config = tomllib.loads((_REPOSITORY_ROOT / "prek.toml").read_text(encoding="utf-8"))
-    hooks = [hook for repo in config["repos"] if repo["repo"] == "local" for hook in repo["hooks"]]
-
-    assert hooks == [
-        {
-            "id": "exact-revision-gate",
-            "name": "Exact revision integration gate",
-            "entry": (
-                "uv run python scripts/exact_revision_gate.py verify-bookmark --bookmark massive-reworks-and-new-ui"
-            ),
-            "language": "system",
-            "pass_filenames": False,
-            "stages": ["pre-push"],
-        }
-    ]

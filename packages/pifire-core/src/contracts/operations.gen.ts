@@ -71,10 +71,13 @@ export type MaintenanceAction =
   | "clear_events"
   | "clear_pelletdb"
   | "clear_pelletdb_log";
+type Id = string;
+type UpdatedProbes = string[];
 type ApplyTo = string | null;
 type Name1 = string;
+type Name2 = string;
 type Applied = string | null;
-type Id = string;
+type Id1 = string;
 /**
  * This interface was referenced by `PiFireOperationsWebContracts`'s JSON-Schema
  * via the `definition` "SystemAction".
@@ -350,6 +353,14 @@ export interface MaintenanceActionResponse {
 }
 /**
  * This interface was referenced by `PiFireOperationsWebContracts`'s JSON-Schema
+ * via the `definition` "ProbeProfileMutation".
+ */
+export interface ProbeProfileMutation {
+  id: Id;
+  updated_probes: UpdatedProbes;
+}
+/**
+ * This interface was referenced by `PiFireOperationsWebContracts`'s JSON-Schema
  * via the `definition` "ProfileInput".
  */
 export interface ProfileInput {
@@ -361,11 +372,21 @@ export interface ProfileInput {
 }
 /**
  * This interface was referenced by `PiFireOperationsWebContracts`'s JSON-Schema
+ * via the `definition` "ProfileValues".
+ */
+export interface ProfileValues {
+  a: FiniteNumber;
+  b: FiniteNumber;
+  c: FiniteNumber;
+  name: Name2;
+}
+/**
+ * This interface was referenced by `PiFireOperationsWebContracts`'s JSON-Schema
  * via the `definition` "SavedProfile".
  */
 export interface SavedProfile {
   applied: Applied;
-  id: Id;
+  id: Id1;
 }
 /**
  * This interface was referenced by `PiFireOperationsWebContracts`'s JSON-Schema

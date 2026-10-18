@@ -1,7 +1,5 @@
 import pytest
 
-from tests.fakes.clock import clock_stamp
-
 from common.defaults import default_notify, default_probe_config
 from common.modes import Mode
 from common.persistence.control import (
@@ -20,6 +18,7 @@ from common.web_contracts.wizard import (
     ProbeMapResponse,
     ProbeModuleCatalog,
 )
+from tests.fakes.clock import clock_stamp
 
 PROFILE_ID = "TWPS00"
 
@@ -122,6 +121,42 @@ def test_apply_writes_live_settings_and_flags_the_controller(ds, client):
     # production that drain is the control loop's own execute_control_writes.
     execute_control_writes(timer_now=clock_stamp())
     assert read_control()["probe_map_update"] is True
+
+
+def test_apply_resolves_stale_profile_copies_from_current_library(ds, client):
+    _stop_mode()
+    draft = _map([_virtual_device()], [_probe("Grill", "VirtDev", "VIRT0")])
+    response = client.put(
+        f"/api/probe_profiles/{PROFILE_ID}",
+        json={"name": "Fresh calibration", "a": -0.001, "b": 0, "c": 9.51568577e-8},
+    )
+    assert response.status_code == 200
+    response = client.post("/api/probe_map", json={"probe_map": draft})
+    assert response.status_code == 200
+    expected = {
+        "id": PROFILE_ID,
+        "name": "Fresh calibration",
+        "A": -0.001,
+        "B": 0,
+        "C": 9.51568577e-8,
+    }
+    stored = read_settings()["probe_settings"]["probe_map"]["probe_info"][0]["profile"]
+    assert stored == expected
+    assert response.get_json()["data"]["probe_map"]["probe_info"][0]["profile"] == expected
+
+
+@pytest.mark.parametrize(
+    "profile",
+    [{}, {"id": "legacy-only", "name": "Legacy calibration", "A": 0.001, "B": 0, "C": 9.51568577e-8}],
+)
+def test_apply_preserves_unknown_or_empty_embedded_profiles(ds, client, profile):
+    _stop_mode()
+    probe = _probe("Grill", "VirtDev", "VIRT0")
+    probe["profile"] = profile
+    response = client.post("/api/probe_map", json={"probe_map": _map([_virtual_device()], [probe])})
+    assert response.status_code == 200
+    assert read_settings()["probe_settings"]["probe_map"]["probe_info"][0]["profile"] == profile
+    assert response.get_json()["data"]["probe_map"]["probe_info"][0]["profile"] == profile
 
 
 def test_apply_regenerates_the_history_probe_config(ds, client):
@@ -400,3 +435,33 @@ def test_apply_rejects_an_empty_body_before_any_handler(ds, client):
     resp = client.post("/api/probe_map", json={})
     assert resp.status_code == 400
     assert resp.get_json() is None
+
+
+def test_map_apply_does_not_overwrite_profile_edit_after_request_snapshot(ds, client, monkeypatch):
+    from blueprints.api import routes
+    from common.probe_profiles import update_probe_profile
+    from common.web_contracts.operations import ProfileValues
+
+    settings = read_settings()
+    submitted_map = settings["probe_settings"]["probe_map"]
+    control = read_control()
+    control["mode"] = Mode.STOP
+    write_control_snapshot(control, origin="test")
+    original = routes._API_POST_ACTIONS["probe_map"]
+
+    def edit_then_apply(stale_settings, request_json):
+        update_probe_profile(
+            "TWPS00",
+            ProfileValues(name="Concurrent calibration", a=0.0007, b=0.0002, c=9.6e-8),
+        )
+        return original(stale_settings, request_json)
+
+    monkeypatch.setitem(routes._API_POST_ACTIONS, "probe_map", edit_then_apply)
+    response = client.post("/api/probe_map", json={"probe_map": submitted_map})
+    assert response.status_code == 200
+    current = read_settings()["probe_settings"]
+    assert current["probe_profiles"]["TWPS00"]["C"] == 9.6e-8
+    for probe in current["probe_map"]["probe_info"]:
+        if probe["profile"].get("id") == "TWPS00":
+            assert probe["profile"]["name"] == "Concurrent calibration"
+            assert probe["profile"]["C"] == 9.6e-8

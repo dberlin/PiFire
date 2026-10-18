@@ -16,7 +16,6 @@ from pydantic import ValidationError
 
 from blueprints.tuner.tuner import calc_auto_tune_status, calc_shh_chart, calc_shh_coefficients
 from common.app import api_response
-from common.common import generate_uuid
 from common.control_delta import control_delta
 from common.modes import Mode
 from common.persistence.control import (
@@ -33,15 +32,14 @@ from common.persistence.history import (
 from common.persistence.runtime import (
     read_current_snapshot,
     read_settings,
-    write_settings,
 )
+from common.probe_profiles import ProbeProfileError, create_probe_profile
 from common.web_contracts.operations import (
     AutoStatus,
     AutoStatusRequest,
     Coefficients,
     CoefficientsRequest,
     ProfileInput,
-    SavedProfile,
     TrReading,
     TunerSession,
     TunerSessionRequest,
@@ -210,57 +208,16 @@ def tuner_coefficients():
 
 @api_tuner_bp.route("/profile", methods=["POST"])
 def tuner_profile():
-    """Save a probe profile, optionally attaching it to a probe.
-
-    The same two writes _settings_addprofile makes, with three differences that
-    are all deliberate:
-
-      * numbers are validated instead of being float()-ed inside a bare
-        `except:` that reports "something bad happened";
-      * an apply_to that matches no probe is a 404, not a silent success --
-        Flask loops looking for the label and simply does not find it, so the
-        operator is told the profile was applied when it was not;
-      * nothing is written at all when apply_to does not match, so a failed
-        apply does not leave an orphan profile behind.
-
-    Not routed through _settings_addprofile: that handler reads request.form
-    off the global, so it is not callable without faking a request context.
-    """
+    """Create a shared library profile, optionally applying it while stopped."""
     payload, invalid = validate_json(ProfileInput, fallback_field="name")
     if payload is None:
         assert invalid is not None
         return invalid
-    coefficients = {"a": float(payload.a), "b": float(payload.b), "c": float(payload.c)}
-    apply_to = payload.apply_to
-
-    settings = read_settings()
-    probe_info = settings["probe_settings"]["probe_map"]["probe_info"]
-    target = None
-    if apply_to:
-        target = next((i for i, p in enumerate(probe_info) if p["label"] == apply_to), None)
-        if target is None:
-            #  Refused BEFORE the profile is stored, so a bad label cannot
-            #  leave an orphan behind.
-            return error("not_found", 404, field="apply_to")
-
-    profile_id = generate_uuid()
-    profile = {
-        "A": coefficients["a"],
-        "B": coefficients["b"],
-        "C": coefficients["c"],
-        "name": payload.name,
-        "id": profile_id,
-    }
-    settings["probe_settings"]["probe_profiles"][profile_id] = profile
-    if target is not None:
-        probe_info[target]["profile"] = profile
-    write_settings(settings)
-
-    data = dump_wire(
-        SavedProfile,
-        {"id": profile_id, "applied": apply_to if target is not None else None},
-    )
-    return jsonify(api_response("OK", None, data)), 200
+    try:
+        result = create_probe_profile(payload)
+    except ProbeProfileError as exc:
+        return error(exc.code, exc.status, **exc.error_data())
+    return jsonify(api_response("OK", None, result.model_dump(mode="json"))), 200
 
 
 def _reference_temp(current, reference):

@@ -277,8 +277,19 @@ export function extractFrontendWebTransports(root?: string): {
           const nestedRoutes = routesFromExpression(span.expression);
           const queryFragment =
             ts.isIdentifier(span.expression) && span.expression.text === "qs" ? "" : null;
+          const encodedParameter =
+            ts.isCallExpression(span.expression) &&
+            ts.isIdentifier(span.expression.expression) &&
+            span.expression.expression.text === "encodeURIComponent" &&
+            span.expression.arguments.length === 1
+              ? "<>"
+              : null;
           const replacements = finiteValues(span.expression) ?? [
-            literalText(span.expression) ?? nestedRoutes[0] ?? queryFragment ?? "<dynamic>",
+            literalText(span.expression) ??
+              nestedRoutes[0] ??
+              queryFragment ??
+              encodedParameter ??
+              "<dynamic>",
           ];
           rendered = rendered.flatMap((prefix) =>
             replacements.map((replacement) => `${prefix}${replacement}${span.literal.text}`),

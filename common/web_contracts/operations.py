@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Annotated, Any, Literal, Self, TypeAliasType
 
 from pydantic import (
@@ -267,12 +268,22 @@ class Coefficients(WireModel):
     chart_ok: bool
 
 
-class ProfileInput(WireModel):
+class ProfileValues(WireModel):
     name: str
     a: FiniteNumber
     b: FiniteNumber
     c: FiniteNumber
-    apply_to: str | None = None
+
+    @field_validator("a", "b", "c")
+    @classmethod
+    def _require_finite_coefficient(cls, value: FiniteNumber) -> FiniteNumber:
+        try:
+            finite = math.isfinite(value)
+        except OverflowError:
+            finite = False
+        if not finite:
+            raise ValueError("must be representable as a finite number")
+        return value
 
     @field_validator("name")
     @classmethod
@@ -283,9 +294,18 @@ class ProfileInput(WireModel):
         return value
 
 
+class ProfileInput(ProfileValues):
+    apply_to: str | None = None
+
+
 class SavedProfile(WireModel):
     id: str
     applied: str | None
+
+
+class ProbeProfileMutation(WireModel):
+    id: str
+    updated_probes: list[str]
 
 
 class AutoStatusRequest(WireModel):

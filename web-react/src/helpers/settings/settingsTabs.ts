@@ -21,6 +21,7 @@ export const SETTINGS_TABS = [
   { id: "units", label: "Units", editable: false, hideWithoutDcFan: false },
   { id: "platform", label: "Platform", editable: false, hideWithoutDcFan: false },
   { id: "probes", label: "Probes", editable: true, hideWithoutDcFan: false },
+  { id: "probe-profiles", label: "Probe Profiles", editable: true, hideWithoutDcFan: false },
 ] as const;
 
 type SettingsTab = (typeof SETTINGS_TABS)[number];

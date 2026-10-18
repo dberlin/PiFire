@@ -98,7 +98,9 @@ from .operations import (
     LogsMetadata,
     MaintenanceActionRequest,
     MaintenanceActionResponse,
+    ProbeProfileMutation,
     ProfileInput,
+    ProfileValues,
     SavedProfile,
     SystemActionRequest,
     SystemActionResponse,
@@ -340,6 +342,10 @@ JSON_WEB_CONTRACT_INVENTORY: tuple[JsonWebContract, ...] = (
     _http("POST /api/update/rebuild-web-ui", UpdateStarted, "operations", EmptyOperationRequest),
     _http("POST /api/update/rebuild-acados", UpdateStarted, "operations", EmptyOperationRequest),
     _http("GET /api/update/buildlog", BuildLog, "operations"),
+    # Shared probe-profile library mutations.
+    _http("POST /api/probe_profiles", SavedProfile, "operations", ProfileInput),
+    _http("PUT /api/probe_profiles/<profile_id>", ProbeProfileMutation, "operations", ProfileValues),
+    _http("DELETE /api/probe_profiles/<profile_id>", ProbeProfileMutation, "operations"),
     # Tuner JSON endpoints.
     _http("POST /api/tuner/session [open=true]", TunerSession, "operations", TunerSessionRequest),
     _http("POST /api/tuner/session [open=false]", TunerSession, "operations", TunerSessionRequest),

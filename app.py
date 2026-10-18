@@ -91,6 +91,7 @@ from blueprints.api_admin import api_admin_bp
 from blueprints.api_files import api_files_bp
 from blueprints.api_history import api_history_bp
 from blueprints.api_metrics import api_metrics_bp
+from blueprints.api_probe_profiles import api_probe_profiles_bp
 from blueprints.api_tuner import api_tuner_bp
 from blueprints.api_update import api_update_bp
 from blueprints.api_wizard import api_wizard_bp
@@ -102,6 +103,7 @@ app.register_blueprint(api_history_bp, url_prefix="/api/history")
 app.register_blueprint(api_files_bp, url_prefix="/api/files")
 app.register_blueprint(api_admin_bp, url_prefix="/api/admin")
 app.register_blueprint(api_metrics_bp, url_prefix="/api/metrics")
+app.register_blueprint(api_probe_profiles_bp, url_prefix="/api/probe_profiles")
 app.register_blueprint(api_tuner_bp, url_prefix="/api/tuner")
 app.register_blueprint(api_update_bp, url_prefix="/api/update")
 

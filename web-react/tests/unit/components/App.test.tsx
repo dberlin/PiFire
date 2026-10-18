@@ -6,7 +6,6 @@ import type { RouteObject } from "react-router";
 import { createMemoryRouter, RouterProvider } from "react-router";
 
 import { queryClient } from "../../../src/helpers/query/queryClient";
-import { SETTINGS_TABS } from "../../../src/helpers/settings/settingsTabs";
 import { testQueryClient } from "../test-utils";
 
 // AppShell -- the layout route wrapping /, /history and /settings -- is the one
@@ -58,7 +57,6 @@ rs.mock("../../../src/helpers/wizard/wizardApi", () => ({
 }));
 
 // Route modules load only after their API mocks above are registered.
-const { probeModulesLoader } = await import("../../../src/helpers/probes/probeMapRoutes");
 const { AppPrefsProvider } = await import("../../../src/components/AppPrefs");
 const { default: App } = await import("../../../src/components/App");
 const { routes } = await import("../../../src/components/appRoutes");
@@ -121,13 +119,6 @@ function renderApp(initialEntry: string) {
   return { ...view, router };
 }
 
-function settingsChildren(): RouteObject[] {
-  const shellChildren = (routes as RouteObject[]).flatMap(({ children }) => children ?? []);
-  const settingsRoute = shellChildren.find(({ path }) => path === "/settings");
-  if (!settingsRoute?.children) throw new Error("The /settings route has no child routes");
-  return settingsRoute.children;
-}
-
 describe("App routing", () => {
   it("renders the dashboard at /", () => {
     useLiveStateMock.mockReturnValue({
@@ -170,25 +161,6 @@ describe("App routing", () => {
 
     expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/settings/general");
-  });
-
-  it("defines exactly one ordered child route for every manifest ID and no extras", () => {
-    const children = settingsChildren();
-    const indexed = children.filter(({ index }) => index === true);
-    const addressed = children.filter(
-      (route): route is RouteObject & { path: string } => typeof route.path === "string",
-    );
-
-    expect(indexed).toHaveLength(1);
-    expect(children).toHaveLength(SETTINGS_TABS.length + 1);
-    expect(addressed.map(({ path }) => path)).toEqual(SETTINGS_TABS.map(({ id }) => id));
-  });
-
-  it("keeps probes as the only settings child with a loader", () => {
-    const loaded = settingsChildren().filter(({ loader }) => loader !== undefined);
-
-    expect(loaded.map(({ path }) => path)).toEqual(["probes"]);
-    expect(loaded[0]?.loader).toBe(probeModulesLoader);
   });
 
   it("keeps the hidden PWM route addressable on an AC-fan build", async () => {

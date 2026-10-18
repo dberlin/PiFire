@@ -23,6 +23,7 @@ import { HistoryTab } from "./settings/tabs/HistoryTab";
 import { NotificationsTab } from "./settings/tabs/NotificationsTab";
 import { PelletsTab } from "./settings/tabs/PelletsTab";
 import { PlatformTab } from "./settings/tabs/PlatformTab";
+import { ProbeProfilesTab } from "./settings/tabs/ProbeProfilesTab";
 import { ProbesTab } from "./settings/tabs/ProbesTab";
 import { PwmTab } from "./settings/tabs/PwmTab";
 import { SafetyTab } from "./settings/tabs/SafetyTab";
@@ -55,6 +56,7 @@ const settingsRoutes = {
   // other tab pay for it. Running as a sibling loader also means
   // useSaveSettings' revalidate() refreshes both.
   probes: { path: "probes", element: <ProbesTab />, loader: probeModulesLoader },
+  "probe-profiles": { path: "probe-profiles", element: <ProbeProfilesTab /> },
 } satisfies Record<SettingsTabId, RouteObject>;
 
 // Exported (not just used to build `router` below) so App.test.tsx can drive

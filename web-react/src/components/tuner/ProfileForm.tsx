@@ -1,6 +1,8 @@
 import type { ProfileInput, SavedProfile } from "@pifire/core/contracts/operations";
+import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { queryKeys } from "../../helpers/query/keys";
 import { saveProfile, tunerErrorText } from "../../helpers/tuner/tunerApi";
 
 import "./tuner.css";
@@ -27,6 +29,7 @@ export function ProfileForm({
   probeLabel: string;
   onSaved: (saved: SavedProfile) => void;
 }) {
+  const queryClient = useQueryClient();
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -40,12 +43,13 @@ export function ProfileForm({
       { name: name.trim(), ...coefficients, apply_to: applyTo },
       BASE_URL,
     );
-    setSaving(false);
     if (result.ok && result.data) {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.settingsRoot(BASE_URL) });
       onSaved(result.data);
     } else {
       setError(tunerErrorText(result));
     }
+    setSaving(false);
   }
 
   return (
@@ -58,6 +62,7 @@ export function ProfileForm({
         className="pf-tuner-input"
         type="text"
         value={name}
+        disabled={saving}
         onChange={(e) => setName(e.target.value)}
       />
 

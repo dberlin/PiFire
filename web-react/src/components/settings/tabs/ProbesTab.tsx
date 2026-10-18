@@ -228,6 +228,9 @@ export function ProbesTab() {
             Discard changes
           </button>
           {saved && !dirty && <span className="pf-settings-saved">Applied ✓</span>}
+          <Link className="pf-modal-btn" to="/settings/probe-profiles">
+            Manage probe profiles
+          </Link>
           {/* The probe TUNER lives on its own top-level route, not under
               settings -- it opens a live tuning session and moves the grill
               into Monitor, which a settings tab should not. Flask reaches it

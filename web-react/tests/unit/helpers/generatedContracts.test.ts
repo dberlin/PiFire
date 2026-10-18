@@ -267,6 +267,26 @@ describe("generated web contract ownership", () => {
     }
   });
 
+  it("discovers mutation endpoints with encoded resource IDs", () => {
+    const root = mkdtempSync(join(tmpdir(), "pifire-transport-resource-"));
+    try {
+      writeFileSync(
+        join(root, "resource.ts"),
+        [
+          'function update(baseUrl: string, id: string) { return fetch(`${baseUrl}/api/resources/${encodeURIComponent(id)}`, { method: "PUT" }); }',
+          'function remove(baseUrl: string, id: string) { return fetch(`${baseUrl}/api/resources/${encodeURIComponent(id)}?confirm=true`, { method: "DELETE" }); }',
+        ].join("\n"),
+      );
+      expect(
+        extractFrontendWebTransports(root)
+          .json.map((entry) => entry.name)
+          .sort(),
+      ).toEqual(["DELETE /api/resources/<>", "PUT /api/resources/<>"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("exports each generated contract declaration from exactly one manifest artifact", () => {
     const owners = new Map<string, string[]>();
     for (const artifact of generatedArtifacts()) {
