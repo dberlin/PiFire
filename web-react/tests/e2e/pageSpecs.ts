@@ -326,6 +326,29 @@ export const PAGE_SPECS: PageSpec[] = [
       ".pf-modal-btn",
     ],
   },
+  ...[
+    { name: "settings-probe-profiles", clicks: [] },
+    {
+      name: "settings-probe-profiles-form",
+      clicks: ['.pf-probe-profiles button:has-text("Add profile")'],
+    },
+  ].map(({ name, clicks }): PageSpec => ({
+    name,
+    path: "/settings/probe-profiles",
+    ready: clicks.length ? ".pf-profile-form" : ".pf-profile-card",
+    root: ".pf-shell",
+    clicks,
+    landmarks: [
+      ...SHELL,
+      ...SETTINGS,
+      ".pf-probe-profiles",
+      ".pf-profile-form",
+      ".pf-profile-list",
+      ".pf-profile-card",
+      ".pf-profile-coefficients",
+      ".pf-modal-btn",
+    ],
+  })),
   // The admin page. Written out rather than generated for the same reason as
   // the recipe and cook-file specs: it needs its own fixture, since the demo
   // server has no /api/admin backend and an unstubbed read would render the

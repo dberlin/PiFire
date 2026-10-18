@@ -174,3 +174,11 @@ The updater's existing `--jj` mode invokes raw Git for tags and bypasses the aut
 - The first native smoke caught Jujutsu's automatic empty-child creation when tagging makes `@` immutable. The updater now pins the full release ID and explicitly checks out that ID for verification; regression coverage models the automatic transition.
 - Independent review identified invocation from a subdirectory incorrectly resolving the relative gate script. Publication and recovery commands now use `uv --directory <workspace-root>`. Actual subdirectory smoke reached the root gate path; an absent gate failed without claiming publication and left an empty child.
 - Actual native local, pinned-operation, and origin tag resolution agreed on v1.30.4's full revision.
+
+### Release-gate corrections
+
+- Attempt `0a02a6056ee4249f91456d06dbd2e0b19b022baa` passed contract preflight and stopped at native rebuild: generated compiler identity files from CMake 4.4.3 and active 4.4.4 coexisted. Preserved the old generated directory outside the compiler-identity scan; no production code or gate checks were changed. Failed evidence remains intact.
+- Attempt `db644f8600bc654fa45b5ecb2e933bf016991440` passed preflight, native rebuild, default Python, slow Python, and workspace tests. It stopped on 24 settings fidelity baselines that still described navigation before the new tab. No push occurred.
+- Regenerated only the affected settings baselines. Review of old versus new data found no removed landmarks: existing desktop tabs only gained the new navigation landmark; phone tabs gained that landmark and 44px of navigation height. Probes additionally gained the management link and its intentional action wrapping. Comparison code, tolerances, and style checks are unchanged.
+- Added profile-list and open-form fidelity/overflow cases at 1280×720 and 390×844 using the existing deterministic settings fixture. All **56 settings fidelity/overflow cases passed** without capture mode; E2E TypeScript checking passed.
+- Rechecked the actual demo surface with the same read fixtures: all four form inputs and both actions were visible and usable; document widths equalled the 390px and 1280px viewports. This is layout verification only; the earlier real Flask smoke supplies mutation and persistence evidence.
