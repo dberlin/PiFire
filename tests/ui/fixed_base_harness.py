@@ -16,7 +16,7 @@ from PIL import __version__ as PILLOW_VERSION
 from tests.ui._driver_helpers import block_power_actions
 
 _REFERENCE_TREBUCHET_SHA256 = "b69a5b33e997c3bc55f35dde8267cb93fe5fbdc3ecbc23b1d987602a9fd2b1f2"
-_REFERENCE_PILLOW_VERSION = "12.3.0"
+_REFERENCE_PILLOW_VERSION = "13.0.0"
 _REFERENCE_FREETYPE_VERSION = "2.14.3"
 
 

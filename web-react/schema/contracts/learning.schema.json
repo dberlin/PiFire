@@ -1451,8 +1451,8 @@
     "ModelRollbackAcknowledgement": {
       "discriminator": {
         "mapping": {
-          "False": "#/$defs/ModelRollbackRejected",
-          "True": "#/$defs/ModelRollbackAccepted"
+          "false": "#/$defs/ModelRollbackRejected",
+          "true": "#/$defs/ModelRollbackAccepted"
         },
         "propertyName": "accepted"
       },

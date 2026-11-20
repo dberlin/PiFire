@@ -30,7 +30,7 @@ import hashlib
 from types import UnionType
 from typing import Any, Union, get_args, get_origin
 
-from pydantic import BaseModel
+from pydantic import AllowInfNan, BaseModel
 
 
 def _is_model(annotation: Any) -> bool:
@@ -53,7 +53,16 @@ def _annotation_repr(annotation: Any) -> str:
 
 
 def _constraints_repr(metadata) -> str:
-    return ", ".join(sorted(repr(item) for item in metadata))
+    # Pydantic 2.14 gave this constraint its own metadata class. Keep the
+    # persisted digest spelling, including the value of the constraint.
+    return ", ".join(
+        sorted(
+            f"_PydanticGeneralMetadata(allow_inf_nan={item.allow_inf_nan!r})"
+            if isinstance(item, AllowInfNan)
+            else repr(item)
+            for item in metadata
+        )
+    )
 
 
 def shape_entries(model: type[BaseModel], prefix: tuple[str, ...] = ()) -> list[str]:
